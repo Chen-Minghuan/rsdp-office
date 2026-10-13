@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+
+# Backend
+backend/target/
+backend/*.log
+backend/.idea/
+
+# Frontend
+frontend/.output
+frontend/.data
+frontend/.nuxt
+frontend/.nitro
+frontend/.cache
+frontend/dist
+frontend/logs
+frontend/*.log
+frontend/node_modules
+
+# Local env
+.env
+.env.*
+!.env.example

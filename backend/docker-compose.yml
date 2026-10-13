@@ -1,0 +1,66 @@
+name: backend
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: office-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: office
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d office"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  office-backend:
+    build:
+      context: ./
+    image: rsdp-office-backend:local
+    container_name: office-backend
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/office
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      RSDP_CAD-PARSER_URL: http://cad-parser:8090
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cad-parser:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  cad-parser:
+    build:
+      context: ./cad-parser
+    image: rsdp-office-cad-parser:local
+    container_name: office-cad-parser
+    restart: unless-stopped
+    environment:
+      CAD_PARSER_PORT: "8090"
+    ports:
+      - "127.0.0.1:8091:8090"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:

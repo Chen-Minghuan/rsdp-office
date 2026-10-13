@@ -1,0 +1,118 @@
+<script setup lang="ts">
+import {
+  HomeIcon,
+  MapIcon,
+  ChatBubbleLeftRightIcon,
+  DocumentTextIcon,
+  FolderIcon,
+  CloudArrowUpIcon,
+  DocumentIcon,
+  PhotoIcon,
+  CubeIcon,
+  TrashIcon,
+  PlusIcon,
+  MinusIcon,
+  ArrowRightIcon,
+  ArrowLeftIcon,
+  CheckIcon,
+  XMarkIcon,
+  PencilIcon,
+  HandRaisedIcon,
+  Square2StackIcon,
+  ClipboardDocumentIcon,
+  ArrowLongRightIcon,
+  MagnifyingGlassPlusIcon,
+  MagnifyingGlassMinusIcon,
+  ArrowsPointingOutIcon,
+  ArrowUturnLeftIcon,
+  PaperAirplaneIcon,
+  ShoppingCartIcon,
+  CurrencyYenIcon,
+  ChartPieIcon,
+  TableCellsIcon,
+  UserIcon,
+  BuildingOfficeIcon,
+  BanknotesIcon,
+  SwatchIcon,
+  InformationCircleIcon,
+  BellIcon,
+  MagnifyingGlassIcon,
+  ChevronDownIcon,
+  AdjustmentsHorizontalIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  ArrowPathIcon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
+  DocumentArrowUpIcon,
+  TagIcon,
+  InboxArrowDownIcon,
+} from '@heroicons/vue/24/outline'
+
+const icons: Record<string, any> = {
+  home: HomeIcon,
+  map: MapIcon,
+  chat: ChatBubbleLeftRightIcon,
+  documentText: DocumentTextIcon,
+  folder: FolderIcon,
+  upload: CloudArrowUpIcon,
+  file: DocumentIcon,
+  photo: PhotoIcon,
+  cube: CubeIcon,
+  trash: TrashIcon,
+  plus: PlusIcon,
+  minus: MinusIcon,
+  arrowRight: ArrowRightIcon,
+  arrowLeft: ArrowLeftIcon,
+  check: CheckIcon,
+  close: XMarkIcon,
+  pencil: PencilIcon,
+  hand: HandRaisedIcon,
+  zone: Square2StackIcon,
+  note: ClipboardDocumentIcon,
+  arrow: ArrowLongRightIcon,
+  reference: PhotoIcon,
+  zoomIn: MagnifyingGlassPlusIcon,
+  zoomOut: MagnifyingGlassMinusIcon,
+  fit: ArrowsPointingOutIcon,
+  undo: ArrowUturnLeftIcon,
+  send: PaperAirplaneIcon,
+  cart: ShoppingCartIcon,
+  money: CurrencyYenIcon,
+  chartPie: ChartPieIcon,
+  table: TableCellsIcon,
+  user: UserIcon,
+  building: BuildingOfficeIcon,
+  banknotes: BanknotesIcon,
+  swatch: SwatchIcon,
+  info: InformationCircleIcon,
+  bell: BellIcon,
+  search: MagnifyingGlassIcon,
+  chevronDown: ChevronDownIcon,
+  settings: AdjustmentsHorizontalIcon,
+  eye: EyeIcon,
+  eyeSlash: EyeSlashIcon,
+  reset: ArrowPathIcon,
+  checkCircle: CheckCircleIcon,
+  warning: ExclamationTriangleIcon,
+  import: DocumentArrowUpIcon,
+  tag: TagIcon,
+  inbox: InboxArrowDownIcon,
+}
+
+const props = defineProps<{
+  name: string
+  size?: string | number
+}>()
+
+const sizeStyle = computed(() => {
+  const s = Number(props.size ?? 5)
+  const px = s * 4
+  return { width: `${px}px`, height: `${px}px`, minWidth: `${px}px`, minHeight: `${px}px` }
+})
+</script>
+
+<template>
+  <component v-if="icons[name]" :is="icons[name]" class="shrink-0" :style="sizeStyle" />
+  <span v-else class="text-xs text-red-500">?{{ name }}</span>
+</template>

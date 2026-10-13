@@ -1,0 +1,4 @@
+# Keep the existing Compose project name to reuse the database volume.
+name: backend
+include:
+  - ./backend/docker-compose.yml

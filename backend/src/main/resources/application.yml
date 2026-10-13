@@ -1,0 +1,37 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: office-product-import
+  datasource:
+    url: jdbc:postgresql://localhost:5434/office
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deletedAt
+      logic-not-delete-value: "null"
+      logic-delete-value: "now()"
+
+rsdp:
+  cad-parser:
+    url: http://127.0.0.1:8091
+  vision:
+    url: # 配置 RSDP AI 图纸识别服务地址，例如 http://localhost:8080/api/v1/floor-plan/recognize
+  import:
+    max-file-size: 50MB
+
+logging:
+  level:
+    com.rsdp.officeproduct.importer: debug

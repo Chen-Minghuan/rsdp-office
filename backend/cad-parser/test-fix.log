@@ -1,0 +1,6 @@
+MSBUILD : error MSB1001: Unknown switch.
+    Full command line: '/usr/share/dotnet/sdk/7.0.410/MSBuild.dll -maxcpucount -verbosity:m -restore -target:VSTest -nodereuse:false -nologo tests/RsdpCadParser.Tests --ignore-failed-sources -property:VSTestArtifactsProcessingMode=collect -property:VSTestSessionCorrelationId=7_46960371-ec7e-4f54-beb1-8125d8eef962 -distributedlogger:Microsoft.DotNet.Tools.MSBuild.MSBuildLogger,/usr/share/dotnet/sdk/7.0.410/dotnet.dll*Microsoft.DotNet.Tools.MSBuild.MSBuildForwardingLogger,/usr/share/dotnet/sdk/7.0.410/dotnet.dll'
+  Switches appended by response files:
+Switch: --ignore-failed-sources
+
+For switch syntax, type "MSBuild -help"

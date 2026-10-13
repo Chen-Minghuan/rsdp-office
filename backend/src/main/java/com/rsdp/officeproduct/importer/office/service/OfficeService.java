@@ -1,0 +1,492 @@
+package com.rsdp.officeproduct.importer.office.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.entity.FactoryProductPrice;
+import com.rsdp.officeproduct.importer.entity.RspuMaster;
+import com.rsdp.officeproduct.importer.entity.RspuVariant;
+import com.rsdp.officeproduct.importer.mapper.FactoryProductPriceMapper;
+import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
+import com.rsdp.officeproduct.importer.mapper.RspuVariantMapper;
+import com.rsdp.officeproduct.importer.office.dto.*;
+import com.rsdp.officeproduct.importer.office.entity.OfficeAgentMessage;
+import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
+import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
+import com.rsdp.officeproduct.importer.office.entity.OfficeProject;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OfficeService {
+
+    private final OfficeProjectMapper projectMapper;
+    private final OfficeCanvasMapper canvasMapper;
+    private final OfficeCartMapper cartMapper;
+    private final OfficeAgentMessageMapper messageMapper;
+    private final RspuMasterMapper rspuMasterMapper;
+    private final RspuVariantMapper rspuVariantMapper;
+    private final FactoryProductPriceMapper factoryProductPriceMapper;
+    private final ObjectMapper objectMapper;
+
+    private static final String DEFAULT_PROJECT_ID = "OFFICE-PROJECT-001";
+
+    public ProjectDto getOrCreateProject(String projectId) {
+        if (!StringUtils.hasText(projectId)) {
+            projectId = DEFAULT_PROJECT_ID;
+        }
+        OfficeProject project = projectMapper.selectById(projectId);
+        if (project == null) {
+            project = new OfficeProject();
+            project.setProjectId(projectId);
+            project.setProjectName("星河科技总部办公空间");
+            project.setArea(800);
+            project.setHeadcount(60);
+            project.setBudget(new BigDecimal("300000"));
+            project.setStyle("现代简约");
+            project.setDescription("开放办公、两间会议室、接待区。希望采光好、浅木色、注重工作效率。");
+            project.setCreatedAt(LocalDateTime.now());
+            project.setUpdatedAt(LocalDateTime.now());
+            projectMapper.insert(project);
+        }
+        return toProjectDto(project);
+    }
+
+    @Transactional
+    public ProjectDto saveProject(SaveProjectRequest request) {
+        String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
+        OfficeProject project = projectMapper.selectById(projectId);
+        boolean isNew = project == null;
+        if (isNew) {
+            project = new OfficeProject();
+            project.setProjectId(projectId);
+            project.setCreatedAt(LocalDateTime.now());
+        }
+        project.setProjectName(request.getProjectName());
+        project.setArea(request.getArea());
+        project.setHeadcount(request.getHeadcount());
+        project.setBudget(request.getBudget());
+        project.setStyle(request.getStyle());
+        project.setDescription(request.getDescription());
+        project.setUpdatedAt(LocalDateTime.now());
+        if (isNew) {
+            projectMapper.insert(project);
+        } else {
+            projectMapper.updateById(project);
+        }
+        return toProjectDto(project);
+    }
+
+    public CanvasDto getCanvas(String projectId) {
+        if (!StringUtils.hasText(projectId)) {
+            projectId = DEFAULT_PROJECT_ID;
+        }
+        List<OfficeCanvas> list = canvasMapper.selectList(
+            new QueryWrapper<OfficeCanvas>().eq("project_id", projectId).orderByDesc("created_at").last("limit 1"));
+        if (list.isEmpty()) {
+            return null;
+        }
+        return toCanvasDto(list.get(0));
+    }
+
+    @Transactional
+    public CanvasDto saveCanvas(SaveCanvasRequest request) {
+        String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
+        ensureProjectExists(projectId);
+
+        OfficeCanvas canvas = new OfficeCanvas();
+        canvas.setProjectId(projectId);
+        canvas.setRevision(request.getRevision() != null ? request.getRevision() : 1);
+        canvas.setMode(StringUtils.hasText(request.getMode()) ? request.getMode() : "overview");
+        canvas.setDesignZoneId(request.getDesignZoneId());
+        canvas.setObjectsJson(writeJson(request.getObjects()));
+        canvas.setFilesJson(writeJson(request.getFiles()));
+        canvas.setBlank(request.getBlank() != null ? request.getBlank() : false);
+        canvas.setCreatedAt(LocalDateTime.now());
+        canvasMapper.insert(canvas);
+        return toCanvasDto(canvas);
+    }
+
+    public List<CartItemDto> listCart(String projectId) {
+        if (!StringUtils.hasText(projectId)) {
+            projectId = DEFAULT_PROJECT_ID;
+        }
+        List<OfficeCart> list = cartMapper.selectList(
+            new QueryWrapper<OfficeCart>().eq("project_id", projectId).orderByAsc("created_at"));
+        return list.stream().map(this::toCartItemDto).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public CartItemDto addCartItem(String projectId, CartItemDto dto) {
+        ensureProjectExists(projectId);
+        String lineId = StringUtils.hasText(dto.getLineId()) ? dto.getLineId() : UUID.randomUUID().toString().replace("-", "");
+        OfficeCart existing = cartMapper.selectById(lineId);
+        if (existing != null) {
+            existing.setQty(dto.getQty());
+            existing.setUpdatedAt(LocalDateTime.now());
+            cartMapper.updateById(existing);
+            return toCartItemDto(existing);
+        }
+        OfficeCart cart = new OfficeCart();
+        cart.setLineId(lineId);
+        cart.setProjectId(projectId);
+        cart.setZoneId(dto.getZoneId());
+        cart.setZoneName(dto.getZoneName());
+        cart.setProductId(dto.getProductId());
+        cart.setQty(dto.getQty() != null ? dto.getQty() : 1);
+        cart.setCreatedAt(LocalDateTime.now());
+        cart.setUpdatedAt(LocalDateTime.now());
+        cartMapper.insert(cart);
+        return toCartItemDto(cart);
+    }
+
+    @Transactional
+    public CartItemDto updateCartItemQty(String projectId, String lineId, Integer qty) {
+        OfficeCart cart = cartMapper.selectById(lineId);
+        if (cart == null || !cart.getProjectId().equals(projectId)) {
+            throw new BusinessException("购物车行不存在");
+        }
+        if (qty == null || qty <= 0) {
+            cartMapper.deleteById(lineId);
+            return null;
+        }
+        cart.setQty(qty);
+        cart.setUpdatedAt(LocalDateTime.now());
+        cartMapper.updateById(cart);
+        return toCartItemDto(cart);
+    }
+
+    @Transactional
+    public void deleteCartItem(String projectId, String lineId) {
+        OfficeCart cart = cartMapper.selectById(lineId);
+        if (cart != null && cart.getProjectId().equals(projectId)) {
+            cartMapper.deleteById(lineId);
+        }
+    }
+
+    @Transactional
+    public void clearCart(String projectId) {
+        cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
+    }
+
+    public List<AgentMessageDto> listMessages(String projectId) {
+        if (!StringUtils.hasText(projectId)) {
+            projectId = DEFAULT_PROJECT_ID;
+        }
+        List<OfficeAgentMessage> list = messageMapper.selectList(
+            new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId).orderByAsc("created_at"));
+        return list.stream().map(this::toAgentMessageDto).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public AgentMessageDto sendMessage(String projectId, SendMessageRequest request) {
+        ensureProjectExists(projectId);
+        OfficeAgentMessage userMsg = new OfficeAgentMessage();
+        userMsg.setProjectId(projectId);
+        userMsg.setRole("user");
+        userMsg.setContent(request.getContent());
+        userMsg.setCreatedAt(LocalDateTime.now());
+        messageMapper.insert(userMsg);
+
+        String reply = generateBotReply(projectId, request.getContent());
+        OfficeAgentMessage botMsg = new OfficeAgentMessage();
+        botMsg.setProjectId(projectId);
+        botMsg.setRole("bot");
+        botMsg.setContent(reply);
+        botMsg.setCreatedAt(LocalDateTime.now());
+        messageMapper.insert(botMsg);
+        return toAgentMessageDto(botMsg);
+    }
+
+    public List<OfficeProductDto> listOfficeProducts() {
+        List<RspuMaster> rspus = rspuMasterMapper.selectList(
+            new QueryWrapper<RspuMaster>().eq("status", "active"));
+        if (rspus.isEmpty()) {
+            return List.of();
+        }
+        List<String> rspuIds = rspus.stream().map(RspuMaster::getRspuId).collect(Collectors.toList());
+        List<RspuVariant> variants = rspuVariantMapper.selectList(
+            new QueryWrapper<RspuVariant>().in("rspu_id", rspuIds).eq("status", "active"));
+        List<FactoryProductPrice> prices = factoryProductPriceMapper.selectList(
+            new QueryWrapper<FactoryProductPrice>().in("rspu_id", rspuIds));
+
+        Map<String, List<RspuVariant>> variantMap = variants.stream().collect(Collectors.groupingBy(RspuVariant::getRspuId));
+        Map<String, List<FactoryProductPrice>> priceMap = prices.stream().collect(Collectors.groupingBy(FactoryProductPrice::getRspuId));
+
+        List<OfficeProductDto> result = new ArrayList<>();
+        for (RspuMaster rspu : rspus) {
+            List<RspuVariant> vs = variantMap.getOrDefault(rspu.getRspuId(), List.of());
+            List<FactoryProductPrice> ps = priceMap.getOrDefault(rspu.getRspuId(), List.of());
+            if (vs.isEmpty()) {
+                result.add(toProductDto(rspu, null, ps));
+            } else {
+                for (RspuVariant v : vs) {
+                    result.add(toProductDto(rspu, v, ps));
+                }
+            }
+        }
+        return result;
+    }
+
+    @Transactional
+    public void resetProjectData(String projectId) {
+        if (!StringUtils.hasText(projectId)) {
+            projectId = DEFAULT_PROJECT_ID;
+        }
+        canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", projectId));
+        cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
+        messageMapper.delete(new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId));
+    }
+
+    private void ensureProjectExists(String projectId) {
+        if (projectMapper.selectById(projectId) == null) {
+            getOrCreateProject(projectId);
+        }
+    }
+
+    private String generateBotReply(String projectId, String text) {
+        String t = text == null ? "" : text;
+        if (t.contains("预算") || t.contains("便宜") || t.contains("经济") || t.contains("价格")) {
+            return "已记录预算敏感偏好。演示中可先比较候选价格；真实环境将以 RSDP 可售商品、规格与定价策略进行检索，不直接采用模拟价格。";
+        }
+        if (t.contains("图纸") || t.contains("画布") || t.contains("空间")) {
+            return "您可以使用左侧“返回修改画布”继续修改区域或标注，再提交新版需求快照。原有已选商品将保留以便复核。";
+        }
+        return "已记录您对办公项目的补充说明：“" + t.trim() + "”。\n\n右侧可查看演示商品候选，您可以加入当前区域并调整数量；真实推荐将在接入 RSDP 商品服务与 Office Skill 后实现。";
+    }
+
+    private ProjectDto toProjectDto(OfficeProject p) {
+        ProjectDto dto = new ProjectDto();
+        dto.setProjectId(p.getProjectId());
+        dto.setProjectName(p.getProjectName());
+        dto.setArea(p.getArea());
+        dto.setHeadcount(p.getHeadcount());
+        dto.setBudget(p.getBudget());
+        dto.setStyle(p.getStyle());
+        dto.setDescription(p.getDescription());
+        return dto;
+    }
+
+    private CanvasDto toCanvasDto(OfficeCanvas c) {
+        CanvasDto dto = new CanvasDto();
+        dto.setCanvasId(c.getCanvasId());
+        dto.setProjectId(c.getProjectId());
+        dto.setRevision(c.getRevision());
+        dto.setMode(c.getMode());
+        dto.setDesignZoneId(c.getDesignZoneId());
+        dto.setObjects(readJsonList(c.getObjectsJson()));
+        dto.setFiles(readJsonList(c.getFilesJson()));
+        dto.setBlank(c.getBlank());
+        return dto;
+    }
+
+    private CartItemDto toCartItemDto(OfficeCart c) {
+        CartItemDto dto = new CartItemDto();
+        dto.setLineId(c.getLineId());
+        dto.setProjectId(c.getProjectId());
+        dto.setZoneId(c.getZoneId());
+        dto.setZoneName(c.getZoneName());
+        dto.setProductId(c.getProductId());
+        dto.setQty(c.getQty());
+        return dto;
+    }
+
+    private AgentMessageDto toAgentMessageDto(OfficeAgentMessage m) {
+        AgentMessageDto dto = new AgentMessageDto();
+        dto.setMessageId(m.getMessageId());
+        dto.setProjectId(m.getProjectId());
+        dto.setRole(m.getRole());
+        dto.setContent(m.getContent());
+        return dto;
+    }
+
+    private OfficeProductDto toProductDto(RspuMaster rspu, RspuVariant variant, List<FactoryProductPrice> prices) {
+        OfficeProductDto dto = new OfficeProductDto();
+        dto.setId(variant != null ? variant.getVariantId() : rspu.getRspuId());
+        dto.setName(rspu.getProductName());
+        dto.setDesc(rspu.getDescription());
+        dto.setVariant(buildVariantText(variant, rspu));
+        dto.setPrice(resolvePrice(rspu, variant, prices));
+        dto.setKind(mapKind(rspu.getCategoryCode()));
+        dto.setUses(mapUses(rspu.getSceneTags(), rspu.getCategoryCode()));
+        int[] dims = resolveDimensions(variant, rspu);
+        dto.setWidthCm(dims[0]);
+        dto.setDepthCm(dims[1]);
+        dto.setImageUrl(rspu.getPrimaryImageUrl());
+        return dto;
+    }
+
+    private String buildVariantText(RspuVariant v, RspuMaster rspu) {
+        if (v == null) {
+            return StringUtils.hasText(rspu.getKeySpecs()) ? rspu.getKeySpecs() : "";
+        }
+        StringBuilder sb = new StringBuilder();
+        if (StringUtils.hasText(v.getDisplayName())) {
+            sb.append(v.getDisplayName());
+        }
+        if (StringUtils.hasText(v.getSizeText())) {
+            if (sb.length() > 0) sb.append(" / ");
+            sb.append(v.getSizeText());
+        }
+        if (StringUtils.hasText(v.getColorText())) {
+            if (sb.length() > 0) sb.append(" / ");
+            sb.append(v.getColorText());
+        }
+        if (StringUtils.hasText(v.getMaterialText())) {
+            if (sb.length() > 0) sb.append(" / ");
+            sb.append(v.getMaterialText());
+        }
+        return sb.toString();
+    }
+
+    private BigDecimal resolvePrice(RspuMaster rspu, RspuVariant variant, List<FactoryProductPrice> prices) {
+        if (variant != null) {
+            Optional<FactoryProductPrice> vp = prices.stream()
+                .filter(p -> variant.getVariantId().equals(p.getVariantId())).findFirst();
+            if (vp.isPresent() && vp.get().getFactoryPrice() != null && vp.get().getFactoryPrice().compareTo(BigDecimal.ZERO) > 0) {
+                return vp.get().getFactoryPrice();
+            }
+        }
+        Optional<FactoryProductPrice> rp = prices.stream().findFirst();
+        if (rp.isPresent() && rp.get().getFactoryPrice() != null && rp.get().getFactoryPrice().compareTo(BigDecimal.ZERO) > 0) {
+            return rp.get().getFactoryPrice();
+        }
+        if (rspu.getRetailPrice() != null && rspu.getRetailPrice().compareTo(BigDecimal.ZERO) > 0) {
+            return rspu.getRetailPrice();
+        }
+        return BigDecimal.ZERO;
+    }
+
+    private String mapKind(String categoryCode) {
+        if (!StringUtils.hasText(categoryCode)) return "other";
+        return switch (categoryCode.toUpperCase()) {
+            case "DK" -> "desk";
+            case "CH" -> "chair";
+            case "MT" -> "meeting";
+            case "MC" -> "chair";
+            case "SO" -> "sofa";
+            case "CB" -> "cabinet";
+            default -> "workstation";
+        };
+    }
+
+    private List<String> mapUses(String sceneTagsJson, String categoryCode) {
+        Set<String> uses = new LinkedHashSet<>();
+        if (StringUtils.hasText(sceneTagsJson)) {
+            try {
+                List<String> scenes = objectMapper.readValue(sceneTagsJson, new TypeReference<List<String>>() {});
+                for (String scene : scenes) {
+                    uses.add(mapSceneToZoneType(scene));
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        if (uses.isEmpty()) {
+            uses.add(mapCategoryToDefaultZoneType(categoryCode));
+        }
+        return new ArrayList<>(uses);
+    }
+
+    private String mapSceneToZoneType(String scene) {
+        return switch (scene.toUpperCase()) {
+            case "OPEN" -> "OPEN_OFFICE";
+            case "MEET" -> "MEETING_ROOM";
+            case "RECEP" -> "RECEPTION";
+            case "LOUNGE" -> "COLLABORATION";
+            case "EXEC" -> "EXECUTIVE_OFFICE";
+            default -> "OTHER";
+        };
+    }
+
+    private String mapCategoryToDefaultZoneType(String categoryCode) {
+        if (!StringUtils.hasText(categoryCode)) return "OTHER";
+        return switch (categoryCode.toUpperCase()) {
+            case "DK" -> "OPEN_OFFICE";
+            case "CH" -> "OPEN_OFFICE";
+            case "MT", "MC" -> "MEETING_ROOM";
+            case "SO" -> "RECEPTION";
+            case "CB" -> "EXECUTIVE_OFFICE";
+            default -> "OTHER";
+        };
+    }
+
+    private int[] resolveDimensions(RspuVariant variant, RspuMaster rspu) {
+        if (variant != null && StringUtils.hasText(variant.getDimensions())) {
+            try {
+                Map<String, Object> dims = objectMapper.readValue(variant.getDimensions(), new TypeReference<>() {});
+                Integer w = parseDim(dims.get("widthCm"));
+                Integer d = parseDim(dims.get("depthCm"));
+                if (w != null && d != null) return new int[]{w, d};
+            } catch (Exception ignored) {
+            }
+        }
+        Integer[] fromSpecs = parseSpecsDimensions(rspu.getKeySpecs());
+        if (fromSpecs[0] != null && fromSpecs[1] != null) return new int[]{fromSpecs[0], fromSpecs[1]};
+        return new int[]{120, 60};
+    }
+
+    private Integer parseDim(Object value) {
+        if (value == null) return null;
+        if (value instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(value.toString().trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Integer[] parseSpecsDimensions(String keySpecs) {
+        Integer[] empty = new Integer[]{null, null};
+        if (!StringUtils.hasText(keySpecs)) return empty;
+        try {
+            Map<String, Object> map = objectMapper.readValue(keySpecs, new TypeReference<>() {});
+            return new Integer[]{parseDim(map.get("widthCm")), parseDim(map.get("depthCm"))};
+        } catch (Exception ignored) {
+        }
+        Pattern pattern = Pattern.compile("(\\d+)\\s*[xX××]\\s*(\\d+)");
+        Matcher matcher = pattern.matcher(keySpecs);
+        if (matcher.find()) {
+            return new Integer[]{Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))};
+        }
+        return empty;
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            log.error("写入 JSON 失败", e);
+            return "[]";
+        }
+    }
+
+    private List<Object> readJsonList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return new ArrayList<>();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<Object>>() {});
+        } catch (Exception e) {
+            log.error("读取 JSON 失败: {}", json, e);
+            return new ArrayList<>();
+        }
+    }
+}
