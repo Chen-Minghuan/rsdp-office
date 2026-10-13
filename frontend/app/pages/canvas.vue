@@ -36,6 +36,15 @@ watch(() => store.canvasMode, (m, oldM) => {
   router.replace({ path: route.path, query })
 })
 
+// 从 URL 加载户型图分析结果
+const analysisIdFromQuery = computed(() => route.query.analysisId as string | undefined)
+watch(analysisIdFromQuery, async (id) => {
+  if (id && (!store.floorPlan || store.floorPlan.analysisId !== id)) {
+    await store.loadFloorPlan(id)
+    store.importFloorPlanToZones()
+  }
+}, { immediate: true })
+
 watch(() => store.designZoneId, (id, oldId) => {
   if (id === oldId || store.canvasMode !== 'design') return
   if (id && route.query.zoneId !== id) {

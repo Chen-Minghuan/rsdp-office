@@ -30,6 +30,12 @@ export interface ZoneObject {
   calibratedWidth?: number
   calibratedHeight?: number
   pixelToMeter?: number
+  /** 识别来源多边形（毫米坐标），存在时优先渲染真实轮廓。 */
+  polygon?: Array<[number, number]>
+  /** 来源：recognition / user_annotation。 */
+  source?: 'recognition' | 'user_annotation'
+  /** 几何来源：cad_geometry / ai_vision / manual_geometry。 */
+  geometrySource?: 'cad_geometry' | 'ai_vision' | 'manual_geometry'
 }
 
 export interface NoteObject {

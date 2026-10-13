@@ -12,6 +12,8 @@ import type {
   CanvasMode,
   Product,
 } from '~/types/office'
+import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
+import { useFloorPlanApi } from '~/composables/useFloorPlanApi'
 import {
   sampleProject,
   sampleFiles,
@@ -22,6 +24,7 @@ import {
 } from '~/utils/sample'
 import { uid, money } from '~/utils/helpers'
 import { createFurnitureObjects } from '~/utils/layout'
+import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 // Read existing drafts once so the workspace rename preserves browser data.
@@ -46,6 +49,9 @@ interface OfficeState {
   products: Product[]
   apiReady: boolean
   loading: boolean
+  floorPlan: FloorPlanAnalysisResponse | null
+  floorPlanLoading: boolean
+  floorPlanError: string | null
 }
 
 function defaultState(): OfficeState {
@@ -68,6 +74,9 @@ function defaultState(): OfficeState {
     products: [],
     apiReady: false,
     loading: false,
+    floorPlan: null,
+    floorPlanLoading: false,
+    floorPlanError: null,
   }
 }
 
@@ -348,6 +357,82 @@ export const useOfficeStore = defineStore('office', {
       this.designZoneId = zoneId
       this.activeZoneId = zoneId
       this.schedulePersist()
+    },
+
+    setFloorPlan(floorPlan: FloorPlanAnalysisResponse | null) {
+      this.floorPlan = floorPlan
+      this.floorPlanError = null
+    },
+
+    async loadFloorPlan(analysisId: string) {
+      this.floorPlanLoading = true
+      this.floorPlanError = null
+      try {
+        const api = useFloorPlanApi()
+        const res = await api.getFloorPlan(analysisId)
+        this.floorPlan = res
+      } catch (e: any) {
+        this.floorPlanError = e.message || '加载户型图失败'
+        console.warn('加载户型图失败', e)
+      } finally {
+        this.floorPlanLoading = false
+      }
+    },
+
+    async confirmFloorPlanRooms(analysisId: string, request: import('~/types/floorPlan').FloorPlanConfirmRequest) {
+      this.floorPlanLoading = true
+      try {
+        const api = useFloorPlanApi()
+        const res = await api.confirmFloorPlanRooms(analysisId, request)
+        this.floorPlan = res
+      } catch (e: any) {
+        this.floorPlanError = e.message || '确认空间失败'
+        throw e
+      } finally {
+        this.floorPlanLoading = false
+      }
+    },
+
+    clearFloorPlan() {
+      this.floorPlan = null
+      this.floorPlanError = null
+    },
+
+    importFloorPlanToZones() {
+      const plan = this.floorPlan
+      if (!plan || !plan.rooms || plan.rooms.length === 0) return
+
+      // 将多边形房间映射为 ZoneObject，保留 polygon 用于渲染
+      const newZones: ZoneObject[] = plan.rooms.map((room, idx) => {
+        const toneKeys = Object.keys(TONES) as Array<keyof typeof TONES>
+        const tone = toneKeys[idx % toneKeys.length]
+        const polygon = normalizePolygon(room.polygon)
+        const bounds = polygonBoundsMm(polygon)
+        return {
+          id: room.roomId,
+          kind: 'zone',
+          x: bounds ? bounds.minX : 0,
+          y: bounds ? bounds.minY : 0,
+          w: bounds ? bounds.maxX - bounds.minX : 0,
+          h: bounds ? bounds.maxY - bounds.minY : 0,
+          name: room.label || '未命名空间',
+          zoneType: mapRoomType(room.roomType),
+          seats: 0,
+          note: '',
+          tone,
+          calibratedWidth: room.widthMm ? room.widthMm / 1000 : undefined,
+          calibratedHeight: room.depthMm ? room.depthMm / 1000 : undefined,
+          polygon,
+          source: 'recognition',
+          geometrySource: room.geometrySource || plan.geometrySource,
+        } as ZoneObject
+      })
+
+      this.objectUpdate(() => {
+        this.objects = this.objects.filter((o) => o.kind !== 'zone')
+        this.objects.push(...newZones)
+        this.blank = false
+      })
     },
 
     submitCanvas() {

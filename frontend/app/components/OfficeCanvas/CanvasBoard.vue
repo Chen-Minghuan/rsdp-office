@@ -2,6 +2,8 @@
 import { uid } from '~/utils/helpers'
 import { TONES } from '~/utils/sample'
 import type { OfficeObject, ZoneObject, FurnitureObject } from '~/types/office'
+import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
+import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
 
 const store = useOfficeStore()
 const tool = defineModel<string>('tool', { default: 'select' })
@@ -39,6 +41,50 @@ const furniture = computed(() => {
   }
   return list
 })
+
+// 识别图层：底图 + 多边形
+const floorPlan = computed<FloorPlanAnalysisResponse | null>(() => store.floorPlan)
+const floorPlanRooms = computed(() => floorPlan.value?.rooms || [])
+const floorPlanImageUrl = computed(() => floorPlan.value?.previewUrl || floorPlan.value?.referenceImageUrl || floorPlan.value?.imageUrl)
+const floorPlanBounds = computed<FloorPlanDrawingBounds | null>(() => {
+  const plan = floorPlan.value
+  if (plan?.drawingBounds) return plan.drawingBounds
+  if (plan?.previewBounds) return plan.previewBounds
+  const rooms = floorPlanRooms.value.map((r) => ({ polygon: normalizePolygon(r.polygon) }))
+  const b = roomsBounds(rooms)
+  if (!b) return null
+  return { minX: b.minX, minY: b.minY, maxX: b.maxX, maxY: b.maxY }
+})
+
+const SVG_W = 1090
+const SVG_H = 640
+
+function mmToSvg(mmX: number, mmY: number): { x: number; y: number } | null {
+  const b = floorPlanBounds.value
+  if (!b) return null
+  const width = Math.max(1, b.maxX - b.minX)
+  const height = Math.max(1, b.maxY - b.minY)
+  return {
+    x: ((mmX - b.minX) / width) * SVG_W,
+    y: ((mmY - b.minY) / height) * SVG_H,
+  }
+}
+
+function polygonSvgPoints(polygon: Array<[number, number]> | undefined): string {
+  if (!polygon || polygon.length === 0) return ''
+  const points = polygon.map(([x, y]) => {
+    const p = mmToSvg(x, y)
+    return p ? `${p.x},${p.y}` : ''
+  }).filter(Boolean)
+  return points.join(' ')
+}
+
+function zonePolygonPoints(zone: ZoneObject): string {
+  if (zone.polygon && zone.polygon.length > 0) {
+    return polygonSvgPoints(zone.polygon)
+  }
+  return `${zone.x},${zone.y} ${zone.x + zone.w},${zone.y} ${zone.x + zone.w},${zone.y + zone.h} ${zone.x},${zone.y + zone.h}`
+}
 
 function placeBoard() {
   if (!board.value) return
@@ -341,49 +387,73 @@ function furnitureProduct(o: FurnitureObject) {
       style="transform-origin: center center; will-change: transform;"
     >
       <!-- Floor plan SVG -->
-      <svg
-        class="absolute pointer-events-none"
+      <div
+        class="absolute pointer-events-none overflow-hidden"
         style="left: 230px; top: 170px; width: 1090px; height: 640px;"
-        viewBox="0 0 1090 640"
         :style="{ opacity: store.blank ? 0.05 : 1 }"
       >
-        <rect width="1090" height="640" fill="#fffdf9" />
-        <g fill="none" stroke="#47505a" stroke-width="7">
-          <path d="M24 19 H1066 V621 H24 Z" />
-          <path d="M735 19 V290 M24 402 H735 M504 402 V621 M735 290 H1066 M895 290 V621" />
-        </g>
-        <g fill="none" stroke="#767b7a" stroke-width="2">
-          <path d="M42 20 V42 M150 20 V42 M320 20 V42 M495 20 V42 M690 20 V42 M850 20 V42 M1020 20 V42" />
-          <path d="M735 75 h18 M735 150 h18 M735 225 h18 M895 350 h-18 M895 450 h-18" />
-          <path d="M270 402 V380 M430 402 V380 M650 402 V380" />
-        </g>
-        <g stroke="#a4aeb0" stroke-width="3">
-          <path d="M50 16 H185 M310 16 H460 M750 16 H865 M925 16 H1045" stroke="#78b7d4" />
-          <path d="M24 150 V292 M1066 410 V540" stroke="#78b7d4" />
-        </g>
-        <g stroke="#b6b0a5" stroke-width="2" fill="none">
-          <path d="M735 289 h60 a60 60 0 0 1-60 60" />
-          <path d="M505 402 v55 a55 55 0 0 0 55-55" />
-          <path d="M895 290 v48 a48 48 0 0 0 48-48" />
-        </g>
-        <g fill="#dfdcd6" stroke="#aba89f">
-          <rect x="450" y="110" width="38" height="38" />
-          <rect x="258" y="363" width="33" height="33" />
-          <rect x="980" y="560" width="30" height="30" />
-        </g>
-        <g fill="#d0c8ba" opacity=".65">
-          <rect x="85" y="72" width="140" height="10" rx="3" />
-          <rect x="250" y="72" width="140" height="10" rx="3" />
-          <rect x="415" y="72" width="140" height="10" rx="3" />
-          <rect x="80" y="325" width="550" height="7" rx="3" />
-        </g>
-        <g stroke="#e1d6c4" stroke-width="2" fill="none">
-          <rect x="801" y="80" width="186" height="113" rx="4" />
-          <rect x="817" y="97" width="154" height="80" rx="4" />
-          <rect x="795" y="455" width="67" height="38" rx="6" />
-        </g>
-        <text x="63" y="599" fill="#8f8b82" font-size="16">模拟办公图纸 · 非真实识别</text>
-      </svg>
+        <img
+          v-if="floorPlanImageUrl"
+          :src="floorPlanImageUrl"
+          class="absolute inset-0 w-full h-full object-contain"
+          alt="户型底图"
+        >
+        <svg
+          v-else
+          width="1090"
+          height="640"
+          viewBox="0 0 1090 640"
+        >
+          <rect width="1090" height="640" fill="#fffdf9" />
+          <g fill="none" stroke="#47505a" stroke-width="7">
+            <path d="M24 19 H1066 V621 H24 Z" />
+            <path d="M735 19 V290 M24 402 H735 M504 402 V621 M735 290 H1066 M895 290 V621" />
+          </g>
+          <g fill="none" stroke="#767b7a" stroke-width="2">
+            <path d="M42 20 V42 M150 20 V42 M320 20 V42 M495 20 V42 M690 20 V42 M850 20 V42 M1020 20 V42" />
+            <path d="M735 75 h18 M735 150 h18 M735 225 h18 M895 350 h-18 M895 450 h-18" />
+            <path d="M270 402 V380 M430 402 V380 M650 402 V380" />
+          </g>
+          <g stroke="#a4aeb0" stroke-width="3">
+            <path d="M50 16 H185 M310 16 H460 M750 16 H865 M925 16 H1045" stroke="#78b7d4" />
+            <path d="M24 150 V292 M1066 410 V540" stroke="#78b7d4" />
+          </g>
+          <text x="63" y="599" fill="#8f8b82" font-size="16">模拟办公图纸 · 非真实识别</text>
+        </svg>
+
+        <!-- 识别多边形叠加层 -->
+        <svg
+          v-if="floorPlanRooms.length > 0 || zones.some(z => z.polygon)"
+          class="absolute inset-0 w-full h-full pointer-events-none"
+          :viewBox="`0 0 ${SVG_W} ${SVG_H}`"
+        >
+          <g v-for="room in floorPlanRooms" :key="`fp-${room.roomId}`">
+            <polygon
+              :points="polygonSvgPoints(normalizePolygon(room.polygon))"
+              fill="rgba(76, 118, 182, 0.12)"
+              stroke="#4c76b6"
+              stroke-width="2"
+            />
+            <text
+              v-if="room.labelPoint"
+              :x="mmToSvg(room.labelPoint.x, room.labelPoint.y)?.x"
+              :y="mmToSvg(room.labelPoint.x, room.labelPoint.y)?.y"
+              fill="#33434b"
+              font-size="14"
+              font-weight="bold"
+            >{{ room.label || '未命名空间' }}</text>
+          </g>
+          <g v-for="zone in zones.filter(z => z.polygon)" :key="`zone-poly-${zone.id}`">
+            <polygon
+              :points="zonePolygonPoints(zone)"
+              fill="rgba(76, 118, 182, 0.08)"
+              stroke="#306fcb"
+              stroke-width="2"
+              stroke-dasharray="6 4"
+            />
+          </g>
+        </svg>
+      </div>
 
       <!-- Arrows -->
       <svg width="1540" height="960" viewBox="0 0 1540 960" class="absolute inset-0 pointer-events-none">

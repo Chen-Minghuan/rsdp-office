@@ -3,6 +3,7 @@ import type { ProjectFile, ZoneObject, ToneKey, ZoneType } from '~/types/office'
 
 const store = useOfficeStore()
 const api = useOfficeApi()
+const floorPlanApi = useFloorPlanApi()
 const fileInput = ref<HTMLInputElement | null>(null)
 const showProjectInfo = ref(true)
 const isParsing = ref(false)
@@ -10,6 +11,7 @@ const parseError = ref<string | null>(null)
 const recognitionResult = ref<any>(null)
 const activeFile = ref<string | null>(null)
 const recognitionSource = ref<'cad' | 'vision' | null>(null)
+const analysisId = ref<string | null>(null)
 
 // 保留真实 File 对象，用于图纸识别时读取二进制内容
 const fileMap = ref<Map<string, File>>(new Map())
@@ -178,6 +180,7 @@ async function recognizeFile(file: ProjectFile) {
   parseError.value = null
   recognitionResult.value = null
   recognitionSource.value = null
+  analysisId.value = null
 
   try {
     let rawFile = fileMap.value.get(file.name)
@@ -191,15 +194,20 @@ async function recognizeFile(file: ProjectFile) {
     }
 
     const type = fileType(file.name)
-    let result: any
-    if (type === 'CAD') {
-      result = await api.parseCad(rawFile)
-      recognitionSource.value = 'cad'
-    } else {
-      result = await api.recognizeImage(rawFile)
-      recognitionSource.value = 'vision'
-    }
+    const isCad = type === 'CAD'
+    const result = await floorPlanApi.analyzeFloorPlan({
+      image: isCad ? undefined : rawFile,
+      cad: isCad ? rawFile : undefined,
+      projectId: api.projectId,
+      sourceName: file.name,
+    })
+    recognitionSource.value = isCad ? 'cad' : 'vision'
+    analysisId.value = result.analysisId
     recognitionResult.value = result
+
+    // 立即拉取一次详情展示
+    const detail = await floorPlanApi.getFloorPlan(result.analysisId)
+    recognitionResult.value = detail
   } catch (e: any) {
     parseError.value = e?.message || '图纸识别失败'
   } finally {
@@ -280,72 +288,18 @@ function polygonBounds(polygon: number[][]): { minX: number; minY: number; maxX:
   return { minX, minY, maxX, maxY }
 }
 
-function applyRecognitionToCanvas() {
-  if (!recognitionResult.value?.rooms?.length) return
-
-  const rooms = recognitionResult.value.rooms as Array<{
-    roomId?: string
-    label?: string
-    roomType?: string
-    polygon: number[][]
-    areaM2?: number
-  }>
-
-  // 计算所有房间的整体包围盒（毫米坐标）
-  let globalMinX = Infinity, globalMinY = Infinity, globalMaxX = -Infinity, globalMaxY = -Infinity
-  for (const room of rooms) {
-    const b = polygonBounds(room.polygon)
-    globalMinX = Math.min(globalMinX, b.minX)
-    globalMinY = Math.min(globalMinY, b.minY)
-    globalMaxX = Math.max(globalMaxX, b.maxX)
-    globalMaxY = Math.max(globalMaxY, b.maxY)
+async function applyRecognitionToCanvas() {
+  if (!analysisId.value) {
+    parseError.value = '尚未完成图纸分析'
+    return
   }
 
-  const cadW = globalMaxX - globalMinX
-  const cadH = globalMaxY - globalMinY
-  if (cadW <= 0 || cadH <= 0) return
+  // 拉取最新详情，确保 rooms 已写入
+  const detail = await floorPlanApi.getFloorPlan(analysisId.value)
+  store.setFloorPlan(detail)
+  store.importFloorPlanToZones()
 
-  // 画布目标区域（预留边距）
-  const canvasW = 990
-  const canvasH = 540
-  const padding = 40
-  const scale = Math.min((canvasW - padding * 2) / cadW, (canvasH - padding * 2) / cadH)
-  const offsetX = padding + (canvasW - padding * 2 - cadW * scale) / 2 - globalMinX * scale
-  const offsetY = padding + (canvasH - padding * 2 - cadH * scale) / 2 - globalMinY * scale
-
-  const tones: ToneKey[] = ['blue', 'green', 'yellow', 'purple', 'pink']
-  const sourceLabel = recognitionSource.value === 'cad' ? 'CAD 识别' : '图纸识别'
-  const newZones: ZoneObject[] = rooms.map((room, idx) => {
-    const b = polygonBounds(room.polygon)
-    const x = b.minX * scale + offsetX
-    const y = b.minY * scale + offsetY
-    const w = (b.maxX - b.minX) * scale
-    const h = (b.maxY - b.minY) * scale
-    return {
-      id: `z-${recognitionSource.value || 'rec'}-${room.roomId || idx}`,
-      kind: 'zone',
-      x,
-      y,
-      w: Math.max(w, 60),
-      h: Math.max(h, 60),
-      name: room.label || roomTypeText(room.roomType),
-      zoneType: mapRoomTypeToZoneType(room.roomType),
-      seats: Math.max(1, Math.floor((room.areaM2 || (w * h / 10000)) / 4)),
-      note: `来自 ${sourceLabel}，面积约 ${(room.areaM2 || 0).toFixed(2)}㎡`,
-      tone: tones[idx % tones.length],
-      calibratedWidth: (b.maxX - b.minX) / 1000,
-      calibratedHeight: (b.maxY - b.minY) / 1000,
-      pixelToMeter: 1000 / scale,
-    }
-  })
-
-  // 替换现有 zone，保留其他对象
-  store.objectUpdate(() => {
-    store.objects = store.objects.filter(o => o.kind !== 'zone').concat(newZones)
-    store.canvasRevision++
-  })
-
-  navigateTo('/canvas')
+  navigateTo(`/canvas?analysisId=${analysisId.value}&mode=overview`)
 }
 </script>
 
