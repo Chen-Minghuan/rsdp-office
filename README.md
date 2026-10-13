@@ -1,5 +1,9 @@
 # RSDP 办公
 
+项目目标：商品入库与上下架；CAD/PDF/PNG 空间识别；在无限画布核对并编辑空间；确认空间后进行家具排版，再推荐商品，确认方案后生成效果图。
+
+开发文档从 [文档入口](docs/README.md) 开始，修改规则见 [AGENTS.md](AGENTS.md)，当前实现、缺口与下一步见 [进度表](docs/status.md)。目标流程尚未完整实现，进度以实际验收证据为准。
+
 ## Docker 基础设施
 
 在项目根目录执行：
@@ -27,7 +31,9 @@ curl -F 'file=@图纸.dxf' http://localhost:8091/parse
 
 CAD 服务支持 DWG/DXF，返回房间、墙体、家具候选、尺寸及预览等解析结果。PDF/PNG 不走该解析接口。
 
-当前项目的前后端尚未接入 CAD HTTP 调用；上传页面展示的仍是模拟识别结果。CAD 容器启动只提供独立解析接口。
+当前前端已通过 Java `POST /api/v1/cad/parse` 转发到 CAD 服务，可显示解析结果并应用到画布。现有导入将房间转成矩形包围盒，真实轮廓、底图对齐和完整办公样本流程仍待完善与验收。
+
+PDF/PNG 通过 Java `POST /api/v1/vision/recognize` 调用配置的识别服务；`rsdp.vision.url` 未配置时返回带 `MOCK_RECOGNITION` 标识的演示结果，不能视为真实识别。
 
 ## 本地启动前后端
 

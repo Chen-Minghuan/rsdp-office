@@ -10,7 +10,7 @@ Docker 构建排除本机 `bin/obj` 及测试文件。可使用 `tests/RsdpCadPa
 curl -F 'file=@backend/cad-parser/tests/RsdpCadParser.Tests/Fixtures/two_inserts.dxf' http://localhost:8091/parse
 ```
 
-下文保留原服务的技术说明；其中相对 RSDP 的设计文档、金样本路径不包含在本目录中。本项目前后端尚未接入该 HTTP 接口。
+下文保留原服务的历史技术说明；其中相对 RSDP 的设计文档、金样本路径不包含在本目录中。当前前端通过 Java `/api/v1/cad/parse` 调用本服务，办公项目的空间识别与画布对应关系仍需按 [架构契约](../../docs/architecture.md) 完善，并按 [进度表](../../docs/status.md) 验收。历史样本结果不代表本项目已通过办公样本验收。
 
 RSDP 的 CAD 户型导入微服务：上传 DWG/DXF，直接解析矢量数据（不经视觉模型），产出带名称/类型的房间多边形（毫米坐标）+ 面积 + 尺寸交叉验证 + 质量门报告。
 
