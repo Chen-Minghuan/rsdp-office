@@ -6,7 +6,7 @@
 
 ## 启动
 
-基础设施通过项目根目录的 `docker compose up -d --build --wait` 启动（PostgreSQL 和 CAD 解析服务）。前端和 Java 后端在本地启动；前端默认访问 `http://localhost:8082` 后端。
+基础设施通过项目根目录的 `docker compose up -d --build --wait postgres cad-parser` 启动（PostgreSQL 和 CAD 解析服务）。前端和 Java 后端在本地启动；前端默认访问 `http://localhost:8082` 后端。
 
 本地开发时，在项目根目录执行：
 
