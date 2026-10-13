@@ -6,6 +6,7 @@ import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -16,12 +17,22 @@ public class RspuCodeService {
     private final AtomicInteger sequence = new AtomicInteger(0);
 
     public String assignCode(String rspuId, String categoryCode, String positioningLabel, String sizeCode) {
-        String prefix = "OF";
-        if (categoryCode != null && !categoryCode.isBlank()) {
-            prefix = categoryCode.toUpperCase();
+        String prefix = (categoryCode == null || categoryCode.isBlank()) ? "OF" : categoryCode.toUpperCase();
+        int nextSeq = 1;
+        List<RspuMaster> latest = rspuMasterMapper.selectList(
+            new QueryWrapper<RspuMaster>().likeRight("rspu_code", prefix + "-").orderByDesc("rspu_code").last("limit 1"));
+        if (!latest.isEmpty()) {
+            String code = latest.get(0).getRspuCode();
+            try {
+                nextSeq = Integer.parseInt(code.substring(code.lastIndexOf('-') + 1)) + 1;
+            } catch (Exception ignored) {
+            }
         }
-        String seq = String.format("%04d", sequence.incrementAndGet());
-        String code = prefix + "-" + seq;
+        String code = prefix + "-" + String.format("%04d", nextSeq);
+        while (rspuMasterMapper.selectCount(new QueryWrapper<RspuMaster>().eq("rspu_code", code)) > 0) {
+            nextSeq++;
+            code = prefix + "-" + String.format("%04d", nextSeq);
+        }
 
         RspuMaster update = new RspuMaster();
         update.setRspuId(rspuId);

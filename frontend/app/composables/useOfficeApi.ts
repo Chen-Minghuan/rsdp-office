@@ -1,5 +1,5 @@
 import type { Project, OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
-import type { ImportedProduct, ProductImportResult } from '~/types/imported-products'
+import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
 const PROJECT_ID = 'OFFICE-PROJECT-001'
@@ -227,6 +227,84 @@ export function useOfficeApi() {
     return res.data
   }
 
+  async function previewImport(file: File): Promise<ProductImportPreview> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await $fetch<ApiResponse<ProductImportPreview>>(apiUrl('/api/v1/products/import-preview'), {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    })
+    if (res.code !== 200) {
+      throw new Error(res.message || '预览失败')
+    }
+    return res.data
+  }
+
+  async function validateImportPreview(rows: ProductImportPreviewRow[], updateIfExists = false): Promise<ProductImportPreview> {
+    const res = await $fetch<ApiResponse<ProductImportPreview>>(apiUrl('/api/v1/products/import-preview/validate'), {
+      method: 'POST',
+      body: { rows, updateIfExists },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (res.code !== 200) {
+      throw new Error(res.message || '校验失败')
+    }
+    return res.data
+  }
+
+  async function confirmImport(rows: ProductImportPreviewRow[], updateIfExists = false): Promise<ProductImportResult> {
+    const res = await $fetch<ApiResponse<ProductImportResult>>(apiUrl('/api/v1/products/import-confirm'), {
+      method: 'POST',
+      body: { rows, updateIfExists },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (res.code !== 200) {
+      throw new Error(res.message || '导入确认失败')
+    }
+    return res.data
+  }
+
+  async function uploadImages(files: File[]): Promise<string[]> {
+    const formData = new FormData()
+    files.forEach(f => formData.append('files', f))
+    const res = await $fetch<ApiResponse<string[]>>(apiUrl('/api/v1/images/upload'), {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    })
+    if (res.code !== 200) {
+      throw new Error(res.message || '图片上传失败')
+    }
+    return res.data
+  }
+
+  async function loadDicts(type: string): Promise<DictItem[]> {
+    return await request<DictItem[]>('GET', `/api/v1/dicts/${type}`)
+  }
+
+  async function createManualProduct(request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
+    return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', request)
+  }
+
+  async function getProduct(rspuId: string): Promise<ProductDetail> {
+    return await request<ProductDetail>('GET', `/api/v1/products/${rspuId}`)
+  }
+
+  async function updateProduct(rspuId: string, request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
+    return await request<{ rspuId: string; message: string }>('PUT', `/api/v1/products/${rspuId}`, request)
+  }
+
+  async function deleteProduct(rspuId: string): Promise<void> {
+    await request<void>('DELETE', `/api/v1/products/${rspuId}`)
+  }
+
+  async function restoreProduct(rspuId: string): Promise<void> {
+    await request<void>('POST', `/api/v1/products/${rspuId}/restore`, {})
+  }
+
   async function recognizeImage(file: File): Promise<unknown> {
     const formData = new FormData()
     formData.append('file', file)
@@ -265,5 +343,15 @@ export function useOfficeApi() {
     rejectProduct,
     parseCad,
     recognizeImage,
+    previewImport,
+    validateImportPreview,
+    confirmImport,
+    uploadImages,
+    loadDicts,
+    createManualProduct,
+    getProduct,
+    updateProduct,
+    deleteProduct,
+    restoreProduct,
   }
 }

@@ -6,7 +6,9 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.config.FactoryProperties;
 import com.rsdp.officeproduct.importer.config.ImportProperties;
 import com.rsdp.officeproduct.importer.dto.excel.ProductImportRow;
+import com.rsdp.officeproduct.importer.dto.request.ManualProductEntryRequest;
 import com.rsdp.officeproduct.importer.dto.request.ProductImportRequest;
+import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportPreview;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportPreviewRow;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportFailure;
@@ -20,6 +22,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -573,6 +576,24 @@ public class ProductImportService {
             imageAssetsMapper.insert(image);
             hasPrimary |= primary;
         }
+
+        // 同步主档图片字段，方便列表缩略图与旧接口读取
+        List<ImageAssets> allImages = imageAssetsMapper.selectList(
+            new QueryWrapper<ImageAssets>().eq("rspu_id", rspuId).orderByAsc("created_at"));
+        String primaryUrl = allImages.stream().filter(a -> Boolean.TRUE.equals(a.getPrimary()))
+            .map(ImageAssets::getStorageUrl).findFirst().orElse(null);
+        if (primaryUrl == null && !allImages.isEmpty()) {
+            primaryUrl = allImages.get(0).getStorageUrl();
+        }
+        final String finalPrimaryUrl = primaryUrl;
+        List<String> detailUrls = allImages.stream()
+            .filter(a -> !a.getStorageUrl().equals(finalPrimaryUrl))
+            .map(ImageAssets::getStorageUrl).toList();
+        RspuMaster rspu = new RspuMaster();
+        rspu.setRspuId(rspuId);
+        rspu.setPrimaryImageUrl(primaryUrl);
+        rspu.setDetailImageUrls(writeJsonListOrNull(detailUrls));
+        rspuMasterMapper.updateById(rspu);
     }
 
     private boolean hasFactoryPrice(ProductImportRow row) {
@@ -690,6 +711,178 @@ public class ProductImportService {
             return value.length() <= 500 && ("http".equalsIgnoreCase(uri.getScheme())
                 || "https".equalsIgnoreCase(uri.getScheme())) && uri.getHost() != null;
         } catch (IllegalArgumentException e) { return false; }
+    }
+
+    // ==================== 手工录入与商品维护 ====================
+
+    @Transactional
+    public Map<String, Object> createManualEntry(ManualProductEntryRequest request) {
+        ProductImportRow row = toImportRow(request);
+        Map<String, List<CategoryDict>> dictCache = preloadDicts();
+        normalizeRow(row, dictCache);
+        String error = validateRow(row, dictCache);
+        if (error != null) throw new BusinessException(error);
+
+        RspuMaster rspu = new RspuMaster();
+        buildRspuFromRow(rspu, row, dictCache, false);
+        rspu.setRspuId(IdGenerator.rspuId());
+        rspu.setExternalCode(trim(row.getExternalCode()));
+        rspu.setStatus("active");
+        rspu.setAuditStatus("pending");
+        rspu.setCreatedBy(CurrentUserContext.currentUsername());
+        rspu.setCreatedAt(LocalDateTime.now());
+        rspu.setUpdatedAt(LocalDateTime.now());
+        rspuMasterMapper.insert(rspu);
+
+        if (DictNormalizes.isValid(rspu.getPositioningLabel(), dictCache.get("style"))) {
+            rspuCodeService.assignCode(rspu.getRspuId(), rspu.getCategoryCode(), rspu.getPositioningLabel(),
+                resolveImportSizeCode(row.getSizeCode(), dictCache.get("size")));
+        }
+
+        RspuVariant variant = createVariantIfNotExists(rspu.getRspuId(), row, dictCache);
+        saveImages(rspu.getRspuId(), row);
+        saveFactoryPrice(rspu.getRspuId(), variant.getVariantId(), row);
+        saveStyles(rspu.getRspuId(), rspu.getPositioningLabel(), dictCache.get("style"), false);
+        saveScenes(rspu.getRspuId(), splitCsv(row.getSceneTags()), dictCache.get("scene"), false);
+
+        return Map.of(
+            "rspuId", rspu.getRspuId(),
+            "variantId", variant.getVariantId(),
+            "message", "手工录入产品成功"
+        );
+    }
+
+    @Transactional
+    public Map<String, Object> updateProduct(String rspuId, ManualProductEntryRequest request) {
+        RspuMaster existing = rspuMasterMapper.selectById(rspuId);
+        if (existing == null) throw new BusinessException("商品不存在: " + rspuId);
+
+        ProductImportRow row = toImportRow(request);
+        Map<String, List<CategoryDict>> dictCache = preloadDicts();
+        normalizeRow(row, dictCache);
+        String error = validateRow(row, dictCache);
+        if (error != null) throw new BusinessException(error);
+
+        buildRspuFromRow(existing, row, dictCache, true);
+        if (StringUtils.hasText(row.getExternalCode())) existing.setExternalCode(row.getExternalCode());
+        if (StringUtils.hasText(request.getDescription())) existing.setDescription(request.getDescription().trim());
+        existing.setUpdatedAt(LocalDateTime.now());
+        rspuMasterMapper.updateById(existing);
+
+        List<RspuVariant> variants = rspuVariantMapper.selectList(
+            new QueryWrapper<RspuVariant>().eq("rspu_id", rspuId).orderByAsc("created_at"));
+        RspuVariant variant = variants.isEmpty() ? null : variants.get(0);
+        if (variant == null) {
+            variant = createVariantIfNotExists(rspuId, row, dictCache);
+        } else {
+            if (StringUtils.hasText(row.getVariantDisplayName())) variant.setDisplayName(row.getVariantDisplayName());
+            if (StringUtils.hasText(row.getSizeCode())) variant.setSizeCode(row.getSizeCode());
+            if (StringUtils.hasText(row.getSizeText())) variant.setSizeText(row.getSizeText());
+            if (StringUtils.hasText(row.getColorCode())) variant.setColorCode(row.getColorCode());
+            if (StringUtils.hasText(row.getColorText())) variant.setColorText(row.getColorText());
+            if (StringUtils.hasText(row.getMaterialCode())) variant.setMaterialCode(row.getMaterialCode());
+            if (StringUtils.hasText(row.getMaterialText())) variant.setMaterialText(row.getMaterialText());
+            if (StringUtils.hasText(row.getVariantReferencePriceBand())) variant.setReferencePriceBand(row.getVariantReferencePriceBand());
+            if (StringUtils.hasText(row.getVariantProductLevel())) variant.setProductLevel(row.getVariantProductLevel());
+            variant.setUpdatedAt(LocalDateTime.now());
+            rspuVariantMapper.updateById(variant);
+        }
+
+        saveImages(rspuId, row);
+        saveFactoryPrice(rspuId, variant.getVariantId(), row);
+        saveStyles(rspuId, existing.getPositioningLabel(), dictCache.get("style"), true);
+        saveScenes(rspuId, splitCsv(row.getSceneTags()), dictCache.get("scene"), true);
+
+        return Map.of("rspuId", rspuId, "message", "商品更新成功");
+    }
+
+    @Transactional
+    public void deleteProduct(String rspuId) {
+        RspuMaster rspu = rspuMasterMapper.selectById(rspuId);
+        if (rspu == null) throw new BusinessException("商品不存在: " + rspuId);
+        rspuMasterMapper.deleteById(rspuId);
+    }
+
+    @Transactional
+    public void restoreProduct(String rspuId) {
+        int rows = rspuMasterMapper.restoreById(rspuId);
+        if (rows == 0) throw new BusinessException("商品不存在或未被删除: " + rspuId);
+    }
+
+    public ProductDetailDto getProductDetail(String rspuId) {
+        RspuMaster rspu = rspuMasterMapper.selectById(rspuId);
+        if (rspu == null) throw new BusinessException("商品不存在: " + rspuId);
+        return toDetailDto(rspu);
+    }
+
+    private ProductDetailDto toDetailDto(RspuMaster rspu) {
+        ProductDetailDto dto = new ProductDetailDto();
+        org.springframework.beans.BeanUtils.copyProperties(rspu, dto);
+
+        List<RspuVariant> variants = rspuVariantMapper.selectList(
+            new QueryWrapper<RspuVariant>().eq("rspu_id", rspu.getRspuId()).orderByAsc("created_at"));
+        List<FactoryProductPrice> prices = factoryProductPriceMapper.selectList(
+            new QueryWrapper<FactoryProductPrice>().eq("rspu_id", rspu.getRspuId()));
+        Map<String, FactoryProductPrice> priceByVariant = prices.stream()
+            .collect(Collectors.toMap(FactoryProductPrice::getVariantId, p -> p, (a, b) -> a));
+
+        for (RspuVariant v : variants) {
+            ProductDetailDto.Variant vd = new ProductDetailDto.Variant();
+            org.springframework.beans.BeanUtils.copyProperties(v, vd);
+            FactoryProductPrice price = priceByVariant.get(v.getVariantId());
+            if (price != null) {
+                vd.setFactoryPrice(price.getFactoryPrice());
+                vd.setMoq(price.getMoq());
+                vd.setLeadTimeDays(price.getLeadTimeDays());
+            }
+            dto.getVariants().add(vd);
+        }
+
+        List<ImageAssets> images = imageAssetsMapper.selectList(
+            new QueryWrapper<ImageAssets>().eq("rspu_id", rspu.getRspuId()).orderByDesc("is_primary").orderByAsc("created_at"));
+        for (ImageAssets img : images) {
+            ProductDetailDto.Image id = new ProductDetailDto.Image();
+            org.springframework.beans.BeanUtils.copyProperties(img, id);
+            dto.getImages().add(id);
+        }
+        return dto;
+    }
+
+    private ProductImportRow toImportRow(ManualProductEntryRequest request) {
+        ProductImportRow row = new ProductImportRow();
+        row.setCategoryCode(request.getCategoryCode());
+        row.setPositioningLabel(request.getPositioningLabel());
+        row.setProductName(request.getProductName());
+        row.setColorPrimaryName(request.getColorPrimaryName());
+        row.setMaterialTags(request.getMaterialTags() == null ? null : String.join(",", request.getMaterialTags()));
+        row.setSceneTags(request.getSceneTags() == null ? null : String.join(",", request.getSceneTags()));
+        row.setProductLevel(request.getProductLevel());
+        row.setWarrantyYears(request.getWarrantyYears());
+        row.setReferencePriceBand(request.getReferencePriceBand());
+        row.setSixDimTags(request.getSixDimTags());
+        row.setKeySpecs(request.getKeySpecs());
+        row.setDescription(request.getDescription());
+        row.setRetailPrice(request.getRetailPrice());
+        row.setExternalCode(request.getExternalCode());
+        row.setVariantDisplayName(request.getVariantDisplayName());
+        row.setSizeCode(request.getSizeCode());
+        row.setSizeText(request.getSizeText());
+        row.setColorCode(request.getColorCode());
+        row.setColorText(request.getColorText());
+        row.setMaterialCode(request.getMaterialCode());
+        row.setMaterialText(request.getMaterialText());
+        row.setVariantReferencePriceBand(request.getVariantReferencePriceBand());
+        row.setVariantProductLevel(request.getVariantProductLevel());
+        row.setFactoryPrice(request.getFactoryPrice());
+        row.setMoq(request.getMoq());
+        row.setLeadTimeDays(request.getLeadTimeDays());
+
+        List<String> urls = request.getImageUrls() == null ? List.of() : request.getImageUrls();
+        if (!urls.isEmpty()) {
+            row.setPrimaryImageUrl(urls.get(0));
+            row.setDetailImageUrls(urls.size() > 1 ? String.join(",", urls.subList(1, urls.size())) : null);
+        }
+        return row;
     }
 
     private void normalizeRow(ProductImportRow row, Map<String, List<CategoryDict>> dictCache) {

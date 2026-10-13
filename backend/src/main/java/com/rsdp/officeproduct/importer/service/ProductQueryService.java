@@ -17,7 +17,7 @@ public class ProductQueryService {
 
     public List<ProductListItemDto> listProducts() {
         List<RspuMaster> entities = rspuMasterMapper.selectList(
-            new QueryWrapper<RspuMaster>().and(w -> w.eq("audit_status", "approved").or().isNull("audit_status")).orderByDesc("created_at"));
+            new QueryWrapper<RspuMaster>().orderByDesc("created_at"));
         return entities.stream().map(this::toDto).toList();
     }
 

@@ -90,6 +90,9 @@ onMounted(loadProducts)
           <NuxtLink to="/products/audit" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
             <AppIcon name="checkCircle" size="4" />商品审核
           </NuxtLink>
+          <NuxtLink to="/products/manual" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
+            <AppIcon name="plus" size="4" />手工录入
+          </NuxtLink>
           <NuxtLink to="/products/import" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-bronze-dark">
             <AppIcon name="import" size="4" />批量导入
           </NuxtLink>
@@ -152,7 +155,9 @@ onMounted(loadProducts)
               <td class="px-4 py-4 text-right font-medium tabular-nums">{{ formatPrice(product.retailPrice) }}</td>
               <td class="px-4 py-4"><span class="rounded-md px-2 py-1 text-xs" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span></td>
               <td class="px-4 py-4 text-xs text-muted">{{ formatDate(product.updatedAt) }}</td>
-              <td class="px-5 py-4 text-right"><button type="button" class="rounded-md px-2 py-1 text-xs font-semibold text-bronze-dark hover:bg-cream" :aria-label="`查看${product.productName || '商品'}详情`" @click="showDetails(product)">查看详情</button></td>
+              <td class="px-5 py-4 text-right">
+                <NuxtLink :to="`/products/${product.rspuId}`" class="rounded-md px-2 py-1 text-xs font-semibold text-bronze-dark hover:bg-cream" :aria-label="`查看${product.productName || '商品'}详情`">查看详情</NuxtLink>
+              </td>
             </tr>
           </tbody>
         </table>

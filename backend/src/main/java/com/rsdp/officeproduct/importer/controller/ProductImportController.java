@@ -1,9 +1,11 @@
 package com.rsdp.officeproduct.importer.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
-import com.rsdp.officeproduct.importer.dto.response.ProductImportResult;
-import com.rsdp.officeproduct.importer.dto.response.ProductImportPreview;
+import com.rsdp.officeproduct.importer.dto.request.ManualProductEntryRequest;
 import com.rsdp.officeproduct.importer.dto.request.ProductImportRequest;
+import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
+import com.rsdp.officeproduct.importer.dto.response.ProductImportPreview;
+import com.rsdp.officeproduct.importer.dto.response.ProductImportResult;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.entity.RspuMaster;
 import com.rsdp.officeproduct.importer.service.ProductAuditService;
@@ -13,9 +15,11 @@ import com.rsdp.officeproduct.importer.util.ProductImportTemplateBuilder;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -27,6 +31,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/products")
@@ -90,5 +95,33 @@ public class ProductImportController {
     @PostMapping("/import-confirm")
     public Result<ProductImportResult> confirmImport(@RequestBody ProductImportRequest request) {
         return Result.ok(productImportService.importRows(request));
+    }
+
+    @PostMapping("/manual")
+    public Result<Map<String, Object>> manualEntry(@RequestBody ManualProductEntryRequest request) {
+        return Result.ok(productImportService.createManualEntry(request));
+    }
+
+    @GetMapping("/{rspuId}")
+    public Result<ProductDetailDto> getProduct(@PathVariable String rspuId) {
+        return Result.ok(productImportService.getProductDetail(rspuId));
+    }
+
+    @PutMapping("/{rspuId}")
+    public Result<Map<String, Object>> updateProduct(@PathVariable String rspuId,
+                                                     @RequestBody ManualProductEntryRequest request) {
+        return Result.ok(productImportService.updateProduct(rspuId, request));
+    }
+
+    @DeleteMapping("/{rspuId}")
+    public Result<Void> deleteProduct(@PathVariable String rspuId) {
+        productImportService.deleteProduct(rspuId);
+        return Result.ok(null);
+    }
+
+    @PostMapping("/{rspuId}/restore")
+    public Result<Void> restoreProduct(@PathVariable String rspuId) {
+        productImportService.restoreProduct(rspuId);
+        return Result.ok(null);
     }
 }

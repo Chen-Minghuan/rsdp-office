@@ -9,6 +9,7 @@
 backend/target/
 backend/*.log
 backend/.idea/
+backend/uploads/
 
 # Frontend
 frontend/.output
