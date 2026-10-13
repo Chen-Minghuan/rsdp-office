@@ -5,7 +5,7 @@
 在项目根目录执行：
 
 ```bash
-docker compose up -d --build --wait
+docker compose up -d --build --wait postgres cad-parser
 ```
 
 仅启动 PostgreSQL 和独立 CAD 解析服务，前后端在本地启动。
@@ -15,7 +15,7 @@ docker compose up -d --build --wait
 | PostgreSQL | localhost:5434，数据库 `office`，用户名/密码均为 `postgres` |
 | CAD 解析 | `POST http://localhost:8091/parse` |
 
-数据库复用已有的 `backend_postgres_data` 数据卷。首次创建空数据卷时自动执行 `backend/src/main/resources/db/schema.sql`；已有数据卷不会重复初始化。Compose 项目名保留为 `backend`，与之前的数据库容器一致。
+数据库使用独立的 `backend_postgres_data` 数据卷。首次创建空数据卷时自动执行 `backend/src/main/resources/db/schema.sql`；已有数据卷不会重复初始化。Compose 项目名为 `backend`。
 
 CAD 服务源码在 `backend/cad-parser/`，归属后端目录，抽取自本机 RSDP 项目的 `rsdp-cad-parser/`。Java 业务后端和 .NET CAD 解析服务各自构建和运行。CAD 宿主机端口使用 `8091`，与原 RSDP 的 `8090` 服务互不冲突。
 

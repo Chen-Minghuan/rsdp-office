@@ -15,7 +15,7 @@
 
 ## 启动基础设施
 
-在项目根目录执行 `docker compose up -d --build --wait`，会启动 PostgreSQL 和独立 CAD 解析服务。Java 后端通过 IDEA 或 Maven 本地启动。详见根目录 `README.md`。
+在项目根目录执行 `docker compose up -d --build --wait postgres cad-parser`，会启动 PostgreSQL 和独立 CAD 解析服务。Java 后端通过 IDEA 或 Maven 本地启动。详见根目录 `README.md`。
 
 ## 本地运行 Java 后端
 
