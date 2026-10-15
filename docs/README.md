@@ -12,6 +12,8 @@
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |
 | [本轮文档任务](tasks/DOC-001-project-baseline.md) | 本次需求与规范整理的过程及验证 |
 | [空间数据任务](tasks/GEOM-001-scene-canvas-contract.md) | 下一项核心工作如何拆分和验收 |
+| [商品图片提取任务](tasks/CAT-002-workbook-image-ingest.md) | 系统导入时提取内嵌图片的实现与验证 |
+| [供应商尺寸导入任务](tasks/CAT-003-supplier-size-import.md) | 供应商目录的毫米尺寸、价格和预览复核 |
 | [外部流程参考评估](development-workflow-assessment.md) | vibe-coding-cn 中哪些方法适用于本项目 |
 
 产品目标以用户最新明确要求为准，代码描述当前实现，进度表记录实现与验收的差距。
