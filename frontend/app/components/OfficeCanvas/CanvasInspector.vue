@@ -43,7 +43,9 @@ function onImageChange(e: Event) {
   <div v-else-if="obj.kind === 'zone'" class="flex flex-col gap-3">
     <div class="flex items-center justify-between mb-1">
       <span class="text-sm font-bold flex items-center gap-2"><AppIcon name="zone" size="4" /> 区域属性</span>
-      <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#e7f1ff] text-[#437eae]">已选中</span>
+      <span :class="['px-1.5 py-0.5 rounded text-[10px]', (obj as any).confirmed ? 'bg-[#e6f5ee] text-green' : 'bg-[#fff8e6] text-[#a67c2e]']">
+        {{ (obj as any).confirmed ? '已确认' : '待确认' }}
+      </span>
     </div>
     <div class="flex flex-col gap-1">
       <label class="text-[11px] text-[#746c64]">区域名称</label>
@@ -63,6 +65,54 @@ function onImageChange(e: Event) {
       <label class="text-[11px] text-[#746c64]">区域说明</label>
       <textarea :value="obj.note" rows="3" class="w-full border border-[#e9e4de] rounded-lg p-2.5 text-sm outline-none focus:border-[#be9369] resize-none leading-relaxed" @input="update({ note: ($event.target as HTMLTextAreaElement).value })" />
     </div>
+
+    <div class="bg-[#f9f7f4] rounded-xl p-3 flex flex-col gap-2">
+      <div class="text-[11px] font-semibold text-[#5b5751]">实际尺寸</div>
+      <div class="flex gap-2">
+        <label class="flex-1">
+          <span class="text-[10px] text-muted">宽 (mm)</span>
+          <input
+            :value="Math.round((obj as any).actualWidthMm || obj.w * 20)"
+            type="number"
+            min="1"
+            class="w-full h-8 px-2 border border-line rounded-lg text-xs"
+            @change="store.resizeZoneByMm(obj.id, Number(($event.target as HTMLInputElement).value), (obj as any).actualDepthMm || obj.h * 20)"
+          >
+        </label>
+        <label class="flex-1">
+          <span class="text-[10px] text-muted">深 (mm)</span>
+          <input
+            :value="Math.round((obj as any).actualDepthMm || obj.h * 20)"
+            type="number"
+            min="1"
+            class="w-full h-8 px-2 border border-line rounded-lg text-xs"
+            @change="store.resizeZoneByMm(obj.id, (obj as any).actualWidthMm || obj.w * 20, Number(($event.target as HTMLInputElement).value))"
+          >
+        </label>
+      </div>
+      <div class="text-[10px] text-muted">
+        画布尺寸：{{ Math.round(obj.w) }}×{{ Math.round(obj.h) }} px
+        <span v-if="(obj as any).pixelToMeter">，比例 {{ (1 / (obj as any).pixelToMeter).toFixed(1) }} px/米</span>
+      </div>
+    </div>
+
+    <div class="flex gap-2">
+      <button
+        v-if="!(obj as any).confirmed"
+        class="flex-1 px-4 py-2 rounded-lg text-xs font-semibold bg-[#e6f5ee] text-green border border-[#d0ead9] hover:bg-[#d8f0e3]"
+        @click="store.confirmZone(obj.id)"
+      >
+        确认空间
+      </button>
+      <button
+        v-else
+        class="flex-1 px-4 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#fff0f0] hover:text-red-500"
+        @click="store.unconfirmZone(obj.id)"
+      >
+        取消确认
+      </button>
+    </div>
+
     <button class="mt-2 px-4 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#fff0f0] hover:text-red-500 flex items-center justify-center gap-2 transition" @click="remove">
       <AppIcon name="trash" size="4" /> 删除该区域
     </button>

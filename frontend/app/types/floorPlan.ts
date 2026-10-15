@@ -1,3 +1,5 @@
+import type { DimensionCalibrationReport } from './dimensionCalibration'
+
 /**
  * 户型图 / 无限画布类型定义（从 RSDP 抽取并简化）。
  */
@@ -56,6 +58,8 @@ export interface FloorPlanDrawingBounds {
 }
 
 export interface FloorPlanAnalysisResponse {
+  dimensionCalibration?: DimensionCalibrationReport | null
+  evidenceKind?: 'REAL_SERVICE' | 'ESTIMATED' | 'DEMO' | 'MANUAL'
   analysisId: string
   projectId?: string | null
   projectName?: string | null

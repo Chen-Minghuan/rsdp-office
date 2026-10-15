@@ -47,7 +47,7 @@ await context.route('**/api/v1/**', async route => {
     if (importMode === 'skipped') return respond({ totalRows: 1, successCount: 0, failedCount: 0, skippedCount: 1, failures: [], warnings: [{ rowIndex: 2, externalCode: 'EXTERNAL-1', rspuId: null, reason: '商品已存在，已跳过' }] })
     return respond(partialResult)
   }
-  return respond(url.pathname.endsWith('/OFFICE-PROJECT-001') ? null : [])
+  return respond(url.pathname.endsWith('/OFFICE-PROJECT-001') || url.pathname.endsWith('/canvas') ? null : [])
 })
 
 async function heading(text) {
@@ -93,8 +93,10 @@ try {
   const projectNav = page.getByRole('navigation', { name: '项目设计步骤' })
   assert.equal(await projectNav.getByRole('link').count(), 4)
   await projectNav.getByRole('link', { name: '2 空间总览' }).click()
-  await page.getByRole('heading', { name: '无限画布 · 空间总览', exact: true }).waitFor()
-  await page.getByRole('button', { name: '进入设计', exact: true }).first().click()
+  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  const enterLayout = page.getByRole('button', { name: '进入家具排版 →', exact: true })
+  assert.equal(await enterLayout.isEnabled(), true)
+  await enterLayout.click()
   await page.waitForURL(/mode=design/)
   const designUrl = page.url()
   await shot('02-project-design')

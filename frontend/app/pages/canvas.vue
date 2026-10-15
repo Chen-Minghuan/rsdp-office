@@ -13,12 +13,17 @@ const mode = computed<'overview' | 'design'>(() => store.canvasMode)
 const designZoneId = computed(() => store.designZoneId)
 
 // Sync URL query -> store (browser back/forward, direct links)
-watch(() => route.query, (q) => {
-  const urlMode = q.mode === 'design' ? 'design' : 'overview'
+watch([() => route.query, () => store.initialized], ([q, initialized]) => {
+  if (!initialized) return
+  const urlMode = q.mode === 'design' && store.canEnterLayout ? 'design' : 'overview'
   const urlZoneId = q.zoneId as string | undefined
   if (urlMode !== store.canvasMode || urlZoneId !== store.designZoneId) {
-    store.canvasMode = urlMode
-    store.designZoneId = urlMode === 'design' ? (urlZoneId || store.zones[0]?.id || null) : null
+    if (urlMode === 'design') store.enterDesign(store.zones.some(zone => zone.id === urlZoneId) ? urlZoneId! : store.zones[0]?.id || '')
+    else { store.canvasMode = 'overview'; store.designZoneId = null }
+  }
+  if (q.mode === 'design' && !store.canEnterLayout) {
+    const { mode, zoneId, ...query } = q
+    router.replace({ path: '/canvas', query })
   }
 }, { immediate: true, deep: true })
 
@@ -26,6 +31,7 @@ watch(() => route.query, (q) => {
 watch(() => store.canvasMode, (m, oldM) => {
   if (m === oldM) return
   const query: Record<string, string> = { ...route.query as Record<string, string> }
+  if (store.floorPlan?.inputMode === 'manual' && /^(STPL|LSTPL)-/.test(store.floorPlan.analysisId)) delete query.analysisId
   if (m === 'design') {
     query.mode = 'design'
     query.zoneId = store.designZoneId || store.zones[0]?.id || ''
@@ -38,17 +44,19 @@ watch(() => store.canvasMode, (m, oldM) => {
 
 // 从 URL 加载户型图分析结果
 const analysisIdFromQuery = computed(() => route.query.analysisId as string | undefined)
-watch(analysisIdFromQuery, async (id) => {
-  if (id && (!store.floorPlan || store.floorPlan.analysisId !== id)) {
-    await store.loadFloorPlan(id)
-    store.importFloorPlanToZones()
+watch([analysisIdFromQuery, () => store.initialized], async ([id, initialized]) => {
+  if (initialized && id && (!store.floorPlan || store.floorPlan.analysisId !== id)) {
+    const snapshot = await store.loadFloorPlan(id)
+    if (snapshot?.analysisId === id && analysisIdFromQuery.value === id) store.importFloorPlanToZones(snapshot)
   }
 }, { immediate: true })
 
 watch(() => store.designZoneId, (id, oldId) => {
   if (id === oldId || store.canvasMode !== 'design') return
   if (id && route.query.zoneId !== id) {
-    router.replace({ path: route.path, query: { ...route.query, mode: 'design', zoneId: id } })
+    const query: Record<string, string> = { ...route.query as Record<string, string>, mode: 'design', zoneId: id }
+    if (store.floorPlan?.inputMode === 'manual' && /^(STPL|LSTPL)-/.test(store.floorPlan.analysisId)) delete query.analysisId
+    router.replace({ path: route.path, query })
   }
 })
 
@@ -61,21 +69,34 @@ function fitBoard() {
   boardRef.value?.fitBoard()
 }
 
-const title = computed(() => mode.value === 'design' ? '无限画布 · 单空间设计' : '无限画布 · 空间总览')
+watch(() => store.canEnterLayout, (confirmed) => {
+  if (!confirmed && store.canvasMode === 'design') store.setCanvasMode('overview')
+})
+
+
+const title = computed(() => mode.value === 'design' ? '无限画布 · 单空间设计' : '无限画布 · 空间核对')
 const subtitle = computed(() => mode.value === 'design'
   ? '聚焦单个功能区，与 Agent 协作完成家具布局与选品。'
   : '校准尺寸、划分办公功能区、标注整体需求，完成后进入单空间设计。')
 </script>
 
 <template>
-  <div class="flex flex-col h-full gap-4">
+  <OfficeCanvasSpaceReview v-if="mode === 'overview'" />
+  <div v-else class="flex flex-col h-full gap-4">
     <div class="flex items-start justify-between flex-none">
       <div>
         <h1 class="text-[25px] font-bold tracking-tight mb-2">{{ title }}</h1>
         <p class="text-xs text-muted">{{ subtitle }}</p>
       </div>
-      <div v-if="mode === 'design'" class="flex items-center gap-2">
-        <button class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" @click="store.setCanvasMode('overview')">
+      <div class="flex items-center gap-2">
+        <NuxtLink
+          to="/manual-canvas"
+          class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]"
+        >
+          <AppIcon name="zone" size="3.5" />
+          <span>手动布局</span>
+        </NuxtLink>
+        <button v-if="mode === 'design'" class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" @click="store.setCanvasMode('overview')">
           <AppIcon name="arrowLeft" size="3.5" />
           <span>返回空间总览</span>
         </button>
@@ -94,12 +115,13 @@ const subtitle = computed(() => mode.value === 'design'
           :mode="mode"
           @undo="store.undo"
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
-          @zoom-out="store.zoom = Math.max(0.25, store.zoom / 1.17)"
+          @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"
         />
         <OfficeCanvasBoard ref="boardRef" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
-          <div class="flex gap-5">
+          <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
+          <div v-else class="flex gap-5">
             <span class="flex items-center gap-1.5">已圈选 <strong class="text-bronze text-sm">{{ store.zoneCount }}</strong> 个区域</span>
             <span class="flex items-center gap-1.5">便签 <strong class="text-bronze text-sm">{{ store.noteCount }}</strong> 条</span>
             <span class="flex items-center gap-1.5">参考图 <strong class="text-bronze text-sm">{{ store.refCount }}</strong> 张</span>

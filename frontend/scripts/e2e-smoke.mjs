@@ -14,7 +14,7 @@ if (process.env.MOCK_API === '1') {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ code: 200, message: '成功', data: url.pathname.endsWith('/OFFICE-PROJECT-001') ? null : [] }),
+      body: JSON.stringify({ code: 200, message: '成功', data: url.pathname.endsWith('/OFFICE-PROJECT-001') || url.pathname.endsWith('/canvas') ? null : [] }),
     })
   })
 }
@@ -35,22 +35,24 @@ await shot('01-upload')
 // 2. 空间总览
 console.log('Step 2: overview')
 await page.goto(`${baseUrl}/canvas`, { waitUntil: 'networkidle' })
-await page.waitForSelector('h1:has-text("空间总览")', { timeout: 10000 })
+await page.waitForSelector('h1:has-text("空间核对")', { timeout: 10000 })
 await shot('02-overview')
 
 // 3. 进入单空间设计
 console.log('Step 3: enter design')
-await page.click('button:has-text("进入设计")')
+await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
 await page.waitForURL(/mode=design/, { timeout: 10000 })
 await page.waitForSelector('h1:has-text("单空间设计")', { timeout: 10000 })
 await shot('03-design')
 
-// 4. 选择单位模块并一键排版
+// 4. 选择单位模块、一键排版、确认排版并加入方案
 console.log('Step 4: select module, layout and add to cart')
-await page.click('text=四人工位组合')
+await page.getByRole('button', { name: '职员直线桌', exact: true }).click()
 await page.waitForTimeout(200)
-await page.click('button:has-text("一键排版")')
+await page.click('button:has-text("一键自动排版")')
 await page.waitForTimeout(500)
+await page.click('button:has-text("确认当前排版")')
+await page.waitForTimeout(300)
 await shot('04-design-layout-confirmed')
 const addButtons = await page.locator('button:has-text("加入方案")').all()
 console.log(`  found ${addButtons.length} products`)

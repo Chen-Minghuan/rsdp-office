@@ -61,11 +61,11 @@ watch(tools, () => {
       <button class="p-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef] flex items-center gap-1" title="撤销" @click="emit('undo')">
         <AppIcon name="undo" size="4" />
       </button>
-      <button class="p-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef]" @click="emit('zoomOut')">
+      <button class="p-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef]" aria-label="缩小画布" @click="emit('zoomOut')">
         <AppIcon name="zoomOut" size="4" />
       </button>
       <span class="text-xs text-[#7e7770] min-w-[44px] text-center font-medium">{{ Math.round(store.zoom * 100) }}%</span>
-      <button class="p-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef]" @click="emit('zoomIn')">
+      <button class="p-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef]" aria-label="放大画布" @click="emit('zoomIn')">
         <AppIcon name="zoomIn" size="4" />
       </button>
       <button class="px-2 py-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef] flex items-center gap-1" @click="emit('fit')">

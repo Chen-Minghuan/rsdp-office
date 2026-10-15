@@ -7,6 +7,11 @@ export function normalizePolygon(
 ): Array<[number, number]> {
   if (!polygon || !Array.isArray(polygon)) return []
   const result: Array<[number, number]> = []
+  if (typeof polygon[0] === 'number') {
+    for (let index = 0; index + 1 < polygon.length; index += 2) {
+      result.push([polygon[index] as number, polygon[index + 1] as number])
+    }
+  }
   for (const item of polygon) {
     if (Array.isArray(item)) {
       if (item.length >= 2 && typeof item[0] === 'number' && typeof item[1] === 'number') {
@@ -16,6 +21,7 @@ export function normalizePolygon(
       result.push([(item as any).x, (item as any).y])
     }
   }
+  if (result.length > 1 && result[0][0] === result[result.length - 1][0] && result[0][1] === result[result.length - 1][1]) result.pop()
   return result
 }
 

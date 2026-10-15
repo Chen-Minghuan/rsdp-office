@@ -12,6 +12,8 @@ const recognitionResult = ref<any>(null)
 const activeFile = ref<string | null>(null)
 const recognitionSource = ref<'cad' | 'vision' | null>(null)
 const analysisId = ref<string | null>(null)
+const pdfPages = reactive<Record<string, number>>({})
+const requiresCalibration = computed(() => recognitionResult.value?.unitResolution?.canonicalUnit === 'px')
 
 // 保留真实 File 对象，用于图纸识别时读取二进制内容
 const fileMap = ref<Map<string, File>>(new Map())
@@ -195,11 +197,16 @@ async function recognizeFile(file: ProjectFile) {
 
     const type = fileType(file.name)
     const isCad = type === 'CAD'
+    const pageNumber = type === 'PDF' ? (pdfPages[file.name] ?? 1) : 1
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      throw new Error('请输入从 1 开始的整数 PDF 页码')
+    }
     const result = await floorPlanApi.analyzeFloorPlan({
       image: isCad ? undefined : rawFile,
       cad: isCad ? rawFile : undefined,
       projectId: api.projectId,
       sourceName: file.name,
+      pageNumber,
     })
     recognitionSource.value = isCad ? 'cad' : 'vision'
     analysisId.value = result.analysisId
@@ -207,6 +214,10 @@ async function recognizeFile(file: ProjectFile) {
 
     // 立即拉取一次详情展示
     const detail = await floorPlanApi.getFloorPlan(result.analysisId)
+    if (detail.status === 'failed') {
+      recognitionResult.value = null
+      throw new Error(detail.errorMessage || '图纸识别失败')
+    }
     recognitionResult.value = detail
   } catch (e: any) {
     parseError.value = e?.message || '图纸识别失败'
@@ -216,6 +227,7 @@ async function recognizeFile(file: ProjectFile) {
 }
 
 function previewImage() {
+  if (recognitionResult.value?.previewUrl) return recognitionResult.value.previewUrl
   if (!recognitionResult.value?.preview?.pngBase64) return null
   return `data:image/png;base64,${recognitionResult.value.preview.pngBase64}`
 }
@@ -296,8 +308,7 @@ async function applyRecognitionToCanvas() {
 
   // 拉取最新详情，确保 rooms 已写入
   const detail = await floorPlanApi.getFloorPlan(analysisId.value)
-  store.setFloorPlan(detail)
-  store.importFloorPlanToZones()
+  store.importFloorPlanToZones(detail)
 
   navigateTo(`/canvas?analysisId=${analysisId.value}&mode=overview`)
 }
@@ -365,6 +376,13 @@ async function applyRecognitionToCanvas() {
                 <div class="text-[10px] text-muted">{{ fileLabel(fileType(f.name)) }} · {{ fmtSize(f.size) }}</div>
               </div>
               <div class="flex items-center gap-1">
+                <label v-if="fileType(f.name) === 'PDF' && !f.mock" class="flex items-center gap-1 mr-2 text-xs text-muted">
+                  第
+                  <input v-model.number="pdfPages[f.name]" :placeholder="'1'" type="number" min="1" step="1"
+                    :disabled="isParsing" :aria-label="`${f.name} 识别页码`"
+                    class="w-14 rounded border border-line px-2 py-1 bg-white text-ink" @click.stop>
+                  页
+                </label>
                 <button
                   v-if="isRecognizable(f.name)"
                   class="px-3 py-1.5 rounded-lg text-xs font-semibold transition"
@@ -412,6 +430,10 @@ async function applyRecognitionToCanvas() {
           </div>
 
           <div v-else class="flex flex-col gap-4">
+            <div v-if="requiresCalibration" class="rounded-xl border border-line bg-cream p-3 text-xs text-bronze-dark">
+              已识别图中空间候选，请核对轮廓并校准实际长度。校准前不计算实际尺寸与面积。
+              <span v-if="recognitionResult.inputMode === 'pdf'">当前识别第 {{ recognitionResult.unitResolution.pageNumber }} 页，共 {{ recognitionResult.unitResolution.pageCount }} 页。</span>
+            </div>
             <!-- 预览图 -->
             <div v-if="previewImage()" class="rounded-xl border border-line overflow-hidden bg-[#faf9f7]">
               <img :src="previewImage()" alt="图纸预览" class="w-full h-auto max-h-[260px] object-contain">
@@ -425,11 +447,12 @@ async function applyRecognitionToCanvas() {
               </div>
               <div class="bg-[#f9f7f4] rounded-xl p-3.5">
                 <div class="text-[10px] text-muted mb-1">命名房间</div>
-                <div class="text-[20px] font-extrabold text-bronze-dark">{{ recognitionResult.rooms?.length || 0 }}</div>
+                <div class="text-[20px] font-extrabold text-bronze-dark">{{ (recognitionResult.rooms || []).filter((r: any) => r.label && r.label !== '未命名空间').length }}</div>
               </div>
               <div class="bg-[#f9f7f4] rounded-xl p-3.5">
                 <div class="text-[10px] text-muted mb-1">总面积</div>
-                <div class="text-[20px] font-extrabold text-green">{{ (recognitionResult.rooms || []).reduce((s: number, r: any) => s + (r.areaM2 || 0), 0).toFixed(1) }}㎡</div>
+                <div v-if="requiresCalibration" class="text-[20px] font-extrabold text-muted">待校准</div>
+                <div v-else class="text-[20px] font-extrabold text-green">{{ (recognitionResult.rooms || []).reduce((s: number, r: any) => s + (r.areaM2 || 0), 0).toFixed(1) }}㎡</div>
               </div>
             </div>
 
@@ -447,12 +470,13 @@ async function applyRecognitionToCanvas() {
                       <span class="text-sm font-bold">{{ room.label || roomTypeText(room.roomType) }}</span>
                       <span v-if="room.roomType" class="px-1.5 py-0.5 rounded bg-[#f4eee6] text-bronze-dark text-[10px]">{{ roomTypeText(room.roomType) }}</span>
                     </div>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded" :class="room.confidence === 'high' ? 'bg-[#e6f5ee] text-green' : 'bg-[#fff5e6] text-[#c97d1a]'">
-                      {{ room.confidence === 'high' ? '高置信' : '中低置信' }}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded" :class="(room.dimensionConfidence || room.confidence) === 'high' ? 'bg-[#e6f5ee] text-green' : 'bg-[#fff5e6] text-[#c97d1a]'">
+                      {{ (room.dimensionConfidence || room.confidence) === 'high' ? '高置信' : '中低置信' }}
                     </span>
                   </div>
                   <div class="text-xs text-muted">
-                    {{ room.widthMm?.toFixed(0) }} × {{ room.depthMm?.toFixed(0) }} mm · {{ room.areaM2?.toFixed(2) }}㎡
+                    <span v-if="requiresCalibration">实际尺寸与面积待校准</span>
+                    <span v-else>{{ room.widthMm?.toFixed(0) }} × {{ room.depthMm?.toFixed(0) }} mm · {{ room.areaM2?.toFixed(2) }}㎡</span>
                   </div>
                 </div>
               </div>

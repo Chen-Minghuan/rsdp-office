@@ -1,3 +1,7 @@
+import type { CustomOfficeModule } from './officeModule'
+import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
+import type { DimensionCalibrationEvidence } from './dimensionCalibration'
+
 export interface Project {
   name: string
   area: number
@@ -36,9 +40,32 @@ export interface ZoneObject {
   source?: 'recognition' | 'user_annotation'
   /** 几何来源：cad_geometry / ai_vision / manual_geometry。 */
   geometrySource?: 'cad_geometry' | 'ai_vision' | 'manual_geometry'
+  /** 空间是否已确认（纳入方案）。 */
+  confirmed?: boolean
+  /** 确认时间戳。 */
+  confirmedAt?: number
+  /** 实际宽度（毫米），用于尺寸双向编辑。 */
+  actualWidthMm?: number
+  /** 实际进深（毫米），用于尺寸双向编辑。 */
+  actualDepthMm?: number
+  /** Geometry basis of polygon/x/y/w/h. Old px drafts stay uncalibrated. */
+  reviewUnit?: 'mm' | 'source'
+  sourceAnalysisId?: string
+  sourceAnalysisRevision?: number
+  spaceTemplateId?: string
+  templateSpaceId?: string
+  /** CAD source bounds are Y-up; stored design rings use Y-down. */
+  sourceYAxis?: 'up' | 'down'
+  sourcePolygon?: Array<[number, number]>
+  /** Original page units to canonical millimetres; shared by the page. */
+  mmPerSourceUnit?: number
+  evidenceKind?: 'DEMO' | 'REAL_SERVICE' | 'MANUAL' | 'ESTIMATED'
+  calibrationEvidence?: DimensionCalibrationEvidence
 }
 
 export interface NoteObject {
+  /** 单空间设计中的附属内容；无归属的内容仅在总览展示。 */
+  zoneId?: string
   id: string
   kind: 'note'
   x: number
@@ -47,6 +74,8 @@ export interface NoteObject {
 }
 
 export interface ArrowObject {
+  /** 单空间设计中的附属内容；无归属的内容仅在总览展示。 */
+  zoneId?: string
   id: string
   kind: 'arrow'
   x: number
@@ -56,6 +85,8 @@ export interface ArrowObject {
 }
 
 export interface ReferenceObject {
+  /** 单空间设计中的附属内容；无归属的内容仅在总览展示。 */
+  zoneId?: string
   id: string
   kind: 'reference'
   x: number
@@ -65,6 +96,15 @@ export interface ReferenceObject {
 }
 
 export interface FurnitureObject {
+  /** 手动布局共用的家具图例；与实际商品引用分开。 */
+  furnitureTemplateId?: string
+  /** Immutable definition for a custom instance, independent of local catalog edits. */
+  moduleSnapshot?: CustomOfficeModule
+  layoutSettings?: { mode: OfficeLayoutMode; spacing: OfficeLayoutSpacing }
+  wingWidthMm?: number
+  heightMm?: number
+  spaceTemplateId?: string
+  templateSpaceId?: string
   id: string
   kind: 'furniture'
   x: number
@@ -75,6 +115,8 @@ export interface FurnitureObject {
   productId: string
   zoneId: string
   label?: string
+  /** 该家具是否属于已确认的排版。 */
+  layoutConfirmed?: boolean
 }
 
 export interface ProductComboItem {
@@ -118,6 +160,8 @@ export interface CartItem {
   zoneId: string | null
   zoneName: string
   qty: number
+  /** 若来自组合推荐，记录组合 ID。 */
+  comboId?: string
 }
 
 export interface Product {

@@ -9,6 +9,7 @@ const GAP = 10
 const ROW_GAP = 30
 
 function pxPerMeter(zone: ZoneObject): number {
+  if (zone.reviewUnit === 'mm') return 1000
   if (zone.pixelToMeter && zone.pixelToMeter > 0) {
     return 1 / zone.pixelToMeter
   }

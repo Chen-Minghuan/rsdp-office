@@ -6,6 +6,9 @@ const collapsed = ref(false)
 
 const zone = computed(() => store.zones.find((z) => z.id === store.designZoneId) || null)
 const hasFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
+const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
+
+const activeTab = ref<'products' | 'combos'>('products')
 
 const categories = [
   { key: 'all', label: '全部' },
@@ -26,6 +29,24 @@ const filteredProducts = computed(() => {
   }
   return list
 })
+
+const filteredCombos = computed(() => {
+  const z = zone.value
+  const allCombos = store.combos.length ? store.combos : []
+  return allCombos.filter((c) => !z || c.uses.includes(z.zoneType))
+})
+
+function comboProductNames(combo: any) {
+  const allProducts = store.products.length ? store.products : []
+  return combo.items.map((item: any) => {
+    const p = allProducts.find((x) => x.id === item.productId)
+    return `${p?.name || item.productId} × ${item.qty}`
+  }).join('、')
+}
+
+function addCombo(comboId: string) {
+  store.addComboToCart(comboId)
+}
 
 function backToOverview() {
   store.setCanvasMode('overview')
@@ -63,7 +84,7 @@ function backToOverview() {
         <strong class="text-[#383432]">{{ zone.zoneType }}</strong>
       </div>
       <div class="flex justify-between text-xs text-[#78736d] my-1">
-        <span>尺寸（像素）</span>
+        <span>尺寸（{{ zone.reviewUnit === 'mm' ? '毫米' : '待校准' }}）</span>
         <strong class="text-[#383432]">{{ Math.round(zone.w) }} × {{ Math.round(zone.h) }}</strong>
       </div>
       <div class="flex justify-between text-xs text-[#78736d] my-1">
@@ -73,22 +94,22 @@ function backToOverview() {
       <div class="mt-2 pt-2 border-t border-[#efe5d7]">
         <div class="flex items-center justify-between">
           <span class="text-xs text-[#78736d]">布局状态</span>
-          <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium', hasFurniture ? 'bg-[#e6f5ee] text-green' : 'bg-[#fff8e6] text-[#a67c2e]']">
-            {{ hasFurniture ? '已生成排版' : '待排版' }}
+          <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium', layoutConfirmed ? 'bg-[#e6f5ee] text-green' : hasFurniture ? 'bg-[#fff8e6] text-[#a67c2e]' : 'bg-[#fff0f0] text-[#a65e4c]']">
+            {{ layoutConfirmed ? '排版已确认' : hasFurniture ? '待确认排版' : '待排版' }}
           </span>
         </div>
       </div>
     </div>
 
     <!-- Layout pending: guidance -->
-    <div v-if="!hasFurniture" class="flex-1 overflow-auto p-4 flex flex-col gap-4">
+    <div v-if="!layoutConfirmed" class="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <div class="text-center py-8">
         <div class="w-14 h-14 mx-auto rounded-2xl bg-[#f6f0e8] text-bronze grid place-items-center mb-3">
           <AppIcon name="cube" size="7" />
         </div>
         <h3 class="text-sm font-bold text-[#5b5751] mb-1">先完成空间排版</h3>
         <p class="text-xs text-muted leading-relaxed">
-          在左侧选择单位模块、设置尺寸与排列方式，<br>点击「一键排版」后在画布中生成家具布局。
+          在左侧选择单位模块、设置尺寸与排列方式，<br>点击「一键自动排版」后在画布中生成家具布局。
         </p>
       </div>
 
@@ -116,7 +137,7 @@ function backToOverview() {
       <div class="mt-auto">
         <button class="w-full px-4 py-2.5 rounded-lg text-xs font-semibold text-white bg-bronze/50 cursor-not-allowed flex items-center justify-center gap-1.5" disabled>
           <AppIcon name="check" size="3.5" />
-          <span>完成排版后展示推荐产品</span>
+          <span>确认排版后解锁推荐产品</span>
         </button>
       </div>
     </div>
@@ -128,7 +149,21 @@ function backToOverview() {
           <AppIcon name="cube" size="4" />
           <span>推荐产品</span>
         </div>
-        <div class="flex gap-1.5 flex-wrap">
+        <div class="flex gap-2 mb-2">
+          <button
+            :class="['px-2.5 py-1 rounded-lg text-[10px] transition', activeTab === 'products' ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-[#746c64] hover:bg-[#efe9e2]']"
+            @click="activeTab = 'products'"
+          >
+            单品
+          </button>
+          <button
+            :class="['px-2.5 py-1 rounded-lg text-[10px] transition', activeTab === 'combos' ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-[#746c64] hover:bg-[#efe9e2]']"
+            @click="activeTab = 'combos'"
+          >
+            搭配组合
+          </button>
+        </div>
+        <div v-if="activeTab === 'products'" class="flex gap-1.5 flex-wrap">
           <button
             v-for="c in categories"
             :key="c.key"
@@ -143,7 +178,7 @@ function backToOverview() {
         </div>
       </div>
 
-      <div class="flex-1 overflow-auto p-3 flex flex-col gap-2">
+      <div v-if="activeTab === 'products'" class="flex-1 overflow-auto p-3 flex flex-col gap-2">
         <div v-for="p in filteredProducts" :key="p.id" class="flex gap-2.5 p-2.5 border border-line rounded-xl">
           <div class="w-[72px] h-[72px] rounded-lg bg-gradient-to-br from-[#f2ede5] to-[#e5d9ca] grid place-items-center flex-none p-1.5">
             <AgentProductArt :kind="p.kind" />
@@ -163,6 +198,27 @@ function backToOverview() {
         </div>
         <div v-if="!filteredProducts.length" class="text-center text-xs text-muted py-8">
           该分类下暂无适配产品
+        </div>
+      </div>
+
+      <div v-else class="flex-1 overflow-auto p-3 flex flex-col gap-2">
+        <div v-for="c in filteredCombos" :key="c.id" class="flex flex-col gap-2 p-3 border border-line rounded-xl">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-bold">{{ c.name }}</div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-[#f4eee5] text-[#946c45]">{{ c.style || '现代' }}</span>
+          </div>
+          <div class="text-[10px] text-muted">{{ c.desc }}</div>
+          <div class="text-[10px] text-[#78736d]">包含：{{ comboProductNames(c) }}</div>
+          <div class="mt-auto flex items-center justify-between">
+            <div class="text-sm text-[#9d6a3a] font-bold">{{ money(c.price) }}</div>
+            <button class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-[#f7f0e8] text-bronze-dark border border-[#efe4d7] hover:bg-[#f3e8dc]" @click="addCombo(c.id)">
+              <AppIcon name="plus" size="2.5" />
+              <span>加入方案</span>
+            </button>
+          </div>
+        </div>
+        <div v-if="!filteredCombos.length" class="text-center text-xs text-muted py-8">
+          当前空间暂无适配组合
         </div>
       </div>
 

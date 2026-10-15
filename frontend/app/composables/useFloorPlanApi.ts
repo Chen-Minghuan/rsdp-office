@@ -3,6 +3,7 @@ import type {
   FloorPlanAnalyzeResponse,
   FloorPlanConfirmRequest,
 } from '~/types/floorPlan'
+import type { DimensionCalibrationReport, DimensionUnit } from '~/types/dimensionCalibration'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
 
@@ -43,6 +44,7 @@ export function useFloorPlanApi() {
     hint?: string
     projectId?: string
     sourceName?: string
+    pageNumber?: number
   }): Promise<FloorPlanAnalyzeResponse> {
     const formData = new FormData()
     if (params.image) formData.append('image', params.image)
@@ -50,6 +52,7 @@ export function useFloorPlanApi() {
     if (params.hint) formData.append('hint', params.hint)
     if (params.projectId) formData.append('projectId', params.projectId)
     if (params.sourceName) formData.append('sourceName', params.sourceName)
+    if (params.pageNumber !== undefined) formData.append('pageNumber', String(params.pageNumber))
 
     const res = await $fetch<ApiResponse<FloorPlanAnalyzeResponse>>(apiUrl('/api/v1/floor-plan/analyze'), {
       method: 'POST',
@@ -78,5 +81,8 @@ export function useFloorPlanApi() {
     analyzeFloorPlan,
     getFloorPlan,
     confirmFloorPlanRooms,
+    recognizeDimensions: (id: string, revision: number) => request<DimensionCalibrationReport>('POST', '/api/v1/floor-plan/' + encodeURIComponent(id) + '/dimension-calibration/recognize?analysisRevision=' + revision),
+    validateDimensions: (id: string, revision: number, assumedUnit: DimensionUnit) => request<DimensionCalibrationReport | null>('GET', '/api/v1/floor-plan/' + encodeURIComponent(id) + '/dimension-calibration?analysisRevision=' + revision + '&assumedUnit=' + assumedUnit),
+    confirmDimensionCalibration: (id: string, analysisRevision: number, reportId: string, assumedUnit: DimensionUnit) => request<DimensionCalibrationReport>('POST', '/api/v1/floor-plan/' + encodeURIComponent(id) + '/dimension-calibration/confirm', { analysisRevision, reportId, assumedUnit }),
   }
 }
