@@ -31,9 +31,9 @@ curl -F 'file=@图纸.dxf' http://localhost:8091/parse
 
 CAD 服务支持 DWG/DXF，返回房间、墙体、家具候选、尺寸及预览等解析结果。PDF/PNG 不走该解析接口。
 
-当前前端已通过 Java `POST /api/v1/cad/parse` 转发到 CAD 服务，可显示解析结果并应用到画布。现有导入将房间转成矩形包围盒，真实轮廓、底图对齐和完整办公样本流程仍待完善与验收。
+当前前端已通过 Java `POST /api/v1/cad/parse` 转发到 CAD 服务，可显示解析结果并应用到画布。现有工作台保留房间多边形，并支持底图对照与毫米编辑；真实 CAD 办公样本及完整业务流程仍待验收。
 
-PDF/PNG 通过 Java `POST /api/v1/vision/recognize` 调用配置的识别服务；`rsdp.vision.url` 未配置时返回带 `MOCK_RECOGNITION` 标识的演示结果，不能视为真实识别。
+图片/PDF 通过 Java 直连百炼 `qwen3-vl-plus`；在后端启动环境变量中填写 `DASHSCOPE_API_KEY`，详情见 [识别配置](docs/vision-configuration.md)。PDF 可填写选定页码并渲染为模型输入。未配置密钥时明确报错，不再返回演示房间。图像结果的实际尺寸与面积待校准；配置 `rsdp.vision.url` 时可继续使用已有独立识别接口。
 
 ## 本地启动前后端
 

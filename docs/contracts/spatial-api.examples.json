@@ -1,0 +1,1416 @@
+{
+  "notice": "目标报文/假 ID，仅用于结构验证，不是运行结果。删除/版本/引用等语义必须由后端核验。",
+  "examples": [
+    {
+      "name": "空稿，不依赖 analysisId",
+      "definition": "CreateSceneRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "clientChangeId": "CREATE-001",
+        "projectId": "PROJECT-001",
+        "pageId": "PAGE-001",
+        "initializationMode": "EMPTY_PAGE",
+        "sourceSceneId": null,
+        "failedRunId": "RUN-FAILED-001"
+      }
+    },
+    {
+      "name": "复制来源新稿",
+      "definition": "CreateSceneRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "clientChangeId": "CREATE-002",
+        "projectId": "PROJECT-001",
+        "pageId": "PAGE-001",
+        "initializationMode": "FROM_RECOGNITION",
+        "sourceSceneId": "SOURCE-001",
+        "failedRunId": null
+      }
+    },
+    {
+      "name": "保存完整稿",
+      "definition": "DraftRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 3,
+        "clientChangeId": "CHANGE-004",
+        "workingCoordinateSystem": "WORLD_MM",
+        "calibrationRevision": 1,
+        "spaces": [
+          {
+            "spaceId": "SPACE-001",
+            "kind": "ROOM",
+            "parentSpaceId": null,
+            "name": "会议室",
+            "category": "MEETING_ROOM",
+            "includedInDesign": true,
+            "exclusionReason": null,
+            "boundaryBasis": "INNER_WALL_FACE",
+            "designGeometry": {
+              "type": "POLYGON",
+              "coordinateSystem": "WORLD_MM",
+              "outer": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  8000,
+                  0
+                ],
+                [
+                  8000,
+                  4000
+                ],
+                [
+                  0,
+                  4000
+                ]
+              ],
+              "outerVertexIds": [
+                "V-0",
+                "V-1",
+                "V-2",
+                "V-3"
+              ],
+              "holes": [],
+              "holeVertexIds": []
+            },
+            "rectangleFrame": {
+              "angleDeg": 0,
+              "cornerVertexIds": {
+                "u0v0": "V-0",
+                "u1v0": "V-1",
+                "u1v1": "V-2",
+                "u0v1": "V-3"
+              }
+            }
+          }
+        ],
+        "walls": [],
+        "openings": [],
+        "obstacles": [],
+        "annotations": [],
+        "boundaryRelations": [],
+        "issueDispositions": [],
+        "deletions": []
+      }
+    },
+    {
+      "name": "保存成功完整响应",
+      "definition": "MutationResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 200,
+      "payload": {
+        "code": 200,
+        "message": "success",
+        "data": {
+          "clientChangeId": "CHANGE-004",
+          "sceneId": "SCENE-001",
+          "previousRevision": 3,
+          "revision": 4,
+          "affectedSpaceIds": [
+            "SPACE-001"
+          ],
+          "invalidatedSpaceIds": [
+            "SPACE-001"
+          ],
+          "confirmationIds": [],
+          "confirmedSceneId": null,
+          "scene": {
+            "schemaVersion": "1.2",
+            "sceneId": "SCENE-001",
+            "projectId": "PROJECT-001",
+            "revision": 4,
+            "scopeRevision": 1,
+            "geometryPolicyVersion": "GEOM-P1-1",
+            "sourcePageId": "PAGE-001",
+            "sourceSceneId": "SOURCE-001",
+            "failedRunId": null,
+            "workingCoordinateSystem": "WORLD_MM",
+            "calibration": {
+              "revision": 1,
+              "status": "CONFIRMED",
+              "sourceToWorld": [
+                10,
+                0,
+                0,
+                -10,
+                -1000,
+                5000
+              ]
+            },
+            "underlays": [
+              {
+                "underlayId": "UNDERLAY-001",
+                "sourcePageId": "PAGE-001",
+                "assetId": "PREVIEW-001",
+                "widthPx": 1000,
+                "heightPx": 700,
+                "imagePixelToWorld": [
+                  10,
+                  0,
+                  0,
+                  -10,
+                  -1000,
+                  5000
+                ],
+                "transformRevision": 1
+              }
+            ],
+            "spaces": [
+              {
+                "spaceId": "SPACE-001",
+                "kind": "ROOM",
+                "parentSpaceId": null,
+                "name": "会议室",
+                "category": "MEETING_ROOM",
+                "includedInDesign": true,
+                "exclusionReason": null,
+                "boundaryBasis": "INNER_WALL_FACE",
+                "designGeometry": {
+                  "type": "POLYGON",
+                  "coordinateSystem": "WORLD_MM",
+                  "outer": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      8000,
+                      0
+                    ],
+                    [
+                      8000,
+                      4000
+                    ],
+                    [
+                      0,
+                      4000
+                    ]
+                  ],
+                  "outerVertexIds": [
+                    "V-0",
+                    "V-1",
+                    "V-2",
+                    "V-3"
+                  ],
+                  "holes": [],
+                  "holeVertexIds": []
+                },
+                "rectangleFrame": {
+                  "angleDeg": 0,
+                  "cornerVertexIds": {
+                    "u0v0": "V-0",
+                    "u1v0": "V-1",
+                    "u1v1": "V-2",
+                    "u0v1": "V-3"
+                  }
+                },
+                "origin": "VISION",
+                "evidenceKind": "REAL_SERVICE",
+                "sourceRef": {
+                  "assetId": "ASSET-001",
+                  "pageId": "PAGE-001",
+                  "runId": "RUN-001",
+                  "sourceSceneId": "SOURCE-001",
+                  "sourceRoomId": "ROOM-001"
+                },
+                "confidence": 0.92,
+                "geometryRevision": 2,
+                "requirementRevision": 2,
+                "metadataRevision": 1,
+                "derived": {
+                  "boundaryAreaM2": 32,
+                  "areaM2": 32,
+                  "rectangleDimensions": {
+                    "widthMm": 8000,
+                    "depthMm": 4000
+                  },
+                  "boundsMm": {
+                    "minX": 0,
+                    "minY": 0,
+                    "maxX": 8000,
+                    "maxY": 4000
+                  }
+                },
+                "confirmation": {
+                  "status": "UNCONFIRMED",
+                  "confirmationId": null,
+                  "confirmedRevision": null,
+                  "confirmedGeometryRevision": null,
+                  "calibrationRevision": null
+                }
+              }
+            ],
+            "walls": [],
+            "openings": [],
+            "obstacles": [],
+            "annotations": [],
+            "boundaryRelations": [],
+            "issueDispositions": [],
+            "layerAvailability": {
+              "walls": "UNKNOWN",
+              "openings": "UNKNOWN",
+              "obstacles": "UNKNOWN"
+            },
+            "qualityIssues": [],
+            "tombstones": [],
+            "confirmedSceneId": null
+          }
+        }
+      }
+    },
+    {
+      "name": "读取完整稿",
+      "definition": "ReadResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 200,
+      "payload": {
+        "code": 200,
+        "message": "success",
+        "data": {
+          "scene": {
+            "schemaVersion": "1.2",
+            "sceneId": "SCENE-001",
+            "projectId": "PROJECT-001",
+            "revision": 4,
+            "scopeRevision": 1,
+            "geometryPolicyVersion": "GEOM-P1-1",
+            "sourcePageId": "PAGE-001",
+            "sourceSceneId": "SOURCE-001",
+            "failedRunId": null,
+            "workingCoordinateSystem": "WORLD_MM",
+            "calibration": {
+              "revision": 1,
+              "status": "CONFIRMED",
+              "sourceToWorld": [
+                10,
+                0,
+                0,
+                -10,
+                -1000,
+                5000
+              ]
+            },
+            "underlays": [
+              {
+                "underlayId": "UNDERLAY-001",
+                "sourcePageId": "PAGE-001",
+                "assetId": "PREVIEW-001",
+                "widthPx": 1000,
+                "heightPx": 700,
+                "imagePixelToWorld": [
+                  10,
+                  0,
+                  0,
+                  -10,
+                  -1000,
+                  5000
+                ],
+                "transformRevision": 1
+              }
+            ],
+            "spaces": [
+              {
+                "spaceId": "SPACE-001",
+                "kind": "ROOM",
+                "parentSpaceId": null,
+                "name": "会议室",
+                "category": "MEETING_ROOM",
+                "includedInDesign": true,
+                "exclusionReason": null,
+                "boundaryBasis": "INNER_WALL_FACE",
+                "designGeometry": {
+                  "type": "POLYGON",
+                  "coordinateSystem": "WORLD_MM",
+                  "outer": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      8000,
+                      0
+                    ],
+                    [
+                      8000,
+                      4000
+                    ],
+                    [
+                      0,
+                      4000
+                    ]
+                  ],
+                  "outerVertexIds": [
+                    "V-0",
+                    "V-1",
+                    "V-2",
+                    "V-3"
+                  ],
+                  "holes": [],
+                  "holeVertexIds": []
+                },
+                "rectangleFrame": {
+                  "angleDeg": 0,
+                  "cornerVertexIds": {
+                    "u0v0": "V-0",
+                    "u1v0": "V-1",
+                    "u1v1": "V-2",
+                    "u0v1": "V-3"
+                  }
+                },
+                "origin": "VISION",
+                "evidenceKind": "REAL_SERVICE",
+                "sourceRef": {
+                  "assetId": "ASSET-001",
+                  "pageId": "PAGE-001",
+                  "runId": "RUN-001",
+                  "sourceSceneId": "SOURCE-001",
+                  "sourceRoomId": "ROOM-001"
+                },
+                "confidence": 0.92,
+                "geometryRevision": 2,
+                "requirementRevision": 2,
+                "metadataRevision": 1,
+                "derived": {
+                  "boundaryAreaM2": 32,
+                  "areaM2": 32,
+                  "rectangleDimensions": {
+                    "widthMm": 8000,
+                    "depthMm": 4000
+                  },
+                  "boundsMm": {
+                    "minX": 0,
+                    "minY": 0,
+                    "maxX": 8000,
+                    "maxY": 4000
+                  }
+                },
+                "confirmation": {
+                  "status": "UNCONFIRMED",
+                  "confirmationId": null,
+                  "confirmedRevision": null,
+                  "confirmedGeometryRevision": null,
+                  "calibrationRevision": null
+                }
+              }
+            ],
+            "walls": [],
+            "openings": [],
+            "obstacles": [],
+            "annotations": [],
+            "boundaryRelations": [],
+            "issueDispositions": [],
+            "layerAvailability": {
+              "walls": "UNKNOWN",
+              "openings": "UNKNOWN",
+              "obstacles": "UNKNOWN"
+            },
+            "qualityIssues": [],
+            "tombstones": [],
+            "confirmedSceneId": null
+          }
+        }
+      }
+    },
+    {
+      "name": "冲突完整响应",
+      "definition": "ErrorResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 409,
+      "payload": {
+        "code": 409,
+        "message": "场景已被更新，请比较当前稿",
+        "data": {
+          "errorCode": "VERSION_CONFLICT",
+          "sceneId": "SCENE-001",
+          "clientChangeId": "CHANGE-005",
+          "currentRevision": 5,
+          "issues": []
+        }
+      }
+    },
+    {
+      "name": "确认失败完整响应",
+      "definition": "ErrorResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 422,
+      "payload": {
+        "code": 422,
+        "message": "存在未解决的确认问题",
+        "data": {
+          "errorCode": "CONFIRMATION_BLOCKED",
+          "sceneId": "SCENE-001",
+          "clientChangeId": "CONFIRM-001",
+          "currentRevision": 4,
+          "issues": [
+            {
+              "issueId": "ISSUE-001",
+              "code": "BOUNDARY_UNRESOLVED",
+              "severity": "ERROR",
+              "spaceIds": [
+                "SPACE-001"
+              ],
+              "objectIds": [],
+              "message": "请核对墙内侧轮廓",
+              "position": null,
+              "blocksConfirmation": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "逐空间确认",
+      "definition": "ConfirmationRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 4,
+        "clientChangeId": "CONFIRM-001",
+        "scope": "SPACES",
+        "calibrationRevision": 1,
+        "scopeRevision": 1,
+        "geometryPolicyVersion": "GEOM-P1-1",
+        "spaces": [
+          {
+            "spaceId": "SPACE-001",
+            "geometryRevision": 2,
+            "requirementRevision": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "整体确认",
+      "definition": "ConfirmationRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 5,
+        "clientChangeId": "CONFIRM-002",
+        "scope": "SCENE",
+        "calibrationRevision": 1,
+        "scopeRevision": 1,
+        "geometryPolicyVersion": "GEOM-P1-1",
+        "spaces": []
+      }
+    },
+    {
+      "name": "应用校准",
+      "definition": "CalibrationRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 2,
+        "clientChangeId": "CAL-CHANGE-001",
+        "calibrationRevision": 0,
+        "sourcePageId": "PAGE-001",
+        "referencePoints": [
+          [
+            100,
+            500
+          ],
+          [
+            700,
+            500
+          ]
+        ],
+        "referenceLengthMm": 6000
+      }
+    },
+    {
+      "name": "显式删除人工空间（引用存在性另由后端校验）",
+      "definition": "DraftRequest",
+      "expectedSchemaValid": true,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 4,
+        "clientChangeId": "DELETE-001",
+        "workingCoordinateSystem": "WORLD_MM",
+        "calibrationRevision": 1,
+        "spaces": [
+          {
+            "spaceId": "SPACE-001",
+            "kind": "ROOM",
+            "parentSpaceId": null,
+            "name": "会议室",
+            "category": "MEETING_ROOM",
+            "includedInDesign": true,
+            "exclusionReason": null,
+            "boundaryBasis": "INNER_WALL_FACE",
+            "designGeometry": {
+              "type": "POLYGON",
+              "coordinateSystem": "WORLD_MM",
+              "outer": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  8000,
+                  0
+                ],
+                [
+                  8000,
+                  4000
+                ],
+                [
+                  0,
+                  4000
+                ]
+              ],
+              "outerVertexIds": [
+                "V-0",
+                "V-1",
+                "V-2",
+                "V-3"
+              ],
+              "holes": [],
+              "holeVertexIds": []
+            },
+            "rectangleFrame": {
+              "angleDeg": 0,
+              "cornerVertexIds": {
+                "u0v0": "V-0",
+                "u1v0": "V-1",
+                "u1v1": "V-2",
+                "u0v1": "V-3"
+              }
+            }
+          }
+        ],
+        "walls": [],
+        "openings": [],
+        "obstacles": [],
+        "annotations": [],
+        "boundaryRelations": [],
+        "issueDispositions": [],
+        "deletions": [
+          {
+            "layer": "spaces",
+            "objectId": "SPACE-MANUAL-002",
+            "reason": "人工区域不再保留"
+          }
+        ]
+      }
+    },
+    {
+      "name": "缺失图层必须拒绝",
+      "definition": "DraftRequest",
+      "expectedSchemaValid": false,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 3,
+        "clientChangeId": "CHANGE-004",
+        "workingCoordinateSystem": "WORLD_MM",
+        "calibrationRevision": 1,
+        "spaces": [
+          {
+            "spaceId": "SPACE-001",
+            "kind": "ROOM",
+            "parentSpaceId": null,
+            "name": "会议室",
+            "category": "MEETING_ROOM",
+            "includedInDesign": true,
+            "exclusionReason": null,
+            "boundaryBasis": "INNER_WALL_FACE",
+            "designGeometry": {
+              "type": "POLYGON",
+              "coordinateSystem": "WORLD_MM",
+              "outer": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  8000,
+                  0
+                ],
+                [
+                  8000,
+                  4000
+                ],
+                [
+                  0,
+                  4000
+                ]
+              ],
+              "outerVertexIds": [
+                "V-0",
+                "V-1",
+                "V-2",
+                "V-3"
+              ],
+              "holes": [],
+              "holeVertexIds": []
+            },
+            "rectangleFrame": {
+              "angleDeg": 0,
+              "cornerVertexIds": {
+                "u0v0": "V-0",
+                "u1v0": "V-1",
+                "u1v1": "V-2",
+                "u0v1": "V-3"
+              }
+            }
+          }
+        ],
+        "openings": [],
+        "obstacles": [],
+        "annotations": [],
+        "boundaryRelations": [],
+        "issueDispositions": [],
+        "deletions": []
+      }
+    },
+    {
+      "name": "不能从客户端伪造确认",
+      "definition": "DraftRequest",
+      "expectedSchemaValid": false,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 3,
+        "clientChangeId": "CHANGE-004",
+        "workingCoordinateSystem": "WORLD_MM",
+        "calibrationRevision": 1,
+        "spaces": [
+          {
+            "spaceId": "SPACE-001",
+            "kind": "ROOM",
+            "parentSpaceId": null,
+            "name": "会议室",
+            "category": "MEETING_ROOM",
+            "includedInDesign": true,
+            "exclusionReason": null,
+            "boundaryBasis": "INNER_WALL_FACE",
+            "designGeometry": {
+              "type": "POLYGON",
+              "coordinateSystem": "WORLD_MM",
+              "outer": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  8000,
+                  0
+                ],
+                [
+                  8000,
+                  4000
+                ],
+                [
+                  0,
+                  4000
+                ]
+              ],
+              "outerVertexIds": [
+                "V-0",
+                "V-1",
+                "V-2",
+                "V-3"
+              ],
+              "holes": [],
+              "holeVertexIds": []
+            },
+            "rectangleFrame": {
+              "angleDeg": 0,
+              "cornerVertexIds": {
+                "u0v0": "V-0",
+                "u1v0": "V-1",
+                "u1v1": "V-2",
+                "u0v1": "V-3"
+              }
+            },
+            "confirmed": true
+          }
+        ],
+        "walls": [],
+        "openings": [],
+        "obstacles": [],
+        "annotations": [],
+        "boundaryRelations": [],
+        "issueDispositions": [],
+        "deletions": []
+      }
+    },
+    {
+      "name": "逐空间目标不能为空",
+      "definition": "ConfirmationRequest",
+      "expectedSchemaValid": false,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 4,
+        "clientChangeId": "CONFIRM-EMPTY",
+        "scope": "SPACES",
+        "calibrationRevision": 1,
+        "scopeRevision": 1,
+        "geometryPolicyVersion": "GEOM-P1-1",
+        "spaces": []
+      }
+    },
+    {
+      "name": "空稿创建成功完整响应",
+      "definition": "MutationResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 200,
+      "payload": {
+        "code": 200,
+        "message": "success",
+        "data": {
+          "clientChangeId": "CREATE-001",
+          "sceneId": "SCENE-001",
+          "previousRevision": 0,
+          "revision": 1,
+          "affectedSpaceIds": [],
+          "invalidatedSpaceIds": [],
+          "confirmationIds": [],
+          "confirmedSceneId": null,
+          "scene": {
+            "schemaVersion": "1.2",
+            "sceneId": "SCENE-001",
+            "projectId": "PROJECT-001",
+            "revision": 1,
+            "scopeRevision": 1,
+            "geometryPolicyVersion": "GEOM-P1-1",
+            "sourcePageId": "PAGE-001",
+            "sourceSceneId": null,
+            "failedRunId": "RUN-FAILED-001",
+            "workingCoordinateSystem": "SOURCE_PAGE",
+            "calibration": {
+              "revision": 0,
+              "status": "UNKNOWN",
+              "sourceToWorld": null
+            },
+            "underlays": [
+              {
+                "underlayId": "UNDERLAY-001",
+                "sourcePageId": "PAGE-001",
+                "assetId": "PREVIEW-001",
+                "widthPx": 1000,
+                "heightPx": 700,
+                "imagePixelToWorld": null,
+                "transformRevision": 0
+              }
+            ],
+            "spaces": [],
+            "walls": [],
+            "openings": [],
+            "obstacles": [],
+            "annotations": [],
+            "boundaryRelations": [],
+            "issueDispositions": [],
+            "layerAvailability": {
+              "walls": "UNKNOWN",
+              "openings": "UNKNOWN",
+              "obstacles": "UNKNOWN"
+            },
+            "qualityIssues": [],
+            "tombstones": [],
+            "confirmedSceneId": null
+          }
+        }
+      }
+    },
+    {
+      "name": "逐空间确认成功完整响应",
+      "definition": "MutationResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 200,
+      "payload": {
+        "code": 200,
+        "message": "success",
+        "data": {
+          "clientChangeId": "CONFIRM-001",
+          "sceneId": "SCENE-001",
+          "previousRevision": 4,
+          "revision": 5,
+          "affectedSpaceIds": [
+            "SPACE-001"
+          ],
+          "invalidatedSpaceIds": [],
+          "confirmationIds": [
+            "CONF-SPACE-001"
+          ],
+          "confirmedSceneId": null,
+          "scene": {
+            "schemaVersion": "1.2",
+            "sceneId": "SCENE-001",
+            "projectId": "PROJECT-001",
+            "revision": 5,
+            "scopeRevision": 1,
+            "geometryPolicyVersion": "GEOM-P1-1",
+            "sourcePageId": "PAGE-001",
+            "sourceSceneId": "SOURCE-001",
+            "failedRunId": null,
+            "workingCoordinateSystem": "WORLD_MM",
+            "calibration": {
+              "revision": 1,
+              "status": "CONFIRMED",
+              "sourceToWorld": [
+                10,
+                0,
+                0,
+                -10,
+                -1000,
+                5000
+              ]
+            },
+            "underlays": [
+              {
+                "underlayId": "UNDERLAY-001",
+                "sourcePageId": "PAGE-001",
+                "assetId": "PREVIEW-001",
+                "widthPx": 1000,
+                "heightPx": 700,
+                "imagePixelToWorld": [
+                  10,
+                  0,
+                  0,
+                  -10,
+                  -1000,
+                  5000
+                ],
+                "transformRevision": 1
+              }
+            ],
+            "spaces": [
+              {
+                "spaceId": "SPACE-001",
+                "kind": "ROOM",
+                "parentSpaceId": null,
+                "name": "会议室",
+                "category": "MEETING_ROOM",
+                "includedInDesign": true,
+                "exclusionReason": null,
+                "boundaryBasis": "INNER_WALL_FACE",
+                "designGeometry": {
+                  "type": "POLYGON",
+                  "coordinateSystem": "WORLD_MM",
+                  "outer": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      8000,
+                      0
+                    ],
+                    [
+                      8000,
+                      4000
+                    ],
+                    [
+                      0,
+                      4000
+                    ]
+                  ],
+                  "outerVertexIds": [
+                    "V-0",
+                    "V-1",
+                    "V-2",
+                    "V-3"
+                  ],
+                  "holes": [],
+                  "holeVertexIds": []
+                },
+                "rectangleFrame": {
+                  "angleDeg": 0,
+                  "cornerVertexIds": {
+                    "u0v0": "V-0",
+                    "u1v0": "V-1",
+                    "u1v1": "V-2",
+                    "u0v1": "V-3"
+                  }
+                },
+                "origin": "VISION",
+                "evidenceKind": "REAL_SERVICE",
+                "sourceRef": {
+                  "assetId": "ASSET-001",
+                  "pageId": "PAGE-001",
+                  "runId": "RUN-001",
+                  "sourceSceneId": "SOURCE-001",
+                  "sourceRoomId": "ROOM-001"
+                },
+                "confidence": 0.92,
+                "geometryRevision": 2,
+                "requirementRevision": 2,
+                "metadataRevision": 1,
+                "derived": {
+                  "boundaryAreaM2": 32,
+                  "areaM2": 32,
+                  "rectangleDimensions": {
+                    "widthMm": 8000,
+                    "depthMm": 4000
+                  },
+                  "boundsMm": {
+                    "minX": 0,
+                    "minY": 0,
+                    "maxX": 8000,
+                    "maxY": 4000
+                  }
+                },
+                "confirmation": {
+                  "status": "CONFIRMED",
+                  "confirmationId": "CONF-SPACE-001",
+                  "confirmedRevision": 2,
+                  "confirmedGeometryRevision": 2,
+                  "calibrationRevision": 1
+                }
+              }
+            ],
+            "walls": [],
+            "openings": [],
+            "obstacles": [],
+            "annotations": [],
+            "boundaryRelations": [],
+            "issueDispositions": [],
+            "layerAvailability": {
+              "walls": "UNKNOWN",
+              "openings": "UNKNOWN",
+              "obstacles": "UNKNOWN"
+            },
+            "qualityIssues": [],
+            "tombstones": [],
+            "confirmedSceneId": null
+          }
+        }
+      }
+    },
+    {
+      "name": "不可变空间确认快照查询",
+      "definition": "ConfirmationReadResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 200,
+      "payload": {
+        "code": 200,
+        "message": "success",
+        "data": {
+          "confirmation": {
+            "confirmationId": "CONF-SPACE-001",
+            "kind": "SPACE",
+            "spaceId": "SPACE-001",
+            "sceneId": "SCENE-001",
+            "sceneRevision": 5,
+            "createdBy": "USER-001",
+            "createdAt": "2026-10-14T02:00:00Z",
+            "snapshot": {
+              "schemaVersion": "1.2",
+              "sceneId": "SCENE-001",
+              "projectId": "PROJECT-001",
+              "revision": 5,
+              "scopeRevision": 1,
+              "geometryPolicyVersion": "GEOM-P1-1",
+              "sourcePageId": "PAGE-001",
+              "sourceSceneId": "SOURCE-001",
+              "failedRunId": null,
+              "workingCoordinateSystem": "WORLD_MM",
+              "calibration": {
+                "revision": 1,
+                "status": "CONFIRMED",
+                "sourceToWorld": [
+                  10,
+                  0,
+                  0,
+                  -10,
+                  -1000,
+                  5000
+                ]
+              },
+              "underlays": [
+                {
+                  "underlayId": "UNDERLAY-001",
+                  "sourcePageId": "PAGE-001",
+                  "assetId": "PREVIEW-001",
+                  "widthPx": 1000,
+                  "heightPx": 700,
+                  "imagePixelToWorld": [
+                    10,
+                    0,
+                    0,
+                    -10,
+                    -1000,
+                    5000
+                  ],
+                  "transformRevision": 1
+                }
+              ],
+              "spaces": [
+                {
+                  "spaceId": "SPACE-001",
+                  "kind": "ROOM",
+                  "parentSpaceId": null,
+                  "name": "会议室",
+                  "category": "MEETING_ROOM",
+                  "includedInDesign": true,
+                  "exclusionReason": null,
+                  "boundaryBasis": "INNER_WALL_FACE",
+                  "designGeometry": {
+                    "type": "POLYGON",
+                    "coordinateSystem": "WORLD_MM",
+                    "outer": [
+                      [
+                        0,
+                        0
+                      ],
+                      [
+                        8000,
+                        0
+                      ],
+                      [
+                        8000,
+                        4000
+                      ],
+                      [
+                        0,
+                        4000
+                      ]
+                    ],
+                    "outerVertexIds": [
+                      "V-0",
+                      "V-1",
+                      "V-2",
+                      "V-3"
+                    ],
+                    "holes": [],
+                    "holeVertexIds": []
+                  },
+                  "rectangleFrame": {
+                    "angleDeg": 0,
+                    "cornerVertexIds": {
+                      "u0v0": "V-0",
+                      "u1v0": "V-1",
+                      "u1v1": "V-2",
+                      "u0v1": "V-3"
+                    }
+                  },
+                  "origin": "VISION",
+                  "evidenceKind": "REAL_SERVICE",
+                  "sourceRef": {
+                    "assetId": "ASSET-001",
+                    "pageId": "PAGE-001",
+                    "runId": "RUN-001",
+                    "sourceSceneId": "SOURCE-001",
+                    "sourceRoomId": "ROOM-001"
+                  },
+                  "confidence": 0.92,
+                  "geometryRevision": 2,
+                  "requirementRevision": 2,
+                  "metadataRevision": 1,
+                  "derived": {
+                    "boundaryAreaM2": 32,
+                    "areaM2": 32,
+                    "rectangleDimensions": {
+                      "widthMm": 8000,
+                      "depthMm": 4000
+                    },
+                    "boundsMm": {
+                      "minX": 0,
+                      "minY": 0,
+                      "maxX": 8000,
+                      "maxY": 4000
+                    }
+                  },
+                  "confirmation": {
+                    "status": "CONFIRMED",
+                    "confirmationId": "CONF-SPACE-001",
+                    "confirmedRevision": 2,
+                    "confirmedGeometryRevision": 2,
+                    "calibrationRevision": 1
+                  }
+                }
+              ],
+              "walls": [],
+              "openings": [],
+              "obstacles": [],
+              "annotations": [],
+              "boundaryRelations": [],
+              "issueDispositions": [],
+              "layerAvailability": {
+                "walls": "UNKNOWN",
+                "openings": "UNKNOWN",
+                "obstacles": "UNKNOWN"
+              },
+              "qualityIssues": [],
+              "tombstones": [],
+              "confirmedSceneId": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "整体确认成功完整响应",
+      "definition": "MutationResponse",
+      "expectedSchemaValid": true,
+      "httpStatus": 200,
+      "payload": {
+        "code": 200,
+        "message": "success",
+        "data": {
+          "clientChangeId": "CONFIRM-002",
+          "sceneId": "SCENE-001",
+          "previousRevision": 5,
+          "revision": 6,
+          "affectedSpaceIds": [],
+          "invalidatedSpaceIds": [],
+          "confirmationIds": [
+            "CONF-SCENE-001"
+          ],
+          "confirmedSceneId": "CONF-SCENE-001",
+          "scene": {
+            "schemaVersion": "1.2",
+            "sceneId": "SCENE-001",
+            "projectId": "PROJECT-001",
+            "revision": 6,
+            "scopeRevision": 1,
+            "geometryPolicyVersion": "GEOM-P1-1",
+            "sourcePageId": "PAGE-001",
+            "sourceSceneId": "SOURCE-001",
+            "failedRunId": null,
+            "workingCoordinateSystem": "WORLD_MM",
+            "calibration": {
+              "revision": 1,
+              "status": "CONFIRMED",
+              "sourceToWorld": [
+                10,
+                0,
+                0,
+                -10,
+                -1000,
+                5000
+              ]
+            },
+            "underlays": [
+              {
+                "underlayId": "UNDERLAY-001",
+                "sourcePageId": "PAGE-001",
+                "assetId": "PREVIEW-001",
+                "widthPx": 1000,
+                "heightPx": 700,
+                "imagePixelToWorld": [
+                  10,
+                  0,
+                  0,
+                  -10,
+                  -1000,
+                  5000
+                ],
+                "transformRevision": 1
+              }
+            ],
+            "spaces": [
+              {
+                "spaceId": "SPACE-001",
+                "kind": "ROOM",
+                "parentSpaceId": null,
+                "name": "会议室",
+                "category": "MEETING_ROOM",
+                "includedInDesign": true,
+                "exclusionReason": null,
+                "boundaryBasis": "INNER_WALL_FACE",
+                "designGeometry": {
+                  "type": "POLYGON",
+                  "coordinateSystem": "WORLD_MM",
+                  "outer": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      8000,
+                      0
+                    ],
+                    [
+                      8000,
+                      4000
+                    ],
+                    [
+                      0,
+                      4000
+                    ]
+                  ],
+                  "outerVertexIds": [
+                    "V-0",
+                    "V-1",
+                    "V-2",
+                    "V-3"
+                  ],
+                  "holes": [],
+                  "holeVertexIds": []
+                },
+                "rectangleFrame": {
+                  "angleDeg": 0,
+                  "cornerVertexIds": {
+                    "u0v0": "V-0",
+                    "u1v0": "V-1",
+                    "u1v1": "V-2",
+                    "u0v1": "V-3"
+                  }
+                },
+                "origin": "VISION",
+                "evidenceKind": "REAL_SERVICE",
+                "sourceRef": {
+                  "assetId": "ASSET-001",
+                  "pageId": "PAGE-001",
+                  "runId": "RUN-001",
+                  "sourceSceneId": "SOURCE-001",
+                  "sourceRoomId": "ROOM-001"
+                },
+                "confidence": 0.92,
+                "geometryRevision": 2,
+                "requirementRevision": 2,
+                "metadataRevision": 1,
+                "derived": {
+                  "boundaryAreaM2": 32,
+                  "areaM2": 32,
+                  "rectangleDimensions": {
+                    "widthMm": 8000,
+                    "depthMm": 4000
+                  },
+                  "boundsMm": {
+                    "minX": 0,
+                    "minY": 0,
+                    "maxX": 8000,
+                    "maxY": 4000
+                  }
+                },
+                "confirmation": {
+                  "status": "CONFIRMED",
+                  "confirmationId": "CONF-SPACE-001",
+                  "confirmedRevision": 2,
+                  "confirmedGeometryRevision": 2,
+                  "calibrationRevision": 1
+                }
+              }
+            ],
+            "walls": [],
+            "openings": [],
+            "obstacles": [],
+            "annotations": [],
+            "boundaryRelations": [],
+            "issueDispositions": [],
+            "layerAvailability": {
+              "walls": "UNKNOWN",
+              "openings": "UNKNOWN",
+              "obstacles": "UNKNOWN"
+            },
+            "qualityIssues": [],
+            "tombstones": [],
+            "confirmedSceneId": "CONF-SCENE-001"
+          }
+        }
+      }
+    },
+    {
+      "name": "不能混用来源坐标与毫米轮廓",
+      "definition": "DraftRequest",
+      "expectedSchemaValid": false,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 3,
+        "clientChangeId": "CHANGE-004",
+        "workingCoordinateSystem": "SOURCE_PAGE",
+        "calibrationRevision": 1,
+        "spaces": [
+          {
+            "spaceId": "SPACE-001",
+            "kind": "ROOM",
+            "parentSpaceId": null,
+            "name": "会议室",
+            "category": "MEETING_ROOM",
+            "includedInDesign": true,
+            "exclusionReason": null,
+            "boundaryBasis": "INNER_WALL_FACE",
+            "designGeometry": {
+              "type": "POLYGON",
+              "coordinateSystem": "WORLD_MM",
+              "outer": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  8000,
+                  0
+                ],
+                [
+                  8000,
+                  4000
+                ],
+                [
+                  0,
+                  4000
+                ]
+              ],
+              "outerVertexIds": [
+                "V-0",
+                "V-1",
+                "V-2",
+                "V-3"
+              ],
+              "holes": [],
+              "holeVertexIds": []
+            },
+            "rectangleFrame": {
+              "angleDeg": 0,
+              "cornerVertexIds": {
+                "u0v0": "V-0",
+                "u1v0": "V-1",
+                "u1v1": "V-2",
+                "u0v1": "V-3"
+              }
+            }
+          }
+        ],
+        "walls": [],
+        "openings": [],
+        "obstacles": [],
+        "annotations": [],
+        "boundaryRelations": [],
+        "issueDispositions": [],
+        "deletions": []
+      }
+    },
+    {
+      "name": "零参考距离拒绝",
+      "definition": "CalibrationRequest",
+      "expectedSchemaValid": false,
+      "httpStatus": null,
+      "payload": {
+        "schemaVersion": "1.2",
+        "baseRevision": 2,
+        "clientChangeId": "CAL-CHANGE-001",
+        "calibrationRevision": 0,
+        "sourcePageId": "PAGE-001",
+        "referencePoints": [
+          [
+            100,
+            500
+          ],
+          [
+            100,
+            500
+          ]
+        ],
+        "referenceLengthMm": 6000
+      }
+    }
+  ]
+}

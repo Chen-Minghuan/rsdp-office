@@ -1,0 +1,2235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RSDP Spatial target API 1.2 (not implemented)",
+  "$ref": "#/$defs/DraftRequest",
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "Revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "Point": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": -10000000,
+          "maximum": 10000000
+        },
+        {
+          "type": "number",
+          "minimum": -10000000,
+          "maximum": 10000000
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "Ring": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Point"
+      },
+      "minItems": 3
+    },
+    "Geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "POLYGON"
+        },
+        "coordinateSystem": {
+          "enum": [
+            "SOURCE_PAGE",
+            "WORLD_MM"
+          ]
+        },
+        "outer": {
+          "$ref": "#/$defs/Ring"
+        },
+        "outerVertexIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 3,
+          "uniqueItems": true
+        },
+        "holes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Ring"
+          }
+        },
+        "holeVertexIds": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Id"
+            },
+            "minItems": 3,
+            "uniqueItems": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "coordinateSystem",
+        "outer",
+        "outerVertexIds",
+        "holes",
+        "holeVertexIds"
+      ]
+    },
+    "RectangleFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "angleDeg": {
+          "type": "number",
+          "minimum": -180,
+          "exclusiveMaximum": 180
+        },
+        "cornerVertexIds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "u0v0": {
+              "$ref": "#/$defs/Id"
+            },
+            "u1v0": {
+              "$ref": "#/$defs/Id"
+            },
+            "u1v1": {
+              "$ref": "#/$defs/Id"
+            },
+            "u0v1": {
+              "$ref": "#/$defs/Id"
+            }
+          },
+          "required": [
+            "u0v0",
+            "u1v0",
+            "u1v1",
+            "u0v1"
+          ]
+        }
+      },
+      "required": [
+        "angleDeg",
+        "cornerVertexIds"
+      ]
+    },
+    "SpaceInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "enum": [
+            "ROOM",
+            "FUNCTION_ZONE"
+          ]
+        },
+        "parentSpaceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "includedInDesign": {
+          "type": "boolean"
+        },
+        "exclusionReason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundaryBasis": {
+          "enum": [
+            "INNER_WALL_FACE",
+            "FUNCTIONAL_DIVISION",
+            "UNRESOLVED"
+          ]
+        },
+        "designGeometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "rectangleFrame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RectangleFrame"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "spaceId",
+        "kind",
+        "parentSpaceId",
+        "name",
+        "category",
+        "includedInDesign",
+        "exclusionReason",
+        "boundaryBasis",
+        "designGeometry",
+        "rectangleFrame"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "includedInDesign": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exclusionReason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "exclusionReason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "FUNCTION_ZONE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parentSpaceId": {
+                "$ref": "#/$defs/Id"
+              },
+              "boundaryBasis": {
+                "const": "FUNCTIONAL_DIVISION"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "parentSpaceId": {
+                "type": "null"
+              },
+              "boundaryBasis": {
+                "enum": [
+                  "INNER_WALL_FACE",
+                  "UNRESOLVED"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Wall": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wallId": {
+          "$ref": "#/$defs/Id"
+        },
+        "spaceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "geometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "thicknessMm": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "wallId",
+        "spaceIds",
+        "geometry",
+        "thicknessMm"
+      ]
+    },
+    "Opening": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "openingId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "enum": [
+            "DOOR",
+            "WINDOW"
+          ]
+        },
+        "wallId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spaceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "segment": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "widthMm": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "openingId",
+        "kind",
+        "wallId",
+        "spaceIds",
+        "segment",
+        "widthMm"
+      ]
+    },
+    "Obstacle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "obstacleId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "enum": [
+            "COLUMN",
+            "SHAFT",
+            "NO_PLACEMENT",
+            "OTHER"
+          ]
+        },
+        "spaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "geometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "excludesFloorArea": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "obstacleId",
+        "kind",
+        "spaceId",
+        "geometry",
+        "excludesFloorArea"
+      ]
+    },
+    "Annotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "annotationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "position": {
+          "$ref": "#/$defs/Point"
+        }
+      },
+      "required": [
+        "annotationId",
+        "text",
+        "position"
+      ]
+    },
+    "EdgeReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "vertexIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "spaceId",
+        "vertexIds"
+      ]
+    },
+    "BoundaryRelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "relationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "enum": [
+            "WALL_SEPARATED",
+            "SHARED_PARTITION"
+          ]
+        },
+        "spaceAId": {
+          "$ref": "#/$defs/Id"
+        },
+        "spaceBId": {
+          "$ref": "#/$defs/Id"
+        },
+        "wallId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edgeA": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EdgeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edgeB": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EdgeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "relationId",
+        "kind",
+        "spaceAId",
+        "spaceBId",
+        "wallId",
+        "edgeA",
+        "edgeB"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "SHARED_PARTITION"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "wallId": {
+                "type": "null"
+              },
+              "edgeA": {
+                "$ref": "#/$defs/EdgeReference"
+              },
+              "edgeB": {
+                "$ref": "#/$defs/EdgeReference"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "wallId": {
+                "$ref": "#/$defs/Id"
+              },
+              "edgeA": {
+                "type": "null"
+              },
+              "edgeB": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "IssueDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issueId": {
+          "$ref": "#/$defs/Id"
+        },
+        "action": {
+          "enum": [
+            "ACKNOWLEDGE",
+            "RESOLVE",
+            "REOPEN"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "issueId",
+        "action",
+        "note"
+      ]
+    },
+    "Deletion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layer": {
+          "enum": [
+            "spaces",
+            "walls",
+            "openings",
+            "obstacles",
+            "annotations",
+            "boundaryRelations"
+          ]
+        },
+        "objectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "layer",
+        "objectId",
+        "reason"
+      ]
+    },
+    "DraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.2"
+        },
+        "baseRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "clientChangeId": {
+          "$ref": "#/$defs/Id"
+        },
+        "workingCoordinateSystem": {
+          "enum": [
+            "SOURCE_PAGE",
+            "WORLD_MM"
+          ]
+        },
+        "calibrationRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpaceInput"
+          }
+        },
+        "walls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Wall"
+          }
+        },
+        "openings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Opening"
+          }
+        },
+        "obstacles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Obstacle"
+          }
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "boundaryRelations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryRelation"
+          }
+        },
+        "issueDispositions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueDisposition"
+          }
+        },
+        "deletions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Deletion"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "baseRevision",
+        "clientChangeId",
+        "workingCoordinateSystem",
+        "calibrationRevision",
+        "spaces",
+        "walls",
+        "openings",
+        "obstacles",
+        "annotations",
+        "boundaryRelations",
+        "issueDispositions",
+        "deletions"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "workingCoordinateSystem": {
+                "const": "SOURCE_PAGE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "spaces": {
+                "items": {
+                  "properties": {
+                    "designGeometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "SOURCE_PAGE"
+                        }
+                      }
+                    },
+                    "rectangleFrame": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              "walls": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "SOURCE_PAGE"
+                        }
+                      }
+                    },
+                    "thicknessMm": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              "obstacles": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "SOURCE_PAGE"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "calibrationRevision": {
+                "const": 0
+              },
+              "openings": {
+                "items": {
+                  "properties": {
+                    "widthMm": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "workingCoordinateSystem": {
+                "const": "WORLD_MM"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "spaces": {
+                "items": {
+                  "properties": {
+                    "designGeometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "WORLD_MM"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "walls": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "WORLD_MM"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "obstacles": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "WORLD_MM"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "calibrationRevision": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CreateSceneRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.2"
+        },
+        "clientChangeId": {
+          "$ref": "#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "pageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "initializationMode": {
+          "enum": [
+            "FROM_RECOGNITION",
+            "EMPTY_PAGE"
+          ]
+        },
+        "sourceSceneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failedRunId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "clientChangeId",
+        "projectId",
+        "pageId",
+        "initializationMode",
+        "sourceSceneId",
+        "failedRunId"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "initializationMode": {
+                "const": "FROM_RECOGNITION"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sourceSceneId": {
+                "$ref": "#/$defs/Id"
+              },
+              "failedRunId": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "sourceSceneId": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CalibrationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.2"
+        },
+        "baseRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "clientChangeId": {
+          "$ref": "#/$defs/Id"
+        },
+        "calibrationRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourcePageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "referencePoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "referenceLengthMm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10000000
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "baseRevision",
+        "clientChangeId",
+        "calibrationRevision",
+        "sourcePageId",
+        "referencePoints",
+        "referenceLengthMm"
+      ]
+    },
+    "SpaceCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "geometryRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "requirementRevision": {
+          "$ref": "#/$defs/Revision"
+        }
+      },
+      "required": [
+        "spaceId",
+        "geometryRevision",
+        "requirementRevision"
+      ]
+    },
+    "ConfirmationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.2"
+        },
+        "baseRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "clientChangeId": {
+          "$ref": "#/$defs/Id"
+        },
+        "scope": {
+          "enum": [
+            "SPACES",
+            "SCENE"
+          ]
+        },
+        "calibrationRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "scopeRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "geometryPolicyVersion": {
+          "const": "GEOM-P1-1"
+        },
+        "spaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpaceCondition"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "baseRevision",
+        "clientChangeId",
+        "scope",
+        "calibrationRevision",
+        "scopeRevision",
+        "geometryPolicyVersion",
+        "spaces"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "SPACES"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "spaces": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "spaces": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Matrix": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "Bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minX": {
+          "type": "number",
+          "minimum": -10000000,
+          "maximum": 10000000
+        },
+        "minY": {
+          "type": "number",
+          "minimum": -10000000,
+          "maximum": 10000000
+        },
+        "maxX": {
+          "type": "number",
+          "minimum": -10000000,
+          "maximum": 10000000
+        },
+        "maxY": {
+          "type": "number",
+          "minimum": -10000000,
+          "maximum": 10000000
+        }
+      },
+      "required": [
+        "minX",
+        "minY",
+        "maxX",
+        "maxY"
+      ]
+    },
+    "Derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "boundaryAreaM2": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "areaM2": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rectangleDimensions": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "widthMm": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "depthMm": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "widthMm",
+                "depthMm"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundsMm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bounds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "boundaryAreaM2",
+        "areaM2",
+        "rectangleDimensions",
+        "boundsMm"
+      ]
+    },
+    "SourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "assetId": {
+          "$ref": "#/$defs/Id"
+        },
+        "pageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sourceSceneId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sourceRoomId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "assetId",
+        "pageId",
+        "runId",
+        "sourceSceneId",
+        "sourceRoomId"
+      ]
+    },
+    "SpaceConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "UNCONFIRMED",
+            "CONFIRMED",
+            "EXCLUDED"
+          ]
+        },
+        "confirmationId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmedRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmedGeometryRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calibrationRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "confirmationId",
+        "confirmedRevision",
+        "confirmedGeometryRevision",
+        "calibrationRevision"
+      ]
+    },
+    "SpaceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "enum": [
+            "ROOM",
+            "FUNCTION_ZONE"
+          ]
+        },
+        "parentSpaceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "includedInDesign": {
+          "type": "boolean"
+        },
+        "exclusionReason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundaryBasis": {
+          "enum": [
+            "INNER_WALL_FACE",
+            "FUNCTIONAL_DIVISION",
+            "UNRESOLVED"
+          ]
+        },
+        "designGeometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "rectangleFrame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RectangleFrame"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "enum": [
+            "VISION",
+            "CAD",
+            "MANUAL",
+            "AGENT"
+          ]
+        },
+        "evidenceKind": {
+          "enum": [
+            "REAL_SERVICE",
+            "ESTIMATED",
+            "DEMO",
+            "MANUAL"
+          ]
+        },
+        "sourceRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "geometryRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "requirementRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "metadataRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "derived": {
+          "$ref": "#/$defs/Derived"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/SpaceConfirmation"
+        }
+      },
+      "required": [
+        "spaceId",
+        "kind",
+        "parentSpaceId",
+        "name",
+        "category",
+        "includedInDesign",
+        "exclusionReason",
+        "boundaryBasis",
+        "designGeometry",
+        "rectangleFrame",
+        "origin",
+        "evidenceKind",
+        "sourceRef",
+        "confidence",
+        "geometryRevision",
+        "requirementRevision",
+        "metadataRevision",
+        "derived",
+        "confirmation"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "includedInDesign": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exclusionReason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "exclusionReason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "FUNCTION_ZONE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parentSpaceId": {
+                "$ref": "#/$defs/Id"
+              },
+              "boundaryBasis": {
+                "const": "FUNCTIONAL_DIVISION"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "parentSpaceId": {
+                "type": "null"
+              },
+              "boundaryBasis": {
+                "enum": [
+                  "INNER_WALL_FACE",
+                  "UNRESOLVED"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issueId": {
+          "$ref": "#/$defs/Id"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "INFO",
+            "WARN",
+            "ERROR"
+          ]
+        },
+        "spaceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "objectIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Point"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocksConfirmation": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "issueId",
+        "code",
+        "severity",
+        "spaceIds",
+        "objectIds",
+        "message",
+        "position",
+        "blocksConfirmation"
+      ]
+    },
+    "CalibrationSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "enum": [
+            "UNKNOWN",
+            "ESTIMATED",
+            "CONFIRMED"
+          ]
+        },
+        "sourceToWorld": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Matrix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "revision",
+        "status",
+        "sourceToWorld"
+      ]
+    },
+    "Underlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "underlayId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sourcePageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "assetId": {
+          "$ref": "#/$defs/Id"
+        },
+        "widthPx": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "heightPx": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imagePixelToWorld": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Matrix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transformRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "underlayId",
+        "sourcePageId",
+        "assetId",
+        "widthPx",
+        "heightPx",
+        "imagePixelToWorld",
+        "transformRevision"
+      ]
+    },
+    "Tombstone": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layer": {
+          "enum": [
+            "spaces",
+            "walls",
+            "openings",
+            "obstacles",
+            "annotations",
+            "boundaryRelations"
+          ]
+        },
+        "objectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "deletedAtRevision": {
+          "$ref": "#/$defs/Revision"
+        }
+      },
+      "required": [
+        "layer",
+        "objectId",
+        "reason",
+        "deletedAtRevision"
+      ]
+    },
+    "SceneSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.2"
+        },
+        "sceneId": {
+          "$ref": "#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "scopeRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "geometryPolicyVersion": {
+          "const": "GEOM-P1-1"
+        },
+        "sourcePageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sourceSceneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failedRunId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workingCoordinateSystem": {
+          "enum": [
+            "SOURCE_PAGE",
+            "WORLD_MM"
+          ]
+        },
+        "calibration": {
+          "$ref": "#/$defs/CalibrationSnapshot"
+        },
+        "underlays": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Underlay"
+          },
+          "minItems": 1
+        },
+        "spaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpaceSnapshot"
+          }
+        },
+        "walls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Wall"
+          }
+        },
+        "openings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Opening"
+          }
+        },
+        "obstacles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Obstacle"
+          }
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "boundaryRelations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryRelation"
+          }
+        },
+        "issueDispositions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueDisposition"
+          }
+        },
+        "layerAvailability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "walls": {
+              "enum": [
+                "AVAILABLE",
+                "PARTIAL",
+                "UNKNOWN",
+                "NOT_APPLICABLE"
+              ]
+            },
+            "openings": {
+              "enum": [
+                "AVAILABLE",
+                "PARTIAL",
+                "UNKNOWN",
+                "NOT_APPLICABLE"
+              ]
+            },
+            "obstacles": {
+              "enum": [
+                "AVAILABLE",
+                "PARTIAL",
+                "UNKNOWN",
+                "NOT_APPLICABLE"
+              ]
+            }
+          },
+          "required": [
+            "walls",
+            "openings",
+            "obstacles"
+          ]
+        },
+        "qualityIssues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          }
+        },
+        "tombstones": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Tombstone"
+          }
+        },
+        "confirmedSceneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "sceneId",
+        "projectId",
+        "revision",
+        "scopeRevision",
+        "geometryPolicyVersion",
+        "sourcePageId",
+        "sourceSceneId",
+        "failedRunId",
+        "workingCoordinateSystem",
+        "calibration",
+        "underlays",
+        "spaces",
+        "walls",
+        "openings",
+        "obstacles",
+        "annotations",
+        "boundaryRelations",
+        "issueDispositions",
+        "layerAvailability",
+        "qualityIssues",
+        "tombstones",
+        "confirmedSceneId"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "workingCoordinateSystem": {
+                "const": "SOURCE_PAGE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "spaces": {
+                "items": {
+                  "properties": {
+                    "designGeometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "SOURCE_PAGE"
+                        }
+                      }
+                    },
+                    "rectangleFrame": {
+                      "type": "null"
+                    },
+                    "derived": {
+                      "properties": {
+                        "areaM2": {
+                          "type": "null"
+                        },
+                        "boundaryAreaM2": {
+                          "type": "null"
+                        },
+                        "rectangleDimensions": {
+                          "type": "null"
+                        },
+                        "boundsMm": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "walls": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "SOURCE_PAGE"
+                        }
+                      }
+                    },
+                    "thicknessMm": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              "obstacles": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "SOURCE_PAGE"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "calibration": {
+                "properties": {
+                  "revision": {
+                    "const": 0
+                  },
+                  "sourceToWorld": {
+                    "type": "null"
+                  },
+                  "status": {
+                    "const": "UNKNOWN"
+                  }
+                }
+              },
+              "openings": {
+                "items": {
+                  "properties": {
+                    "widthMm": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              "underlays": {
+                "items": {
+                  "properties": {
+                    "imagePixelToWorld": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "workingCoordinateSystem": {
+                "const": "WORLD_MM"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "spaces": {
+                "items": {
+                  "properties": {
+                    "designGeometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "WORLD_MM"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "walls": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "WORLD_MM"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "obstacles": {
+                "items": {
+                  "properties": {
+                    "geometry": {
+                      "properties": {
+                        "coordinateSystem": {
+                          "const": "WORLD_MM"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "calibration": {
+                "properties": {
+                  "revision": {
+                    "minimum": 1
+                  },
+                  "sourceToWorld": {
+                    "$ref": "#/$defs/Matrix"
+                  },
+                  "status": {
+                    "enum": [
+                      "ESTIMATED",
+                      "CONFIRMED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "MutationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientChangeId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sceneId": {
+          "$ref": "#/$defs/Id"
+        },
+        "previousRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "affectedSpaceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "invalidatedSpaceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "confirmationIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "uniqueItems": true
+        },
+        "confirmedSceneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scene": {
+          "$ref": "#/$defs/SceneSnapshot"
+        }
+      },
+      "required": [
+        "clientChangeId",
+        "sceneId",
+        "previousRevision",
+        "revision",
+        "affectedSpaceIds",
+        "invalidatedSpaceIds",
+        "confirmationIds",
+        "confirmedSceneId",
+        "scene"
+      ]
+    },
+    "MutationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": 200
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "$ref": "#/$defs/MutationData"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ]
+    },
+    "ReadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": 200
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "scene": {
+              "$ref": "#/$defs/SceneSnapshot"
+            }
+          },
+          "required": [
+            "scene"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            400,
+            403,
+            404,
+            409,
+            422,
+            503
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "errorCode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sceneId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clientChangeId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "currentRevision": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Revision"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Issue"
+              }
+            }
+          },
+          "required": [
+            "errorCode",
+            "sceneId",
+            "clientChangeId",
+            "currentRevision",
+            "issues"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ]
+    },
+    "ConfirmationSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirmationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "enum": [
+            "SPACE",
+            "SCENE"
+          ]
+        },
+        "spaceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sceneId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sceneRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdBy": {
+          "$ref": "#/$defs/Id"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SceneSnapshot"
+        }
+      },
+      "required": [
+        "confirmationId",
+        "kind",
+        "spaceId",
+        "sceneId",
+        "sceneRevision",
+        "createdBy",
+        "createdAt",
+        "snapshot"
+      ]
+    },
+    "ConfirmationReadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": 200
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "confirmation": {
+              "$ref": "#/$defs/ConfirmationSnapshot"
+            }
+          },
+          "required": [
+            "confirmation"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ]
+    }
+  }
+}

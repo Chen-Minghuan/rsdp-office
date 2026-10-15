@@ -4,6 +4,8 @@
 
 `src/` 为 Java 业务后端；`cad-parser/` 为独立的 .NET CAD 解析服务，统一归属后端目录。CAD 由 Docker 构建运行，接口为 `POST http://localhost:8091/parse`。
 
+图片/PDF 识别使用 `qwen3-vl-plus`，在 Java 启动环境中填写 `DASHSCOPE_API_KEY` 后重启；页码与完整配置见 [识别配置](../docs/vision-configuration.md)。未配置密钥不会返回演示空间。
+
 ## 功能
 
 - 下载产品导入模板（商品、规格、价格与图片字段）
@@ -90,3 +92,14 @@ password: postgres
 - MyBatis-Plus 3.5.9
 - PostgreSQL 16
 - EasyExcel 3.3.4
+
+## 空间模板迁移与接口
+
+空间模板使用独立的 `office_space_template` 表。已有数据库须显式迁移，应用启动的 `schema.sql` 不代替此操作。当前本地 Docker 环境可在仓库根目录执行：
+
+```bash
+docker exec -i office-postgres psql -v ON_ERROR_STOP=1 -U postgres -d office < backend/src/main/resources/db/migrations/V20261015__space_template.sql
+```
+
+接口为 `POST/GET /api/v1/office/projects/{projectId}/space-templates`、`GET /api/v1/office/projects/{projectId}/space-templates/{templateId}`。
+保存请求含 name、clientChangeId、sourceCanvasRevision、可选 sourceAnalysisRevision、毫米 scene（现有 SpatialSceneSnapshot）。后端核验可计算几何/比例、重新推导面积，以不可变快照保存；逐空间确认不是前置条件。列表最近 50 条为摘要，详情含 scene。具体范围与实际验证见 [GEOM-004](../docs/tasks/GEOM-004-space-template.md)。
