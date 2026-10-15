@@ -29,8 +29,8 @@ interface ProductDto {
   price: number
   kind: Product['kind']
   uses: string[]
-  widthCm: number
-  depthCm: number
+  widthCm: number | null
+  depthCm: number | null
   imageUrl?: string
 }
 
@@ -150,7 +150,8 @@ export function useOfficeApi() {
 
   async function loadProducts(): Promise<Product[]> {
     const list = await request<ProductDto[]>('GET', '/api/v1/office/products')
-    return list.map((p) => ({
+    return list.filter(p => p.widthCm != null && p.widthCm > 0 && p.depthCm != null && p.depthCm > 0
+      && p.price > 0 && p.kind !== 'other').map((p) => ({
       id: p.id,
       name: p.name,
       desc: p.desc || '',
@@ -158,8 +159,8 @@ export function useOfficeApi() {
       price: p.price || 0,
       kind: p.kind,
       uses: p.uses || [],
-      widthCm: p.widthCm || 120,
-      depthCm: p.depthCm || 60,
+      widthCm: p.widthCm!,
+      depthCm: p.depthCm!,
       imageUrl: p.imageUrl,
     }))
   }
@@ -242,9 +243,10 @@ export function useOfficeApi() {
   }
 
   async function validateImportPreview(rows: ProductImportPreviewRow[], updateIfExists = false): Promise<ProductImportPreview> {
+    const requestRows = rows.map(({ imagePreviews: _imagePreviews, ...row }) => row)
     const res = await $fetch<ApiResponse<ProductImportPreview>>(apiUrl('/api/v1/products/import-preview/validate'), {
       method: 'POST',
-      body: { rows, updateIfExists },
+      body: { rows: requestRows, updateIfExists },
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
     })
@@ -254,12 +256,18 @@ export function useOfficeApi() {
     return res.data
   }
 
-  async function confirmImport(rows: ProductImportPreviewRow[], updateIfExists = false): Promise<ProductImportResult> {
+  async function confirmImport(rows: ProductImportPreviewRow[], updateIfExists = false, file?: File): Promise<ProductImportResult> {
+    const requestRows = rows.map(({ imagePreviews: _imagePreviews, ...row }) => row)
+    const formData = new FormData()
+    if (file) {
+      formData.append('file', file)
+      formData.append('request', new Blob([JSON.stringify({ rows: requestRows, updateIfExists })], { type: 'application/json' }))
+    }
     const res = await $fetch<ApiResponse<ProductImportResult>>(apiUrl('/api/v1/products/import-confirm'), {
       method: 'POST',
-      body: { rows, updateIfExists },
+      body: file ? formData : { rows: requestRows, updateIfExists },
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      ...(!file ? { headers: { 'Content-Type': 'application/json' } } : {}),
     })
     if (res.code !== 200) {
       throw new Error(res.message || '导入确认失败')
@@ -299,6 +307,10 @@ export function useOfficeApi() {
 
   async function deleteProduct(rspuId: string): Promise<void> {
     await request<void>('DELETE', `/api/v1/products/${rspuId}`)
+  }
+
+  async function deleteProducts(rspuIds: string[]): Promise<number> {
+    return await request<number>('DELETE', '/api/v1/products/batch', rspuIds)
   }
 
   async function restoreProduct(rspuId: string): Promise<void> {
@@ -352,6 +364,7 @@ export function useOfficeApi() {
     getProduct,
     updateProduct,
     deleteProduct,
+    deleteProducts,
     restoreProduct,
   }
 }

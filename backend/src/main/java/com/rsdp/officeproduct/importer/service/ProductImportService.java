@@ -42,8 +42,6 @@ public class ProductImportService {
 
     private final RspuMasterMapper rspuMasterMapper;
     private final RspuVariantMapper rspuVariantMapper;
-    private final RspuStyleMapper rspuStyleMapper;
-    private final RspuSceneMapper rspuSceneMapper;
     private final ImageAssetsMapper imageAssetsMapper;
     private final FactoryProductPriceMapper factoryProductPriceMapper;
     private final DictService dictService;
@@ -54,43 +52,127 @@ public class ProductImportService {
     private final DataCleansingService dataCleansingService;
     private final ObjectMapper objectMapper;
     private final PlatformTransactionManager transactionManager;
+    private final EmbeddedImageStore embeddedImageStore;
 
     private static final List<String> SHARED_FIELDS = List.of(
-        "categoryCode", "productName", "positioningLabel", "colorPrimaryName", "materialTags", "sceneTags",
-        "productLevel", "warrantyYears", "referencePriceBand", "sixDimTags", "keySpecs", "description", "retailPrice");
+        "productName", "colorPrimaryName", "description", "retailPrice");
 
     /** 上传解析和预检，不写入商品。 */
     public ProductImportPreview previewProducts(MultipartFile file) {
         validateFile(file);
         ProductImportRequest request = new ProductImportRequest();
-        request.setRows(ImportRowCodec.read(file));
-        return prepare(request).preview();
+        WorkbookImportSource.Source source = WorkbookImportSource.read(file);
+        request.setRows(source.rows());
+        ProductImportPreview preview = prepare(request).preview();
+        int previewChars = 0;
+        final int maxPreviewChars = 20 * 1024 * 1024;
+        for (ProductImportPreviewRow row : preview.getRows()) {
+            for (WorkbookImportSource.Image image : source.images().getOrDefault(row.getRowIndex(), List.of())) {
+                if (row.getImagePreviews().size() >= 8) {
+                    row.getImageWarnings().add("该行图片超过 8 张，预览仅展示前 8 张；确认导入仍处理全部关联图片");
+                    break;
+                }
+                String thumbnail = EmbeddedImagePreview.create(image);
+                if (thumbnail == null) row.getImageWarnings().add("有内嵌图片无法生成预览，请在导入后核对原图");
+                else if (previewChars + thumbnail.length() > maxPreviewChars) {
+                    row.getImageWarnings().add("预览图片总量已达上限，剩余图片请在导入后核对");
+                    break;
+                } else {
+                    row.getImagePreviews().add(thumbnail);
+                    previewChars += thumbnail.length();
+                }
+            }
+        }
+        preview.setEmbeddedImageCount(preview.getRows().stream().mapToInt(ProductImportPreviewRow::getEmbeddedImageCount).sum());
+        preview.setRowsWithImages((int) preview.getRows().stream().filter(r -> r.getEmbeddedImageCount() > 0).count());
+        return preview;
     }
 
     /** 校验用户编辑后的数据；跳过行不参与分组、继承或校验。 */
     public ProductImportPreview validatePreview(ProductImportRequest request) {
-        return prepare(request).preview();
+        ProductImportPreview preview = prepare(request).preview();
+        preview.setEmbeddedImageCount(preview.getRows().stream().mapToInt(ProductImportPreviewRow::getEmbeddedImageCount).sum());
+        preview.setRowsWithImages((int) preview.getRows().stream().filter(r -> r.getEmbeddedImageCount() > 0).count());
+        return preview;
     }
 
     /** 兼容原文件导入接口，与预览确认使用同一处理逻辑。 */
     public ProductImportResult importProducts(MultipartFile file, boolean updateIfExists) {
         validateFile(file);
         ProductImportRequest request = new ProductImportRequest();
-        request.setRows(ImportRowCodec.read(file));
+        WorkbookImportSource.Source source = WorkbookImportSource.read(file);
+        request.setRows(source.rows());
         request.setUpdateIfExists(updateIfExists);
-        return importRows(request);
+        return importRows(request, source);
+    }
+
+    public ProductImportResult importRowsWithFile(MultipartFile file, ProductImportRequest request) {
+        validateFile(file);
+        WorkbookImportSource.Source source = WorkbookImportSource.read(file);
+        Map<Integer, ProductImportPreviewRow> originals = source.rows().stream()
+            .collect(Collectors.toMap(ProductImportPreviewRow::getRowIndex, r -> r));
+        if (request == null || request.getRows() == null || request.getRows().size() != originals.size())
+            throw new BusinessException("预览数据与上传文件不一致，请重新预览");
+        for (ProductImportPreviewRow row : request.getRows()) {
+            if (row == null || row.getFields() == null) throw new BusinessException("商品行数据不完整，请重新预览");
+            ProductImportPreviewRow original = originals.get(row.getRowIndex());
+            if (original == null || row.getSourceSheetIndex() != original.getSourceSheetIndex()
+                || row.getSourceRowIndex() != original.getSourceRowIndex())
+                throw new BusinessException("商品行位置与上传文件不一致，请重新预览");
+            String oldCode = original.getFields().getOrDefault("externalCode", "");
+            String newCode = row.getFields().getOrDefault("externalCode", "");
+            if (!row.isSkipped() && !oldCode.isBlank() && !oldCode.equals(newCode)
+                && source.images().containsKey(row.getRowIndex()))
+                throw new BusinessException("第 " + row.getRowIndex() + " 行商品编码已修改，无法确认内嵌图片归属；请恢复原编码或跳过该行");
+            row.setSourceSheetName(original.getSourceSheetName());
+            row.setSourceSizeText(original.getSourceSizeText());
+            row.setSourceVariantCount(original.getSourceVariantCount());
+            row.setSourceVariantNote(original.getSourceVariantNote());
+            row.setEmbeddedImageCount(original.getEmbeddedImageCount());
+            row.setImageWarnings(new ArrayList<>(original.getImageWarnings()));
+            Integer primaryIndex = row.getPrimaryEmbeddedImageIndex();
+            if (primaryIndex != null && (primaryIndex < 0 || primaryIndex >= original.getEmbeddedImageCount()))
+                throw new BusinessException("第 " + row.getRowIndex() + " 行主图选择无效，请重新预览");
+            List<Integer> selectedIndexes = row.getSelectedEmbeddedImageIndexes();
+            if (selectedIndexes != null) {
+                if (selectedIndexes.stream().anyMatch(index -> index == null || index < 0 || index >= original.getEmbeddedImageCount())
+                    || new HashSet<>(selectedIndexes).size() != selectedIndexes.size())
+                    throw new BusinessException("第 " + row.getRowIndex() + " 行图片选择无效，请重新预览");
+                if (primaryIndex != null && !selectedIndexes.contains(primaryIndex))
+                    throw new BusinessException("第 " + row.getRowIndex() + " 行主图未包含在已选图片中");
+            }
+        }
+        Map<String, ProductImportPreviewRow> sharedSourceImages = new HashMap<>();
+        for (ProductImportPreviewRow row : request.getRows()) {
+            if (row.getSourceVariantCount() < 2) continue;
+            String sourceKey = row.getSourceSheetIndex() + ":" + row.getSourceRowIndex();
+            ProductImportPreviewRow first = sharedSourceImages.putIfAbsent(sourceKey, row);
+            if (first != null && (!Objects.equals(first.getSelectedEmbeddedImageIndexes(), row.getSelectedEmbeddedImageIndexes())
+                || !Objects.equals(first.getPrimaryEmbeddedImageIndex(), row.getPrimaryEmbeddedImageIndex())))
+                throw new BusinessException("同一来源行拆分出的规格必须共用相同的图片选择和主图，请重新预览");
+        }
+        return importRows(request, source);
     }
 
     /** 同商品多行只建一次主档；每个规格行单独提交，失败不占用分组状态。 */
     public synchronized ProductImportResult importRows(ProductImportRequest request) {
+        return importRows(request, null);
+    }
+
+    private synchronized ProductImportResult importRows(ProductImportRequest request, WorkbookImportSource.Source workbook) {
         PreparedImport prepared = prepare(request);
         ProductImportResult result = new ProductImportResult();
         result.setTotalRows(prepared.preview().getRows().size());
         result.setCleansingReport(prepared.preview().getCleansingReport());
         Map<String, String> committedGroups = new HashMap<>();
         Set<String> committedVariants = new HashSet<>();
+        Set<String> committedImageAssociations = new HashSet<>();
         for (ProductImportPreviewRow source : prepared.preview().getRows()) {
             ProductImportRow row = prepared.rows().get(source.getRowIndex());
+            for (String warning : source.getImageWarnings()) {
+                result.getWarnings().add(new ProductImportFailure(source.getRowIndex(), row.getExternalCode(),
+                    row.getRspuId(), warning));
+            }
             if (source.isSkipped()) {
                 result.setSkippedCount(result.getSkippedCount() + 1);
                 continue;
@@ -110,10 +192,23 @@ public class ProductImportService {
                         existing.getRspuId(), "产品已存在，已跳过"));
                     continue;
                 }
-                RowOutcome outcome = processRowInTransaction(row, existing, prepared.dictCache(), committedId != null);
+                List<EmbeddedImageStore.Saved> written = new ArrayList<>();
+                RowOutcome outcome;
+                try {
+                    if (workbook != null) {
+                        appendEmbeddedImages(source, row,
+                            workbook.images().getOrDefault(source.getRowIndex(), List.of()), written);
+                    }
+                    outcome = processRowInTransaction(row, existing, prepared.dictCache(), committedId != null);
+                } catch (Exception e) {
+                    written.forEach(embeddedImageStore::deleteIfCreated);
+                    throw e;
+                }
                 committedGroups.put(source.getGroupKey(), outcome.rspuId());
                 if (outcome.variantId() != null) committedVariants.add(outcome.variantId());
                 result.setSuccessCount(result.getSuccessCount() + 1);
+                for (EmbeddedImageStore.Saved saved : written)
+                    committedImageAssociations.add(outcome.rspuId() + "\0" + saved.url());
             } catch (Exception e) {
                 log.warn("导入行失败，rowIndex={}", source.getRowIndex(), e);
                 result.getFailures().add(new ProductImportFailure(source.getRowIndex(), row.getExternalCode(),
@@ -122,8 +217,30 @@ public class ProductImportService {
         }
         result.setProductCount(committedGroups.size());
         result.setVariantCount(committedVariants.size());
+        result.setEmbeddedImageCount(committedImageAssociations.size());
         result.setFailedCount(result.getFailures().size());
         return result;
+    }
+
+    private void appendEmbeddedImages(ProductImportPreviewRow source, ProductImportRow row,
+                                      List<WorkbookImportSource.Image> images, List<EmbeddedImageStore.Saved> written) {
+        List<Integer> selectedIndexes = source.getSelectedEmbeddedImageIndexes();
+        for (int imageIndex = 0; imageIndex < images.size(); imageIndex++) {
+            if (selectedIndexes != null && !selectedIndexes.contains(imageIndex)) continue;
+            EmbeddedImageStore.Saved saved = embeddedImageStore.save(images.get(imageIndex));
+            written.add(saved);
+            if (Objects.equals(source.getPrimaryEmbeddedImageIndex(), imageIndex)) {
+                if (StringUtils.hasText(row.getPrimaryImageUrl()) && !row.getPrimaryImageUrl().equals(saved.url())) {
+                    String previous = row.getDetailImageUrls();
+                    row.setDetailImageUrls(StringUtils.hasText(previous) ? previous + "," + row.getPrimaryImageUrl() : row.getPrimaryImageUrl());
+                }
+                row.setPrimaryImageUrl(saved.url());
+            } else if (!StringUtils.hasText(row.getPrimaryImageUrl())) row.setPrimaryImageUrl(saved.url());
+            else if (!row.getPrimaryImageUrl().equals(saved.url())) {
+                String previous = row.getDetailImageUrls();
+                row.setDetailImageUrls(StringUtils.hasText(previous) ? previous + "," + saved.url() : saved.url());
+            }
+        }
     }
 
     private record PreparedImport(ProductImportPreview preview, Map<Integer, ProductImportRow> rows,
@@ -147,8 +264,21 @@ public class ProductImportService {
                 || !rowNumbers.add(input.getRowIndex())) throw new BusinessException("行号无效或重复");
             ProductImportPreviewRow source = new ProductImportPreviewRow();
             source.setRowIndex(input.getRowIndex());
+            source.setSourceSheetIndex(input.getSourceSheetIndex());
+            source.setSourceRowIndex(input.getSourceRowIndex());
+            source.setSourceSheetName(input.getSourceSheetName());
+            source.setSourceSizeText(input.getSourceSizeText());
+            source.setSourceVariantCount(input.getSourceVariantCount());
+            source.setSourceVariantNote(input.getSourceVariantNote());
+            source.setEmbeddedImageCount(input.getEmbeddedImageCount());
+            source.setPrimaryEmbeddedImageIndex(input.getPrimaryEmbeddedImageIndex());
+            source.setSelectedEmbeddedImageIndexes(input.getSelectedEmbeddedImageIndexes() == null ? null
+                : new ArrayList<>(input.getSelectedEmbeddedImageIndexes()));
+            source.setImageWarnings(new ArrayList<>(input.getImageWarnings() == null ? List.of() : input.getImageWarnings()));
+            source.setReviewWarnings(new ArrayList<>());
             source.setFields(new LinkedHashMap<>(input.getFields()));
             source.setSkipped(input.isSkipped());
+            source.setGroupKey(input.getGroupKey());
             preview.getRows().add(source);
             ProductImportRow row = ImportRowCodec.decode(source);
             typed.put(source.getRowIndex(), row);
@@ -200,20 +330,27 @@ public class ProductImportService {
                 ProductImportPreviewRow decodeSource = new ProductImportPreviewRow();
                 decodeSource.setFields(member.getFields());
                 ProductImportRow row = ImportRowCodec.decode(decodeSource);
+                row.setSourceSizeText(member.getSourceSizeText());
                 for (String decodeError : decodeSource.getErrors()) {
                     if (!member.getErrors().contains(decodeError)) member.getErrors().add(decodeError);
                 }
-                if (!StringUtils.hasText(row.getCategoryCode())) row.setCategoryCode(existing != null
-                    && StringUtils.hasText(existing.getCategoryCode()) ? existing.getCategoryCode() : "OF");
                 if (!StringUtils.hasText(row.getProductName()) && existing != null) row.setProductName(existing.getProductName());
                 normalizeRow(row, dicts);
                 String error = validateRow(row, dicts);
                 if (error != null) member.getErrors().add(error);
+                if (member.getSourceRowIndex() > 0) {
+                    int[] exact = SupplierProductAdapter.exactDimensions(row.getSizeText());
+                    if (exact != null && ((row.getWidthMm() != null && !row.getWidthMm().equals(exact[0]))
+                        || (row.getDepthMm() != null && !row.getDepthMm().equals(exact[1]))
+                        || (row.getHeightMm() != null && !row.getHeightMm().equals(exact[2]))))
+                        member.getErrors().add("结构化尺寸与三段尺寸原文不一致，请核对毫米值");
+                }
                 if (member.getErrors().isEmpty() && (existing == null || request.isUpdateIfExists())) {
                     String signature = variantSignature(row, dicts);
                     if (!variants.add(signature)) member.getErrors().add("同一商品存在重复规格（尺寸、颜色、材质），请合并或跳过重复行");
                 }
                 ImportRowCodec.encode(row, member);
+                addReviewWarnings(member, row);
                 typed.put(member.getRowIndex(), row);
                 member.setAction(existing != null ? (request.isUpdateIfExists() ? "更新已有商品" : "跳过已有商品")
                     : members.indexOf(member) == 0 ? "新增商品" : "新增规格");
@@ -225,11 +362,43 @@ public class ProductImportService {
         return new PreparedImport(preview, typed, dicts);
     }
 
+    private void addReviewWarnings(ProductImportPreviewRow member, ProductImportRow row) {
+        if (member.getSourceRowIndex() <= 0) return;
+        List<String> warnings = member.getReviewWarnings();
+        if (member.getSourceVariantCount() > 1) {
+            warnings.add("原行尺寸“" + member.getSourceSizeText() + "”已拆为 " + member.getSourceVariantCount()
+                + " 个规格；当前规格为 " + row.getSizeText());
+            if (StringUtils.hasText(member.getSourceVariantNote())) warnings.add(member.getSourceVariantNote());
+        }
+        if (row.getWidthMm() == null || row.getDepthMm() == null)
+            warnings.add("缺少确定的宽度和进深，不能用于精确尺寸匹配；请核对规格后填写毫米值");
+        else if (row.getHeightMm() == null)
+            warnings.add("高度未确定；宽度和进深可用于占地尺寸匹配");
+        if (row.getRetailPrice() == null) warnings.add("缺少 J 列价格，请核对展示价");
+        if (row.getFactoryPrice() == null) warnings.add("缺少 L 列出厂价格");
+        if (member.getEmbeddedImageCount() == 0) warnings.add("未关联内嵌图片，请核对图片归属或稍后补图");
+    }
+
     private String variantSignature(ProductImportRow row, Map<String, List<CategoryDict>> dicts) {
+        String size = effectiveOf(resolveCodeOrNull("size", row.getSizeCode(), dicts.get("size")), row.getSizeText());
         return writeJsonListOrNull(List.of(
-            effectiveOf(resolveCodeOrNull("size", row.getSizeCode(), dicts.get("size")), row.getSizeText()),
+            size.isEmpty() ? rowDimensionKey(row) : size,
             effectiveOf(resolveCodeOrNull("color", row.getColorCode(), dicts.get("color")), row.getColorText()),
             effectiveOf(resolveCodeOrNull("material", row.getMaterialCode(), dicts.get("material")), row.getMaterialText())));
+    }
+
+    private String rowDimensionKey(ProductImportRow row) {
+        return String.valueOf(row.getWidthMm()) + "/" + row.getDepthMm() + "/" + row.getHeightMm();
+    }
+
+    private String variantDimensionKey(RspuVariant variant) {
+        if (!StringUtils.hasText(variant.getDimensions())) return "null/null/null";
+        try {
+            Map<?, ?> dimensions = objectMapper.readValue(variant.getDimensions(), Map.class);
+            return dimensions.get("widthMm") + "/" + dimensions.get("depthMm") + "/" + dimensions.get("heightMm");
+        } catch (Exception e) {
+            return "null/null/null";
+        }
     }
 
     private void validateFile(MultipartFile file) {
@@ -247,13 +416,9 @@ public class ProductImportService {
 
     private Map<String, List<CategoryDict>> preloadDicts() {
         Map<String, List<CategoryDict>> cache = new HashMap<>();
-        cache.put("category", safeList(dictService.listByType("category")));
-        cache.put("style", safeList(dictService.listByType("style")));
-        cache.put("scene", safeList(dictService.listByType("scene")));
         cache.put("material", safeList(dictService.listByType("material")));
         cache.put("size", safeList(dictService.listByType("size")));
         cache.put("color", safeList(dictService.listByType("color")));
-        cache.put("factory_level", safeList(dictService.listByType("factory_level")));
         return cache;
     }
 
@@ -283,9 +448,7 @@ public class ProductImportService {
         try {
             RspuMaster rspu = existing;
             if (!groupCommitted) {
-                rspu = existing != null ? updateRspu(existing, row, dictCache) : createRspu(row, dictCache);
-                saveStyles(rspu.getRspuId(), row.getPositioningLabel(), dictCache.get("style"), existing != null);
-                saveScenes(rspu.getRspuId(), splitCsv(row.getSceneTags()), dictCache.get("scene"), existing != null);
+                rspu = existing != null ? updateRspu(existing, row) : createRspu(row);
             }
             RspuVariant variant = shouldCreateVariant(row) || hasFactoryPrice(row)
                 ? createVariantIfNotExists(rspu.getRspuId(), row, dictCache) : null;
@@ -302,9 +465,9 @@ public class ProductImportService {
         }
     }
 
-    private RspuMaster createRspu(ProductImportRow row, Map<String, List<CategoryDict>> dictCache) {
+    private RspuMaster createRspu(ProductImportRow row) {
         String rspuId = IdGenerator.rspuId();
-        RspuMaster rspu = buildRspuFromRow(new RspuMaster(), row, dictCache, false);
+        RspuMaster rspu = buildRspuFromRow(new RspuMaster(), row, false);
         rspu.setRspuId(rspuId);
         rspu.setExternalCode(trim(row.getExternalCode()));
         rspu.setStatus("active");
@@ -314,17 +477,13 @@ public class ProductImportService {
         rspu.setUpdatedAt(LocalDateTime.now());
         rspuMasterMapper.insert(rspu);
 
-        String sizeCode = resolveImportSizeCode(row.getSizeCode(), dictCache.get("size"));
-        String positioningLabel = rspu.getPositioningLabel();
-        if (DictNormalizes.isValid(positioningLabel, dictCache.get("style"))) {
-            rspuCodeService.assignCode(rspuId, rspu.getCategoryCode(), positioningLabel, sizeCode);
-        }
+        rspuCodeService.assignCode(rspuId);
 
         return rspu;
     }
 
-    private RspuMaster updateRspu(RspuMaster rspu, ProductImportRow row, Map<String, List<CategoryDict>> dictCache) {
-        buildRspuFromRow(rspu, row, dictCache, true);
+    private RspuMaster updateRspu(RspuMaster rspu, ProductImportRow row) {
+        buildRspuFromRow(rspu, row, true);
         if (!StringUtils.hasText(rspu.getExternalCode()) && StringUtils.hasText(row.getExternalCode())) rspu.setExternalCode(row.getExternalCode());
         rspu.setAuditStatus("pending");
         rspu.setUpdatedAt(LocalDateTime.now());
@@ -332,50 +491,12 @@ public class ProductImportService {
         return rspu;
     }
 
-    private RspuMaster buildRspuFromRow(RspuMaster rspu, ProductImportRow row,
-                                       Map<String, List<CategoryDict>> dictCache, boolean isUpdate) {
-        if (StringUtils.hasText(row.getCategoryCode())) {
-            rspu.setCategoryCode(row.getCategoryCode().trim().toUpperCase());
-            rspu.setCategoryPath(CategoryPaths.resolve(rspu.getCategoryCode()));
-        } else if (!isUpdate) {
-            rspu.setCategoryCode(null);
-            rspu.setCategoryPath(null);
-        }
-        if (!isUpdate || StringUtils.hasText(row.getPositioningLabel())) {
-            rspu.setPositioningLabel(StringUtils.hasText(row.getPositioningLabel())
-                ? DictNormalizes.normalize(row.getPositioningLabel(), dictCache.get("style"))
-                : "待识别");
-        }
+    private RspuMaster buildRspuFromRow(RspuMaster rspu, ProductImportRow row, boolean isUpdate) {
         if (!isUpdate || StringUtils.hasText(row.getProductName())) {
             rspu.setProductName(trim(row.getProductName()));
         }
         if (!isUpdate || StringUtils.hasText(row.getColorPrimaryName())) {
             rspu.setColorPrimaryName(trim(row.getColorPrimaryName()));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getMaterialTags())) {
-            rspu.setMaterialTags(writeJsonListOrNull(splitCsv(row.getMaterialTags())));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getSceneTags())) {
-            rspu.setSceneTags(writeJsonListOrNull(splitCsv(row.getSceneTags())));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getSixDimTags())) {
-            rspu.setSixDimTags(trim(row.getSixDimTags()));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getReferencePriceBand())) {
-            rspu.setReferencePriceBand(StringUtils.hasText(row.getReferencePriceBand())
-                ? row.getReferencePriceBand().trim().toLowerCase()
-                : null);
-        }
-        if (!isUpdate || StringUtils.hasText(row.getProductLevel())) {
-            rspu.setProductLevel(StringUtils.hasText(row.getProductLevel())
-                ? DictNormalizes.normalize(row.getProductLevel(), dictCache.get("factory_level"))
-                : null);
-        }
-        if (!isUpdate || row.getWarrantyYears() != null) {
-            rspu.setWarrantyYears(row.getWarrantyYears());
-        }
-        if (!isUpdate || StringUtils.hasText(row.getKeySpecs())) {
-            rspu.setKeySpecs(trim(row.getKeySpecs()));
         }
         if (!isUpdate || StringUtils.hasText(row.getDescription())) {
             rspu.setDescription(trim(row.getDescription()));
@@ -392,73 +513,6 @@ public class ProductImportService {
         return rspu;
     }
 
-    private String resolveImportSizeCode(String rawSizeCode, List<CategoryDict> sizeDict) {
-        if (StringUtils.hasText(rawSizeCode)) {
-            String normalized = DictNormalizes.normalize(rawSizeCode, sizeDict);
-            if (sizeDict.stream().anyMatch(d -> normalized.equalsIgnoreCase(d.getDictCode()))) {
-                return normalized;
-            }
-        }
-        return "X";
-    }
-
-    private void saveStyles(String rspuId, String positioningLabel, List<CategoryDict> styles, boolean isUpdate) {
-        if (isUpdate && !StringUtils.hasText(positioningLabel)) {
-            return;
-        }
-        if (isUpdate) {
-            rspuStyleMapper.delete(new QueryWrapper<RspuStyle>().eq("rspu_id", rspuId));
-        }
-        String code = DictNormalizes.normalizeOrNull(positioningLabel, styles);
-        if (code != null) {
-            RspuStyle style = new RspuStyle();
-            style.setRspuId(rspuId);
-            style.setDictType("style");
-            style.setStyleCode(code);
-            style.setPrimary(true);
-            style.setCreatedAt(LocalDateTime.now());
-            rspuStyleMapper.insert(style);
-        }
-    }
-
-    private void saveScenes(String rspuId, List<String> sceneCodes, List<CategoryDict> sceneDict, boolean isUpdate) {
-        if (isUpdate && (sceneCodes == null || sceneCodes.isEmpty())) {
-            return;
-        }
-        if (isUpdate) {
-            rspuSceneMapper.delete(new QueryWrapper<RspuScene>().eq("rspu_id", rspuId));
-        }
-        if (sceneCodes == null || sceneCodes.isEmpty()) {
-            return;
-        }
-        Set<String> seen = new HashSet<>();
-        for (String raw : sceneCodes) {
-            String code = resolveSceneCode(raw, sceneDict);
-            if (code == null || !seen.add(code)) {
-                continue;
-            }
-            RspuScene scene = new RspuScene();
-            scene.setRspuId(rspuId);
-            scene.setDictType("scene");
-            scene.setSceneCode(code);
-            scene.setCreatedAt(LocalDateTime.now());
-            rspuSceneMapper.insert(scene);
-        }
-    }
-
-    private String resolveSceneCode(String raw, List<CategoryDict> sceneDict) {
-        if (!StringUtils.hasText(raw)) {
-            return null;
-        }
-        String trimmed = raw.trim();
-        String byAlias = dictAliasService.resolveAlias("scene", trimmed);
-        if (StringUtils.hasText(byAlias)) {
-            return byAlias;
-        }
-        String normalized = DictNormalizes.normalize(trimmed, sceneDict);
-        return DictNormalizes.isValid(normalized, sceneDict) ? normalized : null;
-    }
-
     private boolean shouldCreateVariant(ProductImportRow row) {
         return StringUtils.hasText(row.getVariantDisplayName())
             || StringUtils.hasText(row.getSizeCode())
@@ -466,7 +520,9 @@ public class ProductImportService {
             || StringUtils.hasText(row.getColorCode())
             || StringUtils.hasText(row.getColorText())
             || StringUtils.hasText(row.getMaterialCode())
-            || StringUtils.hasText(row.getMaterialText());
+            || StringUtils.hasText(row.getMaterialText())
+            || row.getWidthMm() != null || row.getDepthMm() != null || row.getHeightMm() != null
+            || row.getPackageCount() != null || row.getPackageVolumeCbm() != null || row.getGrossWeight() != null;
     }
 
     private RspuVariant createVariantIfNotExists(String rspuId, ProductImportRow row,
@@ -483,13 +539,17 @@ public class ProductImportService {
             new QueryWrapper<RspuVariant>().eq("rspu_id", rspuId));
         RspuVariant duplicate = existing.stream().filter(v ->
             effSize.equals(effectiveOf(v.getSizeCode(), v.getSizeText()))
+                && (!effSize.isEmpty() || rowDimensionKey(row).equals(variantDimensionKey(v)))
                 && effColor.equals(effectiveOf(v.getColorCode(), v.getColorText()))
                 && effMaterial.equals(effectiveOf(v.getMaterialCode(), v.getMaterialText())))
             .findFirst().orElse(null);
         if (duplicate != null) {
             if (StringUtils.hasText(row.getVariantDisplayName())) duplicate.setDisplayName(row.getVariantDisplayName());
-            if (StringUtils.hasText(row.getVariantReferencePriceBand())) duplicate.setReferencePriceBand(row.getVariantReferencePriceBand());
-            if (StringUtils.hasText(row.getVariantProductLevel())) duplicate.setProductLevel(row.getVariantProductLevel());
+            String dimensions = dimensionsJson(row, duplicate.getDimensions());
+            if (dimensions != null) duplicate.setDimensions(dimensions);
+            if (row.getPackageCount() != null) duplicate.setPackageCount(row.getPackageCount());
+            if (row.getPackageVolumeCbm() != null) duplicate.setPackageVolumeCbm(row.getPackageVolumeCbm());
+            if (row.getGrossWeight() != null) duplicate.setGrossWeight(row.getGrossWeight());
             duplicate.setUpdatedAt(LocalDateTime.now());
             rspuVariantMapper.updateById(duplicate);
             return duplicate;
@@ -505,21 +565,36 @@ public class ProductImportService {
             : "默认变体");
         variant.setSizeCode(sizeCode);
         variant.setSizeText(row.getSizeText());
+        variant.setDimensions(dimensionsJson(row, null));
+        variant.setPackageCount(row.getPackageCount());
+        variant.setPackageVolumeCbm(row.getPackageVolumeCbm());
+        variant.setGrossWeight(row.getGrossWeight());
         variant.setColorCode(colorCode);
         variant.setColorText(row.getColorText());
         variant.setMaterialCode(materialCode);
         variant.setMaterialText(row.getMaterialText());
-        variant.setReferencePriceBand(StringUtils.hasText(row.getVariantReferencePriceBand())
-            ? row.getVariantReferencePriceBand().trim().toLowerCase()
-            : null);
-        variant.setProductLevel(StringUtils.hasText(row.getVariantProductLevel())
-            ? DictNormalizes.normalize(row.getVariantProductLevel(), dictCache.get("factory_level"))
-            : null);
         variant.setStatus("active");
         variant.setCreatedAt(LocalDateTime.now());
         variant.setUpdatedAt(LocalDateTime.now());
         rspuVariantMapper.insert(variant);
         return variant;
+    }
+
+    private String dimensionsJson(ProductImportRow row, String existingJson) {
+        if (row.getWidthMm() == null && row.getDepthMm() == null && row.getHeightMm() == null) return null;
+        Map<String, Object> dimensions = new LinkedHashMap<>();
+        if (StringUtils.hasText(existingJson)) {
+            try { dimensions.putAll(objectMapper.readValue(existingJson, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {})); }
+            catch (Exception ignored) { /* Invalid old JSON is replaced by confirmed values. */ }
+        }
+        if (row.getWidthMm() != null) dimensions.put("widthMm", row.getWidthMm());
+        if (row.getDepthMm() != null) dimensions.put("depthMm", row.getDepthMm());
+        if (row.getHeightMm() != null) dimensions.put("heightMm", row.getHeightMm());
+        if (StringUtils.hasText(row.getSourceSizeText())) dimensions.put("sourceSizeText", row.getSourceSizeText());
+        dimensions.put("unit", "mm");
+        dimensions.put("source", "import_confirmed");
+        try { return objectMapper.writeValueAsString(dimensions); }
+        catch (Exception e) { throw new IllegalStateException("无法保存规格尺寸", e); }
     }
 
     private String resolveCodeOrNull(String dictType, String raw, List<CategoryDict> dicts) {
@@ -545,6 +620,9 @@ public class ProductImportService {
         LinkedHashSet<String> urls = new LinkedHashSet<>();
         if (StringUtils.hasText(row.getPrimaryImageUrl())) urls.add(row.getPrimaryImageUrl().trim());
         urls.addAll(splitCsv(row.getDetailImageUrls()));
+        // A product without images has nothing to synchronize. Otherwise the final
+        // updateById contains only the ID and MyBatis-Plus emits an empty SET clause.
+        if (urls.isEmpty()) return;
         List<ImageAssets> existing = imageAssetsMapper.selectList(new QueryWrapper<ImageAssets>().eq("rspu_id", rspuId));
         Map<String, ImageAssets> byUrl = existing.stream().collect(Collectors.toMap(ImageAssets::getStorageUrl,
             a -> a, (a, b) -> a));
@@ -623,36 +701,34 @@ public class ProductImportService {
             || row.getRetailPrice().compareTo(new BigDecimal("9999999999.99")) > 0)) return "零售参考价必须在 0~9999999999.99 之间";
         if (row.getMoq() != null && row.getMoq() < 1) return "MOQ 必须大于等于 1";
         if (row.getLeadTimeDays() != null && row.getLeadTimeDays() < 0) return "交期天数不能为负数";
-        if (row.getQuantity() != null && row.getQuantity() < 1) return "数量必须大于等于 1";
         for (String url : splitCsv(row.getDetailImageUrls())) {
             if (!validImageUrl(url)) return "详情图 URL 必须是有效的 http/https 地址且不超过 500 字符";
         }
         if (StringUtils.hasText(row.getPrimaryImageUrl()) && !validImageUrl(row.getPrimaryImageUrl())) return "主图 URL 必须是有效的 http/https 地址且不超过 500 字符";
         if (StringUtils.hasText(row.getSizeText()) && row.getSizeText().length() > 100) return "尺寸原文不能超过 100 字符";
+        if (row.getPackageCount() != null && (row.getPackageCount() < 1 || row.getPackageCount() > 100000))
+            return "包数必须在 1~100000 之间";
+        if (row.getPackageVolumeCbm() != null && (row.getPackageVolumeCbm().signum() < 0
+            || row.getPackageVolumeCbm().compareTo(new BigDecimal("999999999.999999999")) > 0
+            || row.getPackageVolumeCbm().stripTrailingZeros().scale() > 9))
+            return "体积(CBM)必须在 0~999999999.999999999 之间，最多 9 位小数";
+        if (row.getGrossWeight() != null && (row.getGrossWeight().signum() < 0
+            || row.getGrossWeight().compareTo(new BigDecimal("99999999999.999")) > 0
+            || row.getGrossWeight().stripTrailingZeros().scale() > 3))
+            return "重量必须在 0~99999999999.999 之间，最多 3 位小数";
+        for (Integer value : List.of(row.getWidthMm() == null ? 1 : row.getWidthMm(),
+            row.getDepthMm() == null ? 1 : row.getDepthMm(), row.getHeightMm() == null ? 1 : row.getHeightMm())) {
+            if (value < 1 || value > 100000) return "结构化尺寸必须在 1~100000 mm 之间";
+        }
+        if ((row.getWidthMm() == null) != (row.getDepthMm() == null))
+            return "宽度和进深必须同时填写毫米值";
         if (StringUtils.hasText(row.getColorText()) && row.getColorText().length() > 100) return "颜色原文不能超过 100 字符";
         if (StringUtils.hasText(row.getMaterialText()) && row.getMaterialText().length() > 255) return "材质原文不能超过 255 字符";
-        if (StringUtils.hasText(row.getVariantReferencePriceBand())
-            && !List.of("low", "mid", "high").contains(row.getVariantReferencePriceBand().toLowerCase())) return "变体参考价格带必须是 low/mid/high 之一";
-        if (StringUtils.hasText(row.getVariantProductLevel())
-            && !DictNormalizes.isValid(row.getVariantProductLevel(), dictCache.get("factory_level"))) return "变体产品等级不存在";
-        if (StringUtils.hasText(row.getCategoryCode())) {
-            String categoryCode = row.getCategoryCode().trim().toUpperCase();
-            if (categoryCode.length() > 16) {
-                return "品类码 长度不能超过 16";
-            }
-            if (!DictNormalizes.isValid(categoryCode, dictCache.get("category"))) {
-                return "品类码不存在: " + categoryCode;
-            }
-        }
-
         if (StringUtils.hasText(row.getRspuId()) && row.getRspuId().trim().length() > 64) {
             return "RSPU ID 长度不能超过 64";
         }
         if (StringUtils.hasText(row.getExternalCode()) && row.getExternalCode().trim().length() > 64) {
             return "外部编码 长度不能超过 64";
-        }
-        if (StringUtils.hasText(row.getPositioningLabel()) && row.getPositioningLabel().trim().length() > 64) {
-            return "定位标签 长度不能超过 64";
         }
         if (StringUtils.hasText(row.getProductName()) && row.getProductName().trim().length() > 255) {
             return "商品名称 长度不能超过 255";
@@ -661,48 +737,7 @@ public class ProductImportService {
             return "变体显示名称 长度不能超过 128";
         }
 
-        if (StringUtils.hasText(row.getPositioningLabel())
-            && !DictNormalizes.isValid(row.getPositioningLabel().trim(), dictCache.get("style"))) {
-            return "定位标签不存在: " + row.getPositioningLabel();
-        }
-        if (StringUtils.hasText(row.getProductLevel())
-            && !DictNormalizes.isValid(row.getProductLevel().trim(), dictCache.get("factory_level"))) {
-            return "产品等级不存在: " + row.getProductLevel();
-        }
-
-        if (StringUtils.hasText(row.getReferencePriceBand())) {
-            String band = row.getReferencePriceBand().trim().toLowerCase();
-            if (!List.of("low", "mid", "high").contains(band)) {
-                return "参考价格带必须是 low/mid/high 之一";
-            }
-        }
-        if (row.getWarrantyYears() != null && (row.getWarrantyYears() < 0 || row.getWarrantyYears() > 100)) {
-            return "保修年限 必须在 0~100 之间";
-        }
-
-        String sixDimError = validateJson(row.getSixDimTags(), "六维标签");
-        if (sixDimError != null) {
-            return sixDimError;
-        }
-        String keySpecsError = validateJson(row.getKeySpecs(), "关键规格");
-        if (keySpecsError != null) {
-            return keySpecsError;
-        }
-
         return null;
-    }
-
-    private String validateJson(String json, String fieldName) {
-        if (!StringUtils.hasText(json)) {
-            return null;
-        }
-        try {
-            var value = objectMapper.readTree(json.trim());
-            if (value == null || !value.isObject()) return fieldName + "必须是 JSON 对象";
-            return null;
-        } catch (Exception e) {
-            return fieldName + " 不是有效的 JSON 字符串";
-        }
     }
 
     private boolean validImageUrl(String value) {
@@ -724,7 +759,7 @@ public class ProductImportService {
         if (error != null) throw new BusinessException(error);
 
         RspuMaster rspu = new RspuMaster();
-        buildRspuFromRow(rspu, row, dictCache, false);
+        buildRspuFromRow(rspu, row, false);
         rspu.setRspuId(IdGenerator.rspuId());
         rspu.setExternalCode(trim(row.getExternalCode()));
         rspu.setStatus("active");
@@ -734,16 +769,11 @@ public class ProductImportService {
         rspu.setUpdatedAt(LocalDateTime.now());
         rspuMasterMapper.insert(rspu);
 
-        if (DictNormalizes.isValid(rspu.getPositioningLabel(), dictCache.get("style"))) {
-            rspuCodeService.assignCode(rspu.getRspuId(), rspu.getCategoryCode(), rspu.getPositioningLabel(),
-                resolveImportSizeCode(row.getSizeCode(), dictCache.get("size")));
-        }
+        rspuCodeService.assignCode(rspu.getRspuId());
 
         RspuVariant variant = createVariantIfNotExists(rspu.getRspuId(), row, dictCache);
         saveImages(rspu.getRspuId(), row);
         saveFactoryPrice(rspu.getRspuId(), variant.getVariantId(), row);
-        saveStyles(rspu.getRspuId(), rspu.getPositioningLabel(), dictCache.get("style"), false);
-        saveScenes(rspu.getRspuId(), splitCsv(row.getSceneTags()), dictCache.get("scene"), false);
 
         return Map.of(
             "rspuId", rspu.getRspuId(),
@@ -763,7 +793,7 @@ public class ProductImportService {
         String error = validateRow(row, dictCache);
         if (error != null) throw new BusinessException(error);
 
-        buildRspuFromRow(existing, row, dictCache, true);
+        buildRspuFromRow(existing, row, true);
         if (StringUtils.hasText(row.getExternalCode())) existing.setExternalCode(row.getExternalCode());
         if (StringUtils.hasText(request.getDescription())) existing.setDescription(request.getDescription().trim());
         existing.setUpdatedAt(LocalDateTime.now());
@@ -778,29 +808,44 @@ public class ProductImportService {
             if (StringUtils.hasText(row.getVariantDisplayName())) variant.setDisplayName(row.getVariantDisplayName());
             if (StringUtils.hasText(row.getSizeCode())) variant.setSizeCode(row.getSizeCode());
             if (StringUtils.hasText(row.getSizeText())) variant.setSizeText(row.getSizeText());
+            String dimensions = dimensionsJson(row, variant.getDimensions());
+            if (dimensions != null) variant.setDimensions(dimensions);
             if (StringUtils.hasText(row.getColorCode())) variant.setColorCode(row.getColorCode());
             if (StringUtils.hasText(row.getColorText())) variant.setColorText(row.getColorText());
             if (StringUtils.hasText(row.getMaterialCode())) variant.setMaterialCode(row.getMaterialCode());
             if (StringUtils.hasText(row.getMaterialText())) variant.setMaterialText(row.getMaterialText());
-            if (StringUtils.hasText(row.getVariantReferencePriceBand())) variant.setReferencePriceBand(row.getVariantReferencePriceBand());
-            if (StringUtils.hasText(row.getVariantProductLevel())) variant.setProductLevel(row.getVariantProductLevel());
             variant.setUpdatedAt(LocalDateTime.now());
             rspuVariantMapper.updateById(variant);
         }
 
         saveImages(rspuId, row);
         saveFactoryPrice(rspuId, variant.getVariantId(), row);
-        saveStyles(rspuId, existing.getPositioningLabel(), dictCache.get("style"), true);
-        saveScenes(rspuId, splitCsv(row.getSceneTags()), dictCache.get("scene"), true);
 
         return Map.of("rspuId", rspuId, "message", "商品更新成功");
     }
 
     @Transactional
     public void deleteProduct(String rspuId) {
-        RspuMaster rspu = rspuMasterMapper.selectById(rspuId);
-        if (rspu == null) throw new BusinessException("商品不存在: " + rspuId);
-        rspuMasterMapper.deleteById(rspuId);
+        deleteProducts(List.of(rspuId));
+    }
+
+    /**
+     * Permanently removes products. This intentionally bypasses MyBatis-Plus
+     * logical deletion so that the product and its owned rows are gone from
+     * the database after the transaction commits.
+     */
+    @Transactional
+    public int deleteProducts(Collection<String> rspuIds) {
+        List<String> ids = rspuIds == null ? List.of() : rspuIds.stream()
+            .filter(Objects::nonNull)
+            .map(String::trim)
+            .filter(id -> !id.isEmpty())
+            .distinct()
+            .toList();
+        if (ids.isEmpty()) throw new BusinessException("请选择要删除的商品");
+        int deleted = rspuMasterMapper.hardDeleteByRspuIds(ids);
+        if (deleted == 0) throw new BusinessException("商品不存在: " + String.join(", ", ids));
+        return deleted;
     }
 
     @Transactional
@@ -850,29 +895,21 @@ public class ProductImportService {
 
     private ProductImportRow toImportRow(ManualProductEntryRequest request) {
         ProductImportRow row = new ProductImportRow();
-        row.setCategoryCode(request.getCategoryCode());
-        row.setPositioningLabel(request.getPositioningLabel());
         row.setProductName(request.getProductName());
         row.setColorPrimaryName(request.getColorPrimaryName());
-        row.setMaterialTags(request.getMaterialTags() == null ? null : String.join(",", request.getMaterialTags()));
-        row.setSceneTags(request.getSceneTags() == null ? null : String.join(",", request.getSceneTags()));
-        row.setProductLevel(request.getProductLevel());
-        row.setWarrantyYears(request.getWarrantyYears());
-        row.setReferencePriceBand(request.getReferencePriceBand());
-        row.setSixDimTags(request.getSixDimTags());
-        row.setKeySpecs(request.getKeySpecs());
         row.setDescription(request.getDescription());
         row.setRetailPrice(request.getRetailPrice());
         row.setExternalCode(request.getExternalCode());
         row.setVariantDisplayName(request.getVariantDisplayName());
         row.setSizeCode(request.getSizeCode());
         row.setSizeText(request.getSizeText());
+        row.setWidthMm(request.getWidthMm());
+        row.setDepthMm(request.getDepthMm());
+        row.setHeightMm(request.getHeightMm());
         row.setColorCode(request.getColorCode());
         row.setColorText(request.getColorText());
         row.setMaterialCode(request.getMaterialCode());
         row.setMaterialText(request.getMaterialText());
-        row.setVariantReferencePriceBand(request.getVariantReferencePriceBand());
-        row.setVariantProductLevel(request.getVariantProductLevel());
         row.setFactoryPrice(request.getFactoryPrice());
         row.setMoq(request.getMoq());
         row.setLeadTimeDays(request.getLeadTimeDays());
@@ -888,28 +925,16 @@ public class ProductImportService {
     private void normalizeRow(ProductImportRow row, Map<String, List<CategoryDict>> dictCache) {
         row.setRspuId(trim(row.getRspuId()));
         row.setExternalCode(trim(row.getExternalCode()));
-        row.setCategoryCode(trim(row.getCategoryCode()));
-        row.setPositioningLabel(trim(row.getPositioningLabel()));
         row.setProductName(trim(row.getProductName()));
         row.setDescription(trim(row.getDescription()));
         row.setColorPrimaryName(trim(row.getColorPrimaryName()));
-        row.setMaterialTags(trim(row.getMaterialTags()));
-        row.setSceneTags(trim(row.getSceneTags()));
-        row.setProductLevel(trim(row.getProductLevel()));
-        row.setReferencePriceBand(trim(row.getReferencePriceBand()));
-        row.setSixDimTags(trim(row.getSixDimTags()));
-        row.setKeySpecs(trim(row.getKeySpecs()));
         row.setPrimaryImageUrl(trim(row.getPrimaryImageUrl()));
         row.setDetailImageUrls(trim(row.getDetailImageUrls()));
         row.setVariantDisplayName(trim(row.getVariantDisplayName()));
         row.setSizeCode(trim(row.getSizeCode()));
         row.setColorCode(trim(row.getColorCode()));
         row.setMaterialCode(trim(row.getMaterialCode()));
-        row.setVariantReferencePriceBand(trim(row.getVariantReferencePriceBand()));
-        row.setVariantProductLevel(trim(row.getVariantProductLevel()));
 
-        if (StringUtils.hasText(row.getCategoryCode())) row.setCategoryCode(DictNormalizes.normalize(row.getCategoryCode(), dictCache.get("category")));
-        if (StringUtils.hasText(row.getVariantProductLevel())) row.setVariantProductLevel(DictNormalizes.normalize(row.getVariantProductLevel(), dictCache.get("factory_level")));
         if (StringUtils.hasText(row.getSizeText())) row.setSizeText(row.getSizeText().trim());
         if (StringUtils.hasText(row.getColorText())) row.setColorText(row.getColorText().trim());
         if (StringUtils.hasText(row.getMaterialText())) row.setMaterialText(row.getMaterialText().trim());
@@ -919,12 +944,6 @@ public class ProductImportService {
             && !StringUtils.hasText(row.getColorText())) row.setColorText(row.getColorCode());
         if (StringUtils.hasText(row.getMaterialCode()) && resolveCodeOrNull("material", row.getMaterialCode(), dictCache.get("material")) == null
             && !StringUtils.hasText(row.getMaterialText())) row.setMaterialText(row.getMaterialCode());
-        if (StringUtils.hasText(row.getPositioningLabel())) {
-            row.setPositioningLabel(DictNormalizes.normalize(row.getPositioningLabel(), dictCache.get("style")));
-        }
-        if (StringUtils.hasText(row.getProductLevel())) {
-            row.setProductLevel(DictNormalizes.normalize(row.getProductLevel(), dictCache.get("factory_level")));
-        }
     }
 
     private List<String> splitCsv(String value) {

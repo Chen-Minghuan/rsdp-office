@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -97,6 +98,12 @@ public class ProductImportController {
         return Result.ok(productImportService.importRows(request));
     }
 
+    @PostMapping(value = "/import-confirm", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<ProductImportResult> confirmImportWithFile(@RequestPart("file") MultipartFile file,
+                                                              @RequestPart("request") ProductImportRequest request) {
+        return Result.ok(productImportService.importRowsWithFile(file, request));
+    }
+
     @PostMapping("/manual")
     public Result<Map<String, Object>> manualEntry(@RequestBody ManualProductEntryRequest request) {
         return Result.ok(productImportService.createManualEntry(request));
@@ -117,6 +124,11 @@ public class ProductImportController {
     public Result<Void> deleteProduct(@PathVariable String rspuId) {
         productImportService.deleteProduct(rspuId);
         return Result.ok(null);
+    }
+
+    @DeleteMapping("/batch")
+    public Result<Integer> deleteProducts(@RequestBody List<String> rspuIds) {
+        return Result.ok(productImportService.deleteProducts(rspuIds));
     }
 
     @PostMapping("/{rspuId}/restore")

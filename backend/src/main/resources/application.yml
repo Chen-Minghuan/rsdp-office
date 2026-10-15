@@ -11,8 +11,8 @@ spring:
     driver-class-name: org.postgresql.Driver
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      max-file-size: 150MB
+      max-request-size: 150MB
 
 mybatis-plus:
   configuration:
@@ -30,7 +30,7 @@ rsdp:
   vision:
     url: # 配置 RSDP AI 图纸识别服务地址，例如 http://localhost:8080/api/v1/floor-plan/recognize
   import:
-    max-file-size: 50MB
+    max-file-size: 150MB
 
 logging:
   level:

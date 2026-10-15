@@ -17,8 +17,6 @@ const products = Array.from({ length: 15 }, (_, index) => ({
   rspuId: `PRODUCT-${index + 1}`,
   rspuCode: `RSDP-${String(index + 1).padStart(3, '0')}`,
   externalCode: `EXTERNAL-${index + 1}`,
-  categoryCode: index % 2 ? 'DK' : 'CH',
-  categoryPath: index % 2 ? '办公家具 / 办公桌' : '办公家具 / 办公椅',
   productName: index % 2 ? `简约办公桌 ${index + 1}` : `人体工学椅 ${index + 1}`,
   positioningLabel: '现代办公', primaryImageUrl: null, retailPrice: 980 + index * 100,
   referencePriceBand: '标准', productLevel: 'L2', warrantyYears: 3,
@@ -64,7 +62,7 @@ async function assertNoProjectSteps() {
   assert.equal(await page.getByRole('navigation', { name: '项目设计步骤' }).count(), 0)
 }
 
-async function chooseFile(name = '商品清单.csv', content = '品类码,商品名称\nCH,办公椅') {
+async function chooseFile(name = '商品清单.csv', content = '商品名称\n办公椅') {
   await page.getByLabel('选择商品数据文件').setInputFiles({ name, mimeType: 'text/csv', buffer: Buffer.from(content) })
 }
 
@@ -82,15 +80,12 @@ try {
   assert.equal(await page.locator('tbody tr').count(), 1)
   await page.getByRole('button', { name: '查看简约办公桌 2详情' }).click()
   await page.getByRole('dialog').waitFor()
-  assert.match(await page.getByRole('dialog').innerText(), /办公家具 \/ 办公桌/)
   await page.keyboard.press('Escape')
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选' }).click()
-  await page.getByLabel('筛选商品品类').selectOption('CH')
   await page.getByLabel('筛选商品状态').selectOption('active')
-  assert.equal(await page.locator('tbody tr').count(), 5)
-  await page.getByLabel('筛选商品品类').selectOption('')
+  assert.equal(await page.locator('tbody tr').count(), 10)
   await page.getByLabel('筛选商品状态').selectOption('')
 
   await page.getByRole('link', { name: '空间设计', exact: true }).click()
