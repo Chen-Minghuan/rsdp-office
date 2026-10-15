@@ -21,4 +21,8 @@ public final class IdGenerator {
     public static String imageId() {
         return "IMG-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
+
+    public static String spatialId(String prefix) {
+        return prefix + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+    }
 }

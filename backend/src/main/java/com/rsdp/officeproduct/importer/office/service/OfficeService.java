@@ -104,6 +104,9 @@ public class OfficeService {
 
     @Transactional
     public CanvasDto saveCanvas(SaveCanvasRequest request) {
+        if ("design".equals(request.getMode())) {
+            OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(request.getObjects()), request.getDesignZoneId());
+        }
         String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
         ensureProjectExists(projectId);
 
@@ -285,6 +288,14 @@ public class OfficeService {
         dto.setObjects(readJsonList(c.getObjectsJson()));
         dto.setFiles(readJsonList(c.getFilesJson()));
         dto.setBlank(c.getBlank());
+        if ("design".equals(dto.getMode())) {
+            try {
+                OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(dto.getObjects()), dto.getDesignZoneId());
+            } catch (BusinessException invalidDraft) {
+                dto.setMode("overview");
+                dto.setDesignZoneId(null);
+            }
+        }
         return dto;
     }
 
