@@ -77,6 +77,23 @@ export interface FurnitureObject {
   label?: string
 }
 
+export interface ProductComboItem {
+  productId: string
+  qty: number
+  optional?: boolean
+}
+
+export interface ProductCombo {
+  id: string
+  name: string
+  desc: string
+  style?: string
+  kind: 'workstation' | 'meeting' | 'reception' | 'executive' | 'collaboration'
+  uses: ZoneType[]
+  items: ProductComboItem[]
+  price: number
+}
+
 export type OfficeObject = ZoneObject | NoteObject | ArrowObject | ReferenceObject | FurnitureObject
 
 export type ToneKey = 'blue' | 'green' | 'yellow' | 'purple' | 'pink'

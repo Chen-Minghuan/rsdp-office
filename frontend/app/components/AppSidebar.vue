@@ -31,6 +31,15 @@ function isActive(to: string) {
           <AppIcon name="map" />
           <span>空间设计</span>
         </NuxtLink>
+        <NuxtLink
+          to="/manual-canvas"
+          :aria-current="route.path === '/manual-canvas' ? 'page' : undefined"
+          class="flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition"
+          :class="route.path === '/manual-canvas' ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-cream'"
+        >
+          <AppIcon name="zone" />
+          <span>手动布局</span>
+        </NuxtLink>
         <div class="hidden px-3 mt-3 text-xs leading-relaxed text-muted md:block">
           <div class="text-[10px] mb-1">当前项目</div>
           <div class="line-clamp-2">{{ store.project.name || '尚未选择项目' }}</div>
