@@ -115,7 +115,6 @@ onMounted(loadPending)
           <thead class="bg-bg text-xs text-muted">
             <tr>
               <th class="px-5 py-3 font-medium">商品名称 / 编码</th>
-              <th class="px-4 py-3 font-medium">品类</th>
               <th class="px-4 py-3 text-right font-medium">零售价</th>
               <th class="px-4 py-3 font-medium">导入时间</th>
               <th class="px-5 py-3 text-right font-medium">操作</th>
@@ -135,7 +134,6 @@ onMounted(loadPending)
                   </div>
                 </div>
               </td>
-              <td class="px-4 py-3 text-xs text-muted">{{ product.categoryCode || '—' }}</td>
               <td class="px-4 py-3 text-right">{{ formatPrice(product.retailPrice) }}</td>
               <td class="px-4 py-3 text-xs text-muted">{{ formatDate(product.createdAt) }}</td>
               <td class="px-5 py-3 text-right">
@@ -153,7 +151,7 @@ onMounted(loadPending)
     <dialog ref="rejectDialog" class="rounded-2xl border border-line bg-white p-6 shadow-panel backdrop:bg-black/20">
       <h3 class="mb-2 text-base font-semibold">驳回商品</h3>
       <p class="mb-4 text-xs text-muted">驳回后该商品不会进入商品库。请填写驳回原因。</p>
-      <textarea v-model="rejectRemark" rows="3" class="mb-4 w-full rounded-lg border border-line p-3 text-sm outline-bronze" placeholder="例如：品类信息缺失、价格异常…"></textarea>
+      <textarea v-model="rejectRemark" rows="3" class="mb-4 w-full rounded-lg border border-line p-3 text-sm outline-bronze" placeholder="例如：商品信息缺失、价格异常…"></textarea>
       <div class="flex justify-end gap-3">
         <button type="button" class="rounded-lg border border-line px-4 py-2 text-sm hover:bg-cream" @click="closeReject">取消</button>
         <button type="button" class="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800" @click="confirmReject">确认驳回</button>

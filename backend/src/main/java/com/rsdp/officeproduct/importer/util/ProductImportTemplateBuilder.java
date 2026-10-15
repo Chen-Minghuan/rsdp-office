@@ -24,7 +24,7 @@ public final class ProductImportTemplateBuilder {
 
     private static final Set<String> REQUIRED_HEADS = Set.of("商品名称");
     private static final Set<String> RECOMMENDED_HEADS = Set.of(
-        "外部编码", "品类码", "定位标签", "主图URL", "零售参考价", "六维标签");
+        "外部编码", "主图URL", "零售参考价", "宽度(mm)", "进深(mm)");
 
     private ProductImportTemplateBuilder() {
     }
@@ -75,10 +75,11 @@ public final class ProductImportTemplateBuilder {
         rows.add(List.of("更新模式", "updateIfExists=true 时，空单元格不覆盖已有数据"));
         rows.add(List.of());
         rows.add(List.of("列名", "填写要求", "说明", "示例值"));
-        rows.add(List.of("品类码", "建议", "新商品为空时使用 OF（办公家具）；已有商品保留原品类；如 DK 办公桌 / CH 办公椅", "DK"));
         rows.add(List.of("商品名称", "必填", "新商品必填，同编码规格行可继承；更新已有商品可留空", "人体工学办公椅"));
-        rows.add(List.of("六维标签", "建议", "合法 JSON 字符串", "{\"A\":[\"A1\"],\"B\":[\"B2\"]}"));
         rows.add(List.of("尺寸原文", "建议", "工厂尺寸/规格原文", "1200*600*750"));
+        rows.add(List.of("宽度(mm) / 进深(mm)", "建议同时填写", "正整数毫米；两列必须成对填写，明确尺寸后才进入画布候选", "1200 / 600"));
+        rows.add(List.of("高度(mm)", "可选", "正整数毫米；不确定时留空，不按原文猜测", "750"));
+        rows.add(List.of("包数 / 体积(CBM) / 重量(原表值)", "可选", "供应商包装资料，分别保存到变体；包数不是商品数量，重量单位按原表核对", "9 / 0.742 / 209"));
         rows.add(List.of("零售参考价", "建议", "数字（元）", "1299"));
         rows.add(List.of("工厂价", "可选", "数字（元），单工厂报价", "899"));
         rows.add(List.of("MOQ", "可选", "最小起订量，默认 1", "10"));

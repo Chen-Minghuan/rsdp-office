@@ -19,38 +19,11 @@ public class ProductImportRow {
     @ExcelProperty("外部编码")
     private String externalCode;
 
-    @ExcelProperty("品类码")
-    private String categoryCode;
-
-    @ExcelProperty("定位标签")
-    private String positioningLabel;
-
     @ExcelProperty("商品名称")
     private String productName;
 
     @ExcelProperty("主色")
     private String colorPrimaryName;
-
-    @ExcelProperty("材质标签")
-    private String materialTags;
-
-    @ExcelProperty("场景标签")
-    private String sceneTags;
-
-    @ExcelProperty("产品等级")
-    private String productLevel;
-
-    @ExcelProperty("保修年限")
-    private Integer warrantyYears;
-
-    @ExcelProperty("参考价格带")
-    private String referencePriceBand;
-
-    @ExcelProperty("六维标签")
-    private String sixDimTags;
-
-    @ExcelProperty("关键规格")
-    private String keySpecs;
 
     @ExcelProperty("主图URL")
     private String primaryImageUrl;
@@ -67,6 +40,27 @@ public class ProductImportRow {
     @ExcelProperty("尺寸原文")
     private String sizeText;
 
+    /** Original supplier cell when one source line expands into exact size variants. */
+    private String sourceSizeText;
+
+    @ExcelProperty("宽度(mm)")
+    private Integer widthMm;
+
+    @ExcelProperty("进深(mm)")
+    private Integer depthMm;
+
+    @ExcelProperty("高度(mm)")
+    private Integer heightMm;
+
+    @ExcelProperty("包数")
+    private Integer packageCount;
+
+    @ExcelProperty("体积(CBM)")
+    private BigDecimal packageVolumeCbm;
+
+    @ExcelProperty("重量(原表值)")
+    private BigDecimal grossWeight;
+
     @ExcelProperty("颜色码")
     private String colorCode;
 
@@ -78,12 +72,6 @@ public class ProductImportRow {
 
     @ExcelProperty("材质原文")
     private String materialText;
-
-    @ExcelProperty("变体参考价格带")
-    private String variantReferencePriceBand;
-
-    @ExcelProperty("变体产品等级")
-    private String variantProductLevel;
 
     @ExcelProperty("描述/配置说明")
     private String description;
@@ -100,6 +88,4 @@ public class ProductImportRow {
     @ExcelProperty("交期天数")
     private Integer leadTimeDays;
 
-    @ExcelProperty("数量")
-    private Integer quantity;
 }

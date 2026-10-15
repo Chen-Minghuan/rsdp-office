@@ -17,6 +17,7 @@ public class ProductImportResult {
     private int skippedCount;
     private int productCount;
     private int variantCount;
+    private int embeddedImageCount;
     private List<ProductImportFailure> failures = new ArrayList<>();
     private List<ProductImportFailure> warnings = new ArrayList<>();
     private DataCleansingReport cleansingReport = new DataCleansingReport();

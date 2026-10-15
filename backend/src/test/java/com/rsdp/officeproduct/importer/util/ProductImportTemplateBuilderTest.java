@@ -10,10 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProductImportTemplateBuilderTest {
 
     @Test
-    void headerNamesContainsSixDimTags() {
+    void headerNamesContainCoreFieldsWithoutRetiredMetadata() {
         List<String> headers = ProductImportTemplateBuilder.headerNames();
-        assertTrue(headers.contains("六维标签"), "模板应包含六维标签列");
-        assertTrue(headers.contains("品类码"), "模板应包含品类码列");
+        assertTrue(headers.contains("商品名称"), "模板应包含商品名称列");
+        org.junit.jupiter.api.Assertions.assertFalse(headers.contains("品类码"));
+        assertTrue(headers.contains("宽度(mm)"), "模板应包含毫米尺寸列");
+        org.junit.jupiter.api.Assertions.assertFalse(headers.contains("定位标签"));
+        org.junit.jupiter.api.Assertions.assertFalse(headers.contains("六维标签"));
     }
 
     @Test

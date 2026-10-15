@@ -9,7 +9,8 @@ const zone = computed(() => store.zones.find((z) => z.id === store.designZoneId)
 
 const modules = computed(() => {
   if (!zone.value) return []
-  return store.products.filter((p) => p.uses.includes(zone.value!.zoneType))
+  return store.products.filter((p) => p.uses.includes(zone.value!.zoneType)
+    || (p.kind === 'other' && p.uses.length === 1 && p.uses[0] === 'OTHER'))
 })
 
 const selectedModule = ref<Product | null>(null)

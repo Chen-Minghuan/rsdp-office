@@ -1,36 +1,17 @@
 <script setup lang="ts">
-import type { DictItem } from '~/types/imported-products'
-
 const api = useOfficeApi()
 const router = useRouter()
 
-const isLoading = ref(true)
 const isSubmitting = ref(false)
-const dictError = ref<string | null>(null)
 const submitError = ref<string | null>(null)
-
-const categories = ref<DictItem[]>([])
-const styles = ref<DictItem[]>([])
-const scenes = ref<DictItem[]>([])
-const materials = ref<DictItem[]>([])
-const levels = ref<DictItem[]>([])
 
 const imageFiles = ref<File[]>([])
 const imagePreviewUrls = ref<string[]>([])
 const isUploadingImages = ref(false)
 
 const form = ref({
-  categoryCode: '',
-  positioningLabel: '',
   productName: '',
   colorPrimaryName: '',
-  materialTags: [] as string[],
-  sceneTags: [] as string[],
-  productLevel: '',
-  warrantyYears: null as number | null,
-  referencePriceBand: '',
-  sixDimTags: '',
-  keySpecs: '',
   description: '',
   retailPrice: null as number | null,
   externalCode: '',
@@ -38,40 +19,18 @@ const form = ref({
   variantDisplayName: '',
   sizeCode: '',
   sizeText: '',
+  widthMm: null as number | null,
+  depthMm: null as number | null,
+  heightMm: null as number | null,
   colorCode: '',
   colorText: '',
   materialCode: '',
   materialText: '',
-  variantReferencePriceBand: '',
-  variantProductLevel: '',
 
   factoryPrice: null as number | null,
   moq: null as number | null,
   leadTimeDays: null as number | null,
 })
-
-async function loadDicts() {
-  isLoading.value = true
-  dictError.value = null
-  try {
-    const [c, s, sc, m, l] = await Promise.all([
-      api.loadDicts('category'),
-      api.loadDicts('style'),
-      api.loadDicts('scene'),
-      api.loadDicts('material'),
-      api.loadDicts('factory_level'),
-    ])
-    categories.value = c
-    styles.value = s
-    scenes.value = sc
-    materials.value = m
-    levels.value = l
-  } catch (e) {
-    dictError.value = e instanceof Error ? e.message : '字典加载失败'
-  } finally {
-    isLoading.value = false
-  }
-}
 
 function onImageSelect(event: Event) {
   const files = Array.from((event.target as HTMLInputElement).files || [])
@@ -96,8 +55,8 @@ function removeImage(index: number) {
 
 async function submitForm() {
   if (isSubmitting.value) return
-  if (!form.value.categoryCode || !form.value.positioningLabel) {
-    submitError.value = '请选择品类和定位标签'
+  if (!form.value.productName?.trim()) {
+    submitError.value = '请填写商品名称'
     return
   }
   isSubmitting.value = true
@@ -124,7 +83,6 @@ async function submitForm() {
   }
 }
 
-onMounted(loadDicts)
 </script>
 
 <template>
@@ -144,49 +102,16 @@ onMounted(loadDicts)
       </div>
     </div>
 
-    <div v-if="dictError" class="flex-none rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
-      <p>字典加载失败：{{ dictError }}</p>
-      <button type="button" class="mt-2 rounded-lg bg-cream px-3 py-1.5 text-xs font-semibold text-bronze-dark" @click="loadDicts">重试</button>
-    </div>
-
     <div v-if="submitError" class="flex-none rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">
       {{ submitError }}
     </div>
 
-    <div v-if="isLoading" class="grid flex-1 place-items-center">
-      <div class="flex items-center gap-2 text-muted">
-        <AppIcon name="reset" size="5" class="animate-spin" />
-        <span class="text-sm">加载字典中…</span>
-      </div>
-    </div>
-
-    <form v-else class="flex-none rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6" @submit.prevent="submitForm">
+    <form class="flex-none rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6" @submit.prevent="submitForm">
       <h2 class="mb-4 text-base font-semibold">基础信息</h2>
       <div class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">品类 <span class="text-red-700">*</span></label>
-          <select v-model="form.categoryCode" required class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze">
-            <option value="">请选择</option>
-            <option v-for="d in categories" :key="d.dictCode" :value="d.dictCode">{{ d.dictName }}（{{ d.dictCode }}）</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">定位标签 <span class="text-red-700">*</span></label>
-          <select v-model="form.positioningLabel" required class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze">
-            <option value="">请选择</option>
-            <option v-for="d in styles" :key="d.dictCode" :value="d.dictCode">{{ d.dictName }}（{{ d.dictCode }}）</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">产品等级</label>
-          <select v-model="form.productLevel" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze">
-            <option value="">请选择</option>
-            <option v-for="d in levels" :key="d.dictCode" :value="d.dictCode">{{ d.dictName }}（{{ d.dictCode }}）</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">商品名称</label>
-          <input v-model="form.productName" type="text" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：人体工学办公椅">
+          <label class="text-xs font-medium text-muted">商品名称 <span class="text-red-700">*</span></label>
+          <input v-model="form.productName" type="text" required class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：人体工学办公椅">
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="text-xs font-medium text-muted">主色</label>
@@ -200,38 +125,9 @@ onMounted(loadDicts)
           <label class="text-xs font-medium text-muted">零售参考价</label>
           <input v-model.number="form.retailPrice" type="number" min="0" step="0.01" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：1299">
         </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">保修年限</label>
-          <input v-model.number="form.warrantyYears" type="number" min="0" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：3">
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">参考价格带</label>
-          <select v-model="form.referencePriceBand" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze">
-            <option value="">请选择</option>
-            <option value="low">low</option>
-            <option value="mid">mid</option>
-            <option value="high">high</option>
-          </select>
-        </div>
         <div class="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-3">
           <label class="text-xs font-medium text-muted">描述/配置说明</label>
           <textarea v-model="form.description" rows="2" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：可调节扶手、透气网布…" />
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">材质标签</label>
-          <select v-model="form.materialTags" multiple class="h-24 rounded-lg border border-line bg-white px-3 py-2 text-xs outline-bronze">
-            <option v-for="d in materials" :key="d.dictCode" :value="d.dictCode">{{ d.dictName }}</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">场景标签</label>
-          <select v-model="form.sceneTags" multiple class="h-24 rounded-lg border border-line bg-white px-3 py-2 text-xs outline-bronze">
-            <option v-for="d in scenes" :key="d.dictCode" :value="d.dictCode">{{ d.dictName }}</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">六维标签（JSON）</label>
-          <textarea v-model="form.sixDimTags" rows="2" class="rounded-lg border border-line px-3 py-2.5 text-xs font-mono outline-bronze" placeholder='{"A":["A1"]}' />
         </div>
       </div>
 
@@ -248,6 +144,10 @@ onMounted(loadDicts)
         <div class="flex flex-col gap-1.5">
           <label class="text-xs font-medium text-muted">尺寸原文</label>
           <input v-model="form.sizeText" type="text" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：680×650×1100">
+        </div>
+        <div v-for="field in [{ key: 'widthMm', label: '宽度(mm)' }, { key: 'depthMm', label: '进深(mm)' }, { key: 'heightMm', label: '高度(mm)' }]" :key="field.key" class="flex flex-col gap-1.5">
+          <label class="text-xs font-medium text-muted">{{ field.label }}</label>
+          <input v-model.number="form[field.key as 'widthMm' | 'depthMm' | 'heightMm']" type="number" min="1" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="毫米">
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="text-xs font-medium text-muted">颜色码</label>

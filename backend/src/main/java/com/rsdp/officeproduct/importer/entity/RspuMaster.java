@@ -19,29 +19,10 @@ public class RspuMaster {
 
     private String rspuCode;
     private String externalCode;
-    private String categoryCode;
-    private String categoryPath;
-    private String positioningLabel;
     private String productName;
     private String colorPrimaryName;
     private String description;
     private BigDecimal retailPrice;
-
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String sixDimTags;
-
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String materialTags;
-
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String sceneTags;
-
-    private String referencePriceBand;
-    private String productLevel;
-    private Integer warrantyYears;
-
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String keySpecs;
 
     private String primaryImageUrl;
 

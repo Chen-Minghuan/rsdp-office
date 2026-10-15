@@ -109,7 +109,7 @@ export interface Product {
   desc: string
   variant: string
   price: number
-  kind: 'workstation' | 'chair' | 'meeting' | 'sofa' | 'desk' | 'cabinet'
+  kind: 'workstation' | 'chair' | 'meeting' | 'sofa' | 'desk' | 'cabinet' | 'other'
   uses: ZoneType[]
   widthCm: number
   depthCm: number

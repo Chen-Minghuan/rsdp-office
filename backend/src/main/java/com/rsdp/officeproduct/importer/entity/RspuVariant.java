@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.rsdp.officeproduct.importer.config.JsonbTypeHandler;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -23,13 +24,14 @@ public class RspuVariant {
 
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String dimensions;
+    private Integer packageCount;
+    private BigDecimal packageVolumeCbm;
+    private BigDecimal grossWeight;
 
     private String colorCode;
     private String colorText;
     private String materialCode;
     private String materialText;
-    private String referencePriceBand;
-    private String productLevel;
     private String status;
 
     private LocalDateTime createdAt;

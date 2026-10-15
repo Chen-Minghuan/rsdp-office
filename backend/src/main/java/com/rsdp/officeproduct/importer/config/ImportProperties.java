@@ -10,5 +10,5 @@ import org.springframework.util.unit.DataSize;
 @ConfigurationProperties(prefix = "rsdp.import")
 public class ImportProperties {
 
-    private DataSize maxFileSize = DataSize.ofMegabytes(50);
+    private DataSize maxFileSize = DataSize.ofMegabytes(150);
 }

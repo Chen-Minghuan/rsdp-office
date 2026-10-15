@@ -5,10 +5,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.entity.FactoryProductPrice;
 import com.rsdp.officeproduct.importer.entity.RspuMaster;
 import com.rsdp.officeproduct.importer.entity.RspuVariant;
-import com.rsdp.officeproduct.importer.mapper.FactoryProductPriceMapper;
 import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
 import com.rsdp.officeproduct.importer.mapper.RspuVariantMapper;
 import com.rsdp.officeproduct.importer.office.dto.*;
@@ -29,8 +27,6 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -44,7 +40,6 @@ public class OfficeService {
     private final OfficeAgentMessageMapper messageMapper;
     private final RspuMasterMapper rspuMasterMapper;
     private final RspuVariantMapper rspuVariantMapper;
-    private final FactoryProductPriceMapper factoryProductPriceMapper;
     private final ObjectMapper objectMapper;
 
     private static final String DEFAULT_PROJECT_ID = "OFFICE-PROJECT-001";
@@ -225,21 +220,16 @@ public class OfficeService {
         List<String> rspuIds = rspus.stream().map(RspuMaster::getRspuId).collect(Collectors.toList());
         List<RspuVariant> variants = rspuVariantMapper.selectList(
             new QueryWrapper<RspuVariant>().in("rspu_id", rspuIds).eq("status", "active"));
-        List<FactoryProductPrice> prices = factoryProductPriceMapper.selectList(
-            new QueryWrapper<FactoryProductPrice>().in("rspu_id", rspuIds));
-
         Map<String, List<RspuVariant>> variantMap = variants.stream().collect(Collectors.groupingBy(RspuVariant::getRspuId));
-        Map<String, List<FactoryProductPrice>> priceMap = prices.stream().collect(Collectors.groupingBy(FactoryProductPrice::getRspuId));
 
         List<OfficeProductDto> result = new ArrayList<>();
         for (RspuMaster rspu : rspus) {
             List<RspuVariant> vs = variantMap.getOrDefault(rspu.getRspuId(), List.of());
-            List<FactoryProductPrice> ps = priceMap.getOrDefault(rspu.getRspuId(), List.of());
             if (vs.isEmpty()) {
-                result.add(toProductDto(rspu, null, ps));
+                result.add(toProductDto(rspu, null));
             } else {
                 for (RspuVariant v : vs) {
-                    result.add(toProductDto(rspu, v, ps));
+                    result.add(toProductDto(rspu, v));
                 }
             }
         }
@@ -318,25 +308,25 @@ public class OfficeService {
         return dto;
     }
 
-    private OfficeProductDto toProductDto(RspuMaster rspu, RspuVariant variant, List<FactoryProductPrice> prices) {
+    private OfficeProductDto toProductDto(RspuMaster rspu, RspuVariant variant) {
         OfficeProductDto dto = new OfficeProductDto();
         dto.setId(variant != null ? variant.getVariantId() : rspu.getRspuId());
         dto.setName(rspu.getProductName());
         dto.setDesc(rspu.getDescription());
-        dto.setVariant(buildVariantText(variant, rspu));
-        dto.setPrice(resolvePrice(rspu, variant, prices));
-        dto.setKind(mapKind(rspu.getCategoryCode()));
-        dto.setUses(mapUses(rspu.getSceneTags(), rspu.getCategoryCode()));
-        int[] dims = resolveDimensions(variant, rspu);
+        dto.setVariant(buildVariantText(variant));
+        dto.setPrice(resolvePrice(rspu));
+        dto.setKind("other");
+        dto.setUses(List.of("OTHER"));
+        Integer[] dims = resolveDimensions(variant);
         dto.setWidthCm(dims[0]);
         dto.setDepthCm(dims[1]);
         dto.setImageUrl(rspu.getPrimaryImageUrl());
         return dto;
     }
 
-    private String buildVariantText(RspuVariant v, RspuMaster rspu) {
+    private String buildVariantText(RspuVariant v) {
         if (v == null) {
-            return StringUtils.hasText(rspu.getKeySpecs()) ? rspu.getKeySpecs() : "";
+            return "";
         }
         StringBuilder sb = new StringBuilder();
         if (StringUtils.hasText(v.getDisplayName())) {
@@ -357,90 +347,28 @@ public class OfficeService {
         return sb.toString();
     }
 
-    private BigDecimal resolvePrice(RspuMaster rspu, RspuVariant variant, List<FactoryProductPrice> prices) {
-        if (variant != null) {
-            Optional<FactoryProductPrice> vp = prices.stream()
-                .filter(p -> variant.getVariantId().equals(p.getVariantId())).findFirst();
-            if (vp.isPresent() && vp.get().getFactoryPrice() != null && vp.get().getFactoryPrice().compareTo(BigDecimal.ZERO) > 0) {
-                return vp.get().getFactoryPrice();
-            }
-        }
-        Optional<FactoryProductPrice> rp = prices.stream().findFirst();
-        if (rp.isPresent() && rp.get().getFactoryPrice() != null && rp.get().getFactoryPrice().compareTo(BigDecimal.ZERO) > 0) {
-            return rp.get().getFactoryPrice();
-        }
+    private BigDecimal resolvePrice(RspuMaster rspu) {
         if (rspu.getRetailPrice() != null && rspu.getRetailPrice().compareTo(BigDecimal.ZERO) > 0) {
             return rspu.getRetailPrice();
         }
         return BigDecimal.ZERO;
     }
 
-    private String mapKind(String categoryCode) {
-        if (!StringUtils.hasText(categoryCode)) return "other";
-        return switch (categoryCode.toUpperCase()) {
-            case "DK" -> "desk";
-            case "CH" -> "chair";
-            case "MT" -> "meeting";
-            case "MC" -> "chair";
-            case "SO" -> "sofa";
-            case "CB" -> "cabinet";
-            default -> "workstation";
-        };
-    }
-
-    private List<String> mapUses(String sceneTagsJson, String categoryCode) {
-        Set<String> uses = new LinkedHashSet<>();
-        if (StringUtils.hasText(sceneTagsJson)) {
-            try {
-                List<String> scenes = objectMapper.readValue(sceneTagsJson, new TypeReference<List<String>>() {});
-                for (String scene : scenes) {
-                    uses.add(mapSceneToZoneType(scene));
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        if (uses.isEmpty()) {
-            uses.add(mapCategoryToDefaultZoneType(categoryCode));
-        }
-        return new ArrayList<>(uses);
-    }
-
-    private String mapSceneToZoneType(String scene) {
-        return switch (scene.toUpperCase()) {
-            case "OPEN" -> "OPEN_OFFICE";
-            case "MEET" -> "MEETING_ROOM";
-            case "RECEP" -> "RECEPTION";
-            case "LOUNGE" -> "COLLABORATION";
-            case "EXEC" -> "EXECUTIVE_OFFICE";
-            default -> "OTHER";
-        };
-    }
-
-    private String mapCategoryToDefaultZoneType(String categoryCode) {
-        if (!StringUtils.hasText(categoryCode)) return "OTHER";
-        return switch (categoryCode.toUpperCase()) {
-            case "DK" -> "OPEN_OFFICE";
-            case "CH" -> "OPEN_OFFICE";
-            case "MT", "MC" -> "MEETING_ROOM";
-            case "SO" -> "RECEPTION";
-            case "CB" -> "EXECUTIVE_OFFICE";
-            default -> "OTHER";
-        };
-    }
-
-    private int[] resolveDimensions(RspuVariant variant, RspuMaster rspu) {
+    private Integer[] resolveDimensions(RspuVariant variant) {
         if (variant != null && StringUtils.hasText(variant.getDimensions())) {
             try {
                 Map<String, Object> dims = objectMapper.readValue(variant.getDimensions(), new TypeReference<>() {});
+                Integer widthMm = parseDim(dims.get("widthMm"));
+                Integer depthMm = parseDim(dims.get("depthMm"));
+                if (widthMm != null && depthMm != null && widthMm > 0 && depthMm > 0)
+                    return new Integer[]{(widthMm + 9) / 10, (depthMm + 9) / 10};
                 Integer w = parseDim(dims.get("widthCm"));
                 Integer d = parseDim(dims.get("depthCm"));
-                if (w != null && d != null) return new int[]{w, d};
+                if (w != null && d != null && w > 0 && d > 0) return new Integer[]{w, d};
             } catch (Exception ignored) {
             }
         }
-        Integer[] fromSpecs = parseSpecsDimensions(rspu.getKeySpecs());
-        if (fromSpecs[0] != null && fromSpecs[1] != null) return new int[]{fromSpecs[0], fromSpecs[1]};
-        return new int[]{120, 60};
+        return new Integer[]{null, null};
     }
 
     private Integer parseDim(Object value) {
@@ -451,22 +379,6 @@ public class OfficeService {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private Integer[] parseSpecsDimensions(String keySpecs) {
-        Integer[] empty = new Integer[]{null, null};
-        if (!StringUtils.hasText(keySpecs)) return empty;
-        try {
-            Map<String, Object> map = objectMapper.readValue(keySpecs, new TypeReference<>() {});
-            return new Integer[]{parseDim(map.get("widthCm")), parseDim(map.get("depthCm"))};
-        } catch (Exception ignored) {
-        }
-        Pattern pattern = Pattern.compile("(\\d+)\\s*[xX××]\\s*(\\d+)");
-        Matcher matcher = pattern.matcher(keySpecs);
-        if (matcher.find()) {
-            return new Integer[]{Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))};
-        }
-        return empty;
     }
 
     private String writeJson(Object value) {

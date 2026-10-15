@@ -20,7 +20,7 @@ const activeCategory = ref('all')
 
 const filteredProducts = computed(() => {
   const z = zone.value
-  let list = store.products.filter((p) => !z || p.uses.includes(z.zoneType))
+  let list = store.products.filter((p) => !z || p.uses.includes(z.zoneType) || (p.kind === 'other' && p.uses.length === 1 && p.uses[0] === 'OTHER'))
   if (activeCategory.value !== 'all') {
     list = list.filter((p) => p.kind === activeCategory.value)
   }

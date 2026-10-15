@@ -14,7 +14,7 @@ create table if not exists category_dict (
     primary key (dict_type, dict_code)
 );
 
--- 六维维度定义（可选）
+-- 六维定义表保留已有资料；新商品录入不使用。
 create table if not exists six_dim_schema (
     id bigserial primary key,
     category_code varchar(50) not null,
@@ -29,20 +29,10 @@ create table if not exists rspu_master (
     rspu_id varchar(64) primary key,
     rspu_code varchar(50) unique,
     external_code varchar(100),
-    category_code varchar(50),
-    category_path text,
-    positioning_label varchar(64),
     product_name varchar(255),
     color_primary_name varchar(64),
     description text,
     retail_price decimal(12,2),
-    six_dim_tags jsonb,
-    material_tags jsonb,
-    scene_tags jsonb,
-    reference_price_band varchar(20),
-    product_level varchar(20),
-    warranty_years int,
-    key_specs jsonb,
     primary_image_url varchar(500),
     detail_image_urls jsonb,
     status varchar(20) default 'active',
@@ -53,9 +43,6 @@ create table if not exists rspu_master (
     updated_at timestamp default now(),
     deleted_at timestamp
 );
-
--- 兼容已创建的表：允许 category_code 为空
-alter table if exists rspu_master alter column category_code drop not null;
 
 -- 兼容已创建的表：新增审核字段
 alter table if exists rspu_master add column if not exists audit_status varchar(20) default 'pending';
@@ -69,19 +56,20 @@ create table if not exists rspu_variant (
     size_code varchar(64),
     size_text varchar(100),
     dimensions jsonb,
+    package_count integer,
+    package_volume_cbm numeric(18,9),
+    gross_weight numeric(14,3),
     color_code varchar(64),
     color_text varchar(100),
     material_code varchar(128),
     material_text varchar(255),
-    reference_price_band varchar(20),
-    product_level varchar(20),
     status varchar(20) default 'active',
     created_at timestamp default now(),
     updated_at timestamp default now(),
     deleted_at timestamp
 );
 
--- 风格关联
+-- 旧关联表保留已有资料；新商品录入不写入。
 create table if not exists rspu_style (
     rspu_id varchar(64) not null references rspu_master(rspu_id),
     dict_type varchar(50) not null,
@@ -91,7 +79,6 @@ create table if not exists rspu_style (
     primary key (rspu_id, style_code)
 );
 
--- 场景关联
 create table if not exists rspu_scene (
     rspu_id varchar(64) not null references rspu_master(rspu_id),
     dict_type varchar(50) not null,
@@ -195,22 +182,6 @@ insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_or
 ('factory_level', 'B', 'B级', null, 2),
 ('factory_level', 'C', 'C级', null, 3)
 on conflict (dict_type, dict_code) do nothing;
-
--- 六维标签示例定义（A=功能场景 B=人体工学 C=风格 D=材质 E=预算带 F=尺寸带）
-insert into six_dim_schema (category_code, dim_code, dim_name, allowed_values) values
-('DK', 'A', '功能场景', '["独立工位","多人协作","升降桌"]'),
-('DK', 'B', '结构特性', '["电动升降","手动升降","固定高度"]'),
-('DK', 'C', '风格', '["现代简约","商务正装","工业风"]'),
-('DK', 'D', '主材', '["实木","钢木","全钢"]'),
-('DK', 'E', '预算带', '["经济型","中端","高端"]'),
-('DK', 'F', '尺寸带', '["1.0m","1.2m","1.4m","1.6m"]'),
-('CH', 'A', '功能场景', '["职员椅","高管椅","会议椅"]'),
-('CH', 'B', '人体工学', '["基础","中级","高级"]'),
-('CH', 'C', '风格', '["现代简约","商务正装","工业风"]'),
-('CH', 'D', '主材', '["网布","真皮","布艺"]'),
-('CH', 'E', '预算带', '["经济型","中端","高端"]'),
-('CH', 'F', '尺寸带', '["标准","加宽","加大"]')
-on conflict (category_code, dim_code) do nothing;
 
 -- 办公项目与画布数据（前后端贯通）
 create table if not exists office_project (

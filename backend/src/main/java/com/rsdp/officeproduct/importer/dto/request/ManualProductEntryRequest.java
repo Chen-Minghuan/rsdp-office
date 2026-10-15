@@ -11,17 +11,8 @@ import java.util.List;
 public class ManualProductEntryRequest {
 
     // RSPU 字段
-    private String categoryCode;
-    private String positioningLabel;
     private String productName;
     private String colorPrimaryName;
-    private List<String> materialTags = new ArrayList<>();
-    private List<String> sceneTags = new ArrayList<>();
-    private String productLevel;
-    private Integer warrantyYears;
-    private String referencePriceBand;
-    private String sixDimTags;
-    private String keySpecs;
     private String description;
     private BigDecimal retailPrice;
     private String externalCode;
@@ -30,12 +21,13 @@ public class ManualProductEntryRequest {
     private String variantDisplayName;
     private String sizeCode;
     private String sizeText;
+    private Integer widthMm;
+    private Integer depthMm;
+    private Integer heightMm;
     private String colorCode;
     private String colorText;
     private String materialCode;
     private String materialText;
-    private String variantReferencePriceBand;
-    private String variantProductLevel;
 
     // 工厂报价（默认工厂）
     private BigDecimal factoryPrice;

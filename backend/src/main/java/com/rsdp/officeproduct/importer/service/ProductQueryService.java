@@ -26,16 +26,9 @@ public class ProductQueryService {
         dto.setRspuId(e.getRspuId());
         dto.setRspuCode(e.getRspuCode());
         dto.setExternalCode(e.getExternalCode());
-        dto.setCategoryCode(e.getCategoryCode());
-        dto.setCategoryPath(e.getCategoryPath());
         dto.setProductName(e.getProductName());
-        dto.setPositioningLabel(e.getPositioningLabel());
         dto.setPrimaryImageUrl(e.getPrimaryImageUrl());
         dto.setRetailPrice(e.getRetailPrice());
-        dto.setReferencePriceBand(e.getReferencePriceBand());
-        dto.setProductLevel(e.getProductLevel());
-        dto.setWarrantyYears(e.getWarrantyYears());
-        dto.setSixDimTags(e.getSixDimTags());
         dto.setStatus(e.getStatus());
         dto.setAuditStatus(e.getAuditStatus());
         dto.setAuditRemark(e.getAuditRemark());

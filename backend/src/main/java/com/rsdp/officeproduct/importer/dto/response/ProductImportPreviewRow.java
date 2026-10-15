@@ -10,6 +10,22 @@ import java.util.Map;
 @Data
 public class ProductImportPreviewRow {
     private int rowIndex;
+    private int sourceSheetIndex;
+    private int sourceRowIndex;
+    private String sourceSheetName;
+    /** Original supplier size cell when one physical row expands into multiple exact variants. */
+    private String sourceSizeText;
+    private int sourceVariantCount;
+    private String sourceVariantNote;
+    private int embeddedImageCount;
+    /** Zero-based index in the source workbook's ordered images; null keeps an existing URL as primary. */
+    private Integer primaryEmbeddedImageIndex;
+    /** Null means all source images are selected; an empty list means none. */
+    private List<Integer> selectedEmbeddedImageIndexes;
+    /** Only small, read-only previews from the initial workbook upload; never used for import. */
+    private List<String> imagePreviews = new ArrayList<>();
+    private List<String> imageWarnings = new ArrayList<>();
+    private List<String> reviewWarnings = new ArrayList<>();
     private Map<String, String> fields = new LinkedHashMap<>();
     private boolean skipped;
     private String groupKey;

@@ -16,8 +16,8 @@ public class RspuCodeService {
     private final RspuMasterMapper rspuMasterMapper;
     private final AtomicInteger sequence = new AtomicInteger(0);
 
-    public String assignCode(String rspuId, String categoryCode, String positioningLabel, String sizeCode) {
-        String prefix = (categoryCode == null || categoryCode.isBlank()) ? "OF" : categoryCode.toUpperCase();
+    public String assignCode(String rspuId) {
+        String prefix = "PR";
         int nextSeq = 1;
         List<RspuMaster> latest = rspuMasterMapper.selectList(
             new QueryWrapper<RspuMaster>().likeRight("rspu_code", prefix + "-").orderByDesc("rspu_code").last("limit 1"));

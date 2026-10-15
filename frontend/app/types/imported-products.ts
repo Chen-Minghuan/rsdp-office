@@ -2,16 +2,9 @@ export interface ImportedProduct {
   rspuId: string
   rspuCode: string | null
   externalCode: string | null
-  categoryCode: string | null
-  categoryPath: string | null
   productName: string | null
-  positioningLabel: string | null
   primaryImageUrl: string | null
   retailPrice: number | null
-  referencePriceBand: string | null
-  productLevel: string | null
-  warrantyYears: number | null
-  sixDimTags: string | null
   status: string | null
   auditStatus: string | null
   auditRemark: string | null
@@ -45,6 +38,8 @@ export interface ProductImportResult {
   successCount: number
   failedCount: number
   skippedCount: number
+  embeddedImageCount?: number
+  imagePreviews?: string[]
   failures: ProductImportIssue[]
   warnings: ProductImportIssue[]
   cleansingReport: DataCleansingReport
@@ -67,6 +62,18 @@ export interface ProductImportColumn {
 
 export interface ProductImportPreviewRow {
   rowIndex: number
+  sourceSheetIndex?: number
+  sourceRowIndex?: number
+  sourceSheetName?: string
+  sourceSizeText?: string
+  sourceVariantCount?: number
+  sourceVariantNote?: string
+  embeddedImageCount?: number
+  primaryEmbeddedImageIndex?: number | null
+  selectedEmbeddedImageIndexes?: number[] | null
+  imagePreviews?: string[]
+  imageWarnings?: string[]
+  reviewWarnings?: string[]
   fields: Record<string, string>
   skipped: boolean
   groupKey: string
@@ -80,6 +87,8 @@ export interface ProductImportPreview {
   productCount: number
   invalidRows: number
   skippedRows: number
+  embeddedImageCount?: number
+  rowsWithImages?: number
   cleansingReport: DataCleansingReport
 }
 
@@ -90,17 +99,8 @@ export interface DictItem {
 }
 
 export interface ManualProductEntryRequest {
-  categoryCode: string
-  positioningLabel: string
   productName?: string
   colorPrimaryName?: string
-  materialTags?: string[]
-  sceneTags?: string[]
-  productLevel?: string
-  warrantyYears?: number | null
-  referencePriceBand?: string
-  sixDimTags?: string
-  keySpecs?: string
   description?: string
   retailPrice?: number | null
   externalCode?: string
@@ -108,12 +108,13 @@ export interface ManualProductEntryRequest {
   variantDisplayName?: string
   sizeCode?: string
   sizeText?: string
+  widthMm?: number | null
+  depthMm?: number | null
+  heightMm?: number | null
   colorCode?: string
   colorText?: string
   materialCode?: string
   materialText?: string
-  variantReferencePriceBand?: string
-  variantProductLevel?: string
 
   factoryPrice?: number | null
   moq?: number | null
@@ -128,12 +129,13 @@ export interface ProductVariant {
   sizeCode: string | null
   sizeText: string | null
   dimensions: string | null
+  packageCount: number | null
+  packageVolumeCbm: number | null
+  grossWeight: number | null
   colorCode: string | null
   colorText: string | null
   materialCode: string | null
   materialText: string | null
-  referencePriceBand: string | null
-  productLevel: string | null
   status: string
   factoryPrice: number | null
   moq: number | null
@@ -159,20 +161,10 @@ export interface ProductDetail {
   rspuId: string
   rspuCode: string | null
   externalCode: string | null
-  categoryCode: string | null
-  categoryPath: string | null
-  positioningLabel: string | null
   productName: string | null
   colorPrimaryName: string | null
   description: string | null
   retailPrice: number | null
-  referencePriceBand: string | null
-  productLevel: string | null
-  warrantyYears: number | null
-  sixDimTags: string | null
-  materialTags: string | null
-  sceneTags: string | null
-  keySpecs: string | null
   primaryImageUrl: string | null
   detailImageUrls: string | null
   status: string | null

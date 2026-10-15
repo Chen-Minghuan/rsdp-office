@@ -12,5 +12,7 @@ public class ProductImportPreview {
     private int productCount;
     private int invalidRows;
     private int skippedRows;
+    private int embeddedImageCount;
+    private int rowsWithImages;
     private DataCleansingReport cleansingReport = new DataCleansingReport();
 }

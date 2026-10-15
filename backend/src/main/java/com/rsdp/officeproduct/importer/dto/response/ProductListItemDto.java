@@ -14,16 +14,9 @@ public class ProductListItemDto {
     private String rspuId;
     private String rspuCode;
     private String externalCode;
-    private String categoryCode;
-    private String categoryPath;
     private String productName;
-    private String positioningLabel;
     private String primaryImageUrl;
     private BigDecimal retailPrice;
-    private String referencePriceBand;
-    private String productLevel;
-    private Integer warrantyYears;
-    private String sixDimTags;
     private String status;
     private String auditStatus;
     private String auditRemark;
