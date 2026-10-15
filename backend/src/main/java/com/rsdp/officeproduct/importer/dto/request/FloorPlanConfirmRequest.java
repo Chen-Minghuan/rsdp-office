@@ -47,5 +47,8 @@ public class FloorPlanConfirmRequest {
 
         @Valid
         private FloorPlanBBox bbox;
+
+        /** 确认后的多边形轮廓（毫米坐标），优先用于面积计算。 */
+        private List<List<Double>> polygon;
     }
 }

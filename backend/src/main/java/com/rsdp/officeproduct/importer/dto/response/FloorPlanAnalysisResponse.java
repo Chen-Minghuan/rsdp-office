@@ -49,6 +49,7 @@ public class FloorPlanAnalysisResponse {
     private Integer furnitureRevision;
     private String parseStatus;
     private Object unitResolution;
+    private DimensionCalibrationReport dimensionCalibration;
 
     private String inputMode;
     private JsonNode layout;

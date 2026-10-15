@@ -37,4 +37,12 @@ public interface FloorPlanSceneRevisionMapper extends BaseMapper<FloorPlanSceneR
         "activated_by = #{r.activatedBy} " +
         "WHERE analysis_id = #{r.analysisId} AND analysis_revision = #{r.analysisRevision}")
     int updateByRevision(@Param("r") FloorPlanSceneRevision revision);
+
+    @Update("UPDATE floor_plan_scene_revision SET raw_result = #{next, typeHandler=com.rsdp.officeproduct.importer.config.JsonbTypeHandler} " +
+        "WHERE analysis_id = #{analysisId} AND analysis_revision = #{revision} " +
+        "AND raw_result = #{expected, typeHandler=com.rsdp.officeproduct.importer.config.JsonbTypeHandler} " +
+        "AND EXISTS (SELECT 1 FROM floor_plan_analysis a WHERE a.analysis_id = #{analysisId} " +
+        "AND COALESCE(a.working_analysis_revision, a.active_analysis_revision, a.latest_analysis_revision, 1) = #{revision})")
+    int compareAndSetDimensionResult(@Param("analysisId") String analysisId, @Param("revision") Integer revision,
+                                    @Param("expected") String expected, @Param("next") String next);
 }

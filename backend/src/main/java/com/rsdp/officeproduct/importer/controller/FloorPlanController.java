@@ -4,6 +4,10 @@ import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.dto.request.FloorPlanConfirmRequest;
 import com.rsdp.officeproduct.importer.dto.response.FloorPlanAnalysisResponse;
 import com.rsdp.officeproduct.importer.service.FloorPlanService;
+import com.rsdp.officeproduct.importer.service.FloorPlanDimensionService;
+import com.rsdp.officeproduct.importer.dto.response.DimensionCalibrationReport;
+import com.rsdp.officeproduct.importer.dto.request.DimensionCalibrationConfirmRequest;
+import jakarta.validation.constraints.Min;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +35,7 @@ import java.util.Map;
 public class FloorPlanController {
 
     private final FloorPlanService floorPlanService;
+    private final FloorPlanDimensionService floorPlanDimensionService;
 
     /**
      * 上传户型图并创建分析任务。
@@ -49,10 +54,11 @@ public class FloorPlanController {
         @RequestParam(required = false) String hint,
         @RequestParam(required = false) String projectId,
         @RequestParam(required = false) String sourceName,
+        @RequestParam(defaultValue = "1") int pageNumber,
         HttpServletRequest request) {
         String baseUrl = ServletUriComponentsBuilder.fromRequestUri(request)
             .replacePath("").toUriString();
-        return Result.ok(floorPlanService.analyze(image, cad, hint, projectId, sourceName, baseUrl));
+        return Result.ok(floorPlanService.analyze(image, cad, hint, projectId, sourceName, baseUrl, pageNumber));
     }
 
     /**
@@ -73,5 +79,23 @@ public class FloorPlanController {
         @PathVariable String analysisId,
         @Valid @RequestBody FloorPlanConfirmRequest request) {
         return Result.ok(floorPlanService.confirmRooms(analysisId, request));
+    }
+
+    @PostMapping("/{analysisId}/dimension-calibration/recognize")
+    public Result<DimensionCalibrationReport> recognizeDimensions(@PathVariable String analysisId,
+        @RequestParam @Min(1) int analysisRevision) {
+        return Result.ok(floorPlanDimensionService.recognize(analysisId, analysisRevision));
+    }
+
+    @GetMapping("/{analysisId}/dimension-calibration")
+    public Result<DimensionCalibrationReport> dimensionCalibration(@PathVariable String analysisId,
+        @RequestParam @Min(1) int analysisRevision, @RequestParam(defaultValue = "mm") String assumedUnit) {
+        return Result.ok(floorPlanDimensionService.get(analysisId, analysisRevision, assumedUnit));
+    }
+
+    @PostMapping("/{analysisId}/dimension-calibration/confirm")
+    public Result<DimensionCalibrationReport> confirmDimensionCalibration(@PathVariable String analysisId,
+        @Valid @RequestBody DimensionCalibrationConfirmRequest request) {
+        return Result.ok(floorPlanDimensionService.confirm(analysisId, request.getAnalysisRevision(), request.getReportId(), request.getAssumedUnit()));
     }
 }

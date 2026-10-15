@@ -31,6 +31,10 @@ services:
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
       RSDP_CAD-PARSER_URL: http://cad-parser:8090
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      RSDP_VISION_MODEL: ${RSDP_VISION_MODEL:-qwen3-vl-plus}
+      RSDP_VISION_URL: ${RSDP_VISION_URL:-}
     ports:
       - "127.0.0.1:8082:8082"
     depends_on:

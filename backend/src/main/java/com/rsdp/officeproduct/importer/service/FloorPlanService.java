@@ -65,7 +65,9 @@ public class FloorPlanService {
     private final OfficeProjectMapper officeProjectMapper;
     private final CadParseClient cadParseClient;
     private final VisionRecognitionClient visionRecognitionClient;
+    private final FloorPlanDimensionService floorPlanDimensionService;
     private final ObjectMapper objectMapper;
+    private final com.rsdp.officeproduct.importer.service.spatial.SpatialGeometryService spatialGeometryService;
 
     // ==================== 分析任务 ====================
 
@@ -75,6 +77,12 @@ public class FloorPlanService {
     @Transactional
     public Map<String, String> analyze(MultipartFile image, MultipartFile cad, String hint,
                                        String projectId, String sourceName, String baseUrl) {
+        return analyze(image, cad, hint, projectId, sourceName, baseUrl, 1);
+    }
+
+    @Transactional
+    public Map<String, String> analyze(MultipartFile image, MultipartFile cad, String hint,
+                                       String projectId, String sourceName, String baseUrl, int pageNumber) {
         if (!StringUtils.hasText(projectId)) {
             projectId = defaultProjectId();
         }
@@ -124,7 +132,7 @@ public class FloorPlanService {
             if (hasCad) {
                 rawResult = cadParseClient.parse(cad);
             } else {
-                rawResult = visionRecognitionClient.recognize(image);
+                rawResult = visionRecognitionClient.recognize(image, pageNumber);
             }
         } catch (Exception e) {
             log.error("识别失败", e);
@@ -154,6 +162,9 @@ public class FloorPlanService {
         FloorPlanDrawingBounds previewBounds = extractPreviewBounds(rawResult, drawingBounds);
         revision.setDrawingBounds(writeJson(drawingBounds));
         revision.setPreviewBounds(writeJson(previewBounds));
+        if (rawResult.has("unitResolution")) {
+            revision.setUnitResolution(rawResult.get("unitResolution").toString());
+        }
 
         // 提取质量提示
         List<FloorPlanQualityIssue> qualityIssues = extractQualityIssues(rawResult);
@@ -241,6 +252,9 @@ public class FloorPlanService {
             response.setDrawingBounds(parseBounds(revision.getDrawingBounds()));
             response.setPreviewBounds(parseBounds(revision.getPreviewBounds()));
             response.setUnitResolution(parseJsonNode(revision.getUnitResolution()));
+            JsonNode original = parseJsonNode(revision.getRawResult());
+            String assumedUnit = original == null ? "mm" : original.path("dimensionCalibrationConfirmation").path("assumedUnit").asText("mm");
+            response.setDimensionCalibration(floorPlanDimensionService.report(original, analysisId, targetRevision, assumedUnit));
         }
 
         return response;
@@ -280,8 +294,9 @@ public class FloorPlanService {
             room.setLabel(item.getLabel());
             room.setWidthMm(item.getWidthMm());
             room.setDepthMm(item.getDepthMm());
-            room.setAreaM2(calculateArea(item.getWidthMm(), item.getDepthMm()));
+            room.setPolygon(writeJson(item.getPolygon()));
             room.setBbox(writeJson(item.getBbox()));
+            room.setAreaM2(calculateAreaFromPolygon(item.getPolygon(), item.getWidthMm(), item.getDepthMm()));
             room.setConfirmationStatus(FloorPlanRoom.CONFIRMATION_STATUS_CONFIRMED);
             room.setGeometrySource(FloorPlanAnalysis.GEOMETRY_SOURCE_MANUAL_GEOMETRY);
             room.setSortOrder(sortOrder++);
@@ -573,6 +588,20 @@ public class FloorPlanService {
         if (widthMm == null || depthMm == null) return null;
         return BigDecimal.valueOf(widthMm).multiply(BigDecimal.valueOf(depthMm))
             .divide(BigDecimal.valueOf(1_000_000), 4, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateAreaFromPolygon(List<List<Double>> polygon, Integer widthMm, Integer depthMm) {
+        if (polygon != null && !polygon.isEmpty() && spatialGeometryService != null) {
+            try {
+                double areaMm2 = Math.abs(spatialGeometryService.ringArea(polygon));
+                if (areaMm2 > 0) {
+                    return BigDecimal.valueOf(areaMm2 / 1_000_000.0).setScale(4, RoundingMode.HALF_UP);
+                }
+            } catch (Exception e) {
+                log.warn("按多边形计算面积失败，回退到宽×深", e);
+            }
+        }
+        return calculateArea(widthMm, depthMm);
     }
 
     private String writeJson(Object value) {

@@ -2,6 +2,8 @@ server:
   port: 8082
 
 spring:
+  config:
+    import: optional:file:${user.home}/.config/rsdp-office/vision.properties
   application:
     name: office-product-import
   datasource:
@@ -28,7 +30,12 @@ rsdp:
   cad-parser:
     url: http://127.0.0.1:8091
   vision:
-    url: # 配置 RSDP AI 图纸识别服务地址，例如 http://localhost:8080/api/v1/floor-plan/recognize
+    url: ${RSDP_VISION_URL:} # 可选：已有识别接口；配置后优先使用
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    model: ${RSDP_VISION_MODEL:qwen3-vl-plus}
+    max-image-edge: 3072
+    pdf-dpi: 144
   import:
     max-file-size: 150MB
 
