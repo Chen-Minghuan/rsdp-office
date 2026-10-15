@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DictItem, ProductDetail, ProductVariant } from '~/types/imported-products'
+import type { ProductDetail, ProductVariant } from '~/types/imported-products'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,35 +13,10 @@ const error = ref<string | null>(null)
 const product = ref<ProductDetail | null>(null)
 const isEditing = ref(false)
 
-const categories = ref<DictItem[]>([])
-const styles = ref<DictItem[]>([])
-const scenes = ref<DictItem[]>([])
-const materials = ref<DictItem[]>([])
-const levels = ref<DictItem[]>([])
-
 const imageFiles = ref<File[]>([])
 const imagePreviewUrls = ref<string[]>([])
 
 const form = ref<Partial<ProductDetail>>({})
-
-async function loadDicts() {
-  try {
-    const [c, s, sc, m, l] = await Promise.all([
-      api.loadDicts('category'),
-      api.loadDicts('style'),
-      api.loadDicts('scene'),
-      api.loadDicts('material'),
-      api.loadDicts('factory_level'),
-    ])
-    categories.value = c
-    styles.value = s
-    scenes.value = sc
-    materials.value = m
-    levels.value = l
-  } catch (e) {
-    console.warn('字典加载失败', e)
-  }
-}
 
 async function loadProduct() {
   isLoading.value = true
@@ -62,15 +37,6 @@ function resetForm() {
   imageFiles.value = []
   imagePreviewUrls.value = []
   isEditing.value = false
-}
-
-function parseTags(json: string | null): Array<{ key: string; values: string[] }> {
-  if (!json) return []
-  try {
-    const tags = JSON.parse(json)
-    if (!tags || typeof tags !== 'object' || Array.isArray(tags)) return []
-    return Object.entries(tags).map(([key, value]) => ({ key, values: (Array.isArray(value) ? value : [value]).map(String) }))
-  } catch { return [] }
 }
 
 function formatPrice(price: number | null) {
@@ -115,17 +81,8 @@ async function saveProduct() {
     }
 
     const request = {
-      categoryCode: form.value.categoryCode || '',
-      positioningLabel: form.value.positioningLabel || '',
       productName: form.value.productName || undefined,
       colorPrimaryName: form.value.colorPrimaryName || undefined,
-      materialTags: parseTags(form.value.materialTags).flatMap(t => t.values),
-      sceneTags: parseTags(form.value.sceneTags).flatMap(t => t.values),
-      productLevel: form.value.productLevel || undefined,
-      warrantyYears: form.value.warrantyYears ?? undefined,
-      referencePriceBand: form.value.referencePriceBand || undefined,
-      sixDimTags: form.value.sixDimTags || undefined,
-      keySpecs: form.value.keySpecs || undefined,
       description: form.value.description || undefined,
       retailPrice: form.value.retailPrice ?? undefined,
       externalCode: form.value.externalCode || undefined,
@@ -137,8 +94,6 @@ async function saveProduct() {
       colorText: form.value.variants?.[0]?.colorText || undefined,
       materialCode: form.value.variants?.[0]?.materialCode || undefined,
       materialText: form.value.variants?.[0]?.materialText || undefined,
-      variantReferencePriceBand: form.value.variants?.[0]?.referencePriceBand || undefined,
-      variantProductLevel: form.value.variants?.[0]?.productLevel || undefined,
 
       factoryPrice: form.value.variants?.[0]?.factoryPrice ?? undefined,
       moq: form.value.variants?.[0]?.moq ?? undefined,
@@ -157,11 +112,11 @@ async function saveProduct() {
 }
 
 async function deleteProduct() {
-  if (!confirm('确定要删除该商品吗？删除后可在详情页恢复。')) return
+  if (!confirm('确定要永久删除该商品吗？商品及其规格、图片和报价数据会从数据库中删除，无法恢复。')) return
   isDeleting.value = true
   try {
     await api.deleteProduct(rspuId)
-    await loadProduct()
+    await router.push('/products')
   } catch (e) {
     error.value = e instanceof Error ? e.message : '删除失败'
   } finally {
@@ -169,17 +124,7 @@ async function deleteProduct() {
   }
 }
 
-async function restoreProduct() {
-  try {
-    await api.restoreProduct(rspuId)
-    await loadProduct()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '恢复失败'
-  }
-}
-
 onMounted(async () => {
-  await loadDicts()
   await loadProduct()
 })
 </script>
@@ -232,11 +177,10 @@ onMounted(async () => {
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button v-if="product.deletedAt" type="button" class="rounded-lg bg-green/10 px-4 py-2 text-sm font-semibold text-green hover:bg-green/20" @click="restoreProduct">恢复商品</button>
-          <button v-else type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark hover:bg-[#ebe3d8]" :class="isEditing ? 'bg-bronze text-white hover:bg-bronze-dark' : ''" @click="isEditing ? saveProduct() : isEditing = true">
+          <button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark hover:bg-[#ebe3d8]" :class="isEditing ? 'bg-bronze text-white hover:bg-bronze-dark' : ''" @click="isEditing ? saveProduct() : isEditing = true">
             {{ isEditing ? (isSaving ? '保存中…' : '保存') : '编辑' }}
           </button>
-          <button v-if="!product.deletedAt" type="button" class="rounded-lg bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50" :disabled="isDeleting" @click="deleteProduct">删除</button>
+          <button type="button" class="rounded-lg bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50" :disabled="isDeleting" @click="deleteProduct">永久删除</button>
           <button v-if="isEditing" type="button" class="rounded-lg border border-line px-4 py-2 text-sm hover:bg-cream" @click="resetForm">取消</button>
         </div>
       </div>
@@ -247,21 +191,13 @@ onMounted(async () => {
             <h2 class="mb-3 text-base font-semibold">基础信息</h2>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div v-for="field in [
-                { label: '品类', key: 'categoryCode', type: 'select', options: categories },
-                { label: '定位标签', key: 'positioningLabel', type: 'select', options: styles },
-                { label: '产品等级', key: 'productLevel', type: 'select', options: levels },
                 { label: '商品名称', key: 'productName', type: 'text' },
                 { label: '主色', key: 'colorPrimaryName', type: 'text' },
                 { label: '外部编码', key: 'externalCode', type: 'text' },
                 { label: '零售参考价', key: 'retailPrice', type: 'number' },
-                { label: '保修年限', key: 'warrantyYears', type: 'number' },
               ]" :key="field.key" class="flex flex-col gap-1.5">
                 <label class="text-xs font-medium text-muted">{{ field.label }}</label>
-                <select v-if="field.type === 'select' && field.options" v-model="form[field.key as keyof typeof form]" :disabled="!isEditing" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze disabled:bg-bg">
-                  <option value="">—</option>
-                  <option v-for="opt in field.options" :key="opt.dictCode" :value="opt.dictCode">{{ opt.dictName }}（{{ opt.dictCode }}）</option>
-                </select>
-                <input v-else v-model="form[field.key as keyof typeof form]" :type="field.type" :disabled="!isEditing" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze disabled:bg-bg">
+                <input v-model="form[field.key as keyof typeof form]" :type="field.type" :disabled="!isEditing" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze disabled:bg-bg">
               </div>
               <div class="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-3">
                 <label class="text-xs font-medium text-muted">描述/配置说明</label>
@@ -280,6 +216,9 @@ onMounted(async () => {
                     <th class="px-4 py-3 font-medium">尺寸</th>
                     <th class="px-4 py-3 font-medium">颜色</th>
                     <th class="px-4 py-3 font-medium">材质</th>
+                    <th class="px-4 py-3 text-right font-medium">包数</th>
+                    <th class="px-4 py-3 text-right font-medium">体积(CBM)</th>
+                    <th class="px-4 py-3 text-right font-medium">重量(原表值)</th>
                     <th class="px-4 py-3 text-right font-medium">工厂价</th>
                     <th class="px-4 py-3 text-right font-medium">MOQ</th>
                     <th class="px-4 py-3 text-right font-medium">交期</th>
@@ -292,6 +231,9 @@ onMounted(async () => {
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.sizeText || variant.sizeCode || '—' }}</td>
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.colorText || variant.colorCode || '—' }}</td>
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.materialText || variant.materialCode || '—' }}</td>
+                    <td class="px-4 py-3 text-right tabular-nums">{{ variant.packageCount ?? '—' }}</td>
+                    <td class="px-4 py-3 text-right tabular-nums">{{ variant.packageVolumeCbm ?? '—' }}</td>
+                    <td class="px-4 py-3 text-right tabular-nums">{{ variant.grossWeight ?? '—' }}</td>
                     <td class="px-4 py-3 text-right tabular-nums">{{ formatPrice(variant.factoryPrice) }}</td>
                     <td class="px-4 py-3 text-right tabular-nums">{{ variant.moq ?? '—' }}</td>
                     <td class="px-4 py-3 text-right tabular-nums">{{ variant.leadTimeDays ?? '—' }} 天</td>
