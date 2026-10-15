@@ -844,7 +844,7 @@ public class ProductImportService {
             .toList();
         if (ids.isEmpty()) throw new BusinessException("请选择要删除的商品");
         int deleted = rspuMasterMapper.hardDeleteByRspuIds(ids);
-        if (deleted == 0) throw new BusinessException("商品不存在: " + String.join(", ", ids));
+        if (deleted != ids.size()) throw new BusinessException("部分商品不存在或已删除，批量删除已取消，请刷新商品库后重试");
         return deleted;
     }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProductDetail, ProductVariant } from '~/types/imported-products'
+import type { ProductDetail } from '~/types/imported-products'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,8 +15,28 @@ const isEditing = ref(false)
 
 const imageFiles = ref<File[]>([])
 const imagePreviewUrls = ref<string[]>([])
-
+const selectedImageId = ref<string | null>(null)
 const form = ref<Partial<ProductDetail>>({})
+
+const galleryImages = computed(() => {
+  const images = (form.value.images || []).filter(image => image.storageUrl).map(image => ({
+    id: image.imageId,
+    url: image.storageUrl,
+    primary: image.primary,
+    label: image.primary ? '主图' : '商品图片',
+  }))
+  const primaryWasInAssets = product.value?.images.some(image => image.storageUrl === product.value?.primaryImageUrl)
+  if (product.value?.primaryImageUrl && !primaryWasInAssets && !images.some(image => image.url === product.value?.primaryImageUrl)) {
+    images.unshift({ id: 'primary', url: product.value.primaryImageUrl, primary: true, label: '主图' })
+  }
+  imagePreviewUrls.value.forEach((url, index) => images.push({ id: `new-${index}`, url, primary: false, label: '新图片' }))
+  return images
+})
+const selectedImage = computed(() => galleryImages.value.find(image => image.id === selectedImageId.value) || galleryImages.value[0] || null)
+
+watch(galleryImages, images => {
+  if (!images.some(image => image.id === selectedImageId.value)) selectedImageId.value = images[0]?.id || null
+})
 
 async function loadProduct() {
   isLoading.value = true
@@ -33,9 +53,11 @@ async function loadProduct() {
 
 function resetForm() {
   if (!product.value) return
-  form.value = { ...product.value }
+  imagePreviewUrls.value.forEach(URL.revokeObjectURL)
+  form.value = { ...product.value, images: [...product.value.images], variants: [...product.value.variants] }
   imageFiles.value = []
   imagePreviewUrls.value = []
+  selectedImageId.value = null
   isEditing.value = false
 }
 
@@ -64,8 +86,10 @@ function removeNewImage(index: number) {
   imagePreviewUrls.value.splice(index, 1)
 }
 
+onUnmounted(() => imagePreviewUrls.value.forEach(URL.revokeObjectURL))
+
 function removeExistingImage(index: number) {
-  if (!form.value.images) return
+  if (!form.value.images || index < 0) return
   form.value.images.splice(index, 1)
 }
 
@@ -130,7 +154,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-5 overflow-y-auto">
+  <div class="mx-auto flex h-full min-h-0 w-full max-w-[1480px] flex-col gap-5 overflow-y-auto">
     <div class="flex-none">
       <div class="mb-3 text-xs text-muted">
         <NuxtLink to="/products" class="hover:text-bronze-dark">商品资源 / 商品库</NuxtLink> / 商品详情
@@ -164,17 +188,13 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-else class="flex-none rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6">
-      <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex items-center gap-3">
-          <div class="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-cream text-bronze">
-            <img v-if="product.primaryImageUrl" :src="product.primaryImageUrl" class="h-full w-full object-cover" alt="">
-            <AppIcon v-else name="cube" size="7" />
-          </div>
-          <div>
-            <div class="text-lg font-bold">{{ product.productName || '未命名商品' }}</div>
-            <div class="text-xs text-muted">{{ product.rspuCode || product.rspuId }}</div>
-          </div>
+    <div v-else class="flex-none space-y-5">
+      <section class="rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6">
+      <div class="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-sm font-semibold text-ink">商品概览</span>
+          <span class="rounded-md bg-bg px-2.5 py-1 text-xs text-muted">{{ product.rspuCode || product.rspuId }}</span>
+          <span class="rounded-md px-2.5 py-1 text-xs" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
         </div>
         <div class="flex flex-wrap gap-2">
           <button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark hover:bg-[#ebe3d8]" :class="isEditing ? 'bg-bronze text-white hover:bg-bronze-dark' : ''" @click="isEditing ? saveProduct() : isEditing = true">
@@ -185,11 +205,35 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div class="space-y-5">
+      <div class="grid gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+        <section class="min-w-0" aria-label="商品图片">
+          <div class="aspect-[4/3] overflow-hidden rounded-xl border border-line bg-white">
+            <ProductImagePreview :src="selectedImage?.url" :alt="`${product.productName || '商品'}图片`" />
+          </div>
+          <div v-if="galleryImages.length" class="mt-3 flex gap-3 overflow-x-auto pb-2" aria-label="选择商品图片">
+            <button v-for="image in galleryImages" :key="image.id" type="button" class="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 bg-white transition" :class="selectedImage?.id === image.id ? 'border-bronze' : 'border-line hover:border-bronze/50'" :aria-label="`查看${image.label}`" :aria-pressed="selectedImage?.id === image.id" @click="selectedImageId = image.id">
+              <img :src="image.url" alt="" class="h-full w-full object-contain" loading="lazy">
+              <span v-if="image.primary" class="absolute bottom-0 left-0 rounded-tr bg-bronze px-1.5 py-0.5 text-[10px] text-white">主图</span>
+            </button>
+          </div>
+          <p v-if="galleryImages.length" class="mt-1 text-xs text-muted">共 {{ galleryImages.length }} 张图片</p>
+          <div v-if="isEditing" class="mt-4 flex flex-wrap items-center gap-2">
+            <label class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted hover:bg-cream">
+              <AppIcon name="plus" size="4" />添加图片
+              <input type="file" accept="image/*" multiple class="sr-only" @change="onImageSelect">
+            </label>
+            <button v-if="selectedImage?.id?.startsWith('new-')" type="button" class="rounded-lg px-3 py-2 text-sm text-red-700 hover:bg-red-50" @click="removeNewImage(Number(selectedImage.id.slice(4)))">移除当前图片</button>
+            <button v-else-if="selectedImage && selectedImage.id !== 'primary'" type="button" class="rounded-lg px-3 py-2 text-sm text-red-700 hover:bg-red-50" @click="removeExistingImage(form.images?.findIndex(image => image.imageId === selectedImage?.id) ?? -1)">移除当前图片</button>
+          </div>
+        </section>
+
+        <div class="min-w-0 max-w-[900px] space-y-5">
           <section>
-            <h2 class="mb-3 text-base font-semibold">基础信息</h2>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="mb-4 flex items-end justify-between gap-3 border-b border-line pb-3">
+              <div><div class="mb-1 text-xs text-muted">商品资料</div><h2 class="text-base font-semibold">基础信息</h2></div>
+              <span v-if="!isEditing" class="text-xl font-bold text-bronze-dark">{{ formatPrice(product.retailPrice) }}</span>
+            </div>
+            <div v-if="isEditing" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div v-for="field in [
                 { label: '商品名称', key: 'productName', type: 'text' },
                 { label: '主色', key: 'colorPrimaryName', type: 'text' },
@@ -197,19 +241,36 @@ onMounted(async () => {
                 { label: '零售参考价', key: 'retailPrice', type: 'number' },
               ]" :key="field.key" class="flex flex-col gap-1.5">
                 <label class="text-xs font-medium text-muted">{{ field.label }}</label>
-                <input v-model="form[field.key as keyof typeof form]" :type="field.type" :disabled="!isEditing" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze disabled:bg-bg">
+                <input v-model="form[field.key as keyof typeof form]" :type="field.type" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze">
               </div>
-              <div class="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-3">
+              <div class="flex flex-col gap-1.5 sm:col-span-2">
                 <label class="text-xs font-medium text-muted">描述/配置说明</label>
-                <textarea v-model="form.description" :disabled="!isEditing" rows="2" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze disabled:bg-bg" />
+                <textarea v-model="form.description" rows="3" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" />
               </div>
+            </div>
+            <div v-else>
+              <dl class="grid gap-4 sm:grid-cols-2">
+                <div><dt class="mb-1 text-xs text-muted">商品名称</dt><dd class="text-sm font-semibold text-ink">{{ product.productName || '—' }}</dd></div>
+                <div><dt class="mb-1 text-xs text-muted">主色</dt><dd class="text-sm text-ink">{{ product.colorPrimaryName || '—' }}</dd></div>
+                <div><dt class="mb-1 text-xs text-muted">外部编码</dt><dd class="break-all text-sm text-ink">{{ product.externalCode || '—' }}</dd></div>
+                <div><dt class="mb-1 text-xs text-muted">审核状态</dt><dd class="text-sm text-ink">{{ product.auditStatus === 'pending' ? '待审核' : product.auditStatus === 'approved' ? '已通过' : product.auditStatus || '—' }}</dd></div>
+              </dl>
+              <div class="mt-5 border-t border-line pt-4"><div class="mb-1 text-xs text-muted">描述 / 配置说明</div><p class="whitespace-pre-wrap text-sm leading-6 text-ink">{{ product.description || '暂无说明' }}</p></div>
             </div>
           </section>
 
-          <section>
-            <h2 class="mb-3 text-base font-semibold">规格与报价</h2>
+          <section class="grid gap-3 rounded-lg border border-line bg-[#fbfaf8] p-4 text-xs sm:grid-cols-2">
+            <div><span class="text-muted">创建时间</span><div class="mt-1 font-medium text-ink">{{ formatDate(product.createdAt) }}</div></div>
+            <div><span class="text-muted">更新时间</span><div class="mt-1 font-medium text-ink">{{ formatDate(product.updatedAt) }}</div></div>
+          </section>
+        </div>
+      </div>
+      </section>
+
+      <section class="rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6">
+            <div class="mb-4 flex flex-wrap items-end justify-between gap-2"><div><div class="mb-1 text-xs text-muted">商品规格</div><h2 class="text-base font-semibold">规格与报价</h2></div><span class="text-xs text-muted">{{ form.variants?.length || 0 }} 个规格</span></div>
             <div class="overflow-x-auto rounded-lg border border-line">
-              <table class="w-full text-left text-sm">
+              <table class="w-full min-w-[1050px] text-left text-sm">
                 <thead class="bg-bg text-xs text-muted">
                   <tr>
                     <th class="px-4 py-3 font-medium">变体名称</th>
@@ -226,6 +287,7 @@ onMounted(async () => {
                   </tr>
                 </thead>
                 <tbody>
+                  <tr v-if="!form.variants?.length"><td colspan="11" class="px-4 py-8 text-center text-sm text-muted">暂无规格信息</td></tr>
                   <tr v-for="variant in form.variants" :key="variant.variantId" class="border-t border-line">
                     <td class="px-4 py-3">{{ variant.displayName || '—' }}</td>
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.sizeText || variant.sizeCode || '—' }}</td>
@@ -244,42 +306,7 @@ onMounted(async () => {
                 </tbody>
               </table>
             </div>
-          </section>
-        </div>
-
-        <aside class="space-y-5">
-          <section>
-            <h2 class="mb-3 text-base font-semibold">商品图片</h2>
-            <div class="flex flex-wrap gap-2">
-              <div v-for="(img, idx) in form.images" :key="img.imageId" class="relative h-20 w-20 overflow-hidden rounded-lg border border-line bg-bg">
-                <img :src="img.storageUrl" class="h-full w-full object-cover" alt="">
-                <span v-if="img.primary" class="absolute left-1 top-1 rounded bg-bronze px-1 py-0.5 text-[10px] text-white">主图</span>
-                <button v-if="isEditing" type="button" class="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-red-700 shadow" @click="removeExistingImage(idx)">
-                  <AppIcon name="close" size="3" />
-                </button>
-              </div>
-              <div v-for="(url, idx) in imagePreviewUrls" :key="`new-${idx}`" class="relative h-20 w-20 overflow-hidden rounded-lg border border-line bg-bg">
-                <img :src="url" class="h-full w-full object-cover" alt="">
-                <button type="button" class="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-red-700 shadow" @click="removeNewImage(idx)">
-                  <AppIcon name="close" size="3" />
-                </button>
-              </div>
-              <label v-if="isEditing" class="grid h-20 w-20 cursor-pointer place-items-center rounded-lg border border-dashed border-line bg-bg text-muted hover:bg-cream">
-                <AppIcon name="plus" size="5" />
-                <input type="file" accept="image/*" multiple class="hidden" @change="onImageSelect">
-              </label>
-            </div>
-          </section>
-
-          <section class="rounded-lg bg-bg p-4 text-xs text-muted">
-            <div class="mb-2 flex justify-between"><span>商品编码</span><span class="text-ink">{{ product.rspuCode || product.rspuId }}</span></div>
-            <div class="mb-2 flex justify-between"><span>状态</span><span class="text-ink">{{ product.status === 'active' ? '在售' : product.status }}</span></div>
-            <div class="mb-2 flex justify-between"><span>审核状态</span><span class="text-ink">{{ product.auditStatus === 'pending' ? '待审核' : product.auditStatus === 'approved' ? '已通过' : product.auditStatus }}</span></div>
-            <div class="mb-2 flex justify-between"><span>创建时间</span><span class="text-ink">{{ formatDate(product.createdAt) }}</span></div>
-            <div class="flex justify-between"><span>更新时间</span><span class="text-ink">{{ formatDate(product.updatedAt) }}</span></div>
-          </section>
-        </aside>
-      </div>
+      </section>
     </div>
   </div>
 </template>

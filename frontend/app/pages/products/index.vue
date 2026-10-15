@@ -5,6 +5,8 @@ const api = useOfficeApi()
 const products = ref<ImportedProduct[]>([])
 const isLoading = ref(true)
 const listError = ref<string | null>(null)
+const actionError = ref<string | null>(null)
+const actionMessage = ref<string | null>(null)
 const search = ref('')
 const status = ref('')
 const currentPage = ref(1)
@@ -13,6 +15,7 @@ const pageInput = ref(1)
 const pageSizeOptions = [12, 24, 48, 96]
 const selectedIds = ref<Set<string>>(new Set())
 const isDeleting = ref(false)
+const deleteDialog = ref<HTMLDialogElement | null>(null)
 const selectedProduct = ref<ImportedProduct | null>(null)
 const detailDialog = ref<HTMLDialogElement | null>(null)
 const activeCount = computed(() => products.value.filter(product => product.status === 'active').length)
@@ -30,6 +33,8 @@ const pageProducts = computed(() => filteredProducts.value.slice((currentPage.va
 const pageProductIds = computed(() => pageProducts.value.map(product => product.rspuId))
 const allPageSelected = computed(() => pageProductIds.value.length > 0 && pageProductIds.value.every(id => selectedIds.value.has(id)))
 const somePageSelected = computed(() => pageProductIds.value.some(id => selectedIds.value.has(id)) && !allPageSelected.value)
+const allFilteredSelected = computed(() => filteredProducts.value.length > 0 && filteredProducts.value.every(product => selectedIds.value.has(product.rspuId)))
+const selectedProducts = computed(() => products.value.filter(product => selectedIds.value.has(product.rspuId)))
 
 watch([search, status, pageSize], () => {
   currentPage.value = 1
@@ -72,6 +77,8 @@ function toggleProduct(productId: string) {
   if (next.has(productId)) next.delete(productId)
   else next.add(productId)
   selectedIds.value = next
+  actionError.value = null
+  actionMessage.value = null
 }
 
 function togglePageSelection() {
@@ -79,6 +86,31 @@ function togglePageSelection() {
   if (allPageSelected.value) pageProductIds.value.forEach(id => next.delete(id))
   else pageProductIds.value.forEach(id => next.add(id))
   selectedIds.value = next
+  actionError.value = null
+  actionMessage.value = null
+}
+
+function toggleFilteredSelection() {
+  const next = new Set(selectedIds.value)
+  if (allFilteredSelected.value) filteredProducts.value.forEach(product => next.delete(product.rspuId))
+  else filteredProducts.value.forEach(product => next.add(product.rspuId))
+  selectedIds.value = next
+  actionError.value = null
+  actionMessage.value = null
+}
+
+function clearSelection() {
+  selectedIds.value = new Set()
+  actionError.value = null
+}
+
+function openDeleteDialog() {
+  if (!selectedIds.value.size || isDeleting.value) return
+  deleteDialog.value?.showModal()
+}
+
+function closeDeleteDialog() {
+  if (!isDeleting.value) deleteDialog.value?.close()
 }
 
 function goToPage() {
@@ -89,15 +121,18 @@ function goToPage() {
 async function deleteSelectedProducts() {
   const ids = [...selectedIds.value]
   if (!ids.length || isDeleting.value) return
-  if (!confirm(`确定永久删除选中的 ${ids.length} 件商品吗？商品及其规格、图片和报价数据会从数据库中删除，无法恢复。`)) return
   isDeleting.value = true
-  listError.value = null
+  actionError.value = null
+  actionMessage.value = null
   try {
-    await api.deleteProducts(ids)
+    const deletedCount = await api.deleteProducts(ids)
+    if (deletedCount !== ids.length) throw new Error(`请求删除 ${ids.length} 件商品，服务仅确认删除 ${deletedCount} 件，请刷新核对。`)
+    deleteDialog.value?.close()
     selectedIds.value = new Set()
     await loadProducts()
+    if (!listError.value) actionMessage.value = `已永久删除 ${deletedCount} 件商品。`
   } catch (error) {
-    listError.value = error instanceof Error ? error.message : '批量删除失败'
+    actionError.value = error instanceof Error ? error.message : '批量删除失败'
   } finally {
     isDeleting.value = false
   }
@@ -149,9 +184,19 @@ onMounted(loadProducts)
         <select v-model="status" aria-label="筛选商品状态" class="min-w-0 rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" :disabled="!statsAvailable">
           <option value="">全部状态</option><option value="active">在售</option><option value="other">非在售</option>
         </select>
-        <button v-if="selectedIds.size" type="button" class="rounded-lg bg-red-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50" :disabled="isDeleting" @click="deleteSelectedProducts">{{ isDeleting ? '删除中…' : `批量删除（${selectedIds.size}）` }}</button>
+        <button type="button" class="rounded-lg bg-red-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-45" :disabled="!selectedIds.size || isDeleting || !statsAvailable" @click="openDeleteDialog">批量删除{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</button>
         <button type="button" class="rounded-lg border border-line p-2.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="loadProducts"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
       </div>
+
+      <div v-if="selectedIds.size && statsAvailable" class="flex flex-wrap items-center gap-3 border-b border-line bg-red-50/60 px-4 py-3 text-sm">
+        <strong class="text-red-800">已选择 {{ selectedIds.size }} 件商品</strong>
+        <span class="text-xs text-muted">可跨页勾选</span>
+        <button v-if="filteredProducts.length" type="button" class="font-medium text-bronze-dark hover:underline" @click="toggleFilteredSelection">{{ allFilteredSelected ? '取消选择筛选结果' : `选择全部筛选结果（${filteredProducts.length}）` }}</button>
+        <button type="button" class="font-medium text-muted hover:text-ink hover:underline" @click="clearSelection">清空选择</button>
+      </div>
+      <p v-else-if="statsAvailable && products.length" class="border-b border-line px-4 py-2 text-xs text-muted">勾选商品后可批量永久删除；表头可选择当前页。</p>
+      <div v-if="actionError" class="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{{ actionError }}</div>
+      <div v-if="actionMessage" class="border-b border-green/20 bg-green/10 px-4 py-3 text-sm text-green" role="status">{{ actionMessage }}</div>
 
       <div v-if="isLoading" class="p-5" role="status" aria-label="正在加载商品">
         <div class="sr-only">加载商品数据中…</div>
@@ -178,11 +223,16 @@ onMounted(loadProducts)
 
       <div v-else class="overflow-x-auto">
         <table class="w-full whitespace-nowrap text-left text-sm">
-          <thead class="bg-bg text-xs text-muted"><tr><th class="w-12 px-5 py-3 font-medium"><input type="checkbox" :checked="allPageSelected" :indeterminate="somePageSelected" aria-label="选择当前页商品" @change="togglePageSelection"></th><th class="px-2 py-3 font-medium">商品名称 / 编码</th><th class="px-4 py-3 text-right font-medium">零售价</th><th class="px-4 py-3 font-medium">状态</th><th class="px-4 py-3 font-medium">更新日期</th><th class="px-5 py-3 text-right font-medium">操作</th></tr></thead>
+          <thead class="bg-bg text-xs text-muted"><tr><th class="w-12 px-5 py-3 font-medium"><input type="checkbox" :checked="allPageSelected" :indeterminate="somePageSelected" :disabled="isDeleting" aria-label="选择当前页商品" @change="togglePageSelection"></th><th class="px-2 py-3 font-medium">商品名称 / 编码</th><th class="px-4 py-3 text-right font-medium">零售价</th><th class="px-4 py-3 font-medium">状态</th><th class="px-4 py-3 font-medium">更新日期</th><th class="px-5 py-3 text-right font-medium">操作</th></tr></thead>
           <tbody>
             <tr v-for="product in pageProducts" :key="product.rspuId" class="border-t border-line transition hover:bg-bg/70">
-              <td class="px-5 py-4"><input type="checkbox" :checked="selectedIds.has(product.rspuId)" :aria-label="`选择${product.productName || '商品'}`" @change="toggleProduct(product.rspuId)"></td>
-              <td class="px-2 py-4"><div class="flex items-center gap-3"><div class="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-cream text-bronze"><img v-if="product.primaryImageUrl" :src="product.primaryImageUrl" :alt="product.productName || '商品图片'" class="h-full w-full object-cover" loading="lazy"><AppIcon v-else name="cube" size="5" /></div><div class="max-w-[250px]"><div class="truncate font-medium" :title="product.productName || undefined">{{ product.productName || '未命名商品' }}</div><div class="mt-1 text-xs text-muted">{{ product.rspuCode || product.externalCode || product.rspuId }}</div></div></div></td>
+              <td class="px-5 py-4"><input type="checkbox" :checked="selectedIds.has(product.rspuId)" :disabled="isDeleting" :aria-label="`选择${product.productName || '商品'}`" @change="toggleProduct(product.rspuId)"></td>
+              <td class="px-2 py-3">
+                <NuxtLink :to="`/products/${product.rspuId}`" class="group flex w-fit items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2" :aria-label="`查看${product.productName || '商品'}详情`">
+                  <div class="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg border border-line transition group-hover:border-bronze"><ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" /></div>
+                  <div class="min-w-0 max-w-[250px]"><div class="truncate font-medium group-hover:text-bronze-dark group-hover:underline" :title="product.productName || undefined">{{ product.productName || '未命名商品' }}</div><div class="mt-1 text-xs text-muted">{{ product.rspuCode || product.externalCode || product.rspuId }}</div></div>
+                </NuxtLink>
+              </td>
               <td class="px-4 py-4 text-right font-medium tabular-nums">{{ formatPrice(product.retailPrice) }}</td>
               <td class="px-4 py-4"><span class="rounded-md px-2 py-1 text-xs" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span></td>
               <td class="px-4 py-4 text-xs text-muted">{{ formatDate(product.updatedAt) }}</td>
@@ -199,6 +249,20 @@ onMounted(loadProducts)
         <div class="flex flex-wrap items-center justify-end gap-3"><label class="flex items-center gap-2">每页<select v-model.number="pageSize" class="rounded-md border border-line bg-white px-2 py-1.5 text-ink"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select>件</label><button type="button" class="rounded-md border border-line px-3 py-2 text-ink disabled:opacity-40" :disabled="currentPage === 1" @click="currentPage--">上一页</button><label class="flex items-center gap-1">第<input v-model.number="pageInput" type="number" min="1" :max="pageCount" class="w-14 rounded-md border border-line px-2 py-1.5 text-center text-ink" aria-label="跳转到页码" @keyup.enter="goToPage" @blur="goToPage">页 / {{ pageCount }}</label><button type="button" class="rounded-md border border-line px-3 py-2 text-ink disabled:opacity-40" :disabled="currentPage === pageCount" @click="currentPage++">下一页</button></div>
       </div>
     </section>
+
+    <dialog ref="deleteDialog" class="m-auto max-h-[85dvh] w-[min(520px,calc(100%_-_32px))] overflow-y-auto rounded-2xl border border-line bg-white p-6 text-ink shadow-panel backdrop:bg-black/40" aria-labelledby="batch-delete-title" @cancel="event => { if (isDeleting) event.preventDefault() }">
+      <h2 id="batch-delete-title" class="text-lg font-bold">确认永久删除 {{ selectedIds.size }} 件商品？</h2>
+      <p class="mt-2 text-sm leading-6 text-muted">商品主档及关联的规格、图片、报价等数据库记录会被删除，操作无法撤销。</p>
+      <div class="mt-4 max-h-48 overflow-y-auto rounded-lg border border-line bg-bg px-4 py-2 text-sm">
+        <div v-for="product in selectedProducts.slice(0, 8)" :key="product.rspuId" class="flex justify-between gap-3 border-b border-line py-2 last:border-0"><span class="min-w-0 truncate">{{ product.productName || '未命名商品' }}</span><span class="shrink-0 text-xs text-muted">{{ product.rspuCode || product.rspuId }}</span></div>
+        <p v-if="selectedProducts.length > 8" class="py-2 text-xs text-muted">另有 {{ selectedProducts.length - 8 }} 件商品</p>
+      </div>
+      <p v-if="actionError" class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{{ actionError }}</p>
+      <div class="mt-6 flex justify-end gap-2">
+        <button type="button" class="rounded-lg border border-line px-4 py-2 text-sm hover:bg-bg disabled:opacity-50" :disabled="isDeleting" @click="closeDeleteDialog">取消</button>
+        <button type="button" class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50" :disabled="isDeleting" @click="deleteSelectedProducts">{{ isDeleting ? '删除中…' : `永久删除 ${selectedIds.size} 件` }}</button>
+      </div>
+    </dialog>
 
     <dialog ref="detailDialog" class="m-auto max-h-[85dvh] w-[min(560px,calc(100%_-_32px))] overflow-y-auto rounded-2xl border border-line bg-white p-6 text-ink shadow-panel backdrop:bg-black/30" aria-labelledby="product-detail-title" @close="selectedProduct = null" @click="event => { if (event.target === event.currentTarget) detailDialog?.close() }">
       <template v-if="selectedProduct">
