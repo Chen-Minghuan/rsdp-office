@@ -116,6 +116,7 @@ export interface FurnitureObject {
   zoneId: string
   label?: string
   /** 该家具是否属于已确认的排版。 */
+  productSelection?: import('./moduleRecommendation').ModuleProductCandidate & { cartLineId: string; sourceCanvasRevision: number }
   layoutConfirmed?: boolean
 }
 
@@ -165,6 +166,11 @@ export interface CartItem {
 }
 
 export interface Product {
+  rspuId?: string
+  variantId?: string
+  widthMm?: number
+  depthMm?: number
+  heightMm?: number
   id: string
   name: string
   desc: string

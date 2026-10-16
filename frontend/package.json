@@ -19,7 +19,8 @@
     "e2e:custom-modules": "node scripts/e2e-custom-modules.mjs",
     "e2e:furniture-modules": "node scripts/e2e-furniture-modules.mjs",
     "e2e:single-space": "node scripts/e2e-single-space.mjs",
-    "e2e:templates": "node scripts/e2e-space-template.mjs"
+    "e2e:templates": "node scripts/e2e-space-template.mjs",
+    "e2e:module-recommendations": "node scripts/e2e-module-recommendations.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

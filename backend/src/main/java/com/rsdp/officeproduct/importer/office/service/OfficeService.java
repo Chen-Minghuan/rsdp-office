@@ -95,7 +95,7 @@ public class OfficeService {
             projectId = DEFAULT_PROJECT_ID;
         }
         List<OfficeCanvas> list = canvasMapper.selectList(
-            new QueryWrapper<OfficeCanvas>().eq("project_id", projectId).orderByDesc("created_at").last("limit 1"));
+            new QueryWrapper<OfficeCanvas>().eq("project_id", projectId).orderByDesc("created_at").orderByDesc("canvas_id").last("limit 1"));
         if (list.isEmpty()) {
             return null;
         }
@@ -109,6 +109,12 @@ public class OfficeService {
         }
         String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
         ensureProjectExists(projectId);
+        projectMapper.lockProject(projectId);
+        CanvasDto latest = getCanvas(projectId);
+        int revision = request.getRevision() != null ? request.getRevision() : 1;
+        if (latest != null && latest.getRevision() != null && revision < latest.getRevision()) {
+            throw new BusinessException("画布版本已过期，请刷新后重新操作");
+        }
 
         OfficeCanvas canvas = new OfficeCanvas();
         canvas.setProjectId(projectId);
@@ -216,7 +222,7 @@ public class OfficeService {
 
     public List<OfficeProductDto> listOfficeProducts() {
         List<RspuMaster> rspus = rspuMasterMapper.selectList(
-            new QueryWrapper<RspuMaster>().eq("status", "active"));
+            new QueryWrapper<RspuMaster>().eq("status", "active").eq("audit_status", "approved"));
         if (rspus.isEmpty()) {
             return List.of();
         }
@@ -228,13 +234,7 @@ public class OfficeService {
         List<OfficeProductDto> result = new ArrayList<>();
         for (RspuMaster rspu : rspus) {
             List<RspuVariant> vs = variantMap.getOrDefault(rspu.getRspuId(), List.of());
-            if (vs.isEmpty()) {
-                result.add(toProductDto(rspu, null));
-            } else {
-                for (RspuVariant v : vs) {
-                    result.add(toProductDto(rspu, v));
-                }
-            }
+            for (RspuVariant v : vs) result.add(toProductDto(rspu, v));
         }
         return result;
     }
@@ -322,6 +322,14 @@ public class OfficeService {
     private OfficeProductDto toProductDto(RspuMaster rspu, RspuVariant variant) {
         OfficeProductDto dto = new OfficeProductDto();
         dto.setId(variant != null ? variant.getVariantId() : rspu.getRspuId());
+        dto.setRspuId(rspu.getRspuId());
+        dto.setVariantId(variant != null ? variant.getVariantId() : null);
+        if (variant != null) {
+            try {
+                BigDecimal[] exact = OfficeProductMatching.dimensions(objectMapper.readTree(variant.getDimensions()));
+                dto.setWidthMm(exact[0]); dto.setDepthMm(exact[1]); dto.setHeightMm(exact[2]);
+            } catch (Exception invalidDimensions) { /* Unknown dimensions remain unknown. */ }
+        }
         dto.setName(rspu.getProductName());
         dto.setDesc(rspu.getDescription());
         dto.setVariant(buildVariantText(variant));
@@ -368,28 +376,13 @@ public class OfficeService {
     private Integer[] resolveDimensions(RspuVariant variant) {
         if (variant != null && StringUtils.hasText(variant.getDimensions())) {
             try {
-                Map<String, Object> dims = objectMapper.readValue(variant.getDimensions(), new TypeReference<>() {});
-                Integer widthMm = parseDim(dims.get("widthMm"));
-                Integer depthMm = parseDim(dims.get("depthMm"));
-                if (widthMm != null && depthMm != null && widthMm > 0 && depthMm > 0)
-                    return new Integer[]{(widthMm + 9) / 10, (depthMm + 9) / 10};
-                Integer w = parseDim(dims.get("widthCm"));
-                Integer d = parseDim(dims.get("depthCm"));
-                if (w != null && d != null && w > 0 && d > 0) return new Integer[]{w, d};
-            } catch (Exception ignored) {
-            }
+                BigDecimal[] exact = OfficeProductMatching.dimensions(objectMapper.readTree(variant.getDimensions()));
+                if (exact[0] != null && exact[1] != null) return new Integer[]{
+                    exact[0].divide(BigDecimal.TEN, 0, java.math.RoundingMode.CEILING).intValueExact(),
+                    exact[1].divide(BigDecimal.TEN, 0, java.math.RoundingMode.CEILING).intValueExact()};
+            } catch (Exception invalidDimensions) { /* Preserve unknown instead of inventing dimensions. */ }
         }
         return new Integer[]{null, null};
-    }
-
-    private Integer parseDim(Object value) {
-        if (value == null) return null;
-        if (value instanceof Number n) return n.intValue();
-        try {
-            return Integer.parseInt(value.toString().trim());
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private String writeJson(Object value) {

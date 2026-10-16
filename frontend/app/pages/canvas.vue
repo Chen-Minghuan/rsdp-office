@@ -138,7 +138,7 @@ const subtitle = computed(() => mode.value === 'design'
       </div>
 
       <!-- Right sidebar -->
-      <OfficeCanvasDesignSidebar v-if="mode === 'design'" />
+      <OfficeCanvasDesignSidebar v-if="mode === 'design'" :selected-id="selectedId" />
       <aside v-else :class="['flex-none bg-white border border-line rounded-2xl shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
         <div v-show="!overviewCollapsed" class="w-72 h-full p-4 flex flex-col gap-4">
           <div class="relative flex items-center justify-between">
