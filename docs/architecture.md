@@ -38,6 +38,7 @@ Viewport（平移、缩放）独立于上述物理几何
 
 所有关联使用稳定 ID。文件名、数组下标、可修改的房间名称不能作为唯一关联键。
 重识别生成新的识别版本；以映射/比较方式处理用户编辑，不沿用序号误配空间。
+当前兼容导入会通过分析详情的 `imageSha256` / `designCorrections` 继承同项目、同标准底图、唯一同名的人工轮廓；原始 `rooms` / `sourcePolygon` 与新来源版本保留，毫米稿还原为来源像素后再应用到新设计副本。`contourGrounded` 记录独立房名定位和封闭墙线证据，防止完全错位的历史框覆盖新定位的封闭房间；不代表人工确认或比例确认。见 [RECOG-005](tasks/RECOG-005-label-grounding-and-correction-reuse.md)。
 服务使用 `sceneVersion` 等不同名称时，适配层注明它是契约版本还是业务修订，不能与编辑修订号混用。
 
 ## 3. 坐标和单位
@@ -134,6 +135,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 ## 7. 当前迁移重点
 
 本轮 `/canvas` 的空间核对使用 `SpaceReview` / `SpatialCanvas`：来源范围和设计多边形共用相机，矩形毫米编辑与异形顶点拖动更新 polygon，面积从几何派生。旧 `CanvasBoard` 保留给单空间排版，仅渲染当前 designZoneId 的空间、家具及显式归属的局部内容，单空间不绘制整层底图。视图范围取当前多边形，内容偏移、指针逆变换与适屏共用世界原点；负坐标与远坐标不需平移设计数据。整层底图及全部空间仍在核对总览展示，旧 px 草稿不会被猜测为已校准。
+空间核对的自由变换以设计顶点为输入，八点框只提供变换控制，不替换凹多边形。平移、缩放和单边推拉经 `contourTransform` 计算，同一 `updateZonePolygon` 校验及保存；拖动预览与抬起提交分开，视图缩放仅更新相机，见 [GEOM-007](tasks/GEOM-007-free-contour-transform.md)。
 兼容数据仍通过 `ZoneObject` 的可选 `reviewUnit/sourceAnalysisId/sourceYAxis/sourcePolygon/mmPerSourceUnit/evidenceKind` 和 Office Canvas JSON 保存。图像坐标 Y 向下；CAD 原始范围 Y 向上，导入时把设计副本转为 Y 向下并记录 sourceYAxis，原始 FloorPlan 不改方向。渲染适配到 WORLD_MM 时统一翻转 Y。
 当前单位模块共享 `manualFurniture` 可见目录与 `ManualFurnitureGlyph`；新实例使用 `furnitureTemplateId` 记录家具图例，`productId` 保留兼容字段，未绑定商品时为空串。模块规格及实例宽深采用毫米，沿边旋转的占地与物件实际宽深分别处理；旧商品绑定实例只做显示适配，不重写保存数据。
 自定义模块为 `CustomOfficeModule`，独立 UMOD ID 与共享 `glyphTemplateId` 分开；目录存于当前浏览器 `customModules` 配置，界面明确本机范围，未新增团队共享服务。已摆实例携带不可变 `moduleSnapshot`，使用既有画布 JSON 保存，即使目录被编辑、移除或另一个浏览器没有本机目录，也按原快照渲染。逐件放置状态不持久化，位置使用画布世界坐标逆变换，按完整旋转外包占地校验实际轮廓、离墙和与已有家具间距；成功仅追加当前空间实例，使该空间排版确认失效，不替换其他家具。选中删除与快捷键使用同一可见对象检查和 store 删除路径；删除家具后只取消该空间剩余家具的排版确认，保留其他空间及目录，沿用画布撤销/持久化。目录删除提供独立的最近一次恢复入口，不混入画布几何撤销。

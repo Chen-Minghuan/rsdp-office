@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "projectId": "OFFICE-PROJECT-001",
+  "baseCanvasRevision": 456,
+  "analysisId": "FPA-01A9127D",
+  "analysisRevision": 1,
+  "imageSha256": "bb88227c94adf107e30ccef75478460c2beee5661e1c06fd08d4bf6a1c1e4202",
+  "sourceSize": [
+    2094,
+    1269
+  ],
+  "basis": "USER_ANNOTATION_SOURCE_PX",
+  "corrections": [
+    {
+      "zoneId": "FPR-744F645A",
+      "name": "棋牌室",
+      "expectedPolygon": [
+        [
+          17652.998196435925,
+          4924.361375205414
+        ],
+        [
+          20186.472074801226,
+          4924.361375205414
+        ],
+        [
+          20186.472074801226,
+          8071.785262919554
+        ],
+        [
+          17652.998196435925,
+          8071.785262919554
+        ]
+      ],
+      "polygon": [
+        [
+          1676,
+          445
+        ],
+        [
+          1971,
+          445
+        ],
+        [
+          1971,
+          690
+        ],
+        [
+          1719,
+          690
+        ],
+        [
+          1719,
+          685
+        ],
+        [
+          1676,
+          685
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "projectId": "OFFICE-PROJECT-001",
+  "baseCanvasRevision": 452,
+  "analysisId": "FPA-38D532FB",
+  "analysisRevision": 1,
+  "imageSha256": "bb88227c94adf107e30ccef75478460c2beee5661e1c06fd08d4bf6a1c1e4202",
+  "sourceSize": [
+    2094,
+    1269
+  ],
+  "basis": "USER_ANNOTATION_SOURCE_PX",
+  "corrections": [
+    {
+      "zoneId": "FPR-20B59BA9",
+      "name": "休闲区",
+      "expectedPolygon": [
+        [
+          1047,
+          531.711
+        ],
+        [
+          1465.8,
+          531.711
+        ],
+        [
+          1465.8,
+          1060.884
+        ],
+        [
+          1047,
+          1060.884
+        ]
+      ],
+      "polygon": [
+        [
+          836,
+          688
+        ],
+        [
+          1508,
+          688
+        ],
+        [
+          1508,
+          1043
+        ],
+        [
+          1493,
+          1043
+        ],
+        [
+          1493,
+          1068
+        ],
+        [
+          858,
+          1068
+        ],
+        [
+          858,
+          1043
+        ],
+        [
+          836,
+          1043
+        ]
+      ]
+    }
+  ]
+}
