@@ -2,7 +2,7 @@
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFurniture'
 import { planOfficeFurniture, OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
-import type { OfficeLayoutMode } from '~/utils/officeAutoLayout'
+import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import { furnitureMatchesPlan } from '~/utils/officeFurniture'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
 import { moduleGlyphId } from '~/utils/officeModules'
@@ -25,7 +25,11 @@ const lastDeletedModule = ref<CustomOfficeModule | null>(null)
 const unitW = ref(0)
 const unitD = ref(0)
 const arrangement = ref<OfficeLayoutMode>('auto')
-const spacing = reactive({ ...OFFICE_LAYOUT_SPACING })
+const spacing = reactive<OfficeLayoutSpacing>({ ...OFFICE_LAYOUT_SPACING })
+const pairGap = computed({
+  get: () => arrangement.value === 'faceToFace' ? spacing.faceGapMm ?? 900 : spacing.backGapMm ?? 0,
+  set: (value: number) => { if (arrangement.value === 'faceToFace') spacing.faceGapMm = value; else spacing.backGapMm = value },
+})
 
 watch(selectedModule, (p) => {
   if (p) {
@@ -43,9 +47,12 @@ watch([() => zone.value?.id, () => zone.value ? store.furnitureForZone(zone.valu
     unitW.value = item!.w
     unitD.value = item!.h
   }
-  if (!settings || !['auto', 'row', 'grid', 'backToBack', 'perimeter'].includes(settings.mode)) return
+  if (!settings || !['auto', 'row', 'grid', 'backToBack', 'perimeter', 'faceToFace', 'staggered', 'centerAisle'].includes(settings.mode)) return
   arrangement.value = settings.mode
-  Object.assign(spacing, settings.spacing)
+  delete spacing.pairMm
+  Object.assign(spacing, OFFICE_LAYOUT_SPACING, settings.spacing)
+  if (settings.spacing.pairMm !== undefined && settings.spacing.faceGapMm === undefined && settings.mode === 'faceToFace') spacing.faceGapMm = settings.spacing.pairMm
+  if (settings.spacing.pairMm !== undefined && settings.spacing.backGapMm === undefined && settings.mode === 'backToBack') spacing.backGapMm = settings.spacing.pairMm
 }, { immediate: true })
 
 const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, d]) => w === unitW.value && d === unitD.value)
@@ -57,7 +64,7 @@ const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone
 const autoPlan = computed(() => zone.value ? planOfficeFurniture(zone.value, unitW.value, unitD.value, 'auto', spacing) : null)
 const draftApplied = computed(() => furnitureMatchesPlan(currentFurniture.value, selectedModule.value.id, unitW.value, unitD.value, plan.value?.slots || [], moduleGlyphId(selectedModule.value), selectedModule.value.heightMm))
 watch(draftApplied, applied => { if (!applied) applicationMessage.value = '' }, { flush: 'sync' })
-watch([selectedModule, unitW, unitD, arrangement, () => spacing.aisleMm, () => spacing.wallMm, () => spacing.gapMm, () => zone.value?.id], () => { applicationMessage.value = '' }, { flush: 'sync' })
+watch([selectedModule, unitW, unitD, arrangement, () => spacing.aisleMm, () => spacing.wallMm, () => spacing.gapMm, () => spacing.faceGapMm, () => spacing.backGapMm, () => zone.value?.id], () => { applicationMessage.value = '' }, { flush: 'sync' })
 
 function selectModule(template: OfficeModuleTemplate) {
   store.cancelFurniturePlacement()
@@ -102,9 +109,9 @@ function addToCanvas() {
 function applyLayout() {
   if (!zone.value || capacity.value <= 0) return
   const applied = store.layoutFurnitureTemplate(zone.value.id, selectedModule.value.id, unitW.value, unitD.value, arrangement.value, { ...spacing })
-  applicationMessage.value = applied
-    ? `已应用${arrangement.value === 'auto' ? '自动多排' : '当前方式'}：${store.furnitureForZone(zone.value.id).length} 件`
-    : '排版未应用，请检查空间和尺寸后重试'
+  if (!applied) { applicationMessage.value = '排版未应用，请检查空间和尺寸后重试'; return }
+  const message = `已应用${arrangement.value === 'auto' ? '自动多排' : '当前方式'}：${store.furnitureForZone(zone.value.id).length} 件`
+  nextTick(() => { applicationMessage.value = message })
 }
 
 function applyAutoLayout() {
@@ -131,9 +138,12 @@ function clearLayout() {
 
 const arrangements = [
   { key: 'auto', label: '自动优化', description: '比较横纵朝向，布置多排并保留排间净距' },
-  { key: 'row', label: '单排', description: '只布置一排，其余空间保持留白' },
-  { key: 'backToBack', label: '背靠背', description: '多组相向双排，组间保留排间净距' },
+  { key: 'row', label: '单排', description: '沿房间上侧布置一排，其余空间保持留白' },
+  { key: 'backToBack', label: '背靠背', description: '座位朝外的双排背侧相邻，组内中缝默认 0 mm，组间保留排间净距' },
   { key: 'grid', label: '矩阵', description: '按当前朝向布置多排，保留排间净距' },
+  { key: 'faceToFace', label: '面对面', description: '座位朝向中央相对的双排，组内面对净距默认 900 mm' },
+  { key: 'staggered', label: '错位排', description: '相邻排错开半个桌位，边缘放不下的桌子不生成' },
+  { key: 'centerAisle', label: '中间通道', description: '两侧桌子面向一条连续通道，中央净宽采用排间净距' },
   { key: 'perimeter', label: '沿边', description: '沿周边布置，跳过转角相互重叠的位置' },
 ] as const
 </script>
@@ -236,13 +246,16 @@ const arrangements = [
             </button>
           </div>
           <p class="mt-2 text-[10px] text-muted">{{ arrangements.find(option => option.key === arrangement)?.description }}</p>
-          <details class="mt-2 text-[10px] text-muted">
+          <details open class="mt-2 text-[10px] text-muted">
             <summary class="cursor-pointer py-1">间距设置（毫米）</summary>
-            <div class="grid grid-cols-3 gap-1.5 mt-1">
-              <label>排间净距<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="w-full h-7 px-1 border border-line rounded-lg"></label>
+            <div class="grid grid-cols-2 gap-1.5 mt-1">
+              <label>{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="w-full h-7 px-1 border border-line rounded-lg"></label>
               <label>离墙距离<input v-model.number="spacing.wallMm" aria-label="离墙距离（毫米）" type="number" min="0" step="100" class="w-full h-7 px-1 border border-line rounded-lg"></label>
-              <label>同排间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="w-full h-7 px-1 border border-line rounded-lg"></label>
+              <label class="col-span-2 flex items-center gap-1.5"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">左右桌子留缝</label>
+              <label class="col-span-2">同排/每列桌子间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="w-full h-7 px-1 border border-line rounded-lg"></label>
+              <label v-if="arrangement === 'backToBack' || arrangement === 'faceToFace'" class="col-span-2">{{ arrangement === 'faceToFace' ? '面对净距' : '背靠中缝' }}<input v-model.number="pairGap" aria-label="对排中缝（毫米）" type="number" min="0" step="50" class="w-full h-7 px-1 border border-line rounded-lg"></label>
             </div>
+            <p class="mt-1">默认 0 mm，相邻桌子紧贴；勾选留缝从 100 mm 起，可直接修改数值。</p>
           </details>
         </div>
 
