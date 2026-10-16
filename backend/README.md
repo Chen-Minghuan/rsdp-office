@@ -103,3 +103,7 @@ docker exec -i office-postgres psql -v ON_ERROR_STOP=1 -U postgres -d office < b
 
 接口为 `POST/GET /api/v1/office/projects/{projectId}/space-templates`、`GET /api/v1/office/projects/{projectId}/space-templates/{templateId}`。
 保存请求含 name、clientChangeId、sourceCanvasRevision、可选 sourceAnalysisRevision、毫米 scene（现有 SpatialSceneSnapshot）。后端核验可计算几何/比例、重新推导面积，以不可变快照保存；逐空间确认不是前置条件。列表最近 50 条为摘要，详情含 scene。具体范围与实际验证见 [GEOM-004](../docs/tasks/GEOM-004-space-template.md)。
+
+## 模块尺寸推荐
+
+`POST /api/v1/office/projects/{projectId}/module-recommendations` 根据已保存且已确认排版的模块读取真实商品毫米规格，支持分别向下兼容、旋转和贴合度分档。`POST /.../module-products` 在选择时重验修订及真实 SKU 可用性，事务内保存模块选择快照和清单；不缩放预留模块。商品候选只读取上架且审核通过的主档与上架变体。复用已有表，无新增迁移；接口使用最新 Java 代码，见 [RECOMMEND-002](../docs/tasks/RECOMMEND-002-module-size-matching.md)。
