@@ -50,6 +50,9 @@ public class FloorPlanAnalysisResponse {
     private String parseStatus;
     private Object unitResolution;
     private DimensionCalibrationReport dimensionCalibration;
+    private String imageSha256;
+    /** Manual design overlay only; rooms above remain the new recognition output. */
+    private List<DesignContourCorrection> designCorrections;
 
     private String inputMode;
     private JsonNode layout;

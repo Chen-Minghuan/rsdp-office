@@ -42,4 +42,6 @@ public class FloorPlanRoomResponse {
 
     /** 几何来源：ai_vision / cad_geometry / manual_geometry。 */
     private String geometrySource;
+    /** True only for this run's independent label + closed raster-wall grounding. */
+    private Boolean contourGrounded;
 }

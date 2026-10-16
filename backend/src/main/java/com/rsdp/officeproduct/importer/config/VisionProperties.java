@@ -22,4 +22,6 @@ public class VisionProperties {
     private String model = "qwen3-vl-plus";
     private int maxImageEdge = 3072;
     private int pdfDpi = 144;
+    /** Independently locate labels, then ground closed wall regions; independent from dimension calibration. */
+    private boolean refineRoomContours = true;
 }
