@@ -40,6 +40,7 @@ import { inferRectangleFrame, resizeRectangle } from '~/utils/spatial/geometry'
 import type { SpaceTemplate } from '~/types/spaceTemplate'
 import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFromTemplate, templatePlan } from '~/utils/spatial/spaceTemplate'
 import { officeReviewExample } from '~/utils/spatial/example'
+import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 // Read existing drafts once so the workspace rename preserves browser data.
@@ -714,12 +715,14 @@ export const useOfficeStore = defineStore('office', {
           pixelToMeter: calibrated ? 0.001 : undefined,
           sourceAnalysisId: plan.analysisId,
           sourceAnalysisRevision: plan.analysisRevision || 1,
+          sourceImageSha256: plan.imageSha256 || undefined,
           sourceYAxis,
           sourcePolygon: polygon.map(([x, y]) => [x, y]),
           evidenceKind: plan.evidenceKind || 'ESTIMATED',
         } as ZoneObject
       })
 
+      applyDesignCorrections(newZones, plan)
       this.objectUpdate(() => {
         this.floorPlan = plan
         this.floorPlanError = null

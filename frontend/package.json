@@ -15,6 +15,7 @@
     "e2e:dimensions": "node scripts/e2e-dimension-calibration.mjs",
     "e2e:workflows": "node scripts/e2e-workflows.mjs",
     "test:auto-layout": "node scripts/test-auto-layout.mjs",
+    "test:design-corrections": "node scripts/test-design-corrections.mjs",
     "e2e:auto-layout": "node scripts/e2e-auto-layout.mjs",
     "e2e:delete-modules": "node scripts/e2e-delete-modules.mjs",
     "e2e:custom-modules": "node scripts/e2e-custom-modules.mjs",

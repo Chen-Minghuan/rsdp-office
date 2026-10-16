@@ -151,6 +151,7 @@ try {
   holdConfirm = true
   await confirm().click()
   await page.waitForFunction(() => document.querySelector('.dimension-confirm-button')?.textContent.includes('确认中'))
+  await page.getByRole('button', { name: '编辑轮廓', exact: true }).click()
   const vertex = page.locator('[data-vertex-id="AUTO-ROOM-V-2"]')
   const box = await vertex.boundingBox()
   await page.mouse.move(box.x + 4, box.y + 4); await page.mouse.down(); await page.mouse.move(box.x - 18, box.y + 4, { steps: 4 }); await page.mouse.up()

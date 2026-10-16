@@ -52,6 +52,8 @@ export interface ZoneObject {
   reviewUnit?: 'mm' | 'source'
   sourceAnalysisId?: string
   sourceAnalysisRevision?: number
+  sourceImageSha256?: string
+  contourCorrection?: { sourceAnalysisId: string; sourceAnalysisRevision: number; canvasRevision: number }
   spaceTemplateId?: string
   templateSpaceId?: string
   /** CAD source bounds are Y-up; stored design rings use Y-down. */

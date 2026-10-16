@@ -54,7 +54,7 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
         </form>
         <div class="property-row"><span>净面积</span><strong data-testid="selected-area">{{ space.derived.areaM2 != null ? space.derived.areaM2.toFixed(2) + ' m²' : '待校准' }}</strong></div>
         <div class="property-row"><span>编辑锚点</span><strong>{{ space.rectangleFrame ? '局部左下角固定' : '保持异形轮廓' }}</strong></div>
-        <p class="inspector-hint">{{ space.rectangleFrame ? '数值与轮廓联动；修改后更新关联排版。' : '可拖动选中顶点修正异形边界，面积按多边形计算。' }}<br>底图保留原始状态，不随空间编辑变形。</p>
+        <p class="inspector-hint">{{ space.rectangleFrame ? '数值与轮廓联动；修改后更新关联排版。' : '可拖动选中顶点修正异形边界，面积按多边形计算。' }}<br>缺少入口或转折时，点“编辑轮廓”补点，或沿墙重描。底图保留原始状态。</p>
         <p v-if="issue" class="geometry-issue" :role="issueBlocking ? 'alert' : 'status'">{{ issue }}</p>
       </section>
     </template>
