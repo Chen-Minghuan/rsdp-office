@@ -16,7 +16,7 @@ const designTools = [
   { key: 'select', icon: 'pencil', label: '选择' },
   { key: 'pan', icon: 'hand', label: '拖动' },
   { key: 'note', icon: 'note', label: '标注' },
-  { key: 'reference', icon: 'reference', label: '效果图' },
+  { key: 'render', icon: 'reference', label: '效果预览' },
 ]
 
 const tools = computed(() => mode.value === 'design' ? designTools : overviewTools)
@@ -26,6 +26,7 @@ const emit = defineEmits<{
   zoomIn: []
   zoomOut: []
   fit: []
+  render: []
 }>()
 
 watch(tools, () => {
@@ -50,7 +51,7 @@ watch(tools, () => {
             'flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg min-w-[52px] text-[10px] transition',
             tool === t.key ? 'text-[#976c43] bg-[#f4e9dc]' : 'text-[#746f69] hover:bg-[#f6f2ed]',
           ]"
-          @click="tool = t.key"
+          @click="t.key === 'render' ? emit('render') : tool = t.key"
         >
           <AppIcon :name="t.icon" size="4" />
           <span>{{ t.label }}</span>

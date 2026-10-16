@@ -6,6 +6,7 @@ const router = useRouter()
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
 const showSubmit = ref(false)
+const showRenderPreview = ref(false)
 const overviewCollapsed = ref(false)
 const boardRef = ref<{ fitBoard: () => void } | null>(null)
 
@@ -117,6 +118,7 @@ const subtitle = computed(() => mode.value === 'design'
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
           @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"
+          @render="showRenderPreview = true"
         />
         <OfficeCanvasBoard ref="boardRef" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
@@ -179,5 +181,6 @@ const subtitle = computed(() => mode.value === 'design'
     </div>
 
     <OfficeCanvasSubmitDialog v-model:show="showSubmit" />
+    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" />
   </div>
 </template>

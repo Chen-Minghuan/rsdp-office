@@ -1,6 +1,35 @@
 -- 办公产品导入模块数据库初始化脚本
 -- 先创建数据库：CREATE DATABASE office OWNER postgres;
 
+-- Independent concept previews. Snapshots never confirm or overwrite a design scheme.
+create table if not exists office_render_preview (
+    preview_id varchar(64) primary key,
+    project_id varchar(128) not null,
+    zone_id varchar(128) not null,
+    zone_name text not null,
+    canvas_revision integer not null,
+    purpose varchar(32) not null default 'CONCEPT_PREVIEW' check (purpose = 'CONCEPT_PREVIEW'),
+    model varchar(64) not null,
+    style varchar(100) not null,
+    view varchar(32) not null,
+    instructions text not null,
+    status varchar(32) not null,
+    client_change_id varchar(128) not null,
+    content_hash varchar(64) not null,
+    snapshot_json jsonb not null,
+    prompt text not null,
+    provider_base_url text not null,
+    provider_task_id varchar(128),
+    provider_request_id varchar(128),
+    image_url text,
+    reference_url text,
+    error_message text,
+    created_at timestamp not null,
+    updated_at timestamp not null,
+    unique(project_id, client_change_id)
+);
+create index if not exists idx_render_preview_history on office_render_preview(project_id, zone_id, created_at desc);
+
 -- 品类字典
 create table if not exists category_dict (
     dict_type varchar(50) not null,

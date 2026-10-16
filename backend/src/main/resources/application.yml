@@ -27,6 +27,11 @@ mybatis-plus:
       logic-delete-value: "now()"
 
 rsdp:
+  render:
+    api-key: ${RSDP_RENDER_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${RSDP_RENDER_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
+    model: ${RSDP_RENDER_MODEL:qwen-image-3.0}
+    storage-directory: ${RSDP_RENDER_STORAGE_DIRECTORY:uploads/render-previews}
   cad-parser:
     url: http://127.0.0.1:8091
   vision:

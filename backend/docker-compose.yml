@@ -35,6 +35,11 @@ services:
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       RSDP_VISION_MODEL: ${RSDP_VISION_MODEL:-qwen3-vl-plus}
       RSDP_VISION_URL: ${RSDP_VISION_URL:-}
+      RSDP_RENDER_API_KEY: ${RSDP_RENDER_API_KEY:-${DASHSCOPE_API_KEY:-}}
+      RSDP_RENDER_BASE_URL: ${RSDP_RENDER_BASE_URL:-https://dashscope.aliyuncs.com/api/v1}
+      RSDP_RENDER_MODEL: ${RSDP_RENDER_MODEL:-qwen-image-3.0}
+    volumes:
+      - render_previews:/app/uploads/render-previews
     ports:
       - "127.0.0.1:8082:8082"
     depends_on:
@@ -68,3 +73,4 @@ services:
 
 volumes:
   postgres_data:
+  render_previews:
