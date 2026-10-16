@@ -3,6 +3,7 @@ package com.rsdp.officeproduct.importer.office.controller;
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.office.dto.*;
 import com.rsdp.officeproduct.importer.office.service.OfficeService;
+import com.rsdp.officeproduct.importer.office.service.OfficeModuleRecommendationService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,17 @@ import java.util.List;
 public class OfficeController {
 
     private final OfficeService officeService;
+    private final OfficeModuleRecommendationService moduleRecommendations;
+
+    @PostMapping("/projects/{projectId}/module-recommendations")
+    public Result<ModuleRecommendationDto> recommendModules(@PathVariable String projectId, @RequestBody ModuleRecommendationRequest request) {
+        return Result.ok(moduleRecommendations.recommend(projectId, request));
+    }
+
+    @PostMapping("/projects/{projectId}/module-products")
+    public Result<ModuleRecommendationDto.Selection> selectModuleProduct(@PathVariable String projectId, @RequestBody ModuleRecommendationRequest request) {
+        return Result.ok(moduleRecommendations.select(projectId, request));
+    }
 
     @GetMapping("/projects/{projectId}")
     public Result<ProjectDto> getProject(@PathVariable String projectId) {

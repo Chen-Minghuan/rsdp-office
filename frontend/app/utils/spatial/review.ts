@@ -108,7 +108,7 @@ export function zoneProblem(zone: ZoneObject, zones: ZoneObject[]): string | nul
 }
 
 export function zoneReviewMessage(zone: ZoneObject, zones: ZoneObject[]): string | null {
-  return zoneProblem(zone, zones) || (zone.geometrySource === 'ai_vision' && !zone.confirmed
+  return zoneProblem(zone, zones) || (zone.contourCorrection ? '已沿用同一底图的人工修正轮廓，可对照原图继续调整' : null) || (zone.geometrySource === 'ai_vision' && !zone.confirmed
     ? '图像识别轮廓建议对照原图复核；发现不符可直接修改，不影响继续排版' : null)
 }
 

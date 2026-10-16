@@ -1,3 +1,4 @@
+import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { Project, OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
 import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
@@ -32,6 +33,11 @@ interface ProductDto {
   widthCm: number | null
   depthCm: number | null
   imageUrl?: string
+  rspuId?: string
+  variantId?: string
+  widthMm?: number
+  depthMm?: number
+  heightMm?: number
 }
 
 function apiUrl(path: string) {
@@ -151,8 +157,8 @@ export function useOfficeApi() {
   async function loadProducts(): Promise<Product[]> {
     const list = await request<ProductDto[]>('GET', '/api/v1/office/products')
     return list.filter(p => p.widthCm != null && p.widthCm > 0 && p.depthCm != null && p.depthCm > 0
-      && p.price > 0 && p.kind !== 'other').map((p) => ({
-      id: p.id,
+      && p.price > 0).map((p) => ({
+      id: p.id, rspuId: p.rspuId, variantId: p.variantId, widthMm: p.widthMm, depthMm: p.depthMm, heightMm: p.heightMm,
       name: p.name,
       desc: p.desc || '',
       variant: p.variant || '',
@@ -163,6 +169,14 @@ export function useOfficeApi() {
       depthCm: p.depthCm!,
       imageUrl: p.imageUrl,
     }))
+  }
+
+  async function recommendModule(requestBody: ModuleRecommendationRequest): Promise<ModuleRecommendation> {
+    return await request('POST', `/api/v1/office/projects/${projectId}/module-recommendations`, requestBody)
+  }
+
+  async function selectModuleProduct(requestBody: ModuleRecommendationRequest): Promise<ModuleProductSelection> {
+    return await request('POST', `/api/v1/office/projects/${projectId}/module-products`, requestBody)
   }
 
   async function exportProposal(): Promise<Blob> {
@@ -345,6 +359,8 @@ export function useOfficeApi() {
     loadMessages,
     sendMessage,
     loadProducts,
+    recommendModule,
+    selectModuleProduct,
     exportProposal,
     resetProject,
     downloadImportTemplate,

@@ -9,6 +9,11 @@ import java.util.List;
 public class OfficeProductDto {
 
     private String id;
+    private String rspuId;
+    private String variantId;
+    private BigDecimal widthMm;
+    private BigDecimal depthMm;
+    private BigDecimal heightMm;
     private String name;
     private String desc;
     private String variant;

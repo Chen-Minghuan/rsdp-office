@@ -66,6 +66,7 @@ public class FloorPlanService {
     private final CadParseClient cadParseClient;
     private final VisionRecognitionClient visionRecognitionClient;
     private final FloorPlanDimensionService floorPlanDimensionService;
+    private final FloorPlanDesignCorrectionService designCorrectionService;
     private final ObjectMapper objectMapper;
     private final com.rsdp.officeproduct.importer.service.spatial.SpatialGeometryService spatialGeometryService;
 
@@ -253,6 +254,18 @@ public class FloorPlanService {
             response.setPreviewBounds(parseBounds(revision.getPreviewBounds()));
             response.setUnitResolution(parseJsonNode(revision.getUnitResolution()));
             JsonNode original = parseJsonNode(revision.getRawResult());
+            String imageSha256 = original == null ? null : original.path("imageSha256").asText(null);
+            response.setImageSha256(imageSha256);
+            if (!"cad".equals(analysis.getInputMode())) response.setDesignCorrections(designCorrectionService.find(analysis.getProjectId(), imageSha256));
+            if (original != null && "INDEPENDENT_LABEL_DETECTION".equals(original.path("contourRefinement").path("seedSource").asText())) {
+                for (var room : response.getRooms()) {
+                    List<JsonNode> matches = new ArrayList<>();
+                    for (var record : original.path("contourRefinement").path("rooms"))
+                        if (java.util.Objects.equals(room.getLabel(), record.path("label").asText(null))) matches.add(record);
+                    room.setContourGrounded(FloorPlanAnalysis.GEOMETRY_SOURCE_AI_VISION.equals(room.getGeometrySource())
+                        && matches.size() == 1 && "GROUNDED".equals(matches.get(0).path("status").asText()));
+                }
+            }
             String assumedUnit = original == null ? "mm" : original.path("dimensionCalibrationConfirmation").path("assumedUnit").asText("mm");
             response.setDimensionCalibration(floorPlanDimensionService.report(original, analysisId, targetRevision, assumedUnit));
         }

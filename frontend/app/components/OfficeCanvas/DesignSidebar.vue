@@ -8,45 +8,7 @@ const zone = computed(() => store.zones.find((z) => z.id === store.designZoneId)
 const hasFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
 const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
 
-const activeTab = ref<'products' | 'combos'>('products')
-
-const categories = [
-  { key: 'all', label: '全部' },
-  { key: 'workstation', label: '工位' },
-  { key: 'chair', label: '座椅' },
-  { key: 'meeting', label: '会议' },
-  { key: 'sofa', label: '沙发' },
-  { key: 'desk', label: '桌台' },
-  { key: 'cabinet', label: '储物' },
-]
-const activeCategory = ref('all')
-
-const filteredProducts = computed(() => {
-  const z = zone.value
-  let list = store.products.filter((p) => !z || p.uses.includes(z.zoneType) || (p.kind === 'other' && p.uses.length === 1 && p.uses[0] === 'OTHER'))
-  if (activeCategory.value !== 'all') {
-    list = list.filter((p) => p.kind === activeCategory.value)
-  }
-  return list
-})
-
-const filteredCombos = computed(() => {
-  const z = zone.value
-  const allCombos = store.combos.length ? store.combos : []
-  return allCombos.filter((c) => !z || c.uses.includes(z.zoneType))
-})
-
-function comboProductNames(combo: any) {
-  const allProducts = store.products.length ? store.products : []
-  return combo.items.map((item: any) => {
-    const p = allProducts.find((x) => x.id === item.productId)
-    return `${p?.name || item.productId} × ${item.qty}`
-  }).join('、')
-}
-
-function addCombo(comboId: string) {
-  store.addComboToCart(comboId)
-}
+const props = defineProps<{ selectedId?: string | null }>()
 
 function backToOverview() {
   store.setCanvasMode('overview')
@@ -142,85 +104,9 @@ function backToOverview() {
       </div>
     </div>
 
-    <!-- Layout confirmed: full product catalog -->
+    <!-- Layout confirmed: real SKU recommendations for current module footprints -->
     <template v-else>
-      <div class="px-4 py-3 border-b border-line flex-none">
-        <div class="flex items-center gap-2 text-[15px] font-bold mb-2">
-          <AppIcon name="cube" size="4" />
-          <span>推荐产品</span>
-        </div>
-        <div class="flex gap-2 mb-2">
-          <button
-            :class="['px-2.5 py-1 rounded-lg text-[10px] transition', activeTab === 'products' ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-[#746c64] hover:bg-[#efe9e2]']"
-            @click="activeTab = 'products'"
-          >
-            单品
-          </button>
-          <button
-            :class="['px-2.5 py-1 rounded-lg text-[10px] transition', activeTab === 'combos' ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-[#746c64] hover:bg-[#efe9e2]']"
-            @click="activeTab = 'combos'"
-          >
-            搭配组合
-          </button>
-        </div>
-        <div v-if="activeTab === 'products'" class="flex gap-1.5 flex-wrap">
-          <button
-            v-for="c in categories"
-            :key="c.key"
-            :class="[
-              'px-2 py-1 rounded-lg text-[10px] transition',
-              activeCategory === c.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-[#746c64] hover:bg-[#efe9e2]',
-            ]"
-            @click="activeCategory = c.key"
-          >
-            {{ c.label }}
-          </button>
-        </div>
-      </div>
-
-      <div v-if="activeTab === 'products'" class="flex-1 overflow-auto p-3 flex flex-col gap-2">
-        <div v-for="p in filteredProducts" :key="p.id" class="flex gap-2.5 p-2.5 border border-line rounded-xl">
-          <div class="w-[72px] h-[72px] rounded-lg bg-gradient-to-br from-[#f2ede5] to-[#e5d9ca] grid place-items-center flex-none p-1.5">
-            <AgentProductArt :kind="p.kind" />
-          </div>
-          <div class="flex-1 min-w-0 flex flex-col gap-1">
-            <div class="text-xs font-bold">{{ p.name }}</div>
-            <div class="text-[10px] text-muted">{{ p.desc }}</div>
-            <div class="text-[10px] text-muted">{{ p.variant }}</div>
-            <div class="mt-auto flex items-center justify-between">
-              <div class="text-sm text-[#9d6a3a] font-bold">{{ money(p.price) }}</div>
-              <button class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-[#f7f0e8] text-bronze-dark border border-[#efe4d7] hover:bg-[#f3e8dc]" @click="store.addToCart(p.id)">
-                <AppIcon name="plus" size="2.5" />
-                <span>加入方案</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div v-if="!filteredProducts.length" class="text-center text-xs text-muted py-8">
-          该分类下暂无适配产品
-        </div>
-      </div>
-
-      <div v-else class="flex-1 overflow-auto p-3 flex flex-col gap-2">
-        <div v-for="c in filteredCombos" :key="c.id" class="flex flex-col gap-2 p-3 border border-line rounded-xl">
-          <div class="flex items-center justify-between">
-            <div class="text-xs font-bold">{{ c.name }}</div>
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-[#f4eee5] text-[#946c45]">{{ c.style || '现代' }}</span>
-          </div>
-          <div class="text-[10px] text-muted">{{ c.desc }}</div>
-          <div class="text-[10px] text-[#78736d]">包含：{{ comboProductNames(c) }}</div>
-          <div class="mt-auto flex items-center justify-between">
-            <div class="text-sm text-[#9d6a3a] font-bold">{{ money(c.price) }}</div>
-            <button class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-[#f7f0e8] text-bronze-dark border border-[#efe4d7] hover:bg-[#f3e8dc]" @click="addCombo(c.id)">
-              <AppIcon name="plus" size="2.5" />
-              <span>加入方案</span>
-            </button>
-          </div>
-        </div>
-        <div v-if="!filteredCombos.length" class="text-center text-xs text-muted py-8">
-          当前空间暂无适配组合
-        </div>
-      </div>
+      <OfficeCanvasModuleProductRecommendations :selected-id="props.selectedId" />
 
       <div class="px-4 py-3 border-t border-line bg-[#fefcfb] flex-none">
         <div class="flex justify-between text-xs text-[#78736d] my-1">

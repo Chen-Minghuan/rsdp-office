@@ -33,6 +33,7 @@ export interface FloorPlanPoint {
 }
 
 export interface FloorPlanRoom {
+  contourGrounded?: boolean | null
   roomId: string
   roomType: string
   label?: string | null
@@ -58,6 +59,15 @@ export interface FloorPlanDrawingBounds {
 }
 
 export interface FloorPlanAnalysisResponse {
+  imageSha256?: string | null
+  /** Source-bound manual design overlays; recognition rooms remain unchanged. */
+  designCorrections?: Array<{
+    name: string
+    polygon: Array<[number, number]>
+    sourceAnalysisId: string
+    sourceAnalysisRevision: number
+    canvasRevision: number
+  }>
   dimensionCalibration?: DimensionCalibrationReport | null
   evidenceKind?: 'REAL_SERVICE' | 'ESTIMATED' | 'DEMO' | 'MANUAL'
   analysisId: string

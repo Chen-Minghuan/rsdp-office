@@ -27,9 +27,15 @@ mybatis-plus:
       logic-delete-value: "now()"
 
 rsdp:
+  render:
+    api-key: ${RSDP_RENDER_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${RSDP_RENDER_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
+    model: ${RSDP_RENDER_MODEL:qwen-image-3.0}
+    storage-directory: ${RSDP_RENDER_STORAGE_DIRECTORY:uploads/render-previews}
   cad-parser:
     url: http://127.0.0.1:8091
   vision:
+    refine-room-contours: ${RSDP_VISION_REFINE_ROOM_CONTOURS:true}
     url: ${RSDP_VISION_URL:} # 可选：已有识别接口；配置后优先使用
     api-key: ${DASHSCOPE_API_KEY:}
     base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}

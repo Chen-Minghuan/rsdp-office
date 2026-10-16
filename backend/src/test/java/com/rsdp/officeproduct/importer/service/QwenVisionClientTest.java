@@ -36,6 +36,7 @@ class QwenVisionClientTest {
     void setup() {
         properties = new VisionProperties();
         properties.setApiKey("test-key");
+        properties.setRefineRoomContours(false);
         restTemplate = new RestTemplate();
         server = MockRestServiceServer.bindTo(restTemplate).build();
         client = new QwenVisionClient(restTemplate, properties, mapper,
@@ -73,6 +74,53 @@ class QwenVisionClientTest {
         byte[] preview = Base64.getDecoder().decode(result.path("preview").path("pngBase64").asText());
         assertEquals(200, ImageIO.read(new ByteArrayInputStream(preview)).getWidth());
         assertFalse(properties.toString().contains("test-key"));
+        server.verify();
+    }
+
+    @Test
+    void defaultWallGroundingLocatesLabelsIndependentlyAndPreservesInitialDimensions() throws Exception {
+        assertTrue(new VisionProperties().isRefineRoomContours());
+        properties.setRefineRoomContours(true);
+        server.expect(anything()).andRespond(withSuccess(completion("""
+            {"rooms":[{"label":"办公室","roomType":"EXECUTIVE_OFFICE",
+              "polygon":[[105,131],[430,131],[430,350],[105,350]]}],
+             "dimensionReferences":[
+              {"text":"10000mm","confidence":"high","start":[0,0],"end":[1000,0]},
+              {"text":"8000mm","confidence":"high","start":[0,0],"end":[0,1000]}]}
+            """), MediaType.APPLICATION_JSON));
+        server.expect(anything())
+            .andExpect(jsonPath("$.messages[0].content.length()").value(2))
+            .andRespond(withSuccess(completion("""
+                {"labels":[{"text":"办公室","bbox":[200,200,280,230]}]}
+                """), MediaType.APPLICATION_JSON));
+        var bytes = new ByteArrayOutputStream();
+        ImageIO.write(RasterWallContoursTest.drawing(false), "png", bytes);
+        var result = client.recognize(new MockMultipartFile("file", "plan.png", "image/png", bytes.toByteArray()), 1);
+        assertEquals(1, result.path("contourRefinement").path("acceptedCount").asInt());
+        assertEquals("INDEPENDENT_LABEL_DETECTION", result.path("contourRefinement").path("seedSource").asText());
+        assertEquals("DETECTED", result.path("modelOutput").path("labelLocalization").path("status").asText());
+        assertTrue(result.path("rooms").get(0).path("contourGrounded").asBoolean());
+        assertEquals(240, result.path("rooms").get(0).path("labelPoint").path("x").asDouble());
+        assertEquals(4, result.path("initialModelOutput").path("rooms").get(0).path("polygon").size());
+        assertEquals(6, result.path("rooms").get(0).path("polygon").size());
+        assertEquals(result.path("initialModelOutput").path("dimensionReferences"), result.path("modelOutput").path("dimensionReferences"));
+        assertEquals("READY", result.path("dimensionCalibration").path("status").asText());
+        assertEquals(10, result.path("dimensionCalibration").path("mmPerPixel").asDouble());
+        assertFalse(result.path("unitResolution").path("confirmed").asBoolean());
+        assertEquals("px", result.path("units").asText());
+        assertEquals(result.path("drawingBounds"), result.path("preview").path("bounds"));
+        server.verify();
+    }
+
+    @Test
+    void unavailableLabelDetectionRetainsInitialRecognitionAndReportsFallback() throws Exception {
+        properties.setRefineRoomContours(true);
+        server.expect(anything()).andRespond(withSuccess(completion("{\"rooms\":[]}"), MediaType.APPLICATION_JSON));
+        server.expect(anything()).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        var result = client.recognize(image(), 1);
+        assertEquals("UNAVAILABLE", result.path("modelOutput").path("labelLocalization").path("status").asText());
+        assertTrue(result.path("qualityIssues").toString().contains("房名独立定位未完成"));
+        assertTrue(result.path("initialModelOutput").path("rooms").isArray());
         server.verify();
     }
 
