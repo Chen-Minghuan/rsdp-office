@@ -48,7 +48,11 @@ const analysisIdFromQuery = computed(() => route.query.analysisId as string | un
 watch([analysisIdFromQuery, () => store.initialized], async ([id, initialized]) => {
   if (initialized && id && (!store.floorPlan || store.floorPlan.analysisId !== id)) {
     const snapshot = await store.loadFloorPlan(id)
-    if (snapshot?.analysisId === id && analysisIdFromQuery.value === id) store.importFloorPlanToZones(snapshot)
+    // An empty canvas can be intentional: deleting its last space must not be
+    // undone by the automatic analysis import on refresh.
+    if (snapshot?.analysisId === id && analysisIdFromQuery.value === id && (!store.blank || store.zones.length)) {
+      store.importFloorPlanToZones(snapshot)
+    }
   }
 }, { immediate: true })
 

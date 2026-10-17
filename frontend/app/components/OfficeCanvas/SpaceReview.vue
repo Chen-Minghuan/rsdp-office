@@ -64,6 +64,7 @@ const originalGeometries = computed(() => !showOriginal.value ? [] : store.zones
 })))
 const scaleWidth = computed(() => 2000 * camera.value.zoom)
 const zoomPercent = computed(() => Math.round(camera.value.zoom / fittedZoom.value * 100))
+const saveLabel = computed(() => store.syncState === 'saving' ? '保存中…' : store.syncState === 'error' ? '保存失败' : '✓ 本地草稿已保存')
 
 watch(() => store.zones.map(zone => zone.id).join(','), () => {
   if (!store.zones.some(zone => zone.id === selectedId.value)) selectedId.value = store.zones[0]?.id || null
@@ -110,6 +111,14 @@ function selectSpace(id: string) {
   if (tracing.value) return
   selectedId.value = id
   if (!zones.value.slice(0, 6).some(zone => zone.id === id)) showAllSpaces.value = true
+}
+function deleteSelectedSpace() {
+  const zone = selected.value
+  if (!zone || tracing.value || calibrating.value) return
+  if (typeof window !== 'undefined' && !window.confirm(`确定删除「${zone.name}」？删除后不会进入空间模板和家具排版，可通过“撤销”恢复。`)) return
+  if (!store.deleteZone(zone.id)) return
+  selectedId.value = store.zones[0]?.id || null
+  notify(`已删除「${zone.name}」，可点击“撤销”恢复`)
 }
 function dimensions(zone: ZoneObject) {
   if (zone.reviewUnit !== 'mm') return '尺寸待校准'
@@ -261,7 +270,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
   <div class="space-review">
     <header class="review-topbar">
       <NuxtLink to="/" class="review-brand"><b>R</b><strong>RSDP</strong><i></i><span>办公空间设计</span></NuxtLink>
-      <div class="review-topbar-right"><NuxtLink to="/">项目工作台 / 办公空间</NuxtLink><span class="local-save">✓ 本地草稿已保存</span><NuxtLink to="/products" class="designer-avatar" title="商品资源">设计</NuxtLink></div>
+      <div class="review-topbar-right"><NuxtLink to="/">项目工作台 / 办公空间</NuxtLink><span class="local-save" :class="{ error: store.syncState === 'error', saving: store.syncState === 'saving' }" :title="store.syncError || undefined">{{ saveLabel }}</span><NuxtLink to="/products" class="designer-avatar" title="商品资源">设计</NuxtLink></div>
     </header>
     <section class="review-intro">
       <div><h1>无限画布 · 空间核对</h1><p>空间可直接用于家具排版；需复核处会提示，发现不符可随时修改。</p></div>
@@ -342,7 +351,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       <SpatialInspector :inert="!!tracing" :space="selectedSpace" :is-calibrated="calibrated" :pending-count="pendingCount" :issue="selectedIssue" :issue-blocking="selectedBlocking" :needs-review="!!selectedId && reviewSpaceIds.includes(selectedId)" :layout-blocker="store.layoutBlocker" :template-source="store.floorPlan?.inputMode === 'manual'"
         :calibration-active="calibrating" :calibration-point-count="calibrationPoints.length"
         v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
-        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration">
+        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration" @delete-space="deleteSelectedSpace">
         <template #automatic-calibration><DimensionCalibration :enabled="dimensionCalibrationEnabled" :preview-area="automaticPreviewArea" @reference="selectedDimensionReference = $event" @applied="applyAutomaticCalibration" /></template>
       </SpatialInspector>
     </div>

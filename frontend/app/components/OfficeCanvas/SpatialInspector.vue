@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (e: 'startCalibration'): void
   (e: 'cancelCalibration'): void
   (e: 'applyCalibration', length: number): void
+  (e: 'deleteSpace'): void
 }>()
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
 const showOutline = defineModel<boolean>('showOutline', { default: true })
@@ -56,6 +57,7 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
         <div class="property-row"><span>编辑锚点</span><strong>{{ space.rectangleFrame ? '局部左下角固定' : '保持异形轮廓' }}</strong></div>
         <p class="inspector-hint">{{ space.rectangleFrame ? '数值与轮廓联动；修改后更新关联排版。' : '可拖动选中顶点修正异形边界，面积按多边形计算。' }}<br>缺少入口或转折时，点“编辑轮廓”补点，或沿墙重描。底图保留原始状态。</p>
         <p v-if="issue" class="geometry-issue" :role="issueBlocking ? 'alert' : 'status'">{{ issue }}</p>
+        <button class="delete-space-button" type="button" :disabled="!space" @click="emit('deleteSpace')">删除空间</button>
       </section>
     </template>
     <div v-else class="inspector-hint empty-selection">在左侧列表或画布中选择空间。</div>

@@ -73,6 +73,8 @@ interface OfficeState {
   spaceTemplate: SpaceTemplate | null
   customModules: CustomOfficeModule[]
   furniturePlacement: OfficeFurniturePlacement | null
+  syncState: 'idle' | 'saving' | 'saved' | 'error'
+  syncError: string | null
 }
 
 function defaultState(): OfficeState {
@@ -103,6 +105,8 @@ function defaultState(): OfficeState {
     spaceTemplate: null,
     customModules: [],
     furniturePlacement: null,
+    syncState: 'idle',
+    syncError: null,
   }
 }
 
@@ -141,7 +145,7 @@ function debounce<T extends (this: any, ...args: any[]) => any>(fn: T, ms: numbe
 }
 
 export const useOfficeStore = defineStore('office', {
-  state: (): OfficeState => ({ ...defaultState(), ...loadLocalState(), initialized: false, loading: false, floorPlanLoading: false }),
+  state: (): OfficeState => ({ ...defaultState(), ...loadLocalState(), initialized: false, loading: false, floorPlanLoading: false, syncState: 'idle', syncError: null }),
 
   getters: {
     zones: (state): ZoneObject[] => state.objects.filter((o) => o.kind === 'zone') as ZoneObject[],
@@ -254,19 +258,24 @@ export const useOfficeStore = defineStore('office', {
 
     saveLocal() {
       if (typeof window === 'undefined') return
-      const { furniturePlacement, ...persisted } = this.$state
+      const { furniturePlacement, syncState, syncError, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     },
 
     schedulePersist() {
       this.saveLocal()
+      this.syncState = this.apiReady ? 'saving' : 'saved'
+      this.syncError = null
       this._persistToApi()
     },
 
     _persistToApi: debounce(async function (this: any) {
       const api = useOfficeApi()
-      if (!this.apiReady) return
+      if (!this.apiReady) {
+        this.syncState = 'saved'
+        return
+      }
       try {
         await api.saveProject(this.project)
         await api.saveCanvas({
@@ -277,7 +286,11 @@ export const useOfficeStore = defineStore('office', {
           revision: this.canvasRevision,
           blank: this.blank,
         })
+        this.syncState = 'saved'
+        this.syncError = null
       } catch (e) {
+        this.syncState = 'error'
+        this.syncError = e instanceof Error ? e.message : '远端保存失败'
         console.warn('同步到后端失败', e)
       }
     }, 800),
@@ -405,6 +418,27 @@ export const useOfficeStore = defineStore('office', {
         if (target.kind === 'furniture') {
           this.furnitureForZone(target.zoneId).forEach(item => { item.layoutConfirmed = false })
           this.submitted = null
+        }
+      })
+      return true
+    },
+
+    deleteZone(id: string) {
+      const target = this.zones.find(zone => zone.id === id)
+      if (!target) return false
+      this.objectUpdate(() => {
+        const remaining = this.objects.filter(object => object.kind === 'zone' ? object.id !== id : object.zoneId !== id)
+        this.objects = remaining
+        this.cart = this.cart.filter(item => item.zoneId !== id)
+        this.submitted = null
+        this.spaceTemplate = null
+        // An empty canvas is an intentional user decision. Persist it so a
+        // route carrying analysisId does not silently re-import deleted rooms.
+        this.blank = !remaining.some(object => object.kind === 'zone')
+        if (this.activeZoneId === id) this.activeZoneId = this.zones[0]?.id || null
+        if (this.designZoneId === id) {
+          this.canvasMode = 'overview'
+          this.designZoneId = null
         }
       })
       return true

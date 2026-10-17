@@ -328,6 +328,30 @@ try {
     await page.reload({ waitUntil: 'networkidle' })
     assert.deepEqual((await stored()).objects.find(o => o.id === imported.id).polygon, correctedOutline)
   }
+  // Removing an unused space excludes it from the current layout/template and remains undoable.
+  await choose('L 形办公区')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '删除空间', exact: true }).click()
+  assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, '删除空间同步移除空间')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), true, '删除空间可撤销恢复')
+  // Deleting the last remaining space keeps the canvas intentionally empty
+  // even when the route reloads and tries to auto-import the source analysis.
+  await page.getByRole('button', { name: '选择空间 L 形办公区', exact: true }).click()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '删除空间', exact: true }).click()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).click()
+  await page.getByRole('button', { name: '删除空间', exact: true }).click()
+  assert.equal(await page.locator('.review-room-card').count(), 0, '删除最后空间后列表为空')
+  assert.equal((await stored()).blank, true, '最后空间删除后保存空画布标记')
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    state.floorPlan = null
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
   await page.screenshot({ path: outDir + '/08-reused-contour.png' })
   assert.deepEqual(errors, [])
   console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护。使用模拟 API。')

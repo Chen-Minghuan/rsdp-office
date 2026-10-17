@@ -110,6 +110,11 @@
 .confirm-space { display:block; width:100%; padding:11px 5px; border:1px solid #c9e1d2; background:#edf6ef; color:#5b967a; border-radius:7px; font-size:12px!important; font-weight:500!important; margin:15px 0 0; }
 .confirm-space:disabled { background:#f5f3ed; border-color:#e6e0d4; color:#b5ac98; cursor:not-allowed; }
 .geometry-issue { margin:10px 0; color:#b68a50; font-size:10px; line-height:1.6; }
+.delete-space-button { width:100%; margin-top:14px; padding:8px; border:1px solid #e6caca; border-radius:5px; color:#ae6262; background:#fffafa; font-size:10px; }
+.delete-space-button:hover:not(:disabled) { background:#fff0f0; border-color:#dca7a7; }
+.delete-space-button:disabled { opacity:.45; cursor:not-allowed; }
+.local-save.error { color:#ae6262; }
+.local-save.saving { color:#b28b4c; }
 .calibration-state { color:#b28b4c; font-size:10px; }
 .calibration-state.calibrated { color:#669781; }
 .calibration-button { width:100%; display:flex; justify-content:space-between; color:#949c8a; padding:13px 0 2px; font-size:10px!important; }
