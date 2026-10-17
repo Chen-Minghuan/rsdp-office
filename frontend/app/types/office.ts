@@ -137,6 +137,11 @@ export type ToneKey = 'blue' | 'green' | 'yellow' | 'purple' | 'pink'
 export type CanvasMode = 'overview' | 'design'
 
 export interface ProjectFile {
+  /** Stable identity for this upload; replacing a same-named file creates a new identity. */
+  drawingId?: string
+  analysisId?: string
+  appliedAnalysisId?: string
+  analysisPageNumber?: number
   name: string
   size: number
   type: string

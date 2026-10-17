@@ -12,6 +12,7 @@ import type { FloorPlanDrawingBounds } from '~/types/floorPlan'
 import type { ZoneObject } from '~/types/office'
 import { transformContour } from '~/utils/spatial/contourTransform'
 import type { ContourOperation, ContourPoint } from '~/utils/spatial/contourTransform'
+import { canRestoreSourceContour, sourceContour } from '~/utils/spatial/designCorrections'
 
 const store = useOfficeStore(), router = useRouter(), route = useRoute()
 const selectedId = ref<string | null>(null)
@@ -38,6 +39,8 @@ const selected = computed(() => zones.value.find(zone => zone.id === selectedId.
 const selectedSpace = computed(() => scene.value.spaces.find(space => space.spaceId === selectedId.value) || null)
 const selectedIssue = computed(() => selected.value ? zoneReviewMessage(selected.value, zones.value) : null)
 const selectedBlocking = computed(() => !!selected.value && !!zoneLayoutProblem(selected.value))
+const restorable = computed(() => !!selected.value && store.floorPlan?.inputMode !== 'manual'
+  && selected.value.sourceAnalysisId === store.floorPlan?.analysisId && canRestoreSourceContour(selected.value))
 const calibrated = computed(() => scene.value.workingCoordinateSystem === 'WORLD_MM')
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
@@ -111,6 +114,23 @@ function selectSpace(id: string) {
   if (tracing.value) return
   selectedId.value = id
   if (!zones.value.slice(0, 6).some(zone => zone.id === id)) showAllSpaces.value = true
+}
+function restoreSelectedSource() {
+  const zone = selected.value
+  if (!zone || !restorable.value || tracing.value || calibrating.value || drag.value) return
+  const polygon = sourceContour(zone)
+  if (!polygon) return
+  const xs = polygon.map(p => p[0]), ys = polygon.map(p => p[1])
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys)
+  const room = store.floorPlan?.rooms.find(room => room.roomId === zone.id)
+  store.updateObject(zone.id, {
+    polygon, x: Math.min(...xs), y: Math.min(...ys), w, h,
+    actualWidthMm: zone.reviewUnit === 'mm' ? w : undefined,
+    actualDepthMm: zone.reviewUnit === 'mm' ? h : undefined,
+    geometrySource: room?.geometrySource || store.floorPlan?.geometrySource,
+    source: 'recognition', evidenceKind: store.floorPlan?.evidenceKind || 'ESTIMATED', contourCorrection: undefined,
+  } as Partial<ZoneObject>)
+  notify('已恢复本次识别轮廓，可撤销；关联排版需重新核验')
 }
 function deleteSelectedSpace() {
   const zone = selected.value
@@ -286,7 +306,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       <aside class="review-project review-panel">
         <div class="project-section">
           <div class="section-heading"><h2>项目与空间</h2><small>本地草稿</small></div>
-          <div class="review-project-card"><h3>{{ store.drawingName }}</h3><p>{{ calibrated ? '图纸比例已校准，尺寸单位 mm' : '比例待校准，可先核对空间轮廓' }}</p></div>
+          <div class="review-project-card"><h3>{{ store.floorPlan?.sourceName || store.drawingName }}</h3><p>{{ calibrated ? '图纸比例已校准，尺寸单位 mm' : '比例待校准，可先核对空间轮廓' }}</p></div>
           <div class="review-source-file"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板' : store.floorPlan?.inputMode === 'pdf' ? 'PDF' : store.floorPlan?.inputMode === 'cad' ? 'CAD' : isExample ? 'SVG' : 'PNG' }}</span><div><strong>{{ store.floorPlan?.sourceName || '待关联原始图纸' }}</strong><small>{{ isExample ? '演示底图 · 示例几何' : store.floorPlan?.inputMode === 'manual' ? '空间模板 · 布局设计副本' : '原始底图 · 当前识别页' }}</small></div></div>
         </div>
         <div class="review-room-list">
@@ -349,9 +369,10 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span class="pending-total"><b>{{ pendingCount }}</b> 需复核</span></div><button class="template-workbench-button" :disabled="!store.canEnterLayout || calibrating || !!tracing" @click="showTemplate = true">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button><button :disabled="!store.canEnterLayout || calibrating || !!tracing" @click="advance">进入家具排版 →</button></footer>
       </section>
       <SpatialInspector :inert="!!tracing" :space="selectedSpace" :is-calibrated="calibrated" :pending-count="pendingCount" :issue="selectedIssue" :issue-blocking="selectedBlocking" :needs-review="!!selectedId && reviewSpaceIds.includes(selectedId)" :layout-blocker="store.layoutBlocker" :template-source="store.floorPlan?.inputMode === 'manual'"
+        :source-note="selected?.note" :can-restore-source="restorable && !calibrating && !drag"
         :calibration-active="calibrating" :calibration-point-count="calibrationPoints.length"
         v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
-        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration" @delete-space="deleteSelectedSpace">
+        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration" @delete-space="deleteSelectedSpace" @restore-source="restoreSelectedSource">
         <template #automatic-calibration><DimensionCalibration :enabled="dimensionCalibrationEnabled" :preview-area="automaticPreviewArea" @reference="selectedDimensionReference = $event" @applied="applyAutomaticCalibration" /></template>
       </SpatialInspector>
     </div>

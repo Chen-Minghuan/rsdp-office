@@ -39,6 +39,7 @@ import type { SpaceTemplate } from '~/types/spaceTemplate'
 import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFromTemplate, templatePlan } from '~/utils/spatial/spaceTemplate'
 import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
+import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 // Read existing drafts once so the workspace rename preserves browser data.
@@ -170,6 +171,7 @@ export const useOfficeStore = defineStore('office', {
     layoutBlocker(): string | null {
       if (this.floorPlanLoading) return '正在加载图纸'
       if (this.floorPlanError) return this.floorPlanError
+      if (!drawingMatchesPlan(this.files[0], this.floorPlan)) return '当前图纸尚未应用识别结果，请先识别并进入对应空间'
       if (!this.zones.length) return '请先识别或创建空间'
       const ids = this.zones.map(zone => zone.id)
       if (ids.some(id => !id) || new Set(ids).size !== ids.length) return '空间 ID 缺失或重复'
@@ -503,7 +505,7 @@ export const useOfficeStore = defineStore('office', {
       } else {
         this.objectUpdate(() => {
           this.objects = zonesFromTemplate(template)
-          this.floorPlan = templatePlan(template)
+          this.floorPlan = { ...templatePlan(template), sourceDrawingId: this.files[0]?.drawingId }
           this.floorPlanError = null
           this.spaceTemplate = JSON.parse(JSON.stringify(template)) as SpaceTemplate
           this.submitted = null
@@ -703,8 +705,15 @@ export const useOfficeStore = defineStore('office', {
     },
 
     importFloorPlanToZones(snapshot?: FloorPlanAnalysisResponse) {
-      const plan = snapshot || this.floorPlan
-      if (!plan || !plan.rooms || plan.rooms.length === 0) return
+      const source = snapshot || this.floorPlan
+      if (!source || recognitionRunning(source) || source.status === 'failed' || !source.rooms?.length) return
+      const drawing = this.files[0]
+      const plan = { ...source, sourceDrawingId: source.sourceDrawingId
+        || (drawing?.analysisId === source.analysisId ? drawing.drawingId : undefined)
+        || (this.floorPlan?.analysisId === source.analysisId ? this.floorPlan.sourceDrawingId : undefined) }
+      const replacingDrawing = !!this.floorPlan && this.floorPlan.analysisId !== plan.analysisId && (
+        !!plan.sourceDrawingId && plan.sourceDrawingId !== this.floorPlan.sourceDrawingId
+        || !!plan.sourceName && !!this.floorPlan.sourceName && plan.sourceName !== this.floorPlan.sourceName)
       // Restore source metadata after loading the saved canvas, without replacing its design geometry.
       const existing = this.zones.filter(zone => zone.sourceAnalysisId === plan.analysisId)
       if (existing.length) {
@@ -712,6 +721,7 @@ export const useOfficeStore = defineStore('office', {
         const previous = this.floorPlan?.analysisId === plan.analysisId ? this.floorPlan : null
         const matchingRevision = existing.every(zone => (zone.sourceAnalysisRevision ?? previous?.analysisRevision ?? 1) === sourceRevision)
         if (matchingRevision) {
+          if (drawing?.analysisId === plan.analysisId) drawing.appliedAnalysisId = plan.analysisId
           this.setFloorPlan(plan)
           this.saveLocal()
         } else this.floorPlanError = '来源识别版本已变化，已保留当前编辑；请核对新版本后重新导入，不自动替换底图'
@@ -763,9 +773,12 @@ export const useOfficeStore = defineStore('office', {
       this.objectUpdate(() => {
         this.floorPlan = plan
         this.floorPlanError = null
-        this.objects = this.objects.filter((o) => o.kind !== 'zone')
+        if (drawing?.analysisId === plan.analysisId) drawing.appliedAnalysisId = plan.analysisId
+        this.objects = replacingDrawing ? [] : this.objects.filter((o) => o.kind !== 'zone')
         this.objects.forEach(object => { if (object.kind === 'furniture') object.layoutConfirmed = false })
         this.objects.push(...newZones)
+        this.spaceTemplate = null
+        this.activeZoneId = null
         this.canvasMode = 'overview'
         this.designZoneId = null
         this.submitted = null

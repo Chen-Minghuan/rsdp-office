@@ -59,6 +59,9 @@ export interface FloorPlanDrawingBounds {
 }
 
 export interface FloorPlanAnalysisResponse {
+  /** Local upload binding; independent of names and AI image hashes. */
+  sourceDrawingId?: string
+  processing?: FloorPlanProcessing | null
   imageSha256?: string | null
   /** Source-bound manual design overlays; recognition rooms remain unchanged. */
   designCorrections?: Array<{
@@ -87,6 +90,13 @@ export interface FloorPlanAnalysisResponse {
   drawingBounds?: FloorPlanDrawingBounds | null
   previewBounds?: FloorPlanDrawingBounds | null
   rooms: FloorPlanRoom[]
+  /** Semantic candidates whose boundaries could not be closed by the wall topology. */
+  unresolvedSpaces?: Array<{
+    label?: string | null
+    roomType?: string | null
+    confidence?: DimensionConfidence | null
+    dimensionText?: string | null
+  }>
   analysisRevision?: number | null
   revisionStatus?: string | null
   activeAnalysisRevision?: number | null
@@ -97,6 +107,15 @@ export interface FloorPlanAnalysisResponse {
   parseStatus?: string | null
   unitResolution?: unknown
   inputMode?: 'image' | 'pdf' | 'cad' | 'manual' | null
+}
+
+export interface FloorPlanProcessing {
+  stage: 'QUEUED' | 'PREPARING' | 'RECOGNIZING' | 'REFINING' | 'SAVING' | 'DONE' | 'FAILED'
+  startedAt?: string
+  updatedAt?: string
+  elapsedMs?: number
+  cacheHit?: boolean
+  timingsMs?: Partial<Record<'prepare' | 'spaces' | 'labels' | 'contours' | 'save', number>>
 }
 
 export interface FloorPlanAnalyzeResponse {

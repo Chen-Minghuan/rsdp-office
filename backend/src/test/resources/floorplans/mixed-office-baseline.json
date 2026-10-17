@@ -1,0 +1,872 @@
+{
+  "sourceImageSha256": "bb4fb10a2dd5bcd0ae06676c32ad269029541a3eff11706f44bc51739577bbe4",
+  "evidence": "8.png historical model response; includes furniture false positives, used only for candidate-preservation regression",
+  "initialModelOutput": {
+    "rooms": [
+      {
+        "label": "操作间",
+        "polygon": [
+          [
+            0,
+            0
+          ],
+          [
+            286,
+            0
+          ],
+          [
+            286,
+            143
+          ],
+          [
+            0,
+            143
+          ]
+        ],
+        "roomType": "KITCHEN",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "吧台",
+        "polygon": [
+          [
+            0,
+            143
+          ],
+          [
+            286,
+            143
+          ],
+          [
+            286,
+            214
+          ],
+          [
+            0,
+            214
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "西式简餐厅",
+        "polygon": [
+          [
+            0,
+            214
+          ],
+          [
+            286,
+            214
+          ],
+          [
+            286,
+            429
+          ],
+          [
+            0,
+            429
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "高端私人会所",
+        "polygon": [
+          [
+            0,
+            429
+          ],
+          [
+            286,
+            429
+          ],
+          [
+            286,
+            571
+          ],
+          [
+            0,
+            571
+          ]
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "钢琴",
+        "polygon": [
+          [
+            48,
+            571
+          ],
+          [
+            164,
+            571
+          ],
+          [
+            164,
+            643
+          ],
+          [
+            48,
+            643
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null
+      },
+      {
+        "label": "户外景观",
+        "polygon": [
+          [
+            0,
+            571
+          ],
+          [
+            48,
+            571
+          ],
+          [
+            48,
+            643
+          ],
+          [
+            0,
+            643
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null
+      },
+      {
+        "label": "品茶区",
+        "polygon": [
+          [
+            0,
+            643
+          ],
+          [
+            286,
+            643
+          ],
+          [
+            286,
+            786
+          ],
+          [
+            0,
+            786
+          ]
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "休闲阳台",
+        "polygon": [
+          [
+            0,
+            786
+          ],
+          [
+            286,
+            786
+          ],
+          [
+            286,
+            840
+          ],
+          [
+            0,
+            840
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "主入口",
+        "polygon": [
+          [
+            286,
+            214
+          ],
+          [
+            357,
+            214
+          ],
+          [
+            357,
+            286
+          ],
+          [
+            286,
+            286
+          ]
+        ],
+        "roomType": "HALLWAY",
+        "confidence": "mid",
+        "dimensionText": null
+      },
+      {
+        "label": "前厅",
+        "polygon": [
+          [
+            286,
+            286
+          ],
+          [
+            500,
+            286
+          ],
+          [
+            500,
+            429
+          ],
+          [
+            286,
+            429
+          ]
+        ],
+        "roomType": "RECEPTION",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "等候区",
+        "polygon": [
+          [
+            286,
+            429
+          ],
+          [
+            357,
+            429
+          ],
+          [
+            357,
+            571
+          ],
+          [
+            286,
+            571
+          ]
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "衣帽间",
+        "polygon": [
+          [
+            286,
+            571
+          ],
+          [
+            357,
+            571
+          ],
+          [
+            357,
+            643
+          ],
+          [
+            286,
+            643
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "会议室",
+        "polygon": [
+          [
+            286,
+            643
+          ],
+          [
+            500,
+            643
+          ],
+          [
+            500,
+            786
+          ],
+          [
+            286,
+            786
+          ]
+        ],
+        "roomType": "MEETING_ROOM",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "办公区",
+        "polygon": [
+          [
+            500,
+            643
+          ],
+          [
+            714,
+            643
+          ],
+          [
+            714,
+            786
+          ],
+          [
+            500,
+            786
+          ]
+        ],
+        "roomType": "OPEN_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "技术部",
+        "polygon": [
+          [
+            500,
+            286
+          ],
+          [
+            714,
+            286
+          ],
+          [
+            714,
+            429
+          ],
+          [
+            500,
+            429
+          ]
+        ],
+        "roomType": "OPEN_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "副总办公室",
+        "polygon": [
+          [
+            500,
+            429
+          ],
+          [
+            714,
+            429
+          ],
+          [
+            714,
+            571
+          ],
+          [
+            500,
+            571
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "文印",
+        "polygon": [
+          [
+            500,
+            571
+          ],
+          [
+            643,
+            571
+          ],
+          [
+            643,
+            643
+          ],
+          [
+            500,
+            643
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "总经室",
+        "polygon": [
+          [
+            714,
+            286
+          ],
+          [
+            857,
+            286
+          ],
+          [
+            857,
+            429
+          ],
+          [
+            714,
+            429
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "书吧",
+        "polygon": [
+          [
+            714,
+            429
+          ],
+          [
+            857,
+            429
+          ],
+          [
+            857,
+            571
+          ],
+          [
+            714,
+            571
+          ]
+        ],
+        "roomType": "COLLABORATION",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "财务室",
+        "polygon": [
+          [
+            857,
+            286
+          ],
+          [
+            952,
+            286
+          ],
+          [
+            952,
+            429
+          ],
+          [
+            857,
+            429
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "储物间",
+        "polygon": [
+          [
+            857,
+            429
+          ],
+          [
+            952,
+            429
+          ],
+          [
+            952,
+            571
+          ],
+          [
+            857,
+            571
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "文件柜",
+        "polygon": [
+          [
+            714,
+            571
+          ],
+          [
+            952,
+            571
+          ],
+          [
+            952,
+            643
+          ],
+          [
+            714,
+            643
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null
+      },
+      {
+        "label": "休闲茶室",
+        "polygon": [
+          [
+            714,
+            643
+          ],
+          [
+            857,
+            643
+          ],
+          [
+            857,
+            786
+          ],
+          [
+            714,
+            786
+          ]
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "门禁",
+        "polygon": [
+          [
+            714,
+            786
+          ],
+          [
+            857,
+            786
+          ],
+          [
+            857,
+            840
+          ],
+          [
+            714,
+            840
+          ]
+        ],
+        "roomType": "HALLWAY",
+        "confidence": "mid",
+        "dimensionText": null
+      },
+      {
+        "label": "外机",
+        "polygon": [
+          [
+            857,
+            643
+          ],
+          [
+            952,
+            643
+          ],
+          [
+            952,
+            786
+          ],
+          [
+            857,
+            786
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null
+      },
+      {
+        "label": "设备阳台（空铺防腐木地板）",
+        "polygon": [
+          [
+            0,
+            840
+          ],
+          [
+            952,
+            840
+          ],
+          [
+            952,
+            1000
+          ],
+          [
+            0,
+            1000
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "展厅",
+        "polygon": [
+          [
+            357,
+            214
+          ],
+          [
+            500,
+            214
+          ],
+          [
+            500,
+            286
+          ],
+          [
+            357,
+            286
+          ]
+        ],
+        "roomType": "COLLABORATION",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "展柜",
+        "polygon": [
+          [
+            357,
+            286
+          ],
+          [
+            500,
+            286
+          ],
+          [
+            500,
+            357
+          ],
+          [
+            357,
+            357
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null
+      }
+    ],
+    "warnings": [
+      "右侧楼梯间内标注'3500'与'1833'为竖向尺寸，但未明确对应哪段高度；因无清晰箭头端点，未计入dimensionReferences",
+      "部分房间如'钢琴''展柜'边界由家具轮廓推断，墙体不连续，confidence设为low",
+      "‘文件柜’区域无实体隔墙，仅以虚线/图案分隔，可能属开放区一部分，边界存疑",
+      "图中未见明确单位标注，所有dimensionReferences unit及unitEvidence均为null"
+    ],
+    "dimensionReferences": [
+      {
+        "end": [
+          286,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          571,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          286,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "16800",
+        "unit": null,
+        "start": [
+          571,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          143
+        ],
+        "text": "4200",
+        "unit": null,
+        "start": [
+          500,
+          0
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          429
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          500,
+          143
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          786
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          500,
+          429
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          286,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          571,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          286,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          600,
+          500
+        ],
+        "text": "750",
+        "unit": null,
+        "start": [
+          571,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          857,
+          500
+        ],
+        "text": "7650",
+        "unit": null,
+        "start": [
+          600,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          857,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          286
+        ],
+        "text": "8200",
+        "unit": null,
+        "start": [
+          500,
+          0
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      }
+    ]
+  },
+  "labelLocalization": {
+    "status": "UNAVAILABLE",
+    "labels": []
+  }
+}

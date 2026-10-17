@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
+import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 const store = useOfficeStore()
 const route = useRoute()
 const router = useRouter()
@@ -45,15 +47,55 @@ watch(() => store.canvasMode, (m, oldM) => {
 
 // 从 URL 加载户型图分析结果
 const analysisIdFromQuery = computed(() => route.query.analysisId as string | undefined)
-watch([analysisIdFromQuery, () => store.initialized], async ([id, initialized]) => {
-  if (initialized && id && (!store.floorPlan || store.floorPlan.analysisId !== id)) {
-    const snapshot = await store.loadFloorPlan(id)
-    // An empty canvas can be intentional: deleting its last space must not be
-    // undone by the automatic analysis import on refresh.
-    if (snapshot?.analysisId === id && analysisIdFromQuery.value === id && (!store.blank || store.zones.length)) {
-      store.importFloorPlanToZones(snapshot)
+const drawing = computed(() => store.files[0])
+const canvasMatchesDrawing = computed(() => drawingMatchesPlan(drawing.value, store.floorPlan)
+  || (drawing.value?.mock && !!analysisIdFromQuery.value && analysisIdFromQuery.value === store.floorPlan?.analysisId))
+const targetAnalysisId = computed(() => {
+  if (drawing.value?.drawingId) {
+    if (store.floorPlan?.inputMode === 'manual' && canvasMatchesDrawing.value && !analysisIdFromQuery.value) return undefined
+    return drawing.value.analysisId
+  }
+  return analysisIdFromQuery.value || (!canvasMatchesDrawing.value ? drawing.value?.analysisId : undefined)
+})
+const entryResult = ref<FloorPlanAnalysisResponse | null>(null)
+const entryLoading = ref(false), entryError = ref(''), entryRetry = ref(0)
+const entryBlocked = computed(() => entryLoading.value || !!entryError.value || !canvasMatchesDrawing.value)
+watch([targetAnalysisId, () => store.initialized, () => drawing.value?.drawingId, entryRetry], ([id, initialized], _, onCleanup) => {
+  let cancelled = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => { cancelled = true; clearTimeout(timer) })
+  entryResult.value = null
+  entryError.value = ''
+  entryLoading.value = false
+  if (!initialized || !id || store.floorPlan?.analysisId === id && canvasMatchesDrawing.value) return
+  entryLoading.value = true
+  async function load() {
+    try {
+      const snapshot = await useFloorPlanApi().getFloorPlan(id!)
+      if (cancelled || targetAnalysisId.value !== id) return
+      if (snapshot.analysisId !== id) throw new Error('识别结果与当前图纸任务不一致，请重新识别')
+      if (drawing.value && !drawing.value.drawingId && !drawing.value.mock && snapshot.sourceName !== drawing.value.name) {
+        throw new Error('当前识别结果不属于 ' + drawing.value.name + '，请返回上传页识别当前图纸')
+      }
+      entryResult.value = snapshot
+      if (snapshot.status === 'failed') throw new Error(snapshot.errorMessage || '当前图纸识别失败，请返回上传页重新识别')
+      if (recognitionRunning(snapshot)) { timer = setTimeout(load, 1000); return }
+      if (!snapshot.rooms?.length) throw new Error('当前图纸未识别出可用空间，请返回上传页重新识别')
+      // Preserve intentionally empty legacy drafts; a newly selected drawing is an explicit new import.
+      if (!store.blank || store.zones.length || drawing.value?.analysisId === id && drawing.value.appliedAnalysisId !== id) {
+        store.importFloorPlanToZones({ ...snapshot, sourceDrawingId: drawing.value?.analysisId === id ? drawing.value.drawingId : undefined })
+      } else {
+        store.setFloorPlan({ ...snapshot, sourceDrawingId: drawing.value?.drawingId })
+        store.saveLocal()
+      }
+      entryLoading.value = false
+    } catch (error) {
+      if (cancelled) return
+      entryLoading.value = false
+      entryError.value = error instanceof Error ? error.message : '当前图纸加载失败'
     }
   }
+  void load()
 }, { immediate: true })
 
 watch(() => store.designZoneId, (id, oldId) => {
@@ -95,7 +137,19 @@ const subtitle = computed(() => mode.value === 'design'
 </script>
 
 <template>
-  <OfficeCanvasSpaceReview v-if="mode === 'overview'" />
+  <section v-if="entryBlocked" class="flex h-full flex-col gap-4 overflow-auto rounded-2xl border border-line bg-white p-6" data-testid="drawing-entry">
+    <h1 class="text-xl font-bold">当前图纸：{{ drawing?.name || entryResult?.sourceName || '图纸' }}</h1>
+    <p v-if="entryError" role="alert" class="text-sm text-red-700">{{ entryError }}</p>
+    <p v-else-if="entryLoading" class="text-sm text-muted">正在准备当前图纸的空间，识别完成后进入编辑。</p>
+    <p v-else class="text-sm text-muted">请先识别当前图纸，再进入空间。已有图纸的编辑仍保留。</p>
+    <RecognitionProgress v-if="entryLoading || entryResult?.processing" :progress="entryResult?.processing" :pending="entryLoading" />
+    <img v-if="entryResult?.previewUrl" :src="entryResult.previewUrl" alt="当前图纸预览" class="min-h-0 max-h-[60vh] w-full object-contain">
+    <div class="flex gap-3">
+      <NuxtLink to="/" class="rounded-lg border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
+      <button v-if="entryError && targetAnalysisId" class="rounded-lg border border-line px-4 py-2 text-sm" @click="entryRetry++">重试查询当前图纸</button>
+    </div>
+  </section>
+  <OfficeCanvasSpaceReview v-else-if="mode === 'overview'" />
   <div v-else class="flex flex-col h-full gap-4">
     <div class="flex flex-wrap items-start justify-between gap-3 flex-none">
       <div>

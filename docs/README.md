@@ -10,12 +10,21 @@
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
+| [底图先行与后台并行识别](tasks/RECOG-007-progressive-recognition.md) | 预览先到、模型并行、真实进度和标准图缓存 |
 | [原图墙线约束](tasks/RECOG-004-local-wall-contours.md) | 原图墙线与封闭区域校正、来源坐标映射和异常保留 |
 | [房名定位与同图轮廓继承](tasks/RECOG-005-label-grounding-and-correction-reuse.md) | 棋牌室位置校正、开放分区人工边界继承及真实/模拟验证范围 |
 | [玻璃立面办公图轮廓修正](tasks/RECOG-006-glazed-office-contours.md) | 5.png 当前稿九处修正、顶部玻璃/柱角/门洞校正与真实底图重放 |
+| [细双线隔墙与同名房间纠偏](tasks/RECOG-008-thin-partitions-and-repeated-labels.md) | 7.png 错位原因、结构网络、重复房名匹配与两张冻结实图回归 |
+| [旧稿覆盖与隔间碎片修复](tasks/RECOG-009-contour-history-and-partitions.md) | 会议室截短旧框保护、来源轮廓恢复、女卫/电梯厅补救与未完成范围 |
+| [中央办公区漏失修复](tasks/RECOG-010-missing-open-office.md) | 越界模型轮廓被过滤、同名组连带失效与开放地面追踪补救 |
 | [Qwen 接入任务](tasks/RECOG-002-qwen-vl-integration.md) | 本轮模型接入与验证记录 |
+| [PNG 墙网拓扑识别](tasks/RECOG-011-png-wall-topology-pipeline.md) | Qwen 语义识别、墙网构建、门洞闭合与空间多边形化 |
+| [移除未启用分割服务](tasks/RECOG-015-remove-unused-segformer.md) | 清理服务、Java 接入、Docker 和环境配置，保留栅格墙线核查 |
+| [空间完整性回退修复](tasks/RECOG-014-space-completeness-recovery.md) | 8.png 漏识别、恢复初始候选与保守墙线核查 |
+| [语义切换空间丢失修复](tasks/RECOG-013-recognition-pipeline-recovery.md) | 主请求文字定位补位、同名部分匹配、未命名墙网候选与真实输入回归 |
 | [尺寸标注与比例确认](tasks/RECOG-003-dimension-calibration.md) | 自动读取标注、一致性校验、用户确认和真实图纸实测 |
 | [单张图纸上传](tasks/UPLOAD-001-single-drawing.md) | 单图选择/拖放、更换与旧识别预览清理 |
+| [当前图纸进入对应空间](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 上传 ID/识别绑定、后台空间入口、旧底图/模板/家具隔离与空稿恢复 |
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 上传页面精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |
 | [本轮文档任务](tasks/DOC-001-project-baseline.md) | 本次需求与规范整理的过程及验证 |

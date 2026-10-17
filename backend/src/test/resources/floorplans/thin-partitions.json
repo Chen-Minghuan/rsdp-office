@@ -1,0 +1,761 @@
+{
+  "sourceImageSha256": "6c2256aaddec3f1aa2c93dc35b413bb22752d544914bd29f8c7efa83ff1804cf",
+  "initialModelOutput": {
+    "rooms": [
+      {
+        "label": "茶水区",
+        "polygon": [
+          [
+            175,
+            140
+          ],
+          [
+            375,
+            140
+          ],
+          [
+            375,
+            260
+          ],
+          [
+            325,
+            260
+          ],
+          [
+            325,
+            320
+          ],
+          [
+            275,
+            320
+          ],
+          [
+            275,
+            260
+          ],
+          [
+            225,
+            260
+          ],
+          [
+            225,
+            190
+          ],
+          [
+            175,
+            190
+          ]
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": "18m²"
+      },
+      {
+        "label": "洗手间",
+        "polygon": [
+          [
+            175,
+            340
+          ],
+          [
+            350,
+            340
+          ],
+          [
+            350,
+            440
+          ],
+          [
+            175,
+            440
+          ]
+        ],
+        "roomType": "BATHROOM",
+        "confidence": "high",
+        "dimensionText": "6.1m²"
+      },
+      {
+        "label": "男卫",
+        "polygon": [
+          [
+            175,
+            460
+          ],
+          [
+            275,
+            460
+          ],
+          [
+            275,
+            580
+          ],
+          [
+            175,
+            580
+          ]
+        ],
+        "roomType": "BATHROOM",
+        "confidence": "high",
+        "dimensionText": "7.55m²"
+      },
+      {
+        "label": "女卫",
+        "polygon": [
+          [
+            275,
+            460
+          ],
+          [
+            350,
+            460
+          ],
+          [
+            350,
+            580
+          ],
+          [
+            275,
+            580
+          ]
+        ],
+        "roomType": "BATHROOM",
+        "confidence": "high",
+        "dimensionText": "6.78m²"
+      },
+      {
+        "label": "电梯厅",
+        "polygon": [
+          [
+            175,
+            600
+          ],
+          [
+            350,
+            600
+          ],
+          [
+            350,
+            720
+          ],
+          [
+            175,
+            720
+          ]
+        ],
+        "roomType": "HALLWAY",
+        "confidence": "high",
+        "dimensionText": "16m²"
+      },
+      {
+        "label": "小会议室",
+        "polygon": [
+          [
+            375,
+            600
+          ],
+          [
+            525,
+            600
+          ],
+          [
+            525,
+            720
+          ],
+          [
+            375,
+            720
+          ]
+        ],
+        "roomType": "MEETING_ROOM",
+        "confidence": "high",
+        "dimensionText": "15m²"
+      },
+      {
+        "label": "中会议室",
+        "polygon": [
+          [
+            550,
+            600
+          ],
+          [
+            700,
+            600
+          ],
+          [
+            700,
+            720
+          ],
+          [
+            550,
+            720
+          ]
+        ],
+        "roomType": "MEETING_ROOM",
+        "confidence": "high",
+        "dimensionText": "20.2m²"
+      },
+      {
+        "label": "主管室",
+        "polygon": [
+          [
+            375,
+            140
+          ],
+          [
+            525,
+            140
+          ],
+          [
+            525,
+            280
+          ],
+          [
+            375,
+            280
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "13.67m²"
+      },
+      {
+        "label": "主管室",
+        "polygon": [
+          [
+            550,
+            140
+          ],
+          [
+            700,
+            140
+          ],
+          [
+            700,
+            280
+          ],
+          [
+            550,
+            280
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "13.67m²"
+      },
+      {
+        "label": "主管室",
+        "polygon": [
+          [
+            725,
+            140
+          ],
+          [
+            875,
+            140
+          ],
+          [
+            875,
+            280
+          ],
+          [
+            725,
+            280
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "13.67m²"
+      },
+      {
+        "label": "主管室",
+        "polygon": [
+          [
+            900,
+            140
+          ],
+          [
+            1000,
+            140
+          ],
+          [
+            1000,
+            280
+          ],
+          [
+            900,
+            280
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "13.67m²"
+      },
+      {
+        "label": "主管室",
+        "polygon": [
+          [
+            725,
+            600
+          ],
+          [
+            875,
+            600
+          ],
+          [
+            875,
+            720
+          ],
+          [
+            725,
+            720
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "13.14m²"
+      },
+      {
+        "label": "主管室",
+        "polygon": [
+          [
+            900,
+            600
+          ],
+          [
+            1000,
+            600
+          ],
+          [
+            1000,
+            720
+          ],
+          [
+            900,
+            720
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "13.14m²"
+      },
+      {
+        "label": "开放办公区(38人)",
+        "polygon": [
+          [
+            375,
+            340
+          ],
+          [
+            1000,
+            340
+          ],
+          [
+            1000,
+            580
+          ],
+          [
+            725,
+            580
+          ],
+          [
+            725,
+            460
+          ],
+          [
+            550,
+            460
+          ],
+          [
+            550,
+            580
+          ],
+          [
+            375,
+            580
+          ]
+        ],
+        "roomType": "OPEN_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": null,
+        "polygon": [
+          [
+            175,
+            280
+          ],
+          [
+            1000,
+            280
+          ],
+          [
+            1000,
+            340
+          ],
+          [
+            175,
+            340
+          ]
+        ],
+        "roomType": "HALLWAY",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": null,
+        "polygon": [
+          [
+            175,
+            580
+          ],
+          [
+            1000,
+            580
+          ],
+          [
+            1000,
+            600
+          ],
+          [
+            175,
+            600
+          ]
+        ],
+        "roomType": "HALLWAY",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": null,
+        "polygon": [
+          [
+            325,
+            140
+          ],
+          [
+            375,
+            140
+          ],
+          [
+            375,
+            280
+          ],
+          [
+            325,
+            280
+          ]
+        ],
+        "roomType": "STUDY",
+        "confidence": "mid",
+        "dimensionText": "15.4m²"
+      }
+    ],
+    "warnings": [],
+    "dimensionReferences": [
+      {
+        "end": [
+          250,
+          500
+        ],
+        "text": "7500",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          750,
+          500
+        ],
+        "text": "22470",
+        "unit": null,
+        "start": [
+          250,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "7500",
+        "unit": null,
+        "start": [
+          750,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "7470",
+        "unit": null,
+        "start": [
+          1000,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          110,
+          500
+        ],
+        "text": "2750",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          410,
+          500
+        ],
+        "text": "7500",
+        "unit": null,
+        "start": [
+          110,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          710,
+          500
+        ],
+        "text": "7500",
+        "unit": null,
+        "start": [
+          410,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "7470",
+        "unit": null,
+        "start": [
+          710,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          500,
+          0
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          1000
+        ],
+        "text": "16800",
+        "unit": null,
+        "start": [
+          500,
+          500
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          500
+        ],
+        "text": "8400",
+        "unit": null,
+        "start": [
+          500,
+          0
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          1000
+        ],
+        "text": "16790",
+        "unit": null,
+        "start": [
+          500,
+          500
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      }
+    ]
+  },
+  "labelLocalization": {
+    "labels": [
+      {
+        "bbox": [
+          293,
+          275,
+          328,
+          294
+        ],
+        "text": "茶水区"
+      },
+      {
+        "bbox": [
+          530,
+          275,
+          565,
+          294
+        ],
+        "text": "主管室"
+      },
+      {
+        "bbox": [
+          628,
+          275,
+          663,
+          294
+        ],
+        "text": "主管室"
+      },
+      {
+        "bbox": [
+          726,
+          275,
+          761,
+          294
+        ],
+        "text": "主管室"
+      },
+      {
+        "bbox": [
+          824,
+          275,
+          859,
+          294
+        ],
+        "text": "主管室"
+      },
+      {
+        "bbox": [
+          293,
+          465,
+          328,
+          484
+        ],
+        "text": "洗手间"
+      },
+      {
+        "bbox": [
+          232,
+          582,
+          255,
+          598
+        ],
+        "text": "男卫"
+      },
+      {
+        "bbox": [
+          302,
+          582,
+          325,
+          598
+        ],
+        "text": "女卫"
+      },
+      {
+        "bbox": [
+          257,
+          802,
+          292,
+          819
+        ],
+        "text": "电梯厅"
+      },
+      {
+        "bbox": [
+          412,
+          782,
+          447,
+          799
+        ],
+        "text": "小会议室"
+      },
+      {
+        "bbox": [
+          530,
+          782,
+          565,
+          799
+        ],
+        "text": "中会议室"
+      },
+      {
+        "bbox": [
+          726,
+          762,
+          761,
+          779
+        ],
+        "text": "主管室"
+      },
+      {
+        "bbox": [
+          824,
+          762,
+          859,
+          779
+        ],
+        "text": "主管室"
+      }
+    ],
+    "status": "DETECTED",
+    "coordinateSystem": "NORMALIZED_1000"
+  }
+}

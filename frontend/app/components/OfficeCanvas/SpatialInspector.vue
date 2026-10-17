@@ -11,6 +11,8 @@ const props = defineProps<{
   needsReview?: boolean
   layoutBlocker?: string | null
   templateSource?: boolean
+  sourceNote?: string
+  canRestoreSource?: boolean
   calibrationActive: boolean
   calibrationPointCount: number
 }>()
@@ -21,6 +23,7 @@ const emit = defineEmits<{
   (e: 'cancelCalibration'): void
   (e: 'applyCalibration', length: number): void
   (e: 'deleteSpace'): void
+  (e: 'restoreSource'): void
 }>()
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
 const showOutline = defineModel<boolean>('showOutline', { default: true })
@@ -44,6 +47,7 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
       <p class="room-id">空间 ID · {{ space.spaceId }}</p>
       <div class="property-row"><span>空间用途</span><select :value="space.category" aria-label="空间用途" @change="emit('category', ($event.target as HTMLSelectElement).value)"><option v-for="[value, label] in ZONE_TYPES" :key="value" :value="value">{{ label }}</option></select></div>
       <div class="property-row"><span>几何来源</span><strong>{{ sourceLabel }}</strong></div>
+      <p v-if="sourceNote" class="inspector-hint" role="status">{{ sourceNote }}</p>
       <section class="inspector-section">
         <div class="section-heading"><h4>实际尺寸</h4><small>毫米 mm</small></div>
         <form @submit.prevent="validDimensions && emit('resize', Number(width), Number(depth))">
@@ -57,6 +61,7 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
         <div class="property-row"><span>编辑锚点</span><strong>{{ space.rectangleFrame ? '局部左下角固定' : '保持异形轮廓' }}</strong></div>
         <p class="inspector-hint">{{ space.rectangleFrame ? '数值与轮廓联动；修改后更新关联排版。' : '可拖动选中顶点修正异形边界，面积按多边形计算。' }}<br>缺少入口或转折时，点“编辑轮廓”补点，或沿墙重描。底图保留原始状态。</p>
         <p v-if="issue" class="geometry-issue" :role="issueBlocking ? 'alert' : 'status'">{{ issue }}</p>
+        <button v-if="canRestoreSource" class="calibration-button" type="button" @click="emit('restoreSource')">恢复本次识别轮廓</button>
         <button class="delete-space-button" type="button" :disabled="!space" @click="emit('deleteSpace')">删除空间</button>
       </section>
     </template>

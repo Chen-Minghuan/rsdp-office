@@ -18,6 +18,80 @@ class RasterWallContoursTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final SpatialGeometryService geometry = new SpatialGeometryService();
 
+    @Test
+    void repeatedNamesOutsideInitialPolygonsAreAssignedOnceAndGroundedAtActualLabels() throws Exception {
+        var source = candidates();
+        for (var room : source.path("rooms")) ((ObjectNode) room).put("label", "主管室");
+        ((ObjectNode) source.path("rooms").get(0)).set("polygon", mapper.readTree("[[20,20],[80,20],[80,80],[20,80]]"));
+        ((ObjectNode) source.path("rooms").get(1)).set("polygon", mapper.readTree("[[100,20],[180,20],[180,80],[100,80]]"));
+        var before = source.deepCopy();
+        var labels = mapper.readTree("""
+            {"status":"DETECTED","labels":[
+              {"text":"主管室","bbox":[600,600,680,630]},
+              {"text":"主管室","bbox":[200,200,280,230]}]}
+            """);
+        var result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, labels);
+        assertEquals(2, result.path("contourRefinement").path("acceptedCount").asInt());
+        assertNotEquals(result.path("rooms").get(0).path("labelAnchor"), result.path("rooms").get(1).path("labelAnchor"));
+        assertEquals(before, source);
+    }
+
+    @Test
+    void oneInvalidRepeatedCandidateDoesNotDisableIndependentGroundingOfTheWholeGroup() throws Exception {
+        var source = candidates();
+        for (var room : source.path("rooms")) ((ObjectNode) room).put("label", "主管室");
+        ((ObjectNode) source.path("rooms").get(1)).putArray("polygon");
+        var labels = mapper.readTree("""
+            {"status":"DETECTED","labels":[
+              {"text":"主管室","bbox":[600,600,680,630]},
+              {"text":"主管室","bbox":[200,200,280,230]}]}
+            """);
+        var result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, labels);
+        assertEquals(2, result.path("contourRefinement").path("acceptedCount").asInt());
+        assertNotEquals(result.path("rooms").get(0).path("labelAnchor"), result.path("rooms").get(1).path("labelAnchor"));
+        assertEquals(0, source.path("rooms").get(1).path("polygon").size());
+    }
+
+    @Test
+    void independentOpenOfficeTextRecoversAnOmittedPrimaryRoomWithoutInventingConfirmationOrScale() throws Exception {
+        var source = (ObjectNode) mapper.readTree("{\"rooms\":[]}");
+        var labels = mapper.readTree("""
+            {"status":"DETECTED","labels":[{"text":"开放办公区(38人)","bbox":[200,200,280,230]}]}
+            """);
+        var result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, labels);
+        assertEquals(1, result.path("rooms").size());
+        assertEquals("开放办公区(38人)", result.path("rooms").get(0).path("label").asText());
+        assertEquals(1, result.path("openSpaceRecovery").path("recoveredCount").asInt());
+        assertEquals("INDEPENDENT_LABEL_DETECTION", result.path("openSpaceRecovery").path("rooms").get(0).path("seedSource").asText());
+        assertFalse(result.path("rooms").get(0).path("contourGrounded").asBoolean());
+        assertFalse(result.has("scaleToMm"));
+        assertEquals(0, source.path("rooms").size());
+        ((com.fasterxml.jackson.databind.node.ArrayNode) source.path("rooms")).addObject()
+            .put("label", "开放办公区(38人)").put("roomType", "OPEN_OFFICE").putArray("polygon");
+        ((ObjectNode) labels.path("labels").get(0)).put("text", "开放办公区（38人）");
+        result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, labels);
+        assertEquals(1, result.path("rooms").size(), "全角半角括号不造成重复开放区");
+        assertEquals(1, result.path("openSpaceRecovery").path("recoveredCount").asInt());
+    }
+
+    @Test
+    void openFloorRecoveryRejectsPageLeakageAndAmbiguousOpenNames() throws Exception {
+        var source = (ObjectNode) mapper.readTree("{\"rooms\":[]}");
+        var labels = mapper.readTree("""
+            {"status":"DETECTED","labels":[{"text":"开放办公区","bbox":[600,600,680,630]}]}
+            """);
+        var result = RasterWallContours.refine(source, prepared(drawing(true)), mapper, geometry, labels);
+        assertEquals(0, result.path("openSpaceRecovery").path("recoveredCount").asInt());
+        labels = mapper.readTree("""
+            {"status":"DETECTED","labels":[
+              {"text":"开放办公区A","bbox":[600,600,650,630]},
+              {"text":"开放办公区B","bbox":[700,600,750,630]}]}
+            """);
+        result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, labels);
+        assertEquals(0, result.path("openSpaceRecovery").path("recoveredCount").asInt());
+        assertTrue(result.path("warnings").toString().contains("开放区边界未恢复"));
+    }
+
     static BufferedImage drawing(boolean open) {
         var image = new BufferedImage(1000, 800, BufferedImage.TYPE_INT_RGB);
         var g = image.createGraphics();
@@ -76,7 +150,8 @@ class RasterWallContoursTest {
             g.setColor(Color.DARK_GRAY); g.drawRect(560, 650, 60, 40);
         } finally { g.dispose(); }
         var result = RasterWallContours.refine(candidates(), prepared(image), mapper, geometry);
-        assertEquals("GROUNDED", result.path("contourRefinement").path("rooms").get(1).path("status").asText());
+        assertEquals("WALL_REGION_NEEDS_REVIEW", result.path("contourRefinement").path("rooms").get(1).path("status").asText());
+        assertFalse(result.path("rooms").get(1).path("contourGrounded").asBoolean());
         var shape = new java.awt.geom.Path2D.Double();
         var ring = result.path("rooms").get(1).path("polygon");
         shape.moveTo(ring.get(0).get(0).asDouble(), ring.get(0).get(1).asDouble() * .8);
@@ -148,7 +223,9 @@ class RasterWallContoursTest {
               {"text":"办公室甲","bbox":[600,600,680,630]}]}
             """);
         result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, detection);
-        assertEquals(0, result.path("contourRefinement").path("attemptedCount").asInt());
+        // Keep the occurrence supported by the original position, without merging the other occurrence.
+        assertEquals(1, result.path("contourRefinement").path("attemptedCount").asInt());
+        assertEquals(1, result.path("contourRefinement").path("acceptedCount").asInt());
     }
 
     private BufferedImage glazedCorner(boolean visibleLeaf) {

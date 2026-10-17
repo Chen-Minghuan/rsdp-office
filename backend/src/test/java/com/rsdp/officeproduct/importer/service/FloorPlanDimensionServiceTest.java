@@ -60,6 +60,13 @@ class FloorPlanDimensionServiceTest {
         verify(revisions, times(1)).compareAndSetDimensionResult(anyString(), anyInt(), anyString(), anyString());
         verifyNoInteractions(qwen);
     }
+    @Test void runningRecognitionCannotBeCalibratedOrReread() {
+        analysis.setStatus(FloorPlanAnalysis.STATUS_ANALYZING);
+        assertThrows(BusinessException.class, () -> service.confirm("A", 1, "R", "mm"));
+        assertThrows(BusinessException.class, () -> service.recognize("A", 1));
+        verifyNoInteractions(qwen);
+        verify(revisions, never()).compareAndSetDimensionResult(anyString(), anyInt(), anyString(), anyString());
+    }
     @Test void validatesUnitChoiceOnServerAndNeverAcceptsArbitraryClientScale() {
         assertEquals(100, service.confirm("A", 1, "R", "cm").getMmPerPixel());
         assertNull(service.get("A", 1, "mm").getConfirmationId());

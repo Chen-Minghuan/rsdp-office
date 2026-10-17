@@ -57,7 +57,7 @@ try {
     rooms: source.rooms.map((room, index) => ({ ...room, roomId: id + '-' + room.roomId, contourGrounded: index === 0 })),
     designCorrections: [
       { name: 'L 形办公区', polygon: correctedOutline, sourceAnalysisId: 'PREVIOUS-ANALYSIS', sourceAnalysisRevision: 1, canvasRevision: 20 },
-      { name: '测试会议室', polygon: [[800,100],[1000,100],[1000,400],[800,400]], sourceAnalysisId: 'PREVIOUS-ANALYSIS', sourceAnalysisRevision: 1, canvasRevision: 20 },
+      { name: '测试会议室', polygon: [[110,250],[690,250],[690,490],[110,490]], sourceAnalysisId: 'PREVIOUS-ANALYSIS', sourceAnalysisRevision: 1, canvasRevision: 20 },
     ],
   })
   await context.route('**/api/v1/**', route => {
@@ -198,6 +198,13 @@ try {
   await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
   assert.equal(await page.getByTestId('selected-area').innerText(), '20.00 m²')
   assert.deepEqual((await stored()).objects.find(object => object.id === 'TEST-ROOM').sourcePolygon, originalPolygon)
+  const beforeRestore = (await stored()).objects
+  await page.getByRole('button', { name: '恢复本次识别轮廓', exact: true }).click()
+  assert.equal(await page.getByTestId('selected-area').innerText(), '24.00 m²')
+  assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-ROOM').sourcePolygon, originalPolygon)
+  assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-L'), beforeRestore.find(o => o.id === 'TEST-L'))
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.deepEqual((await stored()).objects, beforeRestore, '毫米恢复可完整撤销')
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
   assert.equal(await page.getByTestId('selected-area').innerText(), '20.00 m²', '刷新不得重导入而覆盖设计副本')
@@ -345,6 +352,14 @@ try {
     assert.equal(imported.reviewUnit, 'source', '继承轮廓不代替比例确认')
     assert.equal(imported.contourCorrection.sourceAnalysisId, 'PREVIOUS-ANALYSIS')
     assert.deepEqual((await stored()).objects.find(o => o.id === id + '-TEST-ROOM').polygon, source.rooms[0].polygon, '旧错位框不覆盖新定位的封闭房间')
+    await choose('测试会议室')
+    await page.getByRole('status').filter({ hasText: '历史编辑与本次墙线轮廓不一致' }).waitFor()
+    await choose('L 形办公区')
+    const beforeRestore = (await stored()).objects
+    await page.getByRole('button', { name: '恢复本次识别轮廓', exact: true }).click()
+    assert.deepEqual((await stored()).objects.find(o => o.id === imported.id).polygon, source.rooms[1].polygon, '未校准恢复沿用来源像素')
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    assert.deepEqual((await stored()).objects, beforeRestore)
     await page.reload({ waitUntil: 'networkidle' })
     assert.deepEqual((await stored()).objects.find(o => o.id === imported.id).polygon, correctedOutline)
   }

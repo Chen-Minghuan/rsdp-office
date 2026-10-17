@@ -22,6 +22,49 @@ class VisionImagePreparerTest {
     private final VisionImagePreparer preparer = new VisionImagePreparer(properties);
 
     @Test
+    void cacheUsesContentsPageAndProcessingParametersAndProtectsImageBytes() throws Exception {
+        var file = pdf();
+        var first = preparer.prepareCached(file, 1);
+        assertFalse(first.cacheHit());
+        var renamed = new MockMultipartFile("file", "renamed.pdf", "application/pdf", file.getBytes());
+        assertTrue(preparer.prepareCached(renamed, 1).cacheHit());
+        assertFalse(preparer.prepareCached(file, 2).cacheHit());
+        properties.setPdfDpi(72);
+        var lowerDpi = preparer.prepareCached(file, 1);
+        assertFalse(lowerDpi.cacheHit());
+        assertEquals(200, lowerDpi.image().width());
+        properties.setMaxImageEdge(256);
+        assertFalse(preparer.prepareCached(file, 1).cacheHit());
+        byte original = lowerDpi.image().png()[0];
+        lowerDpi.image().png()[0] = 0;
+        assertEquals(original, lowerDpi.image().png()[0]);
+        // Failures cannot poison the cache or leave a pending single-flight future.
+        var invalid = new MockMultipartFile("file", new byte[]{1, 2, 3});
+        assertThrows(BusinessException.class, () -> preparer.prepareCached(invalid, 1));
+        assertThrows(BusinessException.class, () -> preparer.prepareCached(invalid, 1));
+    }
+
+    @Test
+    void concurrentIdenticalPreparationIsShared() throws Exception {
+        var file = pdf();
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(6)) {
+            var start = new java.util.concurrent.CountDownLatch(1);
+            var requests = new java.util.ArrayList<java.util.concurrent.Future<VisionImagePreparer.Preparation>>();
+            for (int i = 0; i < 6; i++) requests.add(pool.submit(() -> { start.await(); return preparer.prepareCached(file, 1); }));
+            start.countDown();
+            int conversions = 0;
+            VisionImagePreparer.PreparedImage shared = null;
+            for (var request : requests) {
+                var result = request.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                if (!result.cacheHit()) conversions++;
+                if (shared == null) shared = result.image();
+                else assertSame(shared, result.image());
+            }
+            assertEquals(1, conversions);
+        }
+    }
+
+    @Test
     void selectedPdfPageIsRenderedWithItsOwnSizeAndContent() throws Exception {
         MockMultipartFile pdf = pdf();
         var first = preparer.prepare(pdf, 1);

@@ -18,6 +18,7 @@ public class FloorPlanAnalysisResponse {
     private String previewImageId;
     private String previewUrl;
     private String status;
+    private JsonNode processing;
     private String taskId;
     private BigDecimal scaleRatio;
     private String projectId;
@@ -28,6 +29,9 @@ public class FloorPlanAnalysisResponse {
     private LocalDateTime updatedAt;
 
     private List<FloorPlanRoomResponse> rooms;
+
+    /** Semantic candidates that could not be closed by the image wall topology. */
+    private JsonNode unresolvedSpaces;
 
     /** ai_vision / cad_geometry / manual_geometry。 */
     private String geometrySource;

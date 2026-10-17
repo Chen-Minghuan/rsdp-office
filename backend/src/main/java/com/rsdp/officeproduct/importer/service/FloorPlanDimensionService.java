@@ -76,6 +76,7 @@ public class FloorPlanDimensionService {
     private FloorPlanSceneRevision current(String id, int revision) {
         FloorPlanAnalysis analysis = analysisMapper.selectById(id);
         if (analysis == null) throw new BusinessException("分析批次不存在");
+        if (FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) throw new BusinessException("空间识别尚未完成，请稍后校准尺寸");
         if ("cad".equals(analysis.getInputMode())) throw new BusinessException("CAD 请使用文件单位与已有比例校准，图片尺寸自动读取仅支持 PNG/JPG/PDF");
         int active = analysis.getWorkingAnalysisRevision() != null ? analysis.getWorkingAnalysisRevision()
             : analysis.getActiveAnalysisRevision() != null ? analysis.getActiveAnalysisRevision()

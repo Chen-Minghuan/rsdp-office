@@ -1,5 +1,11 @@
 # 开发进度与下一步
 
+2026-10-17 提交前复核：当前识别/上传/空间核对版本的 `pnpm build`、`pnpm test:design-corrections`、`pnpm e2e:recognition-progress`、`pnpm e2e:drawing-entry`、`pnpm e2e:space-review` 全部通过；三项 UI 使用隔离预览与模拟 API。后端沿用本轮 RECOG-015 的 clean test 149 通过/3 跳过记录。未新增真实模型调用，不扩大识别边界精度或业务验收结论。
+
+2026-10-17 追加：[RECOG-015](tasks/RECOG-015-remove-unused-segformer.md) 清理完成。已删除未启用的 SegFormer 服务及 Java 接入、容器和环境配置，保留 Qwen 候选与 Java 栅格墙线核查；Java clean test 149 通过/3 跳过，Compose、文档及差异检查通过。本地后端已重启且健康检查 UP，历史分析可读取。
+
+2026-10-17 追加：[RECOG-014](tasks/RECOG-014-space-completeness-recovery.md) 完整性回退已修复。8.png 两次真实响应回放均恢复 22 命名候选，补齐主请求 polygon 与两种错误坐标编码；保守墙线核查防止茶室吞并楼梯。151 Java 通过、3 跳过，真实响应 UI 回放及 mock 冒烟通过。8082 已重启，真实上传 API 新任务 FPA-6D94153D 已完成，21 命名候选、无轮廓格式过滤；21 项真实 API 画布回放通过，旧画布保留；候选边界仍偏差，精度未验收。RECOG-013 的其他图验证不能覆盖本图验收。
+
 更新日期：2026-10-17。本轮合入远程主分支 `953dc49`，保留本地空间、识别和上传改动；旧任务各自保留历史基线。
 既有功能状态主要依据源码审阅；CAT-002 已运行 Java 测试、真实工作簿解析测试及前端构建。用户正式导入与补入后，当前数据库有 211 个商品、220 个规格；`16FMT001` 的图片说明不符问题已编码处理，用户补图及完整业务验收仍待验证。
 功能状态以各任务记录为准。Qwen 接入已运行 Java 测试、前端构建及上传页模拟接口验证；本轮 RECOG-003 对一张真实 PNG 调用百炼并持久化尺寸候选，尚未完成跨图纸识别质量或真实 CAD 验收。
@@ -24,6 +30,7 @@
 | ID | 工作项 | 当前状态与证据 | 剩余工作/验收 | 优先级 |
 | --- | --- | --- | --- | --- |
 | UPLOAD-001 | 单张图纸上传与更换 | 已实现并通过专项验证；构建、单图上传/空间回归/冒烟 mock、Java 115 项通过；补充旧 store 实例下的真实 Nuxt 热更新上传回归通过，见[任务记录](tasks/UPLOAD-001-single-drawing.md) | 后端校验待用户启动新版 Java 生效；真实上传识别完整集成待验收 | P1 |
+| UPLOAD-002 | 当前图纸进入对应空间 | 已实现；上传 ID/分析关联、未识别/后台/失败入口隔离、新图模板与家具隔离、编辑/空稿恢复，构建及专项 UI 模拟通过，见[任务记录](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 当前 7.png 的真实识别与用户业务复核待验证；无新表，本次未重启服务或修改真实稿 | P0 |
 | WORKSPACE-001 | 删除项目信息及专用存储 | 已编码并通过专项验证；前端构建、空间/模板/识别/效果预览 UI mock 和 Java 114 项（含隔离 PostgreSQL 迁移/锁测试）通过，见[任务记录](tasks/WORKSPACE-001-remove-project-info.md) | 用户下次启动新版后端执行删表；本轮未重启 8082，当前使用库尚未迁移 | P1 |
 | DOC-001 | 需求、规则、规范与进度基线 | 已验收（文档）；本轮新增文档及 README 同步 | 文档检查通过；后续业务任务按对应标准另行验收 | P0 |
 | DOC-002 | PDF/PNG 空间编辑首期文档调整 | 已验收（文档）；三份 Spatial 目标文档及项目基线已调整，见 [任务记录](tasks/DOC-002-spatial-canvas-first-phase.md) | 本地链接、JSON 示例、契约一致性及差异检查通过；不代表功能实现 | P0 |
@@ -35,6 +42,13 @@
 | RECOG-003 | 图中尺寸与自动比例候选 | 已实现并通过专项验证；48 项 Java、构建、专项 UI 模拟、一次性 DB 确认链路、真实 PNG 候选，见[任务记录](tasks/RECOG-003-dimension-calibration.md) | 真实 PNG 候选待用户确认；更多 PNG/PDF 的质量验收，非标准/模糊尺寸仍需人工校准 | P0 |
 | RECOG-001 | CAD 真实识别链路 | 已编码待验证；上传页 → Java `/api/v1/cad/parse` → CAD 服务 | 真实办公 DWG/DXF、目标选择、单位、未命名空间和失败路径验收 | P0 |
 | RECOG-002 | PDF/PNG 真实识别 | 已接入 `qwen3-vl-plus`，后端环境密钥、PDF 选页渲染、候选/预览适配及明确错误已编码；[接入任务](tasks/RECOG-002-qwen-vl-integration.md) | 真实百炼调用与附件 D 原始自动质量待验收；像素比例校准及人工空稿按 Spatial 任务继续推进 | P0 |
+| RECOG-011 | PNG 墙网拓扑识别 | 第一阶段已实现：Qwen 主请求只保留房名/功能语义，封闭空间由墙体候选、房名锚点、门洞有限闭合和连通区域多边形化生成；语义-only 回归通过，见[任务记录](tasks/RECOG-011-png-wall-topology-pipeline.md) | 当前使用 Qwen 初始候选 + Java 栅格墙线核查；斜墙/开放分区和跨图纸真实质量待验收 | P0 |
+| RECOG-013 | 语义切换空间丢失修复 | 部分实现；同名部分匹配、主请求文字补位、未命名墙网候选及女卫碎片修复；150 项 Java（147 通过/3 跳过）、构建/UI mock、一次真实模型与修复回放通过，见[任务记录](tasks/RECOG-013-recognition-pipeline-recovery.md) | 新后端重新识别；茶水/洗手边界及跨图纸完整精度验收 | P0 |
+| RECOG-012 | SegFormer-B1 墙体分割服务 | 已按用户要求撤销并移除，见[历史记录](tasks/RECOG-012-segformer-wall-segmentation.md)及[清理任务](tasks/RECOG-015-remove-unused-segformer.md) | 不再作为运行依赖或待接入任务 | — |
+| RECOG-007 | 底图先行与识别提速 | 已实现后台任务、预览提前发布、两路模型并行、真实阶段/耗时、同图同页同参数标准图缓存；Java 与前端专项模拟回归通过，见[任务记录](tasks/RECOG-007-progressive-recognition.md) | 未重启用户服务；真实模型耗时改善及跨图纸质量待实测；队列/缓存限单 Java 进程 | P0 |
+| RECOG-008 | 细双线隔墙与同名房间纠偏 | 部分实现；7.png 真实缓存重放从 0 个增至 9 个封闭轮廓，6 间主管室一一归属；保留 5.png 既有四处恢复，未证实轮廓逐空间降置信，见[任务记录](tasks/RECOG-008-thin-partitions-and-repeated-labels.md) | 茶水/洗手/女卫及开放分区仍未解决；正式上传、完整边界质量及跨图纸验收未完成；旧稿不自动覆盖 | P0 |
+| RECOG-009 | 旧稿覆盖与隔间碎片修复 | 部分实现；保护会议室完整来源不被截短旧框覆盖，提供可撤销的来源恢复；两份 7.png 缓存恢复女卫/电梯厅，共 11 个轮廓；构建、纯函数和专项 UI mock 通过，见[任务记录](tasks/RECOG-009-contour-history-and-partitions.md) | 茶水区、洗手间、开放分区/未命名仍未可靠恢复，全图准确要求未完成；新后端、新识别及真实上传验收待执行 | P0 |
+| RECOG-010 | 越界输出导致中央办公区丢失 | 已实现失败响应回归；FPA-5C32CDA8 原始中央候选 X=1175 被过滤，V7 恢复中央办公区及六处主管室，保留其他既有墙线恢复，见[任务记录](tasks/RECOG-010-missing-open-office.md) | 正式新识别待新版后端启动；中央邻接功能分界仍为估计，茶水/洗手/未命名与全图准确性未验收 | P0 |
 | GEOM-001 | 识别场景与画布准确对应 | 部分实现；新增 `SpatialGeometryService`/`SpatialCalibrationService`、DesignScene 存储与 API，修复 `confirmRooms` 保留 polygon 并按多边形算面积；既有 PNG 记录使用 mock，不能算真实识别验收 | 统一相机/底图尺度、来源/设计副本；后端数据库集成测试；真实样本验证 | P0 |
 | GEOM-002 | 无限画布与空间尺寸双向编辑 | 部分实现；新增 `SpatialCanvas.vue`、前端 spatial store、矩形宽深/顶点编辑与面积联动；旧 `CanvasBoard.vue` 仍保留 | 无界世界坐标、L 形/多房间编辑、撤销/重做与恢复、前端 409 冲突合并 | P0 |
 | GEOM-003 | 工装平面图空间核对工作台 | 部分实现；实际 `/canvas` 三栏核对、底图/轮廓同变换、毫米编辑/顶点拖动/撤销、图片校准、复核仅提示与前后端排版条件；[专项与模拟证据](tasks/GEOM-003-space-review-workbench.md) | 真实图纸原始质量与人工核对验收、数据库集成、新 DesignScene 确认快照/409 队列；不能以示例当真实验收 | P0 |

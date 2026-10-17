@@ -70,7 +70,7 @@ public class FloorPlanService {
     // ==================== 分析任务 ====================
 
     /**
-     * 上传户型图并创建分析任务（同步执行识别，不支持复杂异步编排）。
+     * 上传户型图并同步识别；图片/PDF 的后台模式另用 beginBackground。
      */
     @Transactional
     public Map<String, String> analyze(MultipartFile image, MultipartFile cad, String hint,
@@ -81,48 +81,11 @@ public class FloorPlanService {
     @Transactional
     public Map<String, String> analyze(MultipartFile image, MultipartFile cad, String hint,
                                        String projectId, String sourceName, String baseUrl, int pageNumber) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = defaultProjectId();
-        }
-        validateProject(projectId);
-
-        boolean hasImage = image != null && !image.isEmpty();
+        var work = createWork(image, cad, projectId, sourceName, baseUrl);
+        var analysis = work.analysis();
+        var revision = work.revision();
+        String analysisId = analysis.getAnalysisId();
         boolean hasCad = cad != null && !cad.isEmpty();
-        if (!hasImage && !hasCad) {
-            throw new BusinessException("请上传户型图片或 CAD 图纸");
-        }
-
-        String inputMode = hasCad ? "cad" : (isPdf(image) ? "pdf" : "image");
-        String analysisId = "FPA-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-
-        // 保存源文件
-        String imageId = hasImage ? saveImageAsset(image, baseUrl) : null;
-        String cadObjectKey = hasCad ? saveCadFile(cad) : null;
-
-        // 创建分析头表与 Revision
-        FloorPlanAnalysis analysis = new FloorPlanAnalysis();
-        analysis.setAnalysisId(analysisId);
-        analysis.setProjectId(projectId);
-        analysis.setSourceName(StringUtils.hasText(sourceName) ? sourceName.trim() : null);
-        analysis.setStatus(FloorPlanAnalysis.STATUS_ANALYZING);
-        analysis.setInputMode(inputMode);
-        analysis.setImageId(imageId);
-        analysis.setLatestAnalysisRevision(1);
-        analysis.setCreatedBy(CurrentUserContext.currentUsername());
-        analysis.setCreatedAt(LocalDateTime.now());
-        analysis.setUpdatedAt(LocalDateTime.now());
-        analysisMapper.insert(analysis);
-
-        FloorPlanSceneRevision revision = new FloorPlanSceneRevision();
-        revision.setAnalysisId(analysisId);
-        revision.setAnalysisRevision(1);
-        revision.setRevisionTrigger(FloorPlanSceneRevision.TRIGGER_INITIAL_PARSE);
-        revision.setRevisionStatus(FloorPlanSceneRevision.STATUS_PROCESSING);
-        revision.setRoomRevision(1);
-        revision.setFurnitureRevision(1);
-        revision.setCreatedBy(CurrentUserContext.currentUsername());
-        revision.setCreatedAt(LocalDateTime.now());
-        revisionMapper.insert(revision);
 
         // 调用识别服务
         JsonNode rawResult;
@@ -144,6 +107,12 @@ public class FloorPlanService {
             return Map.of("analysisId", analysisId, "taskId", "TASK-" + analysisId);
         }
 
+        finishRecognition(analysis, revision, rawResult, hasCad, baseUrl);
+        return Map.of("analysisId", analysisId, "taskId", "TASK-" + analysisId);
+    }
+
+    private void finishRecognition(FloorPlanAnalysis analysis, FloorPlanSceneRevision revision, JsonNode rawResult, boolean hasCad, String baseUrl) {
+        String analysisId = analysis.getAnalysisId();
         // 解析结果并落库
         String geometrySource = hasCad ? FloorPlanAnalysis.GEOMETRY_SOURCE_CAD_GEOMETRY
             : FloorPlanAnalysis.GEOMETRY_SOURCE_AI_VISION;
@@ -151,7 +120,7 @@ public class FloorPlanService {
         analysis.setRawResult(rawResult.toString());
 
         // 保存 CAD 规范预览图
-        String previewImageId = extractAndSavePreview(rawResult, baseUrl);
+        String previewImageId = analysis.getPreviewImageId() != null ? analysis.getPreviewImageId() : extractAndSavePreview(rawResult, baseUrl);
         analysis.setPreviewImageId(previewImageId);
         revision.setPreviewImageId(previewImageId);
 
@@ -187,7 +156,131 @@ public class FloorPlanService {
         revision.setRawResult(rawResult.toString());
         revisionMapper.updateByRevision(revision);
 
-        return Map.of("analysisId", analysisId, "taskId", "TASK-" + analysisId);
+    }
+
+    public record AnalysisWork(String analysisId, Path sourceFile, String filename, String contentType) {}
+
+    @Transactional
+    public AnalysisWork beginBackground(MultipartFile image, String projectId, String sourceName, String baseUrl, int pageNumber) {
+        if (image == null || image.isEmpty() || image.getSize() > 50L * 1024 * 1024) throw new BusinessException("请上传不超过 50MB 的图片或 PDF");
+        if (pageNumber < 1) throw new BusinessException("PDF 页码必须从 1 开始");
+        var work = createWork(image, null, projectId, sourceName, baseUrl);
+        work.analysis().setRawResult("{\"processing\":{\"stage\":\"QUEUED\"}}");
+        analysisMapper.updateById(work.analysis());
+        return new AnalysisWork(work.analysis().getAnalysisId(), Paths.get(System.getProperty("user.dir"), UPLOAD_DIR,
+            work.analysis().getImageId() + "." + extension(image.getOriginalFilename())), image.getOriginalFilename(), image.getContentType());
+    }
+
+    @Transactional
+    public void publishPreview(String id, ObjectNode raw, String baseUrl) {
+        var analysis = runningAnalysis(id);
+        var revision = revisionMapper.selectByRevision(id, 1);
+        analysis.setPreviewImageId(extractAndSavePreview(raw, baseUrl));
+        if (analysis.getPreviewImageId() == null) throw new BusinessException("保存标准底图失败，请重试");
+        ObjectNode metadata = raw.deepCopy();
+        ((ObjectNode) metadata.path("preview")).remove("pngBase64");
+        analysis.setRawResult(metadata.toString());
+        analysis.setUpdatedAt(LocalDateTime.now());
+        analysisMapper.updateById(analysis);
+        revision.setPreviewImageId(analysis.getPreviewImageId());
+        revision.setRawResult(metadata.toString());
+        revision.setDrawingBounds(raw.path("drawingBounds").toString());
+        revision.setPreviewBounds(raw.path("drawingBounds").toString());
+        revision.setUnitResolution(raw.path("unitResolution").toString());
+        revisionMapper.updateByRevision(revision);
+    }
+
+    @Transactional
+    public void completeBackground(String id, ObjectNode raw, String baseUrl) {
+        var analysis = runningAnalysis(id);
+        finishRecognition(analysis, revisionMapper.selectByRevision(id, 1), raw, false, baseUrl);
+    }
+
+    private FloorPlanAnalysis runningAnalysis(String id) {
+        var analysis = analysisMapper.selectById(id);
+        if (analysis == null || !FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) throw new BusinessException("该识别任务已结束或不存在");
+        return analysis;
+    }
+
+    @Transactional
+    public void updateProgress(String id, ObjectNode progress) {
+        var analysis = analysisMapper.selectById(id);
+        if (analysis == null || !(FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())
+            || FloorPlanAnalysis.STATUS_AWAITING_CONFIRM.equals(analysis.getStatus()))) return;
+        JsonNode old = parseJsonNode(analysis.getRawResult());
+        ObjectNode raw = old != null && old.isObject() ? (ObjectNode) old : objectMapper.createObjectNode();
+        raw.set("processing", progress);
+        // Progress only owns this payload; never write back a stale lifecycle/confirmation snapshot.
+        var patch = new FloorPlanAnalysis();
+        patch.setAnalysisId(id);
+        patch.setRawResult(raw.toString());
+        analysisMapper.updateById(patch);
+    }
+
+    @Transactional
+    public void failBackground(String id, String message, ObjectNode progress) {
+        var analysis = analysisMapper.selectById(id);
+        if (analysis == null || !FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) return;
+        JsonNode old = parseJsonNode(analysis.getRawResult());
+        ObjectNode raw = old != null && old.isObject() ? (ObjectNode) old : objectMapper.createObjectNode();
+        raw.set("processing", progress);
+        analysis.setRawResult(raw.toString());
+        analysis.setStatus(FloorPlanAnalysis.STATUS_FAILED);
+        analysis.setErrorMessage(message);
+        analysis.setUpdatedAt(LocalDateTime.now());
+        analysisMapper.updateById(analysis);
+        var revision = revisionMapper.selectByRevision(id, 1);
+        revision.setRevisionStatus(FloorPlanSceneRevision.STATUS_FAILED);
+        revisionMapper.updateByRevision(revision);
+    }
+
+    private record Work(FloorPlanAnalysis analysis, FloorPlanSceneRevision revision) {}
+    private Work createWork(MultipartFile image, MultipartFile cad, String projectId, String sourceName, String baseUrl) {
+        if (!StringUtils.hasText(projectId)) {
+            projectId = defaultProjectId();
+        }
+        validateProject(projectId);
+
+        boolean hasImage = image != null && !image.isEmpty();
+        boolean hasCad = cad != null && !cad.isEmpty();
+        if (!hasImage && !hasCad) {
+            throw new BusinessException("请上传户型图片或 CAD 图纸");
+        }
+
+        String inputMode = hasCad ? "cad" : (isPdf(image) ? "pdf" : "image");
+        String analysisId = "FPA-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+
+        // 保存源文件
+        String imageId = hasImage ? saveImageAsset(image, baseUrl) : null;
+        String cadObjectKey = hasCad ? saveCadFile(cad) : null;
+
+        // 创建分析头表与 Revision
+        FloorPlanAnalysis analysis = new FloorPlanAnalysis();
+        analysis.setAnalysisId(analysisId);
+        analysis.setProjectId(projectId);
+        analysis.setSourceName(StringUtils.hasText(sourceName) ? sourceName.trim() : null);
+        analysis.setStatus(FloorPlanAnalysis.STATUS_ANALYZING);
+        analysis.setTaskId("TASK-" + analysisId);
+        analysis.setInputMode(inputMode);
+        analysis.setImageId(imageId);
+        analysis.setLatestAnalysisRevision(1);
+        analysis.setCreatedBy(CurrentUserContext.currentUsername());
+        analysis.setCreatedAt(LocalDateTime.now());
+        analysis.setUpdatedAt(LocalDateTime.now());
+        analysisMapper.insert(analysis);
+
+        FloorPlanSceneRevision revision = new FloorPlanSceneRevision();
+        revision.setAnalysisId(analysisId);
+        revision.setAnalysisRevision(1);
+        revision.setRevisionTrigger(FloorPlanSceneRevision.TRIGGER_INITIAL_PARSE);
+        revision.setRevisionStatus(FloorPlanSceneRevision.STATUS_PROCESSING);
+        revision.setRoomRevision(1);
+        revision.setFurnitureRevision(1);
+        revision.setCreatedBy(CurrentUserContext.currentUsername());
+        revision.setCreatedAt(LocalDateTime.now());
+        revisionMapper.insert(revision);
+
+        return new Work(analysis, revision);
     }
 
     /**
@@ -236,6 +329,8 @@ public class FloorPlanService {
         response.setReferenceImageUrl(response.getImageUrl());
         response.setQualityIssues(parseQualityIssues(analysis.getQualityIssues()));
         response.setRooms(rooms.stream().map(this::toRoomResponse).toList());
+        JsonNode currentRaw = parseJsonNode(analysis.getRawResult());
+        if (currentRaw != null) response.setProcessing(currentRaw.get("processing"));
 
         response.setAnalysisRevision(targetRevision);
         response.setActiveAnalysisRevision(analysis.getActiveAnalysisRevision());
@@ -250,6 +345,7 @@ public class FloorPlanService {
             response.setPreviewBounds(parseBounds(revision.getPreviewBounds()));
             response.setUnitResolution(parseJsonNode(revision.getUnitResolution()));
             JsonNode original = parseJsonNode(revision.getRawResult());
+            if (original != null) response.setUnresolvedSpaces(original.path("unresolvedSpaces"));
             String imageSha256 = original == null ? null : original.path("imageSha256").asText(null);
             response.setImageSha256(imageSha256);
             if (!"cad".equals(analysis.getInputMode())) response.setDesignCorrections(designCorrectionService.find(analysis.getProjectId(), imageSha256));
@@ -279,6 +375,8 @@ public class FloorPlanService {
         if (analysis == null) {
             throw new BusinessException("分析批次不存在: " + analysisId);
         }
+
+        if (FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) throw new BusinessException("空间识别尚未完成，请稍后再编辑识别结果");
 
         Integer targetRevision = request.getAnalysisRevision() != null ? request.getAnalysisRevision()
             : analysis.getWorkingAnalysisRevision() != null ? analysis.getWorkingAnalysisRevision() : 1;
@@ -357,7 +455,7 @@ public class FloorPlanService {
         Path dir = Paths.get(System.getProperty("user.dir"), UPLOAD_DIR);
         try {
             if (!Files.exists(dir)) Files.createDirectories(dir);
-            file.transferTo(dir.resolve(filename));
+            try (var input = file.getInputStream()) { Files.copy(input, dir.resolve(filename)); }
         } catch (IOException e) {
             throw new BusinessException("保存户型图失败", e);
         }

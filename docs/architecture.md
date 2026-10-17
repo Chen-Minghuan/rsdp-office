@@ -40,9 +40,21 @@ Viewport（平移、缩放）独立于上述物理几何
 
 当前上传页和 office_canvas.files_json 使用零或一张当前图纸；后端保存拒绝多文件。旧草稿恢复时优先选择与底图同名的文件，否则保留首个。更换文件只更新上传文件和二进制缓存、清除上传页旧识别预览，不删除已保存几何或历史识别；见 [UPLOAD-001](tasks/UPLOAD-001-single-drawing.md)。
 
+当前上传记录带 drawingId（同名同大小重传也更新）、analysisId、analysisPageNumber、appliedAnalysisId，原样保存在现有 files_json，无新增表。前端 floorPlan.sourceDrawingId 关联本地来源；旧草稿仅保留有限名称兼容。上传页和空间页按当前任务进入；未识别/识别中/失败显示当前图纸提示或预览，不展示旧几何。进入空间明确应用新图，导入前保留撤销快照，跨图替换移除旧坐标对象和模板；同分析恢复只补来源、不覆盖设计编辑，appliedAnalysisId 防止清空后的空间重填。详见 [UPLOAD-002](tasks/UPLOAD-002-drawing-canvas-handoff.md)。
+
+图片/PDF 上传页通过 `/api/v1/floor-plan/analyze` 的 `background=true` 启用后台识别（直连 Qwen）。先事务保存原图和独立分析 ID，再后台转换并事务发布标准预览，之后并行请求房间/尺寸候选与独立房名框，两者完成后校正轮廓并事务保存房间。GET 在 analyzing 时即可返回 previewUrl；processing 记录实际阶段、耗时和缓存命中。前端每秒查询，刷新/导航后从 sessionStorage 续查同一任务，完成或失败停查。保存状态与 DONE 进度分次提交，客户端同时等待进度终态。结果由用户应用到画布，不自动覆盖设计稿。未指定 background、CAD、外部 RSDP_VISION_URL 服务兼容同步协议。
+
+任务池 2 个线程/8 个等待位，独立模型池 4 个线程/8 个等待位，满载明确失败。当前后台队列限单 Java 实例；进程重启时，启动扫描将遗留后台任务标为失败并保留底图，需要重新发起。标准 PNG 缓存按源 SHA256、页码、最长边、PDF DPI 和转换版本隔离，30 分钟 TTL、最多 8 项/64 MiB LRU；同键转换合并，不缓存 AI 或人工几何。详见 [RECOG-007](tasks/RECOG-007-progressive-recognition.md)。
+
 所有关联使用稳定 ID。文件名、数组下标、可修改的房间名称不能作为唯一关联键。
 重识别生成新的识别版本；以映射/比较方式处理用户编辑，不沿用序号误配空间。
-当前兼容导入会通过分析详情的 `imageSha256` / `designCorrections` 继承同项目、同标准底图、唯一同名的人工轮廓；原始 `rooms` / `sourcePolygon` 与新来源版本保留，毫米稿还原为来源像素后再应用到新设计副本。`contourGrounded` 记录独立房名定位和封闭墙线证据，防止完全错位的历史框覆盖新定位的封闭房间；不代表人工确认或比例确认。见 [RECOG-005](tasks/RECOG-005-label-grounding-and-correction-reuse.md)。
+当前兼容导入会通过分析详情的 `imageSha256` / `designCorrections` 继承同项目、同标准底图、唯一同名的人工轮廓；原始 `rooms` / `sourcePolygon` 与新来源版本保留，毫米稿还原为来源像素后再应用到新设计副本。`contourGrounded` 记录独立房名定位和封闭墙线证据；不代表人工确认或比例确认。对已有墙线证据的房间，历史框需与来源边界双向接近（来源像素距离容差 10），仅重叠不足以自动套用，拒绝时非阻断提示并保留历史。当前草稿可显式恢复当前分析的 `sourcePolygon`，以已有比例换算、按原几何编辑路径使排版失效并支持撤销，不重新识别、不替换来源。见 [RECOG-005](tasks/RECOG-005-label-grounding-and-correction-reuse.md)、[RECOG-009](tasks/RECOG-009-contour-history-and-partitions.md)。
+
+V5 增加由实心柱/长实墙支撑的细双线结构网络，按提取到的粗细线占比保留不同墙图的处理路径。同名文字与候选在数量一致时做一一最小代价匹配，不再要求错误多边形先包含房名；最终仍核验封闭区域和其他房名归属。启用校正时，未获 `contourGrounded` 的结果逐空间降为 low 并附 `ROOM_CONTOUR_UNVERIFIED`，原始模型自报置信保留。此证据不涵盖开放功能分界，不能等同于全图质量通过，见 [RECOG-008](tasks/RECOG-008-thin-partitions-and-repeated-labels.md)。
+V6 在未恢复空间上补查相连弱线，并以至少三个结构房间的一致图上面积文字核对相对面积。完整隔间碎片满足四边支撑、覆盖率、面积、独占房名及不交叠条件后才合并为墙内轮廓；方法证据分别记录，弱路径保持 mid。面积文字不生成毫米比例，缺少证据仍保留低置信候选；开放功能分界没有因此解决，见 [RECOG-009](tasks/RECOG-009-contour-history-and-partitions.md)。
+V7 的独立房名匹配不再被越界/损坏的初稿连带禁用；有限初稿位置只提供分配成本，不成为最终几何。无效或漏列的开放办公候选可由结构地面追踪补回：排除已获得墙线证据的房间和其他房名触及的独占区域，拒绝页面泄漏、其他房名/已恢复房间冲突；不直接截断越界矩形。`openSpaceRecovery` 独立记录种子来源与估计恢复，保持 low / contourGrounded=false，不计作封闭墙线接受数、比例确认或人工确认。已有有效开放候选不强制重写，功能分界仍需复核，见 [RECOG-010](tasks/RECOG-010-missing-open-office.md)。
+RECOG-014 恢复混合识别：Qwen 主请求输出房间/功能区清单、初始 polygon 和独立的文字紧框 labelBbox；后端在同一标准底图上用墙网保守核查，可靠时替换，否则保留低置信度初始轮廓供复核。墙线掩码直接由 Java 结构线规则生成，来源为 contourRefinement.wallMaskSource=STRUCTURAL_PIXEL_MASK，阶段为 STRUCTURAL_WALL_MASK；已移除外部分割服务接入及其可用性字段。labels-only 响应仍兼容，缺少轮廓且无法墙网补救的语义进入 unresolvedSpaces；仅此协议继续保守扫描未命名墙网，混合候选不追加无名碎片替代清单。房间几何与文字框不能混用，原始输出与设计副本隔离，未知比例不自动确认。见 [RECOG-014](tasks/RECOG-014-space-completeness-recovery.md)。
+RECOG-013 在主请求增加文字紧框，按位置补齐独立定位缺失；原始主/独立响应与合并定位分开保存，文字框不作为房间边界。主请求补位的墙线轮廓保持 low / contourGrounded=false，内部 wallRegionVerified 仅用于避免已获得墙网的空间被开放区重复覆盖。同名组改为带缺失位的一一部分匹配，不要求两路数量相同；新语义流程额外扫描所有保守封闭连通区域，未归属部分以 low 未命名候选返回，不为文字缺失猜名称或比例，见 [RECOG-013](tasks/RECOG-013-recognition-pipeline-recovery.md)。
 服务使用 `sceneVersion` 等不同名称时，适配层注明它是契约版本还是业务修订，不能与编辑修订号混用。
 
 ## 3. 坐标和单位

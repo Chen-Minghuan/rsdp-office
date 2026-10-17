@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { ProjectFile, ZoneObject, ToneKey, ZoneType } from '~/types/office'
 import { drawingFileDescriptor } from '~/utils/drawingUpload'
+import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 
 const store = useOfficeStore()
 const api = useOfficeApi()
 const floorPlanApi = useFloorPlanApi()
 const fileInput = ref<HTMLInputElement | null>(null)
+const recognitionPanel = ref<HTMLElement | null>(null)
 const isParsing = ref(false)
 const isUploading = ref(false)
 const isApplying = ref(false)
@@ -17,6 +19,84 @@ const activeFile = ref<string | null>(null)
 const recognitionSource = ref<'cad' | 'vision' | null>(null)
 const analysisId = ref<string | null>(null)
 const pdfPages = reactive<Record<string, number>>({})
+const taskStorageKey = 'rsdp-office-recognition-task-v1'
+const isRecognitionRunning = recognitionRunning
+const hasRunningResult = computed(() => isRecognitionRunning(recognitionResult.value))
+let recognitionSequence = 0
+let recognitionPoll: ReturnType<typeof setTimeout> | undefined
+let disposed = false
+
+function forgetRecognitionTask() {
+  recognitionSequence++
+  clearTimeout(recognitionPoll)
+  recognitionPoll = undefined
+  sessionStorage.removeItem(taskStorageKey)
+}
+
+async function pollRecognition(id: string, ticket: number) {
+  if (disposed || ticket !== recognitionSequence || analysisId.value !== id) return
+  recognitionPoll = undefined
+  try {
+    const detail = await floorPlanApi.getFloorPlan(id)
+    if (disposed || ticket !== recognitionSequence || analysisId.value !== id) return
+    const reveal = !recognitionResult.value || (!recognitionResult.value.previewUrl && detail.previewUrl)
+    recognitionResult.value = detail
+    if (reveal) {
+      await nextTick()
+      if (disposed || ticket !== recognitionSequence) return
+      recognitionPanel.value?.scrollIntoView({ block: 'start' })
+    }
+    if (detail.status === 'failed') {
+      parseError.value = detail.errorMessage || '图纸识别失败'
+      isParsing.value = false
+      sessionStorage.removeItem(taskStorageKey)
+      return
+    }
+    if (isRecognitionRunning(detail)) {
+      recognitionPoll = setTimeout(() => pollRecognition(id, ticket), 1000)
+    } else {
+      isParsing.value = false
+      sessionStorage.removeItem(taskStorageKey)
+    }
+  } catch (error) {
+    if (disposed || ticket !== recognitionSequence) return
+    parseError.value = (error instanceof Error ? error.message : '任务查询失败') + '；可继续查询，无需重新识别。'
+    isParsing.value = false
+  }
+}
+
+function resumeRecognition() {
+  if (!analysisId.value) return
+  clearTimeout(recognitionPoll)
+  parseError.value = null
+  isParsing.value = true
+  void pollRecognition(analysisId.value, ++recognitionSequence)
+}
+
+onMounted(() => {
+  watch(() => store.initialized, ready => {
+    if (!ready || isParsing.value) return
+    try {
+      const task = JSON.parse(sessionStorage.getItem(taskStorageKey) || 'null')
+      const drawing = store.files[0]
+      if (!task || task.projectId !== api.projectId || task.name !== drawing?.name || task.size !== drawing?.size) return
+      if (task.drawingId && task.drawingId !== drawing?.drawingId) return
+      if (drawing && (!drawing.drawingId || drawing.analysisId !== task.analysisId)) {
+        const bound = { ...drawing, drawingId: drawing.drawingId || crypto.randomUUID(), analysisId: task.analysisId, analysisPageNumber: task.pageNumber }
+        store.$patch({ files: [bound] })
+        store.schedulePersist()
+        sessionStorage.setItem(taskStorageKey, JSON.stringify({ ...task, drawingId: bound.drawingId }))
+      }
+      activeFile.value = task.name
+      pdfPages[task.name] = task.pageNumber
+      analysisId.value = task.analysisId
+      recognitionSource.value = task.source
+      resumeRecognition()
+    } catch { sessionStorage.removeItem(taskStorageKey) }
+  }, { immediate: true })
+})
+onBeforeUnmount(() => { disposed = true; recognitionSequence++; clearTimeout(recognitionPoll) })
+
 const requiresCalibration = computed(() => recognitionResult.value?.unitResolution?.canonicalUnit === 'px')
 
 // 保留真实 File 对象，用于图纸识别时读取二进制内容
@@ -154,6 +234,7 @@ async function acceptDrawing(list: FileList | null) {
   isUploading.value = true
   try {
     const drawing = drawingFileDescriptor(file)
+    forgetRecognitionTask()
     store.$patch({ files: [drawing] })
     store.schedulePersist()
     fileMap.value.clear()
@@ -190,6 +271,7 @@ async function removeFile(name: string) {
   isUploading.value = true
   uploadError.value = null
   try {
+    forgetRecognitionTask()
     store.removeFile(name)
     fileMap.value.delete(name)
     if (activeFile.value === name) {
@@ -210,6 +292,8 @@ const hasRecognizableFiles = computed(() => recognizableFiles.value.length > 0)
 
 async function recognizeFile(file: ProjectFile) {
   if (uploadBusy.value) return
+  forgetRecognitionTask()
+  const ticket = recognitionSequence
   activeFile.value = file.name
   isParsing.value = true
   parseError.value = null
@@ -241,21 +325,20 @@ async function recognizeFile(file: ProjectFile) {
       sourceName: file.name,
       pageNumber,
     })
+    if (disposed || ticket !== recognitionSequence) return
     recognitionSource.value = isCad ? 'cad' : 'vision'
     analysisId.value = result.analysisId
-    recognitionResult.value = result
-
-    // 立即拉取一次详情展示
-    const detail = await floorPlanApi.getFloorPlan(result.analysisId)
-    if (detail.status === 'failed') {
-      recognitionResult.value = null
-      throw new Error(detail.errorMessage || '图纸识别失败')
-    }
-    recognitionResult.value = detail
+    store.$patch({ files: store.files.map(drawing => drawing === file || drawing.drawingId && drawing.drawingId === file.drawingId
+      ? { ...drawing, analysisId: result.analysisId, analysisPageNumber: pageNumber } : drawing) })
+    store.schedulePersist()
+    sessionStorage.setItem(taskStorageKey, JSON.stringify({ analysisId: result.analysisId, name: file.name, size: file.size,
+      drawingId: file.drawingId, projectId: api.projectId, pageNumber, source: recognitionSource.value }))
+    await pollRecognition(result.analysisId, ticket)
   } catch (e: any) {
+    if (disposed || ticket !== recognitionSequence) return
     parseError.value = e?.message || '图纸识别失败'
   } finally {
-    isParsing.value = false
+    if (!recognitionPoll && ticket === recognitionSequence) isParsing.value = false
   }
 }
 
@@ -339,17 +422,38 @@ async function applyRecognitionToCanvas() {
     return
   }
 
-  if (uploadBusy.value) return
+  if (uploadBusy.value || hasRunningResult.value || recognitionResult.value?.status === 'failed') return
+  const id = analysisId.value
+  const drawingId = store.files[0]?.drawingId
+  const ticket = recognitionSequence
   isApplying.value = true
   try {
-    const detail = await floorPlanApi.getFloorPlan(analysisId.value)
-    store.importFloorPlanToZones(detail)
-    await navigateTo(`/canvas?analysisId=${analysisId.value}&mode=overview`)
+    const detail = await floorPlanApi.getFloorPlan(id)
+    if (disposed || ticket !== recognitionSequence || store.files[0]?.drawingId !== drawingId) return
+    if (detail.analysisId !== id) throw new Error('识别结果与当前图纸任务不一致，请重新识别')
+    if (isRecognitionRunning(detail) || detail.status === 'failed') throw new Error('空间识别尚未完成，请稍后再应用')
+    if (!detail.rooms?.length) throw new Error('当前图纸未识别出可用空间，请重新识别')
+    store.importFloorPlanToZones({ ...detail, sourceDrawingId: store.files[0]?.drawingId })
+    await navigateTo(`/canvas?analysisId=${id}&mode=overview`)
   } catch (error) {
+    if (disposed || ticket !== recognitionSequence) return
     parseError.value = error instanceof Error ? error.message : '导入空间失败'
   } finally {
     isApplying.value = false
   }
+}
+
+const canOpenCurrentDrawing = computed(() => {
+  const drawing = store.files[0]
+  return !isUploading.value && !isApplying.value && (!isParsing.value || !!analysisId.value)
+    && (!!drawing?.analysisId || drawingMatchesPlan(drawing, store.floorPlan))
+})
+async function enterCurrentDrawing() {
+  if (!canOpenCurrentDrawing.value) return
+  const id = store.files[0]?.analysisId
+  if (id && id === analysisId.value && recognitionResult.value && !hasRunningResult.value && recognitionResult.value.status !== 'failed') {
+    await applyRecognitionToCanvas()
+  } else await navigateTo(id ? { path: '/canvas', query: { analysisId: id, mode: 'overview' } } : '/canvas')
 }
 </script>
 
@@ -451,29 +555,33 @@ async function applyRecognitionToCanvas() {
         </div>
 
         <!-- 图纸识别结果 -->
-        <div v-if="hasRecognizableFiles" class="flex-1 min-h-0 overflow-auto flex flex-col gap-4">
+        <div v-if="hasRecognizableFiles" ref="recognitionPanel" class="flex-none flex flex-col gap-4">
           <div class="flex items-center justify-between flex-none">
             <strong class="text-sm">图纸识别结果</strong>
-            <span v-if="recognitionResult" class="px-2 py-0.5 rounded-lg text-[10px] font-semibold" :class="statusClass(recognitionResult.parseStatus)">
+            <span v-if="recognitionResult && !hasRunningResult" class="px-2 py-0.5 rounded-lg text-[10px] font-semibold" :class="statusClass(recognitionResult.parseStatus)">
               {{ statusText(recognitionResult.parseStatus) }}
             </span>
+            <span v-else-if="isParsing || hasRunningResult" class="text-xs text-muted">后台处理中</span>
             <span v-else class="text-xs text-muted">选择文件点击「识别图纸」</span>
           </div>
 
-          <div v-if="parseError" class="p-4 rounded-xl bg-[#fff5f5] border border-[#f5d8d8] text-sm text-[#9e3a3a] flex items-start gap-2">
+          <RecognitionProgress v-if="isParsing || recognitionResult?.processing" :progress="recognitionResult?.processing" :pending="isParsing || hasRunningResult" />
+          <button v-if="parseError && analysisId && recognitionResult?.status !== 'failed' && !isParsing" type="button" class="text-xs text-bronze underline self-start" @click="resumeRecognition">继续查询识别进度</button>
+
+          <div v-if="parseError" role="alert" class="p-4 rounded-xl bg-[#fff5f5] border border-[#f5d8d8] text-sm text-[#9e3a3a] flex items-start gap-2">
             <AppIcon name="warning" size="4.5" class="shrink-0 mt-0.5" />
             <span>{{ parseError }}</span>
           </div>
 
-          <div v-else-if="!recognitionResult" class="flex-1 grid place-items-center text-center py-8 text-xs text-[#958f87] bg-[#faf9f7] rounded-xl border border-dashed border-line">
+          <div v-if="!recognitionResult && !parseError" class="flex-1 grid place-items-center text-center py-8 text-xs text-[#958f87] bg-[#faf9f7] rounded-xl border border-dashed border-line">
             <div>
               <AppIcon name="photo" size="8" class="mx-auto mb-2 text-muted" />
               上传 PDF/PNG 或 CAD 后点击识别<br>将解析房间、面积与空间布局
             </div>
           </div>
 
-          <div v-else class="flex flex-col gap-4">
-            <div v-if="requiresCalibration" class="rounded-xl border border-line bg-cream p-3 text-xs text-bronze-dark">
+          <div v-if="recognitionResult" class="flex flex-col gap-4">
+            <div v-if="requiresCalibration && !hasRunningResult && recognitionResult.status !== 'failed'" class="rounded-xl border border-line bg-cream p-3 text-xs text-bronze-dark">
               已识别图中空间候选，请核对轮廓并校准实际长度。校准前不计算实际尺寸与面积。
               <span v-if="recognitionResult.inputMode === 'pdf'">当前识别第 {{ recognitionResult.unitResolution.pageNumber }} 页，共 {{ recognitionResult.unitResolution.pageCount }} 页。</span>
             </div>
@@ -482,6 +590,7 @@ async function applyRecognitionToCanvas() {
               <img :src="previewImage()" alt="图纸预览" class="w-full h-auto max-h-[260px] object-contain">
             </div>
 
+            <template v-if="!hasRunningResult && recognitionResult.status !== 'failed'">
             <!-- 统计 -->
             <div class="grid grid-cols-3 gap-3">
               <div class="bg-[#f9f7f4] rounded-xl p-3.5">
@@ -525,6 +634,17 @@ async function applyRecognitionToCanvas() {
               </div>
             </div>
 
+            <!-- 语义已识别但墙网未闭合的候选 -->
+            <div v-if="recognitionResult.unresolvedSpaces?.length" class="rounded-xl border border-[#f1d7ad] bg-[#fffaf1] p-3">
+              <div class="text-xs font-semibold text-[#9a641f] mb-1">待补画空间（{{ recognitionResult.unresolvedSpaces.length }}）</div>
+              <div class="text-xs text-[#8b6b42] mb-2">已识别房名或功能，但原图墙网没有形成唯一闭合轮廓，请在画布中补充边界。</div>
+              <div class="flex flex-wrap gap-1.5">
+                <span v-for="(candidate, idx) in recognitionResult.unresolvedSpaces" :key="idx" class="px-2 py-1 rounded-lg bg-white border border-[#f1d7ad] text-xs text-[#78572d]">
+                  {{ candidate.label || roomTypeText(candidate.roomType || 'OTHER') }}
+                </span>
+              </div>
+            </div>
+
             <!-- 质量问题 -->
             <div v-if="recognitionResult.qualityIssues?.length">
               <div class="text-xs font-semibold text-[#9e3a3a] mb-2">质量提示</div>
@@ -551,6 +671,7 @@ async function applyRecognitionToCanvas() {
               <AppIcon name="map" size="4" />
               <span>应用到无限画布</span>
             </button>
+            </template>
           </div>
         </div>
 
@@ -573,9 +694,9 @@ async function applyRecognitionToCanvas() {
         <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" :disabled="uploadBusy" @click="!uploadBusy && fileInput?.click()">
           <AppIcon name="upload" size="3" /> {{ store.files.length ? '更换图纸' : '上传图纸' }}
         </button>
-        <NuxtLink to="/canvas" class="px-5 py-2.5 rounded-lg text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2">
+        <button :disabled="!canOpenCurrentDrawing" :title="canOpenCurrentDrawing ? undefined : '请先识别当前图纸'" class="px-5 py-2.5 rounded-lg text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" @click="enterCurrentDrawing">
           进入空间总览 <AppIcon name="arrowRight" size="4" />
-        </NuxtLink>
+        </button>
       </div>
     </div>
   </div>

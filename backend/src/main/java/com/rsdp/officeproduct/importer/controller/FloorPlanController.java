@@ -5,6 +5,8 @@ import com.rsdp.officeproduct.importer.dto.request.FloorPlanConfirmRequest;
 import com.rsdp.officeproduct.importer.dto.response.FloorPlanAnalysisResponse;
 import com.rsdp.officeproduct.importer.service.FloorPlanService;
 import com.rsdp.officeproduct.importer.service.FloorPlanDimensionService;
+import com.rsdp.officeproduct.importer.service.FloorPlanJobService;
+import com.rsdp.officeproduct.importer.config.VisionProperties;
 import com.rsdp.officeproduct.importer.dto.response.DimensionCalibrationReport;
 import com.rsdp.officeproduct.importer.dto.request.DimensionCalibrationConfirmRequest;
 import jakarta.validation.constraints.Min;
@@ -36,6 +38,8 @@ public class FloorPlanController {
 
     private final FloorPlanService floorPlanService;
     private final FloorPlanDimensionService floorPlanDimensionService;
+    private final FloorPlanJobService floorPlanJobService;
+    private final VisionProperties visionProperties;
 
     /**
      * 上传户型图并创建分析任务。
@@ -55,9 +59,13 @@ public class FloorPlanController {
         @RequestParam(required = false) String projectId,
         @RequestParam(required = false) String sourceName,
         @RequestParam(defaultValue = "1") int pageNumber,
+        @RequestParam(defaultValue = "false") boolean background,
         HttpServletRequest request) {
         String baseUrl = ServletUriComponentsBuilder.fromRequestUri(request)
             .replacePath("").toUriString();
+        if (background && (cad == null || cad.isEmpty()) && !org.springframework.util.StringUtils.hasText(visionProperties.getUrl())) {
+            return Result.ok(floorPlanJobService.start(image, projectId, sourceName, baseUrl, pageNumber));
+        }
         return Result.ok(floorPlanService.analyze(image, cad, hint, projectId, sourceName, baseUrl, pageNumber));
     }
 

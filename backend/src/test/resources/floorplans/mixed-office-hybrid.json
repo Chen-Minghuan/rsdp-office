@@ -1,0 +1,1378 @@
+{
+  "sourceImageSha256": "bb4fb10a2dd5bcd0ae06676c32ad269029541a3eff11706f44bc51739577bbe4",
+  "evidence": "Actual qwen3-vl-plus response for 8.png, 2026-10-17; raw ordered edge tuple error retained",
+  "initialModelOutput": {
+    "rooms": [
+      {
+        "label": "操作间",
+        "labelBbox": [
+          160,
+          158,
+          204,
+          173
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            42,
+            95,
+            285,
+            95
+          ],
+          [
+            285,
+            95,
+            285,
+            190
+          ],
+          [
+            285,
+            190,
+            42,
+            190
+          ],
+          [
+            42,
+            190,
+            42,
+            95
+          ]
+        ]
+      },
+      {
+        "label": "吧台",
+        "labelBbox": [
+          160,
+          242,
+          190,
+          257
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            84,
+            220,
+            242,
+            220
+          ],
+          [
+            242,
+            220,
+            242,
+            265
+          ],
+          [
+            242,
+            265,
+            84,
+            265
+          ],
+          [
+            84,
+            265,
+            84,
+            220
+          ]
+        ]
+      },
+      {
+        "label": "西式简餐厅",
+        "labelBbox": [
+          218,
+          465,
+          278,
+          480
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            130,
+            340,
+            212,
+            340
+          ],
+          [
+            212,
+            340,
+            212,
+            520
+          ],
+          [
+            212,
+            520,
+            130,
+            520
+          ],
+          [
+            130,
+            520,
+            130,
+            340
+          ]
+        ]
+      },
+      {
+        "label": "高端私人会所",
+        "labelBbox": [
+          148,
+          540,
+          222,
+          555
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            84,
+            380,
+            130,
+            380
+          ],
+          [
+            130,
+            380,
+            130,
+            560
+          ],
+          [
+            130,
+            560,
+            84,
+            560
+          ],
+          [
+            84,
+            560,
+            84,
+            380
+          ]
+        ]
+      },
+      {
+        "label": "钢琴",
+        "labelBbox": [
+          120,
+          610,
+          150,
+          625
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null,
+        "polygon": []
+      },
+      {
+        "label": "户外景观",
+        "labelBbox": [
+          48,
+          645,
+          108,
+          660
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null,
+        "polygon": [
+          [
+            42,
+            580,
+            84,
+            580
+          ],
+          [
+            84,
+            580,
+            84,
+            680
+          ],
+          [
+            84,
+            680,
+            42,
+            680
+          ],
+          [
+            42,
+            680,
+            42,
+            580
+          ]
+        ]
+      },
+      {
+        "label": "休闲阳台",
+        "labelBbox": [
+          42,
+          760,
+          102,
+          775
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            42,
+            680,
+            285,
+            680
+          ],
+          [
+            285,
+            680,
+            285,
+            780
+          ],
+          [
+            285,
+            780,
+            42,
+            780
+          ],
+          [
+            42,
+            780,
+            42,
+            680
+          ]
+        ]
+      },
+      {
+        "label": "品茶区",
+        "labelBbox": [
+          160,
+          805,
+          198,
+          820
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            120,
+            720,
+            220,
+            720
+          ],
+          [
+            220,
+            720,
+            220,
+            840
+          ],
+          [
+            220,
+            840,
+            120,
+            840
+          ],
+          [
+            120,
+            840,
+            120,
+            720
+          ]
+        ]
+      },
+      {
+        "label": "衣帽间",
+        "labelBbox": [
+          290,
+          645,
+          320,
+          660
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            285,
+            620,
+            340,
+            620
+          ],
+          [
+            340,
+            620,
+            340,
+            680
+          ],
+          [
+            340,
+            680,
+            285,
+            680
+          ],
+          [
+            285,
+            680,
+            285,
+            620
+          ]
+        ]
+      },
+      {
+        "label": "等候区",
+        "labelBbox": [
+          350,
+          625,
+          380,
+          640
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            285,
+            580,
+            380,
+            580
+          ],
+          [
+            380,
+            580,
+            380,
+            620
+          ],
+          [
+            380,
+            620,
+            285,
+            620
+          ],
+          [
+            285,
+            620,
+            285,
+            580
+          ]
+        ]
+      },
+      {
+        "label": "前厅",
+        "labelBbox": [
+          360,
+          520,
+          384,
+          535
+        ],
+        "roomType": "RECEPTION",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            285,
+            300,
+            490,
+            300
+          ],
+          [
+            490,
+            300,
+            490,
+            520
+          ],
+          [
+            490,
+            520,
+            285,
+            520
+          ],
+          [
+            285,
+            520,
+            285,
+            300
+          ]
+        ]
+      },
+      {
+        "label": "展厅",
+        "labelBbox": [
+          418,
+          375,
+          442,
+          390
+        ],
+        "roomType": "COLLABORATION",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            340,
+            340,
+            490,
+            340
+          ],
+          [
+            490,
+            340,
+            490,
+            440
+          ],
+          [
+            490,
+            440,
+            340,
+            440
+          ],
+          [
+            340,
+            440,
+            340,
+            340
+          ]
+        ]
+      },
+      {
+        "label": "会议室",
+        "labelBbox": [
+          390,
+          855,
+          428,
+          870
+        ],
+        "roomType": "MEETING_ROOM",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            285,
+            720,
+            490,
+            720
+          ],
+          [
+            490,
+            720,
+            490,
+            880
+          ],
+          [
+            490,
+            880,
+            285,
+            880
+          ],
+          [
+            285,
+            880,
+            285,
+            720
+          ]
+        ]
+      },
+      {
+        "label": "办公区",
+        "labelBbox": [
+          552,
+          805,
+          584,
+          820
+        ],
+        "roomType": "OPEN_OFFICE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            490,
+            690,
+            720,
+            690
+          ],
+          [
+            720,
+            690,
+            720,
+            880
+          ],
+          [
+            720,
+            880,
+            490,
+            880
+          ],
+          [
+            490,
+            880,
+            490,
+            690
+          ]
+        ]
+      },
+      {
+        "label": "技术部",
+        "labelBbox": [
+          552,
+          455,
+          588,
+          470
+        ],
+        "roomType": "OPEN_OFFICE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            490,
+            260,
+            640,
+            260
+          ],
+          [
+            640,
+            260,
+            640,
+            620
+          ],
+          [
+            640,
+            620,
+            490,
+            620
+          ],
+          [
+            490,
+            620,
+            490,
+            260
+          ]
+        ]
+      },
+      {
+        "label": "文印",
+        "labelBbox": [
+          632,
+          540,
+          652,
+          555
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            640,
+            470,
+            680,
+            470
+          ],
+          [
+            680,
+            470,
+            680,
+            620
+          ],
+          [
+            680,
+            620,
+            640,
+            620
+          ],
+          [
+            640,
+            620,
+            640,
+            470
+          ]
+        ]
+      },
+      {
+        "label": "副总办公室",
+        "labelBbox": [
+          652,
+          405,
+          702,
+          420
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            640,
+            260,
+            720,
+            260
+          ],
+          [
+            720,
+            260,
+            720,
+            470
+          ],
+          [
+            720,
+            470,
+            640,
+            470
+          ],
+          [
+            640,
+            470,
+            640,
+            260
+          ]
+        ]
+      },
+      {
+        "label": "总经室",
+        "labelBbox": [
+          738,
+          425,
+          770,
+          440
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            720,
+            260,
+            840,
+            260
+          ],
+          [
+            840,
+            260,
+            840,
+            540
+          ],
+          [
+            840,
+            540,
+            720,
+            540
+          ],
+          [
+            720,
+            540,
+            720,
+            260
+          ]
+        ]
+      },
+      {
+        "label": "书吧",
+        "labelBbox": [
+          810,
+          470,
+          830,
+          485
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            720,
+            310,
+            840,
+            310
+          ],
+          [
+            840,
+            310,
+            840,
+            470
+          ],
+          [
+            840,
+            470,
+            720,
+            470
+          ],
+          [
+            720,
+            470,
+            720,
+            310
+          ]
+        ]
+      },
+      {
+        "label": "财务室",
+        "labelBbox": [
+          872,
+          425,
+          902,
+          440
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            840,
+            260,
+            950,
+            260
+          ],
+          [
+            950,
+            260,
+            950,
+            540
+          ],
+          [
+            950,
+            540,
+            840,
+            540
+          ],
+          [
+            840,
+            540,
+            840,
+            260
+          ]
+        ]
+      },
+      {
+        "label": "储物间",
+        "labelBbox": [
+          910,
+          560,
+          940,
+          575
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            840,
+            540,
+            950,
+            540
+          ],
+          [
+            950,
+            540,
+            950,
+            620
+          ],
+          [
+            950,
+            620,
+            840,
+            620
+          ],
+          [
+            840,
+            620,
+            840,
+            540
+          ]
+        ]
+      },
+      {
+        "label": "文件柜",
+        "labelBbox": [
+          780,
+          585,
+          810,
+          600
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null,
+        "polygon": []
+      },
+      {
+        "label": "休闲茶室",
+        "labelBbox": [
+          760,
+          725,
+          800,
+          740
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            720,
+            690,
+            840,
+            690
+          ],
+          [
+            840,
+            690,
+            840,
+            780
+          ],
+          [
+            840,
+            780,
+            720,
+            780
+          ],
+          [
+            720,
+            780,
+            720,
+            690
+          ]
+        ]
+      },
+      {
+        "label": "门禁",
+        "labelBbox": [
+          720,
+          830,
+          740,
+          845
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null,
+        "polygon": []
+      },
+      {
+        "label": "外机",
+        "labelBbox": [
+          740,
+          920,
+          768,
+          935
+        ],
+        "roomType": "OTHER",
+        "confidence": "low",
+        "dimensionText": null,
+        "polygon": [
+          [
+            720,
+            880,
+            840,
+            880
+          ],
+          [
+            840,
+            880,
+            840,
+            960
+          ],
+          [
+            840,
+            960,
+            720,
+            960
+          ],
+          [
+            720,
+            960,
+            720,
+            880
+          ]
+        ]
+      },
+      {
+        "label": "设备阳台（空铺防腐木地板）",
+        "labelBbox": [
+          48,
+          355,
+          108,
+          370
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null,
+        "polygon": [
+          [
+            42,
+            260,
+            84,
+            260
+          ],
+          [
+            84,
+            260,
+            84,
+            580
+          ],
+          [
+            84,
+            580,
+            42,
+            580
+          ],
+          [
+            42,
+            580,
+            42,
+            260
+          ]
+        ]
+      }
+    ],
+    "dimensionReferences": [
+      {
+        "text": "8400",
+        "region": "TOP",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          0,
+          500
+        ],
+        "end": [
+          280,
+          500
+        ]
+      },
+      {
+        "text": "8400",
+        "region": "TOP",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          280,
+          500
+        ],
+        "end": [
+          560,
+          500
+        ]
+      },
+      {
+        "text": "16800",
+        "region": "TOP",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          560,
+          500
+        ],
+        "end": [
+          1000,
+          500
+        ]
+      },
+      {
+        "text": "4200",
+        "region": "LEFT",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          500,
+          0
+        ],
+        "end": [
+          500,
+          125
+        ]
+      },
+      {
+        "text": "8400",
+        "region": "LEFT",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          500,
+          125
+        ],
+        "end": [
+          500,
+          375
+        ]
+      },
+      {
+        "text": "8400",
+        "region": "LEFT",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          500,
+          375
+        ],
+        "end": [
+          500,
+          625
+        ]
+      },
+      {
+        "text": "8400",
+        "region": "BOTTOM",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          0,
+          500
+        ],
+        "end": [
+          280,
+          500
+        ]
+      },
+      {
+        "text": "8400",
+        "region": "BOTTOM",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          280,
+          500
+        ],
+        "end": [
+          560,
+          500
+        ]
+      },
+      {
+        "text": "750",
+        "region": "BOTTOM",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          560,
+          500
+        ],
+        "end": [
+          600,
+          500
+        ]
+      },
+      {
+        "text": "7650",
+        "region": "BOTTOM",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          600,
+          500
+        ],
+        "end": [
+          860,
+          500
+        ]
+      },
+      {
+        "text": "8400",
+        "region": "BOTTOM",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          860,
+          500
+        ],
+        "end": [
+          1000,
+          500
+        ]
+      },
+      {
+        "text": "8200",
+        "region": "RIGHT",
+        "unit": null,
+        "unitEvidence": null,
+        "confidence": "high",
+        "start": [
+          500,
+          0
+        ],
+        "end": [
+          500,
+          120
+        ]
+      }
+    ],
+    "warnings": [
+      "图中未标注统一单位，所有尺寸单位设为null；实际单位需依据图纸说明确认",
+      "‘钢琴’、‘文件柜’、‘门禁’、‘外机’为设备/设施，非独立房间，polygon为空",
+      "部分区域如‘主入口’、‘多联末端’无围合墙线，未单独建模为房间",
+      "楼梯间内标注‘3500’与‘1833’为竖向尺寸，非水平线性尺寸，未纳入dimensionReferences",
+      "‘地面：灰色长条地板’为材料说明，不构成功能分区",
+      "右侧储物间与财务室之间隔墙局部模糊，轮廓基于可见墙体推断，confidence为high但存在轻微不确定性"
+    ]
+  },
+  "labelLocalization": {
+    "labels": [
+      {
+        "text": "操作间",
+        "bbox": [
+          162,
+          158,
+          204,
+          175
+        ]
+      },
+      {
+        "text": "吧台",
+        "bbox": [
+          162,
+          243,
+          189,
+          259
+        ]
+      },
+      {
+        "text": "西式简餐厅",
+        "bbox": [
+          219,
+          468,
+          272,
+          484
+        ]
+      },
+      {
+        "text": "高端私人会所",
+        "bbox": [
+          147,
+          542,
+          214,
+          558
+        ]
+      },
+      {
+        "text": "钢琴",
+        "bbox": [
+          127,
+          612,
+          152,
+          628
+        ]
+      },
+      {
+        "text": "户外黑板",
+        "bbox": [
+          44,
+          652,
+          87,
+          668
+        ]
+      },
+      {
+        "text": "设备阳台（空铺防腐木地板）",
+        "bbox": [
+          44,
+          358,
+          75,
+          518
+        ]
+      },
+      {
+        "text": "休闲阳台",
+        "bbox": [
+          44,
+          768,
+          87,
+          784
+        ]
+      },
+      {
+        "text": "品茶区",
+        "bbox": [
+          162,
+          804,
+          194,
+          820
+        ]
+      },
+      {
+        "text": "地面：灰色长条地板",
+        "bbox": [
+          147,
+          688,
+          244,
+          704
+        ]
+      },
+      {
+        "text": "衣帽间",
+        "bbox": [
+          292,
+          652,
+          324,
+          668
+        ]
+      },
+      {
+        "text": "等候区",
+        "bbox": [
+          352,
+          628,
+          384,
+          644
+        ]
+      },
+      {
+        "text": "前厅",
+        "bbox": [
+          372,
+          524,
+          394,
+          540
+        ]
+      },
+      {
+        "text": "展厅",
+        "bbox": [
+          422,
+          376,
+          444,
+          392
+        ]
+      },
+      {
+        "text": "多功能区域",
+        "bbox": [
+          352,
+          384,
+          384,
+          396
+        ]
+      },
+      {
+        "text": "主入口",
+        "bbox": [
+          302,
+          348,
+          334,
+          364
+        ]
+      },
+      {
+        "text": "会议室",
+        "bbox": [
+          384,
+          856,
+          426,
+          872
+        ]
+      },
+      {
+        "text": "办公区",
+        "bbox": [
+          554,
+          804,
+          586,
+          820
+        ]
+      },
+      {
+        "text": "技术部",
+        "bbox": [
+          554,
+          452,
+          586,
+          468
+        ]
+      },
+      {
+        "text": "副总办公室",
+        "bbox": [
+          654,
+          412,
+          696,
+          428
+        ]
+      },
+      {
+        "text": "文印",
+        "bbox": [
+          634,
+          542,
+          656,
+          558
+        ]
+      },
+      {
+        "text": "总经室",
+        "bbox": [
+          738,
+          428,
+          770,
+          444
+        ]
+      },
+      {
+        "text": "书吧",
+        "bbox": [
+          822,
+          472,
+          844,
+          488
+        ]
+      },
+      {
+        "text": "财务室",
+        "bbox": [
+          878,
+          428,
+          910,
+          444
+        ]
+      },
+      {
+        "text": "储物间",
+        "bbox": [
+          910,
+          558,
+          942,
+          574
+        ]
+      },
+      {
+        "text": "文件柜",
+        "bbox": [
+          798,
+          584,
+          830,
+          600
+        ]
+      },
+      {
+        "text": "门禁",
+        "bbox": [
+          738,
+          728,
+          760,
+          744
+        ]
+      },
+      {
+        "text": "休闲茶室",
+        "bbox": [
+          768,
+          728,
+          800,
+          744
+        ]
+      },
+      {
+        "text": "外机",
+        "bbox": [
+          738,
+          912,
+          760,
+          928
+        ]
+      }
+    ],
+    "status": "DETECTED",
+    "coordinateSystem": "NORMALIZED_1000"
+  }
+}

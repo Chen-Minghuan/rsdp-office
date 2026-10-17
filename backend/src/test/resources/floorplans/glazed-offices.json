@@ -1,0 +1,871 @@
+{
+  "sourceImageSha256": "1031a3691e26d4b3c3a89c20b1cbeff8907b6510c3c19c13f70d5af5b65e62b0",
+  "initialModelOutput": {
+    "rooms": [
+      {
+        "label": "总经理室",
+        "polygon": [
+          [
+            106,
+            106
+          ],
+          [
+            250,
+            106
+          ],
+          [
+            250,
+            420
+          ],
+          [
+            106,
+            420
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "S=23m²"
+      },
+      {
+        "label": "会议室",
+        "polygon": [
+          [
+            280,
+            106
+          ],
+          [
+            420,
+            106
+          ],
+          [
+            420,
+            420
+          ],
+          [
+            280,
+            420
+          ]
+        ],
+        "roomType": "MEETING_ROOM",
+        "confidence": "high",
+        "dimensionText": "S=17.5m²"
+      },
+      {
+        "label": "公共办公区",
+        "polygon": [
+          [
+            440,
+            106
+          ],
+          [
+            720,
+            106
+          ],
+          [
+            720,
+            420
+          ],
+          [
+            440,
+            420
+          ]
+        ],
+        "roomType": "OPEN_OFFICE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "副总经理室",
+        "polygon": [
+          [
+            740,
+            106
+          ],
+          [
+            900,
+            106
+          ],
+          [
+            900,
+            420
+          ],
+          [
+            740,
+            420
+          ]
+        ],
+        "roomType": "EXECUTIVE_OFFICE",
+        "confidence": "high",
+        "dimensionText": "S=19m²"
+      },
+      {
+        "label": "财务室",
+        "polygon": [
+          [
+            106,
+            620
+          ],
+          [
+            250,
+            620
+          ],
+          [
+            250,
+            880
+          ],
+          [
+            106,
+            880
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": "S=11.5m²"
+      },
+      {
+        "label": "洗手间",
+        "polygon": [
+          [
+            250,
+            620
+          ],
+          [
+            420,
+            620
+          ],
+          [
+            420,
+            880
+          ],
+          [
+            250,
+            880
+          ]
+        ],
+        "roomType": "BATHROOM",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "茶水间/打印区",
+        "polygon": [
+          [
+            440,
+            620
+          ],
+          [
+            660,
+            620
+          ],
+          [
+            660,
+            880
+          ],
+          [
+            440,
+            880
+          ]
+        ],
+        "roomType": "KITCHEN",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "等候/洽谈",
+        "polygon": [
+          [
+            660,
+            620
+          ],
+          [
+            780,
+            620
+          ],
+          [
+            780,
+            880
+          ],
+          [
+            660,
+            880
+          ]
+        ],
+        "roomType": "LOUNGE",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "材料间",
+        "polygon": [
+          [
+            780,
+            620
+          ],
+          [
+            900,
+            620
+          ],
+          [
+            900,
+            880
+          ],
+          [
+            780,
+            880
+          ]
+        ],
+        "roomType": "OTHER",
+        "confidence": "high",
+        "dimensionText": null
+      },
+      {
+        "label": "前厅",
+        "polygon": [
+          [
+            780,
+            880
+          ],
+          [
+            900,
+            880
+          ],
+          [
+            900,
+            1000
+          ],
+          [
+            780,
+            1000
+          ]
+        ],
+        "roomType": "RECEPTION",
+        "confidence": "high",
+        "dimensionText": null
+      }
+    ],
+    "warnings": [],
+    "dimensionReferences": [
+      {
+        "end": [
+          50,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          250,
+          500
+        ],
+        "text": "3680",
+        "unit": null,
+        "start": [
+          50,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          275,
+          500
+        ],
+        "text": "120",
+        "unit": null,
+        "start": [
+          250,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          425,
+          500
+        ],
+        "text": "3180",
+        "unit": null,
+        "start": [
+          275,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          450,
+          500
+        ],
+        "text": "120",
+        "unit": null,
+        "start": [
+          425,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          750,
+          500
+        ],
+        "text": "6050",
+        "unit": null,
+        "start": [
+          450,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          775,
+          500
+        ],
+        "text": "120",
+        "unit": null,
+        "start": [
+          750,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          925,
+          500
+        ],
+        "text": "3530",
+        "unit": null,
+        "start": [
+          775,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          925,
+          500
+        ],
+        "region": "TOP",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          50
+        ],
+        "text": "140",
+        "unit": null,
+        "start": [
+          500,
+          0
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          330
+        ],
+        "text": "6640",
+        "unit": null,
+        "start": [
+          500,
+          50
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          350
+        ],
+        "text": "120",
+        "unit": null,
+        "start": [
+          500,
+          330
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          530
+        ],
+        "text": "3740",
+        "unit": null,
+        "start": [
+          500,
+          350
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          550
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          500,
+          530
+        ],
+        "region": "LEFT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          50,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          210,
+          500
+        ],
+        "text": "3200",
+        "unit": null,
+        "start": [
+          50,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          235,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          210,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          320,
+          500
+        ],
+        "text": "1750",
+        "unit": null,
+        "start": [
+          235,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          335,
+          500
+        ],
+        "text": "100",
+        "unit": null,
+        "start": [
+          320,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          420,
+          500
+        ],
+        "text": "1750",
+        "unit": null,
+        "start": [
+          335,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          435,
+          500
+        ],
+        "text": "100",
+        "unit": null,
+        "start": [
+          420,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          585,
+          500
+        ],
+        "text": "2900",
+        "unit": null,
+        "start": [
+          435,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          610,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          585,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          760,
+          500
+        ],
+        "text": "2950",
+        "unit": null,
+        "start": [
+          610,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          775,
+          500
+        ],
+        "text": "100",
+        "unit": null,
+        "start": [
+          760,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          950,
+          500
+        ],
+        "text": "3550",
+        "unit": null,
+        "start": [
+          775,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          1000,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          950,
+          500
+        ],
+        "region": "BOTTOM",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          50
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          500,
+          0
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          100
+        ],
+        "text": "140",
+        "unit": null,
+        "start": [
+          500,
+          50
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          380
+        ],
+        "text": "5680",
+        "unit": null,
+        "start": [
+          500,
+          100
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          400
+        ],
+        "text": "120",
+        "unit": null,
+        "start": [
+          500,
+          380
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          920
+        ],
+        "text": "10840",
+        "unit": null,
+        "start": [
+          500,
+          400
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          500,
+          970
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          500,
+          920
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          175,
+          500
+        ],
+        "text": "3550",
+        "unit": null,
+        "start": [
+          0,
+          500
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      },
+      {
+        "end": [
+          200,
+          500
+        ],
+        "text": "200",
+        "unit": null,
+        "start": [
+          175,
+          500
+        ],
+        "region": "RIGHT",
+        "confidence": "high",
+        "unitEvidence": null
+      }
+    ]
+  },
+  "labelLocalization": {
+    "labels": [
+      {
+        "bbox": [
+          150,
+          416,
+          202,
+          436
+        ],
+        "text": "总经理室"
+      },
+      {
+        "bbox": [
+          317,
+          302,
+          358,
+          322
+        ],
+        "text": "会议室"
+      },
+      {
+        "bbox": [
+          549,
+          552,
+          609,
+          572
+        ],
+        "text": "公共办公区"
+      },
+      {
+        "bbox": [
+          777,
+          346,
+          838,
+          366
+        ],
+        "text": "副总经理室"
+      },
+      {
+        "bbox": [
+          144,
+          678,
+          185,
+          698
+        ],
+        "text": "财务室"
+      },
+      {
+        "bbox": [
+          345,
+          754,
+          386,
+          774
+        ],
+        "text": "洗手间"
+      },
+      {
+        "bbox": [
+          452,
+          792,
+          532,
+          812
+        ],
+        "text": "茶水间/打印区"
+      },
+      {
+        "bbox": [
+          627,
+          792,
+          688,
+          812
+        ],
+        "text": "等候/洽谈"
+      },
+      {
+        "bbox": [
+          830,
+          638,
+          871,
+          658
+        ],
+        "text": "材料间"
+      },
+      {
+        "bbox": [
+          834,
+          774,
+          865,
+          794
+        ],
+        "text": "前厅"
+      }
+    ],
+    "status": "DETECTED",
+    "coordinateSystem": "NORMALIZED_1000"
+  }
+}

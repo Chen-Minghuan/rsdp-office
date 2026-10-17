@@ -40,6 +40,8 @@ public class VisionImagePreparer {
 
     public record PreparedImage(byte[] png, int width, int height, int pageNumber, int pageCount,
                                 String sourceSha256, String imageSha256) {
+        public PreparedImage { png = png.clone(); }
+        @Override public byte[] png() { return png.clone(); }
         public String base64() { return Base64.getEncoder().encodeToString(png); }
         public String dataUri() { return "data:image/png;base64," + base64(); }
     }
@@ -82,7 +84,17 @@ public class VisionImagePreparer {
         }
     }
 
-    public PreparedImage prepare(MultipartFile file, int pageNumber) {
+    private static final int CACHE_ENTRIES = 8;
+    private static final long CACHE_BYTES = 64L * 1024 * 1024;
+    private static final long CACHE_TTL_NANOS = java.time.Duration.ofMinutes(30).toNanos();
+    private record Entry(PreparedImage image, long expiresAt) {}
+    public record Preparation(PreparedImage image, boolean cacheHit) {}
+    private final java.util.Map<String, Entry> cache = new java.util.LinkedHashMap<>(16, .75f, true);
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<PreparedImage>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public PreparedImage prepare(MultipartFile file, int pageNumber) { return prepareCached(file, pageNumber).image(); }
+
+    public Preparation prepareCached(MultipartFile file, int pageNumber) {
         if (file == null || file.isEmpty()) throw new BusinessException("请先上传图片或 PDF");
         if (file.getSize() > MAX_FILE_BYTES) throw new BusinessException("图纸文件不能超过 50MB");
         if (pageNumber < 1) throw new BusinessException("PDF 页码必须从 1 开始");
@@ -92,6 +104,42 @@ public class VisionImagePreparer {
         }
         try {
             byte[] bytes = file.getBytes();
+            String key = sha256(bytes) + ":" + pageNumber + ":" + maxEdge + ":" + properties.getPdfDpi() + ":PNG-RGB-v1";
+            synchronized (cache) {
+                cache.entrySet().removeIf(entry -> entry.getValue().expiresAt() < System.nanoTime());
+                Entry cached = cache.get(key);
+                if (cached != null) return new Preparation(cached.image(), true);
+            }
+            var pending = new java.util.concurrent.CompletableFuture<PreparedImage>();
+            var existing = inFlight.putIfAbsent(key, pending);
+            if (existing != null) return new Preparation(existing.join(), true);
+            try {
+                // Check again after becoming the owner: a previous owner may have just finished.
+                synchronized (cache) {
+                    Entry cached = cache.get(key);
+                    if (cached != null) { pending.complete(cached.image()); return new Preparation(cached.image(), true); }
+                }
+                PreparedImage result = convert(bytes, pageNumber, maxEdge);
+                synchronized (cache) {
+                    cache.put(key, new Entry(result, System.nanoTime() + CACHE_TTL_NANOS));
+                    while (cache.size() > CACHE_ENTRIES || cache.values().stream().mapToLong(entry -> entry.image().png.length).sum() > CACHE_BYTES) cache.remove(cache.keySet().iterator().next());
+                }
+                pending.complete(result);
+                return new Preparation(result, false);
+            } catch (RuntimeException | IOException failure) {
+                pending.completeExceptionally(failure);
+                throw failure;
+            } finally { inFlight.remove(key, pending); }
+        } catch (IOException e) {
+            throw new BusinessException("无法读取图纸，请检查图片或 PDF 是否完整");
+        } catch (java.util.concurrent.CompletionException e) {
+            if (e.getCause() instanceof RuntimeException failure) throw failure;
+            throw new BusinessException("无法读取图纸，请检查图片或 PDF 是否完整");
+        }
+    }
+
+    private PreparedImage convert(byte[] bytes, int pageNumber, int maxEdge) throws IOException {
+        try {
             boolean pdf = bytes.length >= 5 && new String(bytes, 0, 5, StandardCharsets.US_ASCII).equals("%PDF-");
             BufferedImage image;
             int pageCount = 1;

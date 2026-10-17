@@ -53,6 +53,7 @@ export function useFloorPlanApi() {
     if (params.projectId) formData.append('projectId', params.projectId)
     if (params.sourceName) formData.append('sourceName', params.sourceName)
     if (params.pageNumber !== undefined) formData.append('pageNumber', String(params.pageNumber))
+    if (params.image) formData.append('background', 'true')
 
     const res = await $fetch<ApiResponse<FloorPlanAnalyzeResponse>>(apiUrl('/api/v1/floor-plan/analyze'), {
       method: 'POST',
