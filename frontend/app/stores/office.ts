@@ -29,7 +29,7 @@ import { furnitureById } from '~/utils/manualFurniture'
 import { createTemplateFurniture } from '~/utils/officeFurniture'
 import type { CustomOfficeModule, OfficeModuleInput } from '~/types/officeModule'
 import { customModuleDefinition, moduleInputProblem, restoreCustomModules } from '~/utils/officeModules'
-import { manualOfficeFurniture, officePlacementProblem, identifyManualFurniture } from '~/utils/officeManualPlacement'
+import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, identifyManualFurniture } from '~/utils/officeManualPlacement'
 import type { OfficeFurniturePlacement } from '~/utils/officeManualPlacement'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
@@ -415,6 +415,36 @@ export const useOfficeStore = defineStore('office', {
         }
       })
       return true
+    },
+
+    deleteFurnitureGroup(ids: string[], zoneId: string) {
+      const selected = new Set(ids)
+      const items = this.furnitureForZone(zoneId).filter(item => selected.has(item.id))
+      if (!items.length || items.length !== selected.size) return false
+      this.objectUpdate(() => {
+        this.objects = this.objects.filter(object => !selected.has(object.id))
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+      })
+      return true
+    },
+
+    moveFurnitureGroup(ids: string[], zoneId: string, dx: number, dy: number): string | null {
+      const zone = this.zones.find(item => item.id === zoneId)
+      const selected = new Set(ids)
+      const current = this.furnitureForZone(zoneId)
+      const items = current.filter(item => selected.has(item.id))
+      if (!zone || !items.length || items.length !== selected.size || !Number.isFinite(dx) || !Number.isFinite(dy)) return '所选家具或位移无效'
+      if (dx === 0 && dy === 0) return null
+      const candidates = items.map(item => ({ ...item, x: item.x + dx, y: item.y + dy }))
+      const problem = officeFurnitureMoveProblem(zone, candidates, current)
+      if (problem) return problem
+      this.objectUpdate(() => {
+        items.forEach(item => { item.x += dx; item.y += dy })
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+      })
+      return null
     },
 
     moveObject(id: string, x: number, y: number) {

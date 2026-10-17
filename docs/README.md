@@ -24,9 +24,11 @@
 | [供应商尺寸导入任务](tasks/CAT-003-supplier-size-import.md) | 供应商目录的毫米尺寸、价格和预览复核 |
 | [商品图片展示任务](tasks/CAT-005-product-image-gallery.md) | 商品详情大图、缩略图与列表悬停放大查看 |
 | [单位模块删除](tasks/LAYOUT-006-delete-modules.md) | 画布选中删除、快捷键/撤销、确认失效与目录独立删除 |
+| [家具多选与整组操作](tasks/LAYOUT-008-multi-furniture-selection.md) | Shift/Ctrl 点选、框选、组移/批删及边界与撤销校验 |
 | [自定义模块与逐件添加](tasks/LAYOUT-005-custom-and-manual-modules.md) | 本机自定义目录、尺寸/图例快照、逐件点击与旋转及不覆盖已有家具 |
 | [自动排版入口与结果反馈](tasks/LAYOUT-004-apply-auto-layout.md) | 恢复旧单排后直接自动多排、当前/预估件数与实际应用状态 |
 | [一键多排与空间利用](tasks/LAYOUT-003-auto-multi-row.md) | 自动横纵比较、多排、间距、轮廓约束与恢复验证 |
+| [常用排布与间距初值](tasks/LAYOUT-007-arrangement-presets-and-spacing.md) | 面对面、错位排、中间通道和默认 0 mm 列间距 |
 | [单位模块共用家具图例](tasks/LAYOUT-002-shared-furniture-legend.md) | 手动布局同源目录、毫米规格、参数化线稿与排版恢复验证 |
 | [按标注修正开放分区](tasks/GEOM-008-annotated-open-zones.md) | 当前方案五处分区、比例保留、修正包及真实 API 保存记录 |
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |

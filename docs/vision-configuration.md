@@ -3,20 +3,16 @@
 更新日期：2026-10-15。当前模型为 `qwen3-vl-plus`，通过后端调用阿里云百炼兼容 Chat Completions 接口。
 接口/页处理和响应适配已实现；真实识别准确率仍需按 [样本规则](spatial/recognition-validation.md) 验证。
 
-## 1. IDEA 中填写密钥
+## 1. 项目本地 `.env` 配置
 
-后端也会自动读取当前系统用户的 `~/.config/rsdp-office/vision.properties` 本机配置。
-其中可填写 `DASHSCOPE_API_KEY=实际密钥`，该文件位于仓库之外，只保存在本机。
-本机配置修改后重启后端即可生效；启动环境变量中的同名值优先。
-
-打开后端的 Run/Debug Configuration（`OfficeProductImportApplication`），在 Environment variables 中添加：
+复制项目根目录 [.env.example](../.env.example) 为 `.env`，在其中填写：
 
 ```text
 DASHSCOPE_API_KEY=填写你自己的百炼API密钥
 ```
 
 模型默认就是 `qwen3-vl-plus`，北京兼容地址默认是 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
-修改后重新启动 Java 后端，前端不需要配置密钥。
+根目录 `.env` 已被 Git 忽略。Java 后端从项目根目录或 `backend/` 作为工作目录启动时会自动读取；Docker Compose 也会读取根目录 `.env`。修改后重新启动 Java 后端，前端不需要配置密钥。启动环境变量中的同名值优先。
 
 可选变量：
 
@@ -34,11 +30,9 @@ DASHSCOPE_API_KEY=填写你自己的百炼API密钥
 
 ## 2. 其他启动方式
 
-本地 Java/Spring 启动进程继承相应环境变量。项目提供 [.env.example](../.env.example) 作为变量名模板；
-IDEA 或本地 Maven 不会因为存在 `.env` 就自动加载，需通过实际启动配置传入。
-
-Docker Compose 启动 Java 后端时，可将根 `.env.example` 复制为 `.env` 并填写，Compose 已向后端容器传入上述变量。
-密钥保留在本地环境配置或已忽略的 `.env`，不填写到前端代码、共享的 IDEA 配置或提交的 YAML 中。
+本地 Java/Spring 启动进程仍可继承相应环境变量；如果 IDEA 使用其他工作目录，需在运行配置中将工作目录设为项目根目录或 `backend/`。
+Docker Compose 已向后端容器传入根目录 `.env` 中的变量。
+密钥只填写在已忽略的 `.env` 或本地环境变量中，不填写到前端代码、共享的 IDEA 配置或提交的 YAML 中。
 
 ## 3. 页面使用
 

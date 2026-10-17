@@ -46,6 +46,19 @@ export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObj
   return null
 }
 
+/** Validate a translated selection against the room and furniture outside the selection. */
+export function officeFurnitureMoveProblem(zone: ZoneObject, candidates: FurnitureObject[], existing: FurnitureObject[]): string | null {
+  if (!candidates.length || candidates.some(item => item.zoneId !== zone.id)) return '只能移动当前空间的家具'
+  const movingIds = new Set(candidates.map(item => item.id))
+  const others = existing.filter(item => !movingIds.has(item.id))
+  const spacing: OfficeLayoutSpacing = { wallMm: 0, gapMm: 0, aisleMm: 0 }
+  for (const candidate of candidates) {
+    const problem = officePlacementProblem(zone, candidate, others, spacing)
+    if (problem) return problem
+  }
+  return null
+}
+
 export function identifyManualFurniture(candidate: FurnitureObject): FurnitureObject {
   return { ...candidate, id: uid('f') }
 }

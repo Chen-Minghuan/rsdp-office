@@ -35,7 +35,7 @@ try {
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
   await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
     draft.objects = [
       { id: 'DELETE-ROOM', kind: 'zone', x: -10000, y: -6000, w: 6000, h: 4000, name: '删除测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[-10000,-6000],[-4000,-6000],[-4000,-2000],[-10000,-2000]] },
       { id: 'OTHER-ROOM', kind: 'zone', x: 10000, y: 0, w: 6000, h: 4000, name: '其他空间', zoneType: 'MEETING_ROOM', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[10000,0],[16000,0],[16000,4000],[10000,4000]] },

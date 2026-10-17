@@ -71,7 +71,7 @@ function backToOverview() {
         </div>
         <h3 class="text-sm font-bold text-[#5b5751] mb-1">先完成空间排版</h3>
         <p class="text-xs text-muted leading-relaxed">
-          在左侧选择单位模块、设置尺寸与排列方式，<br>点击「一键自动排版」后在画布中生成家具布局。
+          在左侧选择单位模块并设置尺寸和间距，<br>一键自动排版或应用选定方式后生成布局。
         </p>
       </div>
 
@@ -91,7 +91,7 @@ function backToOverview() {
           </li>
           <li class="flex items-start gap-2">
             <AppIcon name="check" size="3" class="mt-0.5 text-green" />
-            <span>选择单排、背靠背、矩阵或沿边排列</span>
+            <span>调整排间、列间和离墙距离，选择自动或常用方式</span>
           </li>
         </ul>
       </div>
