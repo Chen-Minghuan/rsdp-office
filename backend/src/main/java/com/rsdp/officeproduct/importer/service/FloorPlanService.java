@@ -260,10 +260,11 @@ public class FloorPlanService {
             if (original != null && "INDEPENDENT_LABEL_DETECTION".equals(original.path("contourRefinement").path("seedSource").asText())) {
                 for (var room : response.getRooms()) {
                     List<JsonNode> matches = new ArrayList<>();
-                    for (var record : original.path("contourRefinement").path("rooms"))
-                        if (java.util.Objects.equals(room.getLabel(), record.path("label").asText(null))) matches.add(record);
+                    for (var candidate : original.path("rooms"))
+                        if (java.util.Objects.equals(room.getLabel(), candidate.path("label").asText(null))
+                            && java.util.Objects.equals(room.getPolygon(), extractPolygon(candidate.path("polygon")))) matches.add(candidate);
                     room.setContourGrounded(FloorPlanAnalysis.GEOMETRY_SOURCE_AI_VISION.equals(room.getGeometrySource())
-                        && matches.size() == 1 && "GROUNDED".equals(matches.get(0).path("status").asText()));
+                        && matches.size() == 1 && matches.get(0).path("contourGrounded").asBoolean(false));
                 }
             }
             String assumedUnit = original == null ? "mm" : original.path("dimensionCalibrationConfirmation").path("assumedUnit").asText("mm");

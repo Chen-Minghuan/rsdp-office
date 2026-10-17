@@ -40,15 +40,13 @@ def build_payload(canvas, patch):
         if zone.get('polygon') != correction['expectedPolygon']:
             raise ValueError('空间已调整，停止覆盖：' + zone['name'])
         ring = correction['polygon']
-        if len(ring) < 4 or len(ring) > 128 or len({tuple(p) for p in ring}) != len(ring):
+        if len(ring) < 3 or len(ring) > 128 or len({tuple(p) for p in ring}) != len(ring):
             raise ValueError('修正轮廓缺失或重复顶点')
         if any(len(p) != 2 or not all(isinstance(v, (float, int)) and math.isfinite(v) for v in p) or not (0 <= p[0] <= width and 0 <= p[1] <= height) for p in ring):
             raise ValueError('修正轮廓超出来源页面')
-        # This manual correction format deliberately accepts axis-aligned simple polygons only.
+        # Curved partitions may be represented by a simple, non-orthogonal polygon.
         for i, a in enumerate(ring):
             b = ring[(i + 1) % len(ring)]
-            if a[0] != b[0] and a[1] != b[1]:
-                raise ValueError('此修正包只支持正交边界')
             for j in range(i + 2, len(ring)):
                 if i == 0 and j == len(ring) - 1:
                     continue

@@ -12,6 +12,7 @@
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
 | [原图墙线约束](tasks/RECOG-004-local-wall-contours.md) | 原图墙线与封闭区域校正、来源坐标映射和异常保留 |
 | [房名定位与同图轮廓继承](tasks/RECOG-005-label-grounding-and-correction-reuse.md) | 棋牌室位置校正、开放分区人工边界继承及真实/模拟验证范围 |
+| [玻璃立面办公图轮廓修正](tasks/RECOG-006-glazed-office-contours.md) | 5.png 当前稿九处修正、顶部玻璃/柱角/门洞校正与真实底图重放 |
 | [Qwen 接入任务](tasks/RECOG-002-qwen-vl-integration.md) | 本轮模型接入与验证记录 |
 | [尺寸标注与比例确认](tasks/RECOG-003-dimension-calibration.md) | 自动读取标注、一致性校验、用户确认和真实图纸实测 |
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |
@@ -28,6 +29,7 @@
 | [按标注修正开放分区](tasks/GEOM-008-annotated-open-zones.md) | 当前方案五处分区、比例保留、修正包及真实 API 保存记录 |
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |
 | [沿墙轮廓修正](tasks/GEOM-006-wall-contour-correction.md) | 入口/退台完整边界、补转折点、沿墙重描与撤销恢复 |
+| [删除不参与排版的空间](tasks/GEOM-010-delete-spaces.md) | 删除空间及关联内容、撤销与刷新后保持空稿 |
 | [单空间视图隔离](tasks/GEOM-005-single-space-view.md) | 当前房间/家具隔离、底图留在总览、负坐标适屏与视图回归 |
 | [空间模板与布局复用](tasks/GEOM-004-space-template.md) | 彩色整层模板、保存/读取、独立布局副本与来源版本 |
 | [空间复核提示规则](tasks/FLOW-002-advisory-space-review.md) | 无需逐个确认，提示复核后直接排版；前后端一致的计算条件 |

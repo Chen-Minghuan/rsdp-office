@@ -31,8 +31,8 @@ final class RasterWallContours {
         if (initial.path("warnings").isArray()) warnings.addAll((ArrayNode) initial.path("warnings"));
         result.set("warnings", warnings);
         ObjectNode evidence = result.putObject("contourRefinement");
-        evidence.put("method", "RASTER_WALL_REGION_V2");
-        Map<String, List<Double>> anchors = labelAnchors(localization);
+        evidence.put("method", "RASTER_WALL_REGION_V4");
+        Map<Integer, List<Double>> anchors = roomAnchors(initial.path("rooms"), localization);
         boolean located = "DETECTED".equals(localization.path("status").asText());
         evidence.put("seedSource", located ? "INDEPENDENT_LABEL_DETECTION" : "MODEL_POLYGON_CENTRE");
         if ("UNAVAILABLE".equals(localization.path("status").asText())) warnings.add("房名独立定位未完成，墙线校正仍为初次候选位置，请复核");
@@ -54,11 +54,11 @@ final class RasterWallContours {
             int nextId = 1;
             for (int index = 0; index < initial.path("rooms").size(); index++) {
                 JsonNode room = initial.path("rooms").get(index);
-                if (!eligible(room, located, anchors)) continue;
+                if (!eligible(room, index, located, anchors)) continue;
                 attempted++;
                 List<List<Double>> candidate = points(room.path("polygon"));
                 if (candidate == null) continue;
-                var anchor = anchors.get(labelKey(room.path("label").asText()));
+                var anchor = anchors.get(index);
                 double cx = (anchor == null ? candidate.stream().mapToDouble(p -> p.get(0)).average().orElse(0) : anchor.get(0)) / 1000 * width;
                 double cy = (anchor == null ? candidate.stream().mapToDouble(p -> p.get(1)).average().orElse(0) : anchor.get(1)) / 1000 * height;
                 int x = (int) Math.round(cx), y = (int) Math.round(cy);
@@ -73,10 +73,10 @@ final class RasterWallContours {
             }
             for (int index = 0; index < initial.path("rooms").size(); index++) {
                 JsonNode room = initial.path("rooms").get(index);
-                if (!eligible(room, located, anchors)) continue;
+                if (!eligible(room, index, located, anchors)) continue;
                 Region region = proposals.get(index);
                 ObjectNode record = records.addObject().put("candidateIndex", index).put("label", room.path("label").asText());
-                var anchor = anchors.get(labelKey(room.path("label").asText()));
+                var anchor = anchors.get(index);
                 if (located) {
                     record.set("labelAnchor", mapper.valueToTree(anchor));
                     ((ObjectNode) result.path("rooms").get(index)).set("labelAnchor", mapper.valueToTree(anchor));
@@ -110,9 +110,9 @@ final class RasterWallContours {
 
     private static String labelKey(String text) { return text.replaceAll("\\s+", ""); }
 
-    private static Map<String, List<Double>> labelAnchors(JsonNode localization) {
-        Map<String, List<Double>> result = new HashMap<>();
-        Set<String> duplicates = new HashSet<>();
+    /** Match repeated text by unique containment, never by list order or a guessed name suffix. */
+    private static Map<Integer, List<Double>> roomAnchors(JsonNode rooms, JsonNode localization) {
+        Map<String, List<List<Double>>> labels = new HashMap<>();
         for (var label : localization.path("labels")) {
             String name = labelKey(label.path("text").asText());
             var box = label.path("bbox");
@@ -121,27 +121,57 @@ final class RasterWallContours {
             for (var v : box) if (!v.isNumber() || !Double.isFinite(v.asDouble()) || v.asDouble() < 0 || v.asDouble() > 1000) valid = false;
             double left = box.get(0).asDouble(), top = box.get(1).asDouble(), right = box.get(2).asDouble(), bottom = box.get(3).asDouble();
             if (!valid || right <= left || bottom <= top || right - left > 200 || bottom - top > 100) continue;
-            if (result.putIfAbsent(name, List.of((left + right) / 2, (top + bottom) / 2)) != null) duplicates.add(name);
+            var center = List.of((left + right) / 2, (top + bottom) / 2);
+            var group = labels.computeIfAbsent(name, ignored -> new ArrayList<>());
+            if (group.stream().noneMatch(p -> Math.hypot(p.get(0) - center.get(0), p.get(1) - center.get(1)) < 2)) group.add(center);
         }
-        duplicates.forEach(result::remove);
+        Map<Integer, List<Double>> proposals = new HashMap<>();
+        Map<String, Integer> counts = new HashMap<>();
+        for (var room : rooms) counts.merge(labelKey(room.path("label").asText()), 1, Integer::sum);
+        for (int i = 0; i < rooms.size(); i++) {
+            var room = rooms.get(i);
+            String name = labelKey(room.path("label").asText());
+            var group = labels.getOrDefault(name, List.of());
+            if (group.size() == 1 && counts.get(name) == 1) proposals.put(i, group.get(0));
+            else if (group.size() == counts.get(name)) {
+                var candidate = points(room.path("polygon"));
+                if (candidate == null) continue;
+                var region = shape(candidate);
+                var bounds = region.getBounds2D();
+                var contained = group.stream().filter(p -> region.intersects(p.get(0) - 3, p.get(1) - 3, 6, 6))
+                    .sorted(Comparator.comparingDouble(p -> Math.hypot(p.get(0) - bounds.getCenterX(), p.get(1) - bounds.getCenterY()))).toList();
+                if (!contained.isEmpty() && (contained.size() == 1
+                    || Math.hypot(contained.get(0).get(0) - bounds.getCenterX(), contained.get(0).get(1) - bounds.getCenterY())
+                    < .75 * Math.hypot(contained.get(1).get(0) - bounds.getCenterX(), contained.get(1).get(1) - bounds.getCenterY()))) proposals.put(i, contained.get(0));
+            }
+        }
+        Map<Integer, List<Double>> result = new HashMap<>();
+        for (var entry : proposals.entrySet()) {
+            String name = labelKey(rooms.get(entry.getKey()).path("label").asText());
+            long uses = proposals.entrySet().stream().filter(other -> name.equals(labelKey(rooms.get(other.getKey()).path("label").asText())) && other.getValue().equals(entry.getValue())).count();
+            if (uses == 1) result.put(entry.getKey(), entry.getValue());
+        }
         return result;
     }
 
-    private static boolean eligible(JsonNode room, boolean located, Map<String, List<Double>> anchors) {
-        return room.path("label").isTextual() && (located ? anchors.containsKey(labelKey(room.path("label").asText())) : ENCLOSED.contains(room.path("roomType").asText()));
+    private static boolean eligible(JsonNode room, int index, boolean located, Map<Integer, List<Double>> anchors) {
+        return room.path("label").isTextual() && !Set.of("OPEN_OFFICE", "HALLWAY", "COLLABORATION").contains(room.path("roomType").asText()) && (located ? anchors.containsKey(index) : ENCLOSED.contains(room.path("roomType").asText()));
     }
 
-    private static boolean ownsLabel(JsonNode rooms, int index, List<List<Double>> ring, Map<String, List<Double>> anchors) {
+    private static boolean ownsLabel(JsonNode rooms, int index, List<List<Double>> ring, Map<Integer, List<Double>> anchors) {
         var region = shape(ring);
-        String own = labelKey(rooms.get(index).path("label").asText());
-        var anchor = anchors.get(own);
+        var anchor = anchors.get(index);
         if (anchor == null || !region.contains(anchor.get(0), anchor.get(1))) return false;
-        for (int i = 0; i < rooms.size(); i++) if (i != index) {
-            String name = labelKey(rooms.get(i).path("label").asText());
-            var other = anchors.get(name);
-            if (own.equals(name) || other != null && region.contains(other.get(0), other.get(1))) return false;
-        }
+        for (var entry : anchors.entrySet())
+            if (entry.getKey() != index && region.contains(entry.getValue().get(0), entry.getValue().get(1))) return false;
         return true;
+    }
+
+    private static boolean structuralPixel(int rgb, int threshold) {
+        int r = rgb >> 16 & 255, g = rgb >> 8 & 255, b = rgb & 255;
+        // Orange room labels and coloured furniture are not structural wall strokes.
+        return Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) <= 50
+            && r * 299 + g * 587 + b * 114 < threshold * 1000;
     }
 
     private static boolean[] wallMask(BufferedImage image) {
@@ -149,7 +179,7 @@ final class RasterWallContours {
         boolean[] dark = new boolean[width * height], wall = new boolean[width * height];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             int rgb = image.getRGB(x, y);
-            dark[y * width + x] = (rgb >> 16 & 255) * 299 + (rgb >> 8 & 255) * 587 + (rgb & 255) * 114 < 185000;
+            dark[y * width + x] = structuralPixel(rgb, 185);
         }
         int span = Math.max(24, (int) Math.round(Math.max(width, height) * .022));
         // Substantial wall strokes: a long run must have three-pixel thickness, excluding ordinary furniture lines.
@@ -174,12 +204,39 @@ final class RasterWallContours {
                 }
             }
         }
+        // Short solid pillars can be shorter than the line-span threshold in both directions.
+        // Keep their filled cores so glazing cannot leak through a facade step.
+        int block = Math.max(9, (int) Math.round(Math.max(width, height) * .006));
+        int[] integral = new int[(width + 1) * (height + 1)];
+        for (int y = 0; y < height; y++) {
+            int row = 0;
+            for (int x = 0; x < width; x++) {
+                row += dark[y * width + x] ? 1 : 0;
+                integral[(y + 1) * (width + 1) + x + 1] = integral[y * (width + 1) + x + 1] + row;
+            }
+        }
+        for (int y = 0; y + block <= height; y++) for (int x = 0; x + block <= width; x++) {
+            int count = integral[(y + block) * (width + 1) + x + block] - integral[y * (width + 1) + x + block]
+                - integral[(y + block) * (width + 1) + x] + integral[y * (width + 1) + x];
+            if (count == block * block) for (int dy = 0; dy < block; dy++) for (int dx = 0; dx < block; dx++) wall[(y + dy) * width + x + dx] = true;
+        }
         // Gap closure may use structural strokes only, never thin furniture/facade returns.
         boolean[] strokes = wall.clone();
         boolean[] thin = new boolean[dark.length];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             int rgb = image.getRGB(x, y);
-            thin[y * width + x] = (rgb >> 16 & 255) * 299 + (rgb >> 8 & 255) * 587 + (rgb & 255) * 114 < 215000;
+            thin[y * width + x] = structuralPixel(rgb, 215);
+        }
+        int facadeTop = height, facadeBottom = 0;
+        for (int x = 0; x < width; x++) {
+            int start = -1;
+            for (int y = 0; y <= height; y++) {
+                if (y < height && strokes[y * width + x]) { if (start < 0) start = y; }
+                else if (start >= 0) {
+                    if (y - start >= height * .3) { facadeTop = Math.min(facadeTop, start); facadeBottom = Math.max(facadeBottom, y - 1); }
+                    start = -1;
+                }
+            }
         }
         // Restore long thin facade lines attached to walls, and short glazing returns. Never promote long cabinet fronts.
         for (boolean horizontal : new boolean[]{true, false, true, false}) {
@@ -192,7 +249,7 @@ final class RasterWallContours {
                 if (horizontal) {
                     // Only a facade spanning most of the page can restore a thin horizontal edge.
                     // Short furniture/cabinet fronts must not become room boundaries.
-                    if (cross < height * .65) continue;
+                    if (facadeTop == height || cross > facadeTop + radius * 2 && cross < facadeBottom - radius * 2) continue;
                     int occupied = 0;
                     for (int a = 0; a < width; a++) if (thin[cross * width + a]) occupied++;
                     if (occupied < width * .65) continue;
@@ -202,8 +259,17 @@ final class RasterWallContours {
                     boolean solid = along < alongSize && thin[index(horizontal, along, cross, width)];
                     if (solid) { if (start < 0) start = along; last = along; }
                     else if (start >= 0 && along - last > 2) {
-                        if (last - start >= minimum && last - start <= maximum && (horizontal || start > height * .65)
-                            && (horizontal || attached(wall, horizontal, start, cross, width, height, radius) || attached(wall, horizontal, last, cross, width, height, radius) || attached(wall, horizontal, (start + last) / 2, cross, width, height, radius))) additions.add(new int[]{cross, start, last});
+                        if (horizontal && last - start >= minimum) {
+                            int firstSupport = -1, lastSupport = -1;
+                            for (int a = start; a <= last; a++) if (attached(wall, true, a, cross, width, height, radius)) {
+                                if (firstSupport < 0) firstSupport = a;
+                                lastSupport = a;
+                            }
+                            if (cross >= facadeBottom - radius * 2 && firstSupport >= 0) additions.add(new int[]{cross, start, last});
+                            else if (firstSupport >= 0 && lastSupport - firstSupport >= minimum) additions.add(new int[]{cross, firstSupport, lastSupport});
+                        }
+                        if (!horizontal && last - start >= minimum && last - start <= maximum && start > height * .65
+                            && (attached(wall, false, start, cross, width, height, radius) || attached(wall, false, last, cross, width, height, radius) || attached(wall, false, (start + last) / 2, cross, width, height, radius))) additions.add(new int[]{cross, start, last});
                         start = -1;
                     }
                 }
@@ -224,21 +290,64 @@ final class RasterWallContours {
                 }
             }
         }
-        // Join short gaps between collinear wall segments, including door openings. These closures remain estimated evidence.
-        int maxGap = Math.max(30, (int) Math.round(Math.max(width, height) * .053));
+        // A door leaf can continue a partition to a perpendicular wall. Require visible thin-line
+        // evidence beside a substantial structural run; do not grow a wall across blank floor.
+        int maxGap = Math.max(30, (int) Math.round(Math.max(width, height) * .065));
+        int support = Math.max(20, (int) Math.round(Math.max(width, height) * .055));
+        boolean[] doorSupports = strokes.clone();
+        int[] leafOrigins = new int[wall.length];
+        Arrays.fill(leafOrigins, -1);
+        int leafRadius = Math.max(2, (int) Math.round(Math.max(width, height) * .004));
         for (boolean horizontal : new boolean[]{true, false}) {
             int alongSize = horizontal ? width : height, crossSize = horizontal ? height : width;
-            int support = Math.max(6, (int) Math.round(Math.max(width, height) * .006));
             for (int cross = 0; cross < crossSize; cross++) {
-                int previousStart = -1, previousEnd = -1, start = -1;
+                int start = -1;
                 for (int along = 0; along <= alongSize; along++) {
                     boolean solid = along < alongSize && strokes[index(horizontal, along, cross, width)];
                     if (solid && start < 0) start = along;
                     if (!solid && start >= 0) {
                         int end = along - 1;
-                        // Perpendicular cabinet sides alone cannot justify bridging a gap.
-                        if (previousStart >= 0 && start - previousEnd <= maxGap && (previousEnd - previousStart + 1 >= support || end - start + 1 >= support))
+                        if (end - start + 1 >= support) for (int direction : new int[]{-1, 1}) {
+                            int edge = direction < 0 ? start : end;
+                            for (int distance = 1; distance <= maxGap; distance++) {
+                                int a = edge + direction * distance;
+                                if (a < 0 || a >= alongSize) break;
+                                boolean visible = false;
+                                for (int d = -leafRadius; d <= leafRadius && !visible; d++)
+                                    if (cross + d >= 0 && cross + d < crossSize) visible = thin[index(horizontal, a, cross + d, width)];
+                                if (!visible) break;
+                                int cell = index(horizontal, a, cross, width);
+                                doorSupports[cell] = true;
+                                if (!strokes[cell]) leafOrigins[cell] = index(horizontal, edge, cross, width);
+                            }
+                        }
+                        start = -1;
+                    }
+                }
+            }
+        }
+        // Join bounded gaps, including a door ending against a perpendicular structural return.
+        for (boolean horizontal : new boolean[]{true, false}) {
+            int alongSize = horizontal ? width : height, crossSize = horizontal ? height : width;
+            for (int cross = 0; cross < crossSize; cross++) {
+                int previousStart = -1, previousEnd = -1, start = -1;
+                for (int along = 0; along <= alongSize; along++) {
+                    boolean solid = along < alongSize && doorSupports[index(horizontal, along, cross, width)];
+                    if (solid && start < 0) start = along;
+                    if (!solid && start >= 0) {
+                        int end = along - 1;
+                        // Require a substantial collinear wall run: short desk/cabinet edges cannot close an entire room.
+                        if (previousStart >= 0 && start - previousEnd <= maxGap && (previousEnd - previousStart + 1 >= support || end - start + 1 >= support)) {
                             for (int a = previousEnd + 1; a < start; a++) wall[index(horizontal, a, cross, width)] = true;
+                            // Promote only the visible leaf actually used by a closure, not every cabinet return.
+                            for (int a : new int[]{previousEnd, start}) {
+                                int cell = index(horizontal, a, cross, width), origin = leafOrigins[cell];
+                                if (origin >= 0) {
+                                    int step = cell % width == origin % width ? width : 1;
+                                    for (int c = Math.min(cell, origin); c <= Math.max(cell, origin); c += step) wall[c] = true;
+                                }
+                            }
+                        }
                         previousStart = start; previousEnd = end; start = -1;
                     }
                 }
@@ -300,7 +409,8 @@ final class RasterWallContours {
         List<List<Double>> a = simplify(new ArrayList<>(largest.subList(0, split + 1))), tail = new ArrayList<>(largest.subList(split, largest.size())); tail.add(first);
         List<List<Double>> b = simplify(tail), ring = new ArrayList<>(a.subList(0, a.size() - 1)); ring.addAll(b.subList(0, b.size() - 1));
 
-        if (ring.size() > 128 || Math.abs(area(ring) - size) / size > .05) return new Region(id, size, null);
+        // Furniture leakage produces noisy outlines; retain the candidate instead of promoting that region.
+        if (ring.size() > 32 || Math.abs(area(ring) - size) / size > .05) return new Region(id, size, null);
         return new Region(id, size, ring);
     }
 

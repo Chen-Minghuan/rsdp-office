@@ -150,4 +150,49 @@ class RasterWallContoursTest {
         result = RasterWallContours.refine(source, prepared(drawing(false)), mapper, geometry, detection);
         assertEquals(0, result.path("contourRefinement").path("attemptedCount").asInt());
     }
+
+    private BufferedImage glazedCorner(boolean visibleLeaf) {
+        var image = new BufferedImage(1000, 800, BufferedImage.TYPE_INT_RGB);
+        var g = image.createGraphics();
+        try {
+            g.setColor(Color.WHITE); g.fillRect(0, 0, 1000, 800);
+            g.setColor(Color.DARK_GRAY); g.setStroke(new BasicStroke(8));
+            g.drawLine(100, 100, 100, 700); g.drawLine(900, 100, 900, 700);
+            g.drawLine(500, 120, 500, 660); g.drawLine(100, 700, 450, 700);
+            g.fillRect(480, 100, 20, 20); // short pillar at a stepped glass facade
+            g.setColor(new Color(190, 190, 190)); g.setStroke(new BasicStroke(1));
+            g.drawLine(100, 100, 900, 100);
+            g.drawLine(100, 140, 900, 140); // interior shadow/cabinet line, not the facade
+            if (visibleLeaf) g.drawLine(500, 660, 500, 700);
+            g.drawRect(150, 600, 160, 70); // thin furniture must not become a closure
+        } finally { g.dispose(); }
+        return image;
+    }
+
+    @Test
+    void topGlazingShortPillarAndPerpendicularDoorReturnKeepTheFullRoom() throws Exception {
+        var source = (ObjectNode) mapper.readTree("""
+            {"rooms":[{"label":"办公室甲","roomType":"EXECUTIVE_OFFICE",
+            "polygon":[[150,200],[450,200],[450,500],[150,500]]}]}
+            """);
+        var detection = mapper.readTree("""
+            {"status":"DETECTED","labels":[{"text":"办公室甲","bbox":[240,480,260,500]}]}
+            """);
+        var before = source.deepCopy();
+        var result = RasterWallContours.refine(source, prepared(glazedCorner(true)), mapper, geometry, detection);
+        assertEquals(1, result.path("contourRefinement").path("acceptedCount").asInt(), result.toString());
+        var path = new java.awt.geom.Path2D.Double();
+        var ring = result.path("rooms").get(0).path("polygon");
+        path.moveTo(ring.get(0).get(0).asDouble(), ring.get(0).get(1).asDouble() * .8);
+        for (var p : ring) path.lineTo(p.get(0).asDouble(), p.get(1).asDouble() * .8);
+        path.closePath();
+        assertTrue(path.contains(250, 120), ring.toString()); // no crop at the interior line
+        assertTrue(path.contains(250, 680), ring.toString()); // complete lower room
+        assertFalse(path.contains(490, 110), ring.toString()); // pillar excluded
+        assertFalse(path.contains(600, 400), ring.toString()); // adjoining space excluded
+        assertEquals(before, source);
+        var open = RasterWallContours.refine(source, prepared(glazedCorner(false)), mapper, geometry, detection);
+        assertEquals(0, open.path("contourRefinement").path("acceptedCount").asInt(), open.toString());
+        assertEquals(source.path("rooms").get(0).path("polygon"), open.path("rooms").get(0).path("polygon"));
+    }
 }
