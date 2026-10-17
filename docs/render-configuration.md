@@ -32,7 +32,7 @@ RSDP_RENDER_BASE_URL=https://dashscope.aliyuncs.com/api/v1
 | `RSDP_RENDER_STORAGE_DIRECTORY` | 本地图片目录，默认 `uploads/render-previews`；由后端提供 `/uploads/render-previews/**` |
 
 支持业务空间专属地址，例如 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1`；新加坡地址为 `https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1`（旧地址 `https://dashscope-intl.aliyuncs.com/api/v1`）。密钥与地域需对应。
-生图配置独立于 `DASHSCOPE_BASE_URL` 和 `RSDP_VISION_URL`，修改后重启后端；不替换现有 `qwen3-vl-plus` 识别模型。
+生图配置独立于 `DASHSCOPE_BASE_URL` 和 `RSDP_VISION_URL`，修改后重启后端；不替换现有 Qwen-VL 识别模型。
 Compose 已传入生图配置并为默认图片目录配置独立持久卷。手动部署同时备份数据库和图片目录；静态图片路径按本项目现有公开资源方式提供，不代表新增了用户权限系统。
 
 ## 接口与状态

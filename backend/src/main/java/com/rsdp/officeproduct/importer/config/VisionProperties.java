@@ -19,7 +19,7 @@ public class VisionProperties {
     @ToString.Exclude
     private String apiKey;
     private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    private String model = "qwen3-vl-plus";
+    private String model = "qwen3-vl-max";
     private int maxImageEdge = 3072;
     private int pdfDpi = 144;
     /** Independently locate labels, then ground closed wall regions; independent from dimension calibration. */

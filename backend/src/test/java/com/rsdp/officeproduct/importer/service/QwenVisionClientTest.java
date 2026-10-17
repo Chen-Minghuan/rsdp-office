@@ -186,7 +186,7 @@ class QwenVisionClientTest {
         server.expect(requestTo(properties.getBaseUrl() + "/chat/completions"))
             .andExpect(method(HttpMethod.POST))
             .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer test-key"))
-            .andExpect(jsonPath("$.model").value("qwen3-vl-plus"))
+            .andExpect(jsonPath("$.model").value("qwen3-vl-max"))
             .andExpect(jsonPath("$.enable_thinking").value(false))
             .andExpect(jsonPath("$.response_format.type").value("json_object"))
             .andExpect(jsonPath("$.messages[0].content[1].image_url.url").value(org.hamcrest.Matchers.startsWith("data:image/png;base64,")))

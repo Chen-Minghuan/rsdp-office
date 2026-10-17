@@ -1,6 +1,6 @@
-# Qwen3-VL-Plus 图片与 PDF 识别配置
+# Qwen-VL 图片与 PDF 识别配置
 
-更新日期：2026-10-17。当前模型为 `qwen3-vl-plus`，通过后端调用阿里云百炼兼容 Chat Completions 接口。
+更新日期：2026-10-17。当前默认模型为 `qwen3-vl-max`，通过后端调用阿里云百炼兼容 Chat Completions 接口。
 接口/页处理和响应适配已实现；真实识别准确率仍需按 [样本规则](spatial/recognition-validation.md) 验证。
 
 ## 1. 项目本地 `.env` 配置
@@ -11,7 +11,7 @@
 DASHSCOPE_API_KEY=填写你自己的百炼API密钥
 ```
 
-模型默认就是 `qwen3-vl-plus`，北京兼容地址默认是 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
+模型默认就是 `qwen3-vl-max`，北京兼容地址默认是 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
 根目录 `.env` 已被 Git 忽略。Java 后端从项目根目录或 `backend/` 作为工作目录启动时会自动读取；Docker Compose 也会读取根目录 `.env`。修改后重新启动 Java 后端，前端不需要配置密钥。启动环境变量中的同名值优先。
 
 可选变量：
@@ -19,7 +19,7 @@ DASHSCOPE_API_KEY=填写你自己的百炼API密钥
 | 变量 | 用途 |
 | --- | --- |
 | `DASHSCOPE_BASE_URL` | 地域/业务空间对应的兼容接口基地址，末尾到 `/compatible-mode/v1`，不要再加 `/chat/completions` |
-| `RSDP_VISION_MODEL` | 模型，默认 `qwen3-vl-plus` |
+| `RSDP_VISION_MODEL` | 模型，默认 `qwen3-vl-max`；如账号或地域未开通，可改回 `qwen3-vl-plus` |
 | `RSDP_VISION_REFINE_ROOM_CONTOURS` | 默认 `true`；并行独立房名定位及保守墙线核查；设 `false` 关闭独立请求/混合候选墙线核查，保留主请求初始轮廓；labels-only 仍尝试墙网补救 |
 | `RSDP_VISION_URL` | 已有独立识别服务地址；非空时优先调用此服务，直连百炼时保持为空 |
 
@@ -108,6 +108,6 @@ RECOG-013 修复语义接口切换后的丢失：主请求有效文字框可补�
 RECOG-003 已实测已有 `1.png`：标准图 2094 × 1269，22575 与 11470 两条参考形成约 12.098729 mm/px 候选，最大偏差约 0.10%，底部受遮挡参考被排除；图纸未确认应用。一次性 DB 副本验证了确认持久化、幂等及过期拒绝。具体哈希/证据与 48 项 Java、构建、UI 模拟检查见 [任务记录](tasks/RECOG-003-dimension-calibration.md)。
 单张尺寸实测不等于房间识别或跨样本质量达标；需固定真实 PNG/PDF 样本与标注后按质量附件继续验收。
 
-参考：[Qwen3-VL-Plus 能力](https://help.aliyun.com/zh/model-studio/qwen3-vl-plus)、
+参考：[Qwen3-VL 能力](https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai)、
 [百炼 PDF 支持列表](https://help.aliyun.com/zh/model-studio/pdf-understanding)、
 [PDFBox](https://pdfbox.apache.org/download)。

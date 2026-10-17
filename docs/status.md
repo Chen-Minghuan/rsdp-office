@@ -41,7 +41,7 @@
 | CAT-005 | 商品大图与悬停放大查看 | 已编码并完成真实商品页面浏览器检查；详情页主图局部放大镜、列表悬停整图预览；详情布局与白色图片背景已调整，见 [任务记录](tasks/CAT-005-product-image-gallery.md) | 用户在常用浏览器复核不同宽高比和移动端显示 | P1 |
 | RECOG-003 | 图中尺寸与自动比例候选 | 已实现并通过专项验证；48 项 Java、构建、专项 UI 模拟、一次性 DB 确认链路、真实 PNG 候选，见[任务记录](tasks/RECOG-003-dimension-calibration.md) | 真实 PNG 候选待用户确认；更多 PNG/PDF 的质量验收，非标准/模糊尺寸仍需人工校准 | P0 |
 | RECOG-001 | CAD 真实识别链路 | 已编码待验证；上传页 → Java `/api/v1/cad/parse` → CAD 服务 | 真实办公 DWG/DXF、目标选择、单位、未命名空间和失败路径验收 | P0 |
-| RECOG-002 | PDF/PNG 真实识别 | 已接入 `qwen3-vl-plus`，后端环境密钥、PDF 选页渲染、候选/预览适配及明确错误已编码；[接入任务](tasks/RECOG-002-qwen-vl-integration.md) | 真实百炼调用与附件 D 原始自动质量待验收；像素比例校准及人工空稿按 Spatial 任务继续推进 | P0 |
+| RECOG-002 | PDF/PNG 真实识别 | 已接入 Qwen-VL，当前默认切换为 `qwen3-vl-max`，后端环境密钥、PDF 选页渲染、候选/预览适配及明确错误已编码；[接入任务](tasks/RECOG-002-qwen-vl-integration.md) | 真实百炼调用与附件 D 原始自动质量待验收；像素比例校准及人工空稿按 Spatial 任务继续推进 | P0 |
 | RECOG-011 | PNG 墙网拓扑识别 | 第一阶段已实现：Qwen 主请求只保留房名/功能语义，封闭空间由墙体候选、房名锚点、门洞有限闭合和连通区域多边形化生成；语义-only 回归通过，见[任务记录](tasks/RECOG-011-png-wall-topology-pipeline.md) | 当前使用 Qwen 初始候选 + Java 栅格墙线核查；斜墙/开放分区和跨图纸真实质量待验收 | P0 |
 | RECOG-013 | 语义切换空间丢失修复 | 部分实现；同名部分匹配、主请求文字补位、未命名墙网候选及女卫碎片修复；150 项 Java（147 通过/3 跳过）、构建/UI mock、一次真实模型与修复回放通过，见[任务记录](tasks/RECOG-013-recognition-pipeline-recovery.md) | 新后端重新识别；茶水/洗手边界及跨图纸完整精度验收 | P0 |
 | RECOG-012 | SegFormer-B1 墙体分割服务 | 已按用户要求撤销并移除，见[历史记录](tasks/RECOG-012-segformer-wall-segmentation.md)及[清理任务](tasks/RECOG-015-remove-unused-segformer.md) | 不再作为运行依赖或待接入任务 | — |
