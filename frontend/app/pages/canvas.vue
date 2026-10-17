@@ -58,12 +58,21 @@ watch([analysisIdFromQuery, () => store.initialized], async ([id, initialized]) 
 
 watch(() => store.designZoneId, (id, oldId) => {
   if (id === oldId || store.canvasMode !== 'design') return
+  selectedId.value = null
+  tool.value = 'select'
+  showSubmit.value = false
+  showRenderPreview.value = false
+  store.cancelFurniturePlacement()
   if (id && route.query.zoneId !== id) {
     const query: Record<string, string> = { ...route.query as Record<string, string>, mode: 'design', zoneId: id }
     if (store.floorPlan?.inputMode === 'manual' && /^(STPL|LSTPL)-/.test(store.floorPlan.analysisId)) delete query.analysisId
     router.replace({ path: route.path, query })
   }
 })
+
+function switchDesignSpace(zoneId: string) {
+  if (zoneId !== store.designZoneId) store.enterDesign(zoneId)
+}
 
 function openSubmit() {
   store.submitCanvas()
@@ -81,14 +90,14 @@ watch(() => store.canEnterLayout, (confirmed) => {
 
 const title = computed(() => mode.value === 'design' ? '无限画布 · 单空间设计' : '无限画布 · 空间核对')
 const subtitle = computed(() => mode.value === 'design'
-  ? '聚焦单个功能区，与 Agent 协作完成家具布局与选品。'
+  ? '选择要排版的空间，分别完成家具布局与选品；切换空间会保留已有排版。'
   : '校准尺寸、划分办公功能区、标注整体需求，完成后进入单空间设计。')
 </script>
 
 <template>
   <OfficeCanvasSpaceReview v-if="mode === 'overview'" />
   <div v-else class="flex flex-col h-full gap-4">
-    <div class="flex items-start justify-between flex-none">
+    <div class="flex flex-wrap items-start justify-between gap-3 flex-none">
       <div>
         <h1 class="text-[25px] font-bold tracking-tight mb-2">{{ title }}</h1>
         <p class="text-xs text-muted">{{ subtitle }}</p>
@@ -107,6 +116,8 @@ const subtitle = computed(() => mode.value === 'design'
         </button>
       </div>
     </div>
+
+    <OfficeCanvasDesignSpaceSwitcher :zone-id="designZoneId" @select="switchDesignSpace" />
 
     <div class="flex-1 min-h-0 flex gap-3">
       <!-- Left sidebar -->

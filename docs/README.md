@@ -25,6 +25,7 @@
 | [商品图片展示任务](tasks/CAT-005-product-image-gallery.md) | 商品详情大图、缩略图与列表悬停放大查看 |
 | [单位模块删除](tasks/LAYOUT-006-delete-modules.md) | 画布选中删除、快捷键/撤销、确认失效与目录独立删除 |
 | [家具多选与整组操作](tasks/LAYOUT-008-multi-furniture-selection.md) | Shift/Ctrl 点选、框选、组移/批删及边界与撤销校验 |
+| [排版页切换空间](tasks/LAYOUT-009-design-space-switcher.md) | 下拉/前后选择空间、排版状态、家具保留与单空间隔离 |
 | [自定义模块与逐件添加](tasks/LAYOUT-005-custom-and-manual-modules.md) | 本机自定义目录、尺寸/图例快照、逐件点击与旋转及不覆盖已有家具 |
 | [自动排版入口与结果反馈](tasks/LAYOUT-004-apply-auto-layout.md) | 恢复旧单排后直接自动多排、当前/预估件数与实际应用状态 |
 | [一键多排与空间利用](tasks/LAYOUT-003-auto-multi-row.md) | 自动横纵比较、多排、间距、轮廓约束与恢复验证 |
