@@ -2,15 +2,6 @@ import type { CustomOfficeModule } from './officeModule'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { DimensionCalibrationEvidence } from './dimensionCalibration'
 
-export interface Project {
-  name: string
-  area: number
-  headcount: number
-  budget: number
-  style: string
-  description: string
-}
-
 export type ZoneType =
   | 'OPEN_OFFICE'
   | 'MEETING_ROOM'
@@ -206,13 +197,6 @@ export interface DesignBrief {
   projectId: string
   canvasRevisionId: string
   sceneRevisionId: null
-  projectContext: {
-    name: string
-    headcount: number
-    budgetMax: number
-    stylePreference: string
-    description: string
-  }
   zones: ZoneBrief[]
   annotations: { id: string; zoneId: null; content: string }[]
   references: { id: string; caption: string; imageAssetId: string }[]

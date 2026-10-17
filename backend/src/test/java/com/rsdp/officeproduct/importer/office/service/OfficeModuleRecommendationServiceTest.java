@@ -21,7 +21,7 @@ class OfficeModuleRecommendationServiceTest {
     private CanvasDto canvas;
     @BeforeEach void setup() throws Exception {
         office = mock(OfficeService.class); carts = mock(OfficeCartMapper.class);
-        service = new OfficeModuleRecommendationService(office, mock(OfficeProjectMapper.class), carts, json);
+        service = new OfficeModuleRecommendationService(office, mock(OfficeWorkspaceLockMapper.class), carts, json);
         canvas = new CanvasDto(); canvas.setRevision(7); canvas.setMode("design"); canvas.setDesignZoneId("Z"); canvas.setFiles(List.of());
         canvas.setObjects(json.readValue("""
             [{"id":"Z","kind":"zone","reviewUnit":"mm","name":"办公区","polygon":[[0,0],[6000,0],[6000,4000],[0,4000]]},

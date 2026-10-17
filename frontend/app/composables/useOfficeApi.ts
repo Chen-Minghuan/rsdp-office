@@ -1,5 +1,5 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
-import type { Project, OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
+import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
 import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
@@ -59,29 +59,6 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export function useOfficeApi() {
   const projectId = PROJECT_ID
-
-  async function loadProject(): Promise<Project> {
-    const dto = await request<Project>('GET', `/api/v1/office/projects/${projectId}`)
-    return {
-      name: dto.projectName || '',
-      area: dto.area || 0,
-      headcount: dto.headcount || 0,
-      budget: dto.budget || 0,
-      style: dto.style || '现代简约',
-      description: dto.description || '',
-    }
-  }
-
-  async function saveProject(project: Project): Promise<void> {
-    await request<void>('PUT', `/api/v1/office/projects/${projectId}`, {
-      projectName: project.name,
-      area: project.area,
-      headcount: project.headcount,
-      budget: project.budget,
-      style: project.style,
-      description: project.description,
-    })
-  }
 
   async function loadCanvas(): Promise<{ objects: OfficeObject[]; files: ProjectFile[]; mode: 'overview' | 'design'; designZoneId: string | null; revision: number; blank: boolean } | null> {
     const dto = await request<CanvasDto | null>('GET', `/api/v1/office/projects/${projectId}/canvas`)
@@ -347,8 +324,6 @@ export function useOfficeApi() {
 
   return {
     projectId,
-    loadProject,
-    saveProject,
     loadCanvas,
     saveCanvas,
     loadCart,

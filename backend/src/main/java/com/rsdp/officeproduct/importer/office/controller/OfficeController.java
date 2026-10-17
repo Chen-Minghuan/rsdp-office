@@ -31,22 +31,6 @@ public class OfficeController {
         return Result.ok(moduleRecommendations.select(projectId, request));
     }
 
-    @GetMapping("/projects/{projectId}")
-    public Result<ProjectDto> getProject(@PathVariable String projectId) {
-        return Result.ok(officeService.getOrCreateProject(projectId));
-    }
-
-    @PostMapping("/projects")
-    public Result<ProjectDto> createProject(@RequestBody SaveProjectRequest request) {
-        return Result.ok(officeService.saveProject(request));
-    }
-
-    @PutMapping("/projects/{projectId}")
-    public Result<ProjectDto> updateProject(@PathVariable String projectId, @RequestBody SaveProjectRequest request) {
-        request.setProjectId(projectId);
-        return Result.ok(officeService.saveProject(request));
-    }
-
     @GetMapping("/projects/{projectId}/canvas")
     public Result<CanvasDto> getCanvas(@PathVariable String projectId) {
         return Result.ok(officeService.getCanvas(projectId));

@@ -49,7 +49,7 @@ Compose 已传入生图配置并为默认图片目录配置独立持久卷。手
 所有结果固定 `purpose=CONCEPT_PREVIEW`，包含实际 `model`、任务/请求 ID、来源快照、生成参数和时间。修改当前空间、排版或商品选择后，旧图保留并标为历史；其他空间和仅视图变化不会导致此空间预览失效。
 
 百炼创建任务使用 `POST /api/v1/services/aigc/image-generation/generation`，带 `X-DashScope-Async: enable`；查询使用 `GET /api/v1/tasks/{task_id}`。提交 1 张布局参考图和 1 条文字提示，`n=1`、`size=1536*1024`、`prompt_extend=false`，避免自动改写扩充家具需求。
-本地状态为 `SUBMITTING → PENDING/RUNNING → SUCCEEDED/FAILED`；服务端以项目行锁串行化同一提交，以任务行锁防止同时查询/保存结果。
+本地状态为 `SUBMITTING → PENDING/RUNNING → SUCCEEDED/FAILED`；服务端以工作区事务 advisory lock（按 projectId，与画布保存/选品共用）串行化同一提交，以任务行锁防止同时查询/保存结果。
 重复的 `clientChangeId` 和相同内容返回原任务；不同内容不能复用同一 ID。前端在会话存储保留结果不明的请求 ID；相同参数重试复用 ID。明确失败后按当前布局重试会创建新任务。
 连接超时可能已在供应商受理，页面会提示核对百炼记录；没有任务 ID 时无法查询或保证供应商侧去重，不自动重提交。
 

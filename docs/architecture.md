@@ -1,6 +1,6 @@
 # 架构与空间数据契约
 
-更新日期：2026-10-15。本文定义后续实现的目标契约；新增字段和模型不代表现有 API 已支持。
+更新日期：2026-10-17。本文定义后续实现的目标契约；新增字段和模型不代表现有 API 已支持。
 业务依据见 [产品需求](product-requirements.md)，迁移差距见 [进度表](status.md)。
 首期 PDF/PNG 闭环的详细设计见 [Spatial 架构](../Spatial_Canvas_Engine_空间解析编辑与无限画布系统架构设计_V1.1.md)、[数据协议](../Spatial_Scene_数据协议规范_V1.0.md)与[实施方案](../Spatial_Canvas_Engine_前后端开发实施方案_V1.0.md)。
 编码前固定的规则见 [几何](spatial/geometry-rules.md)、[接口/存储](spatial/api-storage-contract.md)、[确认失效](spatial/confirmation-rules.md)和[真实样本](spatial/recognition-validation.md)四份附件。
@@ -21,7 +21,7 @@
 ## 2. 核心数据关系（目标模型）
 
 ```text
-Project
+WorkspaceScope（projectId 隔离键，无项目资料实体/表）
   ├─ SourceAsset / SourcePage / RecognitionRun
   ├─ SourceScene（识别原始几何及质量，保留版本）
   ├─ DesignScene（可编辑世界坐标与版本）
@@ -35,6 +35,8 @@ Project
 Product / Variant → AvailabilityRevision（上下架、尺寸、价格等变化）
 Viewport（平移、缩放）独立于上述物理几何
 ```
+
+2026-10-17 移除项目资料及 office_project 表；保留业务表 project_id 和现有路径中的 projects 以兼容稳定 ID。上传、画布、模板、选品与预览无需先创建项目资料。启动迁移仅删除旧表及指向它的外键，不级联删除业务记录。画布保存、模块选品与预览创建共用按隔离键获取的 PostgreSQL 事务 advisory lock，替代原项目行锁，详见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。
 
 所有关联使用稳定 ID。文件名、数组下标、可修改的房间名称不能作为唯一关联键。
 重识别生成新的识别版本；以映射/比较方式处理用户编辑，不沿用序号误配空间。
@@ -117,7 +119,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 商品下架后禁止新推荐，但保留旧方案选择的快照和提示；确认方案时再次核验商品可用性。
 当前商品导入已把确认后的 `widthMm/depthMm/heightMm` 写入 `rspu_variant.dimensions`（JSONB，`unit=mm`）；尺寸原文保留在 `size_text`。旧 `widthCm/depthCm` 数据仍可读取。画布现有接口显示厘米，读取毫米时向上取整厘米，避免缩小占地；这只是旧候选适配，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
-本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订和在售审核状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；项目行锁与同事务清单/画布写入，无新增迁移。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
+本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订和在售审核状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
 供应商的包数、CBM 体积和重量原表值分别保存在变体字段，与采购数量、商品尺寸分开；重量源表没有明确单位，不推断为千克。
 渲染输入包含所选商品的真实尺寸、资源、位置与方向；缺少资源的降级及概念图标识由 RENDER-001 明确。
 

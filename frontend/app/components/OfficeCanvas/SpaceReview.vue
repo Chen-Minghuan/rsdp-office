@@ -286,7 +286,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       <aside class="review-project review-panel">
         <div class="project-section">
           <div class="section-heading"><h2>项目与空间</h2><small>本地草稿</small></div>
-          <div class="review-project-card"><h3>{{ store.project.name || '办公空间 · 一层' }}</h3><p>{{ store.project.headcount || '待定' }} 人 · {{ store.project.style || '待补充风格' }}</p><p>{{ calibrated ? '图纸比例已校准，尺寸单位 mm' : '比例待校准，可先核对空间轮廓' }}</p></div>
+          <div class="review-project-card"><h3>{{ store.drawingName }}</h3><p>{{ calibrated ? '图纸比例已校准，尺寸单位 mm' : '比例待校准，可先核对空间轮廓' }}</p></div>
           <div class="review-source-file"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板' : store.floorPlan?.inputMode === 'pdf' ? 'PDF' : store.floorPlan?.inputMode === 'cad' ? 'CAD' : isExample ? 'SVG' : 'PNG' }}</span><div><strong>{{ store.floorPlan?.sourceName || '待关联原始图纸' }}</strong><small>{{ isExample ? '演示底图 · 示例几何' : store.floorPlan?.inputMode === 'manual' ? '空间模板 · 布局设计副本' : '原始底图 · 当前识别页' }}</small></div></div>
         </div>
         <div class="review-room-list">

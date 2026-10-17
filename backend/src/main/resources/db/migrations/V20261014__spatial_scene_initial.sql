@@ -4,7 +4,7 @@
 -- 来源文档资产（复用 image_assets 原文件引用）
 create table if not exists floor_plan_document (
     asset_id varchar(64) primary key references image_assets(image_id),
-    project_id varchar(64) references office_project(project_id),
+    project_id varchar(64),
     sha256 varchar(64),
     media_type varchar(64) not null,
     original_filename varchar(255),
@@ -53,7 +53,7 @@ create index if not exists idx_fpss_page on floor_plan_source_scene(page_id);
 -- 可编辑设计稿头表
 create table if not exists floor_plan_design_scene (
     scene_id varchar(64) primary key,
-    project_id varchar(64) not null references office_project(project_id),
+    project_id varchar(64) not null,
     page_id varchar(64) not null references floor_plan_page(page_id),
     source_scene_id varchar(64) references floor_plan_source_scene(source_scene_id),
     failed_run_id varchar(64),

@@ -212,23 +212,10 @@ insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_or
 ('factory_level', 'C', 'C级', null, 3)
 on conflict (dict_type, dict_code) do nothing;
 
--- 办公项目与画布数据（前后端贯通）
-create table if not exists office_project (
-    project_id varchar(64) primary key,
-    project_name varchar(255),
-    area int default 0,
-    headcount int default 0,
-    budget decimal(15,2) default 0,
-    style varchar(64),
-    description text,
-    context_json jsonb,
-    created_at timestamp default now(),
-    updated_at timestamp default now()
-);
-
+-- 办公画布数据；project_id 仅作为现有设计工作区的隔离键。
 create table if not exists office_canvas (
     canvas_id bigserial primary key,
-    project_id varchar(64) not null references office_project(project_id),
+    project_id varchar(64) not null,
     revision int default 1,
     mode varchar(20) default 'overview',
     design_zone_id varchar(64),
@@ -240,7 +227,7 @@ create table if not exists office_canvas (
 
 create table if not exists office_cart (
     line_id varchar(64) primary key,
-    project_id varchar(64) not null references office_project(project_id),
+    project_id varchar(64) not null,
     zone_id varchar(64),
     zone_name varchar(255),
     product_id varchar(64) not null,
@@ -251,7 +238,7 @@ create table if not exists office_cart (
 
 create table if not exists office_agent_message (
     message_id bigserial primary key,
-    project_id varchar(64) not null references office_project(project_id),
+    project_id varchar(64) not null,
     role varchar(20) not null,
     content text not null,
     created_at timestamp default now()
@@ -263,7 +250,7 @@ create table if not exists office_agent_message (
 -- 分析批次头表：一次上传对应一个分析批次
 create table if not exists floor_plan_analysis (
     analysis_id varchar(64) primary key,
-    project_id varchar(64) references office_project(project_id),
+    project_id varchar(64),
     source_name varchar(128),
     status varchar(32) not null default 'pending',
     input_mode varchar(16) not null, -- image / pdf / cad / manual

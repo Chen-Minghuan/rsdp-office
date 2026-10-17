@@ -8,7 +8,7 @@ const { projectSteps, currentStep } = useWorkspaceNavigation()
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <div class="text-[11px] text-muted mb-1">项目工作台 / 空间设计</div>
-        <div class="truncate text-sm font-semibold">{{ store.project.name || '当前项目' }}</div>
+        <div class="truncate text-sm font-semibold">{{ store.drawingName }}</div>
       </div>
       <nav class="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="项目设计步骤">
         <template v-for="(step, index) in projectSteps" :key="step.label">

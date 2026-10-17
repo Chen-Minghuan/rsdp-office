@@ -21,8 +21,6 @@ import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanRoomMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
 import com.rsdp.officeproduct.importer.mapper.ImageAssetsMapper;
-import com.rsdp.officeproduct.importer.office.entity.OfficeProject;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMapper;
 import com.rsdp.officeproduct.importer.util.CurrentUserContext;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -62,7 +60,6 @@ public class FloorPlanService {
     private final FloorPlanRoomMapper roomMapper;
     private final FloorPlanSceneRevisionMapper revisionMapper;
     private final ImageAssetsMapper imageAssetsMapper;
-    private final OfficeProjectMapper officeProjectMapper;
     private final CadParseClient cadParseClient;
     private final VisionRecognitionClient visionRecognitionClient;
     private final FloorPlanDimensionService floorPlanDimensionService;
@@ -222,7 +219,6 @@ public class FloorPlanService {
         FloorPlanAnalysisResponse response = new FloorPlanAnalysisResponse();
         response.setAnalysisId(analysisId);
         response.setProjectId(analysis.getProjectId());
-        response.setProjectName(resolveProjectName(analysis.getProjectId()));
         response.setSourceName(analysis.getSourceName());
         response.setStatus(analysis.getStatus());
         response.setTaskId(analysis.getTaskId());
@@ -343,9 +339,8 @@ public class FloorPlanService {
     }
 
     private void validateProject(String projectId) {
-        OfficeProject project = officeProjectMapper.selectById(projectId);
-        if (project == null) {
-            throw new BusinessException("项目不存在: " + projectId);
+        if (projectId == null || projectId.isBlank() || projectId.length() > 64) {
+            throw new BusinessException("设计工作区 ID 无效");
         }
     }
 
@@ -574,12 +569,6 @@ public class FloorPlanService {
         response.setConfirmationStatus(room.getConfirmationStatus());
         response.setGeometrySource(room.getGeometrySource());
         return response;
-    }
-
-    private String resolveProjectName(String projectId) {
-        if (!StringUtils.hasText(projectId)) return null;
-        OfficeProject project = officeProjectMapper.selectById(projectId);
-        return project != null ? project.getProjectName() : null;
     }
 
     private String resolveImageUrl(String imageId) {

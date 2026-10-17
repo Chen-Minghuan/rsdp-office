@@ -72,7 +72,6 @@ export interface FloorPlanAnalysisResponse {
   evidenceKind?: 'REAL_SERVICE' | 'ESTIMATED' | 'DEMO' | 'MANUAL'
   analysisId: string
   projectId?: string | null
-  projectName?: string | null
   sourceName?: string | null
   imageId?: string | null
   imageUrl?: string | null

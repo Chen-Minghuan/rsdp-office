@@ -21,7 +21,6 @@ public class FloorPlanAnalysisResponse {
     private String taskId;
     private BigDecimal scaleRatio;
     private String projectId;
-    private String projectName;
     private String sourceName;
     private String errorMessage;
     private String createdBy;

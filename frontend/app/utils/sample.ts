@@ -1,4 +1,4 @@
-import type { Project, ProjectFile, OfficeObject, FurnitureObject, Product, ProductCombo, AgentMessage, DesignBrief } from '~/types/office'
+import type { ProjectFile, OfficeObject, FurnitureObject, Product, ProductCombo, AgentMessage, DesignBrief } from '~/types/office'
 import type { ManualFloorPlanLayout } from '~/types/manualCanvas'
 
 export const TONES = {
@@ -85,17 +85,6 @@ export const PRODUCT_COMBOS: ProductCombo[] = [
   },
 ]
 
-export function sampleProject(): Project {
-  return {
-    name: '星河科技总部办公空间',
-    area: 800,
-    headcount: 60,
-    budget: 300000,
-    style: '现代简约',
-    description: '开放办公、两间会议室、接待区。希望采光好、浅木色、注重工作效率。',
-  }
-}
-
 export function sampleFiles(): ProjectFile[] {
   return [
     { name: '演示办公平面图.pdf', size: 12800000, type: 'PDF', mock: true },
@@ -132,7 +121,7 @@ export function createWelcomeMessages(submitted: DesignBrief): AgentMessage[] {
   return [
     {
       role: 'bot',
-      content: `已读取办公空间画布（${submitted.canvasRevisionId}）。\n\n项目：${submitted.projectContext.name}\n办公人数：${submitted.projectContext.headcount || '待确认'} 人，预算：¥${(submitted.projectContext.budgetMax || 0).toLocaleString('zh-CN')}，偏好：${submitted.projectContext.stylePreference}。\n画布已标注 ${submitted.zones.length} 个功能区。\n\n请先选择左侧区域，我可以根据区域用途给您展示办公家具的演示候选。实际尺寸与工位容量仍需校准确认。`,
+      content: `已读取办公空间画布（${submitted.canvasRevisionId}）。\n\n画布已标注 ${submitted.zones.length} 个功能区。\n\n请先选择左侧区域，我可以根据区域用途给您展示办公家具的演示候选。实际尺寸与工位容量仍需校准确认。`,
     },
   ]
 }

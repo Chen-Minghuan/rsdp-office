@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { money } from '~/utils/helpers'
 import type { ZoneObject } from '~/types/office'
 
 const store = useOfficeStore()
@@ -68,12 +67,8 @@ function calibrateByPrompt(z: ZoneObject) {
     </div>
 
     <div class="bg-[#f9f7f4] rounded-xl p-3.5 text-xs">
-      <strong class="block truncate text-sm mb-1">{{ store.project.name }}</strong>
-      <div class="text-[11px] text-muted flex items-center gap-3">
-        <span class="flex items-center gap-1"><AppIcon name="user" size="3" /> {{ store.project.headcount || '待定' }} 人</span>
-        <span class="flex items-center gap-1"><AppIcon name="banknotes" size="3" /> {{ money(store.project.budget) }}</span>
-      </div>
-      <div class="text-[11px] text-muted mt-1 flex items-center gap-1"><AppIcon name="swatch" size="3" /> {{ store.project.style }}</div>
+      <strong class="block truncate text-sm mb-1">{{ store.drawingName }}</strong>
+
     </div>
 
     <div class="h-px bg-[#f0ece8]" />

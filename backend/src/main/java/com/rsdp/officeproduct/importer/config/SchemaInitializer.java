@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,7 @@ public class SchemaInitializer {
     @PostConstruct
     public void init() {
         try (var connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
             Resource resource = new ClassPathResource("db/schema.sql");
             if (resource.exists()) {
                 ScriptUtils.executeSqlScript(connection, resource);
@@ -37,8 +39,13 @@ public class SchemaInitializer {
             Resource productCategoryCleanup = new ClassPathResource("db/migrations/20261014_remove_product_category.sql");
             ScriptUtils.executeSqlScript(connection, productCategoryCleanup);
             log.info("商品品类码字段清理完成");
+            Resource projectInfoCleanup = new ClassPathResource("db/migrations/20261017_remove_office_project.sql");
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(projectInfoCleanup), false, false, "--",
+                ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            connection.commit();
+            log.info("项目信息表清理完成；设计工作区数据保留");
         } catch (Exception e) {
-            throw new IllegalStateException("商品数据库结构更新失败", e);
+            throw new IllegalStateException("数据库结构更新失败", e);
         }
     }
 }

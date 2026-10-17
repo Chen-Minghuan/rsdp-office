@@ -5,13 +5,6 @@ const store = useOfficeStore()
 
 const zoneSetSize = computed(() => new Set(store.cart.map((c) => c.zoneId || 'none')).size)
 
-const budgetRatio = computed(() => {
-  if (!store.project.budget) return 0
-  return Math.min(100, (store.totalPrice / store.project.budget) * 100)
-})
-
-const overBudget = computed(() => store.project.budget && store.totalPrice > store.project.budget)
-
 const groupedCart = computed(() => {
   const map = new Map<string, { name: string; items: typeof store.cart }>()
   for (const c of store.cart) {
@@ -179,41 +172,16 @@ function product(c: any) {
       <aside class="w-80 flex-none bg-white border border-line rounded-2xl shadow-panel p-6 flex flex-col gap-4 overflow-hidden">
         <div class="flex items-center gap-2 text-[15px] font-bold">
           <AppIcon name="documentText" size="4" />
-          <span>项目概要</span>
-        </div>
-        <div class="flex justify-between text-xs text-[#78736d] my-2">
-          <span>项目名称</span>
-          <strong class="text-[#383432]">{{ store.project.name }}</strong>
-        </div>
-        <div class="flex justify-between text-xs text-[#78736d] my-2">
-          <span>预计人数</span>
-          <strong class="text-[#383432]">{{ store.project.headcount || '待定' }} 人</strong>
-        </div>
-        <div class="flex justify-between text-xs text-[#78736d] my-2">
-          <span>整体预算</span>
-          <strong class="text-[#383432]">{{ money(store.project.budget) }}</strong>
+          <span>方案概要</span>
         </div>
         <div class="flex justify-between text-xs text-[#78736d] my-2">
           <span>已设计空间</span>
           <strong class="text-[#383432]">{{ zoneSetSize }} 个</strong>
         </div>
-        <div class="h-px bg-[#f0ece8]" />
-        <div class="flex items-center gap-2 text-[15px] font-bold">
-          <AppIcon name="chartPie" size="4" />
-          <span>预算参考</span>
-        </div>
-        <div class="h-2 rounded-full bg-[#f1e6da] overflow-hidden">
-          <div class="h-full rounded-full transition-all" :style="{ width: budgetRatio + '%', backgroundColor: overBudget ? '#d27664' : '#a77b51' }" />
-        </div>
-        <div class="text-xs text-muted">
-          <span v-if="store.project.budget">已占预算约 {{ budgetRatio.toFixed(1) }}% · 剩余 {{ money(store.project.budget - store.totalPrice) }}</span>
-          <span v-else>预算未填写，可返回上传页设置</span>
-        </div>
-
         <div v-if="zoneBudgets.length" class="h-px bg-[#f0ece8]" />
         <div v-if="zoneBudgets.length" class="flex items-center gap-2 text-[15px] font-bold">
           <AppIcon name="zone" size="4" />
-          <span>预算分布（按空间）</span>
+          <span>金额分布（按空间）</span>
         </div>
         <div v-if="zoneBudgets.length" class="flex flex-col gap-2">
           <div v-for="z in zoneBudgets" :key="z.zoneId" class="flex items-center justify-between text-xs">

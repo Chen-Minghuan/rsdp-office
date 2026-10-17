@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { money } from '~/utils/helpers'
 
 const store = useOfficeStore()
 const show = defineModel<boolean>('show')
@@ -29,23 +28,9 @@ function confirm() {
         <div class="bg-[#f6f0e8] border border-[#efe5d7] rounded-lg p-3.5 text-xs text-[#8b7055] leading-relaxed">
           此处只读取用户输入与画布已填写信息。演示底图的绘图坐标并不是实际毫米尺寸，精确布局仍需校准确认。
         </div>
-        <div class="grid grid-cols-2 gap-2.5">
-          <div class="bg-[#f8f6f3] rounded-lg p-3">
-            <span class="block text-[10px] text-[#9c9188] mb-1.5">办公项目</span>
-            <strong class="text-[15px]">{{ brief.projectContext.name }}</strong>
-          </div>
-          <div class="bg-[#f8f6f3] rounded-lg p-3">
-            <span class="block text-[10px] text-[#9c9188] mb-1.5">预计办公人数</span>
-            <strong class="text-[15px]">{{ brief.projectContext.headcount || '待确认' }} 人</strong>
-          </div>
-          <div class="bg-[#f8f6f3] rounded-lg p-3">
-            <span class="block text-[10px] text-[#9c9188] mb-1.5">整体预算</span>
-            <strong class="text-[15px]">{{ money(brief.projectContext.budgetMax) }}</strong>
-          </div>
-          <div class="bg-[#f8f6f3] rounded-lg p-3">
-            <span class="block text-[10px] text-[#9c9188] mb-1.5">画布功能区</span>
-            <strong class="text-[15px]">{{ brief.zones.length }} 个</strong>
-          </div>
+        <div class="bg-[#f8f6f3] rounded-lg p-3">
+          <span class="block text-[10px] text-[#9c9188] mb-1.5">画布功能区</span>
+          <strong class="text-[15px]">{{ brief.zones.length }} 个</strong>
         </div>
         <div>
           <strong class="text-sm">已识别的明确标注</strong>

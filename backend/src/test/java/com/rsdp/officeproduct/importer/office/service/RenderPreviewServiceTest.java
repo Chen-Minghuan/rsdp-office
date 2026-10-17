@@ -20,7 +20,7 @@ import static org.mockito.Mockito.*;
 class RenderPreviewServiceTest {
     private final ObjectMapper json=new ObjectMapper().findAndRegisterModules();
     private final OfficeService office=mock(OfficeService.class);
-    private final OfficeProjectMapper projects=mock(OfficeProjectMapper.class);
+    private final OfficeWorkspaceLockMapper projects=mock(OfficeWorkspaceLockMapper.class);
     private final RenderPreviewMapper mapper=mock(RenderPreviewMapper.class);
     private final QwenImageClient provider=mock(QwenImageClient.class);
     private final RenderPreviewFiles files=mock(RenderPreviewFiles.class);
@@ -38,7 +38,7 @@ class RenderPreviewServiceTest {
             """);
         canvas=new CanvasDto(); canvas.setRevision(3); sync();
         when(office.getCanvas("PROJECT")).thenAnswer(call->canvas);
-        when(projects.lockProject("PROJECT")).thenReturn("PROJECT");
+        when(projects.lockWorkspace("PROJECT")).thenReturn(1);
         when(provider.base()).thenReturn(properties.getBaseUrl());
         when(provider.submit(any(),anyString())).thenReturn(json.readTree("{\"output\":{\"task_id\":\"task-1\"},\"request_id\":\"req-1\"}"));
         when(files.reference(anyString(),any())).thenReturn("/uploads/render-previews/reference.png");

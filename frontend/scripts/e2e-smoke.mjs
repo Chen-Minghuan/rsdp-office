@@ -36,6 +36,7 @@ await shot('01-upload')
 console.log('Step 2: overview')
 await page.goto(`${baseUrl}/canvas`, { waitUntil: 'networkidle' })
 await page.waitForSelector('h1:has-text("空间核对")', { timeout: 10000 })
+await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
 await shot('02-overview')
 
 // 3. 进入单空间设计

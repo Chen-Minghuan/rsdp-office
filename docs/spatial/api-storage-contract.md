@@ -113,7 +113,7 @@ ErrorResponse 仍是 `{code,message,data}`；data 固定包含 errorCode、scene
 
 | 表 | 主键/唯一约束 | 固定内容与关系 |
 | --- | --- | --- |
-| floor_plan_document | asset_id varchar(64) PK/FK image_assets.image_id | 项目 FK office_project、sha256、媒体类型；原文件资产不因编辑变化 |
+| floor_plan_document | asset_id varchar(64) PK/FK image_assets.image_id | project_id 为设计隔离键（不再外键关联 office_project，见 [WORKSPACE-001](../tasks/WORKSPACE-001-remove-project-info.md)）、sha256、媒体类型；原文件资产不因编辑变化 |
 | floor_plan_page | page_id varchar(64) PK；unique(asset_id,page_number,processing_revision) | 文档 FK、标准底图资产 FK、尺寸、页/裁剪变换；处理版本不可覆盖 |
 | floor_plan_source_scene | source_scene_id varchar(64) PK；unique(analysis_id,analysis_revision) | page FK；可空的识别复合 FK 指向 floor_plan_scene_revision；不可变标准来源 JSONB、原始回包 hash、runId |
 | floor_plan_design_scene | scene_id varchar(64) PK | project/page FK，初始 source_scene_id 可空，current_revision bigint、创建信息 |

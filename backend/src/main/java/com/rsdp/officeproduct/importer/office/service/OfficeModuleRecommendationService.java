@@ -7,7 +7,7 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.*;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +20,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class OfficeModuleRecommendationService {
     private final OfficeService office;
-    private final OfficeProjectMapper projects;
+    private final OfficeWorkspaceLockMapper workspaceLocks;
     private final OfficeCartMapper carts;
     private final ObjectMapper json;
 
@@ -78,7 +78,7 @@ public class OfficeModuleRecommendationService {
     /** Recheck saved geometry and live SKU availability at selection time, then bind without resizing reservations. */
     @Transactional
     public ModuleRecommendationDto.Selection select(String projectId, ModuleRecommendationRequest request) {
-        projects.lockProject(projectId);
+        workspaceLocks.lockWorkspace(projectId);
         Context context = context(projectId, request);
         var result = recommendations(context, request);
         var match = result.getCandidates().stream().filter(candidate -> Objects.equals(candidate.getProduct().getId(), request.getProductId())).findFirst()

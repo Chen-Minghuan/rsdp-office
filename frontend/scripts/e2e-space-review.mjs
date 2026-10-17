@@ -28,6 +28,10 @@ try {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   const page = await context.newPage()
   const errors = []
+  const profileRequests = []
+  context.on('request', request => {
+    if (/^\/api\/v1\/office\/projects(?:\/[^/]+)?$/.test(new URL(request.url()).pathname)) profileRequests.push(request.url())
+  })
   page.on('pageerror', error => errors.push(error.message))
   const sourceSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600"><rect width="1100" height="600" fill="white"/><path d="M100 100H700V500H100Z M750 100H1000V200H850V500H750Z" fill="none" stroke="black" stroke-width="4"/></svg>'
   const source = {
@@ -82,10 +86,26 @@ try {
     }, point)
   }
 
+  // No profile is needed, even when the backend returns a null canvas for a new workspace.
+  await page.goto(baseUrl + '/', { waitUntil: 'networkidle' })
+  assert.equal(await page.getByText('项目信息', { exact: true }).count(), 0)
+  assert.equal(await page.getByText('建筑面积', { exact: true }).count(), 0)
+  await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  assert.equal(await page.locator('.review-room-card').count(), 0, '新工作区不自动填充演示空间')
+  await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    state.project = { name: '旧项目资料', area: 800, headcount: 60, budget: 300000, style: '旧风格', description: '旧说明' }
+    state.submitted = { projectContext: state.project, zones: [] }
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+  })
   // A fresh direct link waits for source loading, without requiring prior room confirmations.
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
   await page.waitForURL(/mode=design/)
+  assert.equal(Object.hasOwn(await stored(), 'project'), false, '旧项目资料从本地草稿移除')
+  assert.equal(Object.hasOwn((await stored()).submitted, 'projectContext'), false, '旧需求快照不再含项目资料')
   assert.match(page.url(), /mode=design/)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
@@ -353,6 +373,7 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
   await page.screenshot({ path: outDir + '/08-reused-contour.png' })
+  assert.deepEqual(profileRequests, [], '不调用已删除的项目资料接口')
   assert.deepEqual(errors, [])
   console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护。使用模拟 API。')
 } finally {

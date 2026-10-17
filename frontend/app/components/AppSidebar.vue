@@ -41,8 +41,8 @@ function isActive(to: string) {
           <span>手动布局</span>
         </NuxtLink>
         <div class="hidden px-3 mt-3 text-xs leading-relaxed text-muted md:block">
-          <div class="text-[10px] mb-1">当前项目</div>
-          <div class="line-clamp-2">{{ store.project.name || '尚未选择项目' }}</div>
+          <div class="text-[10px] mb-1">当前图纸</div>
+          <div class="line-clamp-2">{{ store.drawingName }}</div>
         </div>
       </div>
       <div class="grid content-start gap-1.5">

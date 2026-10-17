@@ -13,11 +13,10 @@ import com.rsdp.officeproduct.importer.office.dto.*;
 import com.rsdp.officeproduct.importer.office.entity.OfficeAgentMessage;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
-import com.rsdp.officeproduct.importer.office.entity.OfficeProject;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,7 +33,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OfficeService {
 
-    private final OfficeProjectMapper projectMapper;
+    private final OfficeWorkspaceLockMapper workspaceLocks;
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeCartMapper cartMapper;
     private final OfficeAgentMessageMapper messageMapper;
@@ -43,52 +42,6 @@ public class OfficeService {
     private final ObjectMapper objectMapper;
 
     private static final String DEFAULT_PROJECT_ID = "OFFICE-PROJECT-001";
-
-    public ProjectDto getOrCreateProject(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
-        OfficeProject project = projectMapper.selectById(projectId);
-        if (project == null) {
-            project = new OfficeProject();
-            project.setProjectId(projectId);
-            project.setProjectName("星河科技总部办公空间");
-            project.setArea(800);
-            project.setHeadcount(60);
-            project.setBudget(new BigDecimal("300000"));
-            project.setStyle("现代简约");
-            project.setDescription("开放办公、两间会议室、接待区。希望采光好、浅木色、注重工作效率。");
-            project.setCreatedAt(LocalDateTime.now());
-            project.setUpdatedAt(LocalDateTime.now());
-            projectMapper.insert(project);
-        }
-        return toProjectDto(project);
-    }
-
-    @Transactional
-    public ProjectDto saveProject(SaveProjectRequest request) {
-        String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
-        OfficeProject project = projectMapper.selectById(projectId);
-        boolean isNew = project == null;
-        if (isNew) {
-            project = new OfficeProject();
-            project.setProjectId(projectId);
-            project.setCreatedAt(LocalDateTime.now());
-        }
-        project.setProjectName(request.getProjectName());
-        project.setArea(request.getArea());
-        project.setHeadcount(request.getHeadcount());
-        project.setBudget(request.getBudget());
-        project.setStyle(request.getStyle());
-        project.setDescription(request.getDescription());
-        project.setUpdatedAt(LocalDateTime.now());
-        if (isNew) {
-            projectMapper.insert(project);
-        } else {
-            projectMapper.updateById(project);
-        }
-        return toProjectDto(project);
-    }
 
     public CanvasDto getCanvas(String projectId) {
         if (!StringUtils.hasText(projectId)) {
@@ -108,8 +61,7 @@ public class OfficeService {
             OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(request.getObjects()), request.getDesignZoneId());
         }
         String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
-        ensureProjectExists(projectId);
-        projectMapper.lockProject(projectId);
+        workspaceLocks.lockWorkspace(projectId);
         CanvasDto latest = getCanvas(projectId);
         int revision = request.getRevision() != null ? request.getRevision() : 1;
         if (latest != null && latest.getRevision() != null && revision < latest.getRevision()) {
@@ -140,7 +92,6 @@ public class OfficeService {
 
     @Transactional
     public CartItemDto addCartItem(String projectId, CartItemDto dto) {
-        ensureProjectExists(projectId);
         String lineId = StringUtils.hasText(dto.getLineId()) ? dto.getLineId() : UUID.randomUUID().toString().replace("-", "");
         OfficeCart existing = cartMapper.selectById(lineId);
         if (existing != null) {
@@ -202,7 +153,6 @@ public class OfficeService {
 
     @Transactional
     public AgentMessageDto sendMessage(String projectId, SendMessageRequest request) {
-        ensureProjectExists(projectId);
         OfficeAgentMessage userMsg = new OfficeAgentMessage();
         userMsg.setProjectId(projectId);
         userMsg.setRole("user");
@@ -249,12 +199,6 @@ public class OfficeService {
         messageMapper.delete(new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId));
     }
 
-    private void ensureProjectExists(String projectId) {
-        if (projectMapper.selectById(projectId) == null) {
-            getOrCreateProject(projectId);
-        }
-    }
-
     private String generateBotReply(String projectId, String text) {
         String t = text == null ? "" : text;
         if (t.contains("预算") || t.contains("便宜") || t.contains("经济") || t.contains("价格")) {
@@ -264,18 +208,6 @@ public class OfficeService {
             return "您可以使用左侧“返回修改画布”继续修改区域或标注，再提交新版需求快照。原有已选商品将保留以便复核。";
         }
         return "已记录您对办公项目的补充说明：“" + t.trim() + "”。\n\n右侧可查看演示商品候选，您可以加入当前区域并调整数量；真实推荐将在接入 RSDP 商品服务与 Office Skill 后实现。";
-    }
-
-    private ProjectDto toProjectDto(OfficeProject p) {
-        ProjectDto dto = new ProjectDto();
-        dto.setProjectId(p.getProjectId());
-        dto.setProjectName(p.getProjectName());
-        dto.setArea(p.getArea());
-        dto.setHeadcount(p.getHeadcount());
-        dto.setBudget(p.getBudget());
-        dto.setStyle(p.getStyle());
-        dto.setDescription(p.getDescription());
-        return dto;
     }
 
     private CanvasDto toCanvasDto(OfficeCanvas c) {

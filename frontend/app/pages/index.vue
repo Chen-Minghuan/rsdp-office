@@ -5,7 +5,6 @@ const store = useOfficeStore()
 const api = useOfficeApi()
 const floorPlanApi = useFloorPlanApi()
 const fileInput = ref<HTMLInputElement | null>(null)
-const showProjectInfo = ref(true)
 const isParsing = ref(false)
 const parseError = ref<string | null>(null)
 const recognitionResult = ref<any>(null)
@@ -84,8 +83,6 @@ async function deletePersistedFile(name: string): Promise<void> {
     console.warn('删除持久化文件失败', e)
   }
 }
-
-watch(() => store.project, () => store.schedulePersist(), { deep: true })
 
 onMounted(async () => {
   // 从 IndexedDB 恢复刷新前上传的真实文件
@@ -323,9 +320,9 @@ async function applyRecognitionToCanvas() {
       </div>
     </div>
 
-    <div class="flex-1 min-h-0 grid grid-cols-[minmax(420px,1fr)_minmax(320px,0.7fr)] gap-4">
+    <div class="flex-1 min-h-0 flex flex-col gap-4">
       <!-- 左侧上传与识别结果 -->
-      <div class="bg-white border border-line rounded-2xl p-6 shadow-panel flex flex-col gap-5 overflow-hidden">
+      <div class="flex-1 min-h-0 bg-white border border-line rounded-2xl p-6 shadow-panel flex flex-col gap-5 overflow-auto">
         <div class="flex items-center justify-between flex-none">
           <span class="text-[15px] font-bold">图纸上传</span>
           <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#f4eee5] text-[#946c45]">PDF / PNG / CAD</span>
@@ -519,59 +516,6 @@ async function applyRecognitionToCanvas() {
         </div>
       </div>
 
-      <!-- 右侧项目信息 -->
-      <div class="bg-white border border-line rounded-2xl p-6 shadow-panel flex flex-col gap-5 overflow-hidden">
-        <button class="flex items-center justify-between w-full" @click="showProjectInfo = !showProjectInfo">
-          <span class="text-[15px] font-bold">项目信息</span>
-          <AppIcon :name="showProjectInfo ? 'chevronDown' : 'arrowRight'" size="4" class="text-muted" />
-        </button>
-
-        <div v-show="showProjectInfo" class="flex flex-col gap-4 overflow-auto">
-          <div class="bg-[#f6f0e8] border border-[#efe5d7] rounded-lg p-3.5 text-xs text-[#8b7055] leading-relaxed flex items-start gap-2">
-            <AppIcon name="info" size="4" class="mt-0.5 flex-none" />
-            <span>填写项目信息后，识别结果将自动关联到空间总览。</span>
-          </div>
-
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-[#746c64] font-medium">项目名称</label>
-            <input v-model="store.project.name" class="h-10 px-3 border border-[#e9e4de] rounded-lg outline-none focus:border-[#be9369]" placeholder="例如：星河科技总部办公空间">
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs text-[#746c64] font-medium">建筑面积</label>
-              <input v-model.number="store.project.area" type="number" min="0" class="h-10 px-3 border border-[#e9e4de] rounded-lg outline-none focus:border-[#be9369]" placeholder="如 800">
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs text-[#746c64] font-medium">预计人数</label>
-              <input v-model.number="store.project.headcount" type="number" min="0" class="h-10 px-3 border border-[#e9e4de] rounded-lg outline-none focus:border-[#be9369]" placeholder="如 60">
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs text-[#746c64] font-medium">预算（元）</label>
-              <input v-model.number="store.project.budget" type="number" min="0" class="h-10 px-3 border border-[#e9e4de] rounded-lg outline-none focus:border-[#be9369]" placeholder="如 300000">
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs text-[#746c64] font-medium">整体偏好</label>
-              <select v-model="store.project.style" class="h-10 px-3 border border-[#e9e4de] rounded-lg outline-none focus:border-[#be9369]">
-                <option>现代简约</option>
-                <option>现代商务</option>
-                <option>自然原木</option>
-                <option>工业风</option>
-                <option>暂未确定</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-[#746c64] font-medium">项目说明</label>
-            <textarea v-model="store.project.description" rows="3" class="w-full border border-[#e9e4de] rounded-lg p-3 outline-none focus:border-[#be9369] resize-none leading-relaxed" placeholder="可描述会议室、接待区、工位配置等需求" />
-          </div>
-        </div>
-
-        <div class="mt-auto text-[11px] text-[#a29b94] leading-relaxed">
-          演示数据仅保存在当前浏览器中。正式版需接入 RSDP 项目、鉴权和数据库服务。
-        </div>
-      </div>
     </div>
 
     <div class="bg-white border border-line rounded-xl p-3 flex items-center justify-between flex-none">

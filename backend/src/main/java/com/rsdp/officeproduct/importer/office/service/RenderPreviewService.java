@@ -7,7 +7,7 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.config.RenderProperties;
 import com.rsdp.officeproduct.importer.office.dto.RenderPreviewRequest;
 import com.rsdp.officeproduct.importer.office.entity.RenderPreview;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import com.rsdp.officeproduct.importer.office.mapper.RenderPreviewMapper;
 import com.rsdp.officeproduct.importer.service.*;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +21,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class RenderPreviewService {
     private final OfficeService office;
-    private final OfficeProjectMapper projects;
+    private final OfficeWorkspaceLockMapper workspaceLocks;
     private final RenderPreviewMapper previews;
     private final QwenImageClient provider;
     private final RenderPreviewFiles files;
@@ -32,7 +32,7 @@ public class RenderPreviewService {
     public ObjectNode create(String projectId, RenderPreviewRequest request) {
         project(projectId);
         validateRequest(request);
-        if (projects.lockProject(projectId)==null) throw new BusinessException("请先保存当前项目和排版");
+        workspaceLocks.lockWorkspace(projectId);
         JsonNode expected=RenderPreviewScene.canonical(request.getExpectedSnapshot());
         String hash=VisionImagePreparer.sha256(encode(RenderPreviewScene.canonical(json.valueToTree(Map.of("snapshot",expected,"style",request.getStyle(),"view",request.getView(),
             "instructions",request.getInstructions(),"model",properties.getModel())))).getBytes(StandardCharsets.UTF_8));

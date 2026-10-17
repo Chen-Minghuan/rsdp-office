@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import type {
-  Project,
   ProjectFile,
   OfficeObject,
   ZoneObject,
@@ -17,7 +16,6 @@ import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { DimensionCalibrationReport } from '~/types/dimensionCalibration'
 import { useFloorPlanApi } from '~/composables/useFloorPlanApi'
 import {
-  sampleProject,
   sampleFiles,
   PRODUCTS as SAMPLE_PRODUCTS,
   PRODUCT_COMBOS as SAMPLE_COMBOS,
@@ -47,7 +45,6 @@ const STORAGE_KEY = 'rsdp-office-v01'
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
 
 interface OfficeState {
-  project: Project
   files: ProjectFile[]
   objects: OfficeObject[]
   blank: boolean
@@ -79,7 +76,6 @@ interface OfficeState {
 
 function defaultState(): OfficeState {
   return {
-    project: { name: '', area: 0, headcount: 0, budget: 0, style: '现代简约', description: '' },
     files: [],
     objects: [],
     blank: false,
@@ -117,6 +113,7 @@ function loadLocalState(): Partial<OfficeState> {
     const raw = current || localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw, (key, value) => {
+      if (key === 'project' || key === 'projectContext') return undefined
       if (key === 'projectId' && value === 'DEMO-PROJECT-001') return 'OFFICE-PROJECT-001'
       if ((key === 'productId' || key === 'id') && typeof value === 'string' && /^DEMO-OF-0[1-7]$/.test(value)) {
         return value.replace('DEMO-OF-', 'SAMPLE-OF-')
@@ -125,10 +122,8 @@ function loadLocalState(): Partial<OfficeState> {
       if (key === 'source' && value === 'demo') return 'sample'
       return value
     }) as OfficeState
-    if (!current) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
-      localStorage.removeItem(LEGACY_STORAGE_KEY)
-    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
     const { undoStack, ...rest } = parsed
     return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null }
   } catch {
@@ -148,6 +143,7 @@ export const useOfficeStore = defineStore('office', {
   state: (): OfficeState => ({ ...defaultState(), ...loadLocalState(), initialized: false, loading: false, floorPlanLoading: false, syncState: 'idle', syncError: null }),
 
   getters: {
+    drawingName: (state): string => state.floorPlan?.sourceName || state.files[0]?.name || '办公空间',
     zones: (state): ZoneObject[] => state.objects.filter((o) => o.kind === 'zone') as ZoneObject[],
     activeZone: (state): ZoneObject | null => {
       const list = (state.objects.filter((o) => o.kind === 'zone') as ZoneObject[])
@@ -202,19 +198,15 @@ export const useOfficeStore = defineStore('office', {
       this.loading = true
       const api = useOfficeApi()
       try {
-        const [project, canvas, cart, messages, products] = await Promise.all([
-          api.loadProject().catch(() => null),
-          api.loadCanvas().catch(() => null),
+        const [canvasResult, cart, messages, products] = await Promise.all([
+          api.loadCanvas().then(canvas => ({ available: true, canvas })).catch(() => ({ available: false, canvas: null })),
           api.loadCart().catch(() => [] as CartItem[]),
           api.loadMessages().catch(() => [] as AgentMessage[]),
           api.loadProducts().catch(() => [] as Product[]),
         ])
 
-        this.apiReady = project !== null
-
-        if (project) {
-          this.project = project
-        }
+        this.apiReady = canvasResult.available
+        const canvas = canvasResult.canvas
         if (canvas && Array.isArray(canvas.objects) && canvas.revision >= this.canvasRevision) {
           this.objects = canvas.objects
           this.files = canvas.files
@@ -238,9 +230,6 @@ export const useOfficeStore = defineStore('office', {
         this.combos = SAMPLE_COMBOS
       }
 
-      if (!this.project.name) {
-        this.loadSampleLocal()
-      }
       const templateId = this.zones[0]?.spaceTemplateId
       if (templateId?.startsWith('STPL-') && this.zones.every(zone => zone.spaceTemplateId === templateId) && !this.spaceTemplateCurrent) {
         try {
@@ -277,7 +266,6 @@ export const useOfficeStore = defineStore('office', {
         return
       }
       try {
-        await api.saveProject(this.project)
         await api.saveCanvas({
           objects: this.objects,
           files: this.files,
@@ -310,7 +298,6 @@ export const useOfficeStore = defineStore('office', {
     loadSampleLocal() {
       const example = officeReviewExample()
       this.$patch({
-        project: sampleProject(),
         files: sampleFiles(),
         objects: example.zones,
         floorPlan: example.plan,
@@ -333,7 +320,6 @@ export const useOfficeStore = defineStore('office', {
       if (this.apiReady) {
         try {
           await api.resetProject()
-          await api.saveProject(this.project)
           await api.saveCanvas({
             objects: this.objects,
             files: this.files,
@@ -360,11 +346,6 @@ export const useOfficeStore = defineStore('office', {
       this.blank = true
       this.objects = []
       this.canvasRevision++
-      this.schedulePersist()
-    },
-
-    updateProject(p: Partial<Project>) {
-      Object.assign(this.project, p)
       this.schedulePersist()
     },
 
@@ -485,7 +466,7 @@ export const useOfficeStore = defineStore('office', {
 
     captureSpaceTemplate(name?: string) {
       if (!this.canEnterLayout) return null
-      return captureSpaceTemplate(this.zones, this.floorPlan, this.canvasRevision, name || (this.project.name || '办公空间') + ' · 空间模板')
+      return captureSpaceTemplate(this.zones, this.floorPlan, this.canvasRevision, name || this.drawingName + ' · 空间模板')
     },
     attachSpaceTemplate(template: SpaceTemplate) {
       if (!templateMatches(template, this.zones, this.floorPlan)) return false
@@ -802,13 +783,6 @@ export const useOfficeStore = defineStore('office', {
         projectId: useOfficeApi().projectId,
         canvasRevisionId: `CANVAS-REV-${this.canvasRevision}`,
         sceneRevisionId: null,
-        projectContext: {
-          name: this.project.name,
-          headcount: this.project.headcount,
-          budgetMax: this.project.budget,
-          stylePreference: this.project.style,
-          description: this.project.description,
-        },
         zones,
         annotations: this.objects
           .filter((o) => o.kind === 'note')

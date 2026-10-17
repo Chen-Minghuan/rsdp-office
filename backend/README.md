@@ -36,6 +36,8 @@ mvn spring-boot:run
 
 服务默认监听 `8082` 端口。
 
+2026-10-17 起删除全局项目信息。新版 Java 启动时在事务中执行 `db/migrations/20261017_remove_office_project.sql`，移除旧 `office_project` 表及指向它的外键，保留画布、识别、模板、清单、预览记录和原有 project_id。新库不创建此表，重复启动可安全重跑。无需重新初始化数据库或删除数据卷；请先停止旧版 Java 再启动新版，避免旧代码继续访问已删除表。相关模型及 GET/POST/PUT 项目资料接口已移除，其余 `/projects/{projectId}/...` 路径继续使用隔离键。验证与当前运行库状态见 [WORKSPACE-001](../docs/tasks/WORKSPACE-001-remove-project-info.md)。
+
 ### 3. 下载模板
 
 ```bash
