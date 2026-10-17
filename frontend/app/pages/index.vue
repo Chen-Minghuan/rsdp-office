@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import type { ProjectFile, ZoneObject, ToneKey, ZoneType } from '~/types/office'
+import { drawingFileDescriptor } from '~/utils/drawingUpload'
 
 const store = useOfficeStore()
 const api = useOfficeApi()
 const floorPlanApi = useFloorPlanApi()
 const fileInput = ref<HTMLInputElement | null>(null)
 const isParsing = ref(false)
+const isUploading = ref(false)
+const isApplying = ref(false)
+const uploadError = ref<string | null>(null)
+const uploadBusy = computed(() => isParsing.value || isUploading.value || isApplying.value)
 const parseError = ref<string | null>(null)
 const recognitionResult = ref<any>(null)
 const activeFile = ref<string | null>(null)
@@ -41,6 +46,7 @@ async function persistFile(file: File): Promise<void> {
     const db = await openFileDB()
     const tx = db.transaction(DB_STORE, 'readwrite')
     const os = tx.objectStore(DB_STORE)
+    os.clear()
     os.put({ name: file.name, type: file.type, size: file.size, blob: file })
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
@@ -137,36 +143,65 @@ function fmtSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-async function registerFiles(list: FileList | null) {
-  if (!list) return
-  for (const f of Array.from(list)) {
-    fileMap.value.set(f.name, f)
-    await persistFile(f)
+async function acceptDrawing(list: FileList | null) {
+  if (!list?.length || uploadBusy.value) return
+  uploadError.value = null
+  if (list.length !== 1) {
+    uploadError.value = '一次只能上传一张图纸，请只选择一个文件。'
+    return
+  }
+  const file = list[0]!
+  isUploading.value = true
+  try {
+    const drawing = drawingFileDescriptor(file)
+    store.$patch({ files: [drawing] })
+    store.schedulePersist()
+    fileMap.value.clear()
+    fileMap.value.set(file.name, file)
+    activeFile.value = null
+    recognitionResult.value = null
+    recognitionSource.value = null
+    analysisId.value = null
+    parseError.value = null
+    for (const name of Object.keys(pdfPages)) delete pdfPages[name]
+    await persistFile(file)
+  } catch (error) {
+    uploadError.value = error instanceof Error ? error.message : '上传图纸失败'
+  } finally {
+    isUploading.value = false
   }
 }
 
 async function onDrop(e: DragEvent) {
-  const files = e.dataTransfer?.files || null
-  await registerFiles(files)
-  store.addFiles(files)
+  await acceptDrawing(e.dataTransfer?.files || null)
 }
 
 async function onFileChange(e: Event) {
-  const files = (e.target as HTMLInputElement).files
-  await registerFiles(files)
-  store.addFiles(files)
-  if (fileInput.value) fileInput.value.value = ''
+  const input = e.target as HTMLInputElement
+  try {
+    await acceptDrawing(input.files)
+  } finally {
+    input.value = ''
+  }
 }
 
 async function removeFile(name: string) {
-  store.removeFile(name)
-  fileMap.value.delete(name)
-  await deletePersistedFile(name)
-  if (activeFile.value === name) {
-    activeFile.value = null
-    recognitionResult.value = null
-    recognitionSource.value = null
-    parseError.value = null
+  if (uploadBusy.value) return
+  isUploading.value = true
+  uploadError.value = null
+  try {
+    store.removeFile(name)
+    fileMap.value.delete(name)
+    if (activeFile.value === name) {
+      activeFile.value = null
+      recognitionResult.value = null
+      recognitionSource.value = null
+      analysisId.value = null
+      parseError.value = null
+    }
+    await deletePersistedFile(name)
+  } finally {
+    isUploading.value = false
   }
 }
 
@@ -174,6 +209,7 @@ const recognizableFiles = computed(() => store.files.filter((f) => isRecognizabl
 const hasRecognizableFiles = computed(() => recognizableFiles.value.length > 0)
 
 async function recognizeFile(file: ProjectFile) {
+  if (uploadBusy.value) return
   activeFile.value = file.name
   isParsing.value = true
   parseError.value = null
@@ -303,11 +339,17 @@ async function applyRecognitionToCanvas() {
     return
   }
 
-  // 拉取最新详情，确保 rooms 已写入
-  const detail = await floorPlanApi.getFloorPlan(analysisId.value)
-  store.importFloorPlanToZones(detail)
-
-  navigateTo(`/canvas?analysisId=${analysisId.value}&mode=overview`)
+  if (uploadBusy.value) return
+  isApplying.value = true
+  try {
+    const detail = await floorPlanApi.getFloorPlan(analysisId.value)
+    store.importFloorPlanToZones(detail)
+    await navigateTo(`/canvas?analysisId=${analysisId.value}&mode=overview`)
+  } catch (error) {
+    parseError.value = error instanceof Error ? error.message : '导入空间失败'
+  } finally {
+    isApplying.value = false
+  }
 }
 </script>
 
@@ -321,7 +363,7 @@ async function applyRecognitionToCanvas() {
     </div>
 
     <div class="flex-1 min-h-0 flex flex-col gap-4">
-      <!-- 左侧上传与识别结果 -->
+      <!-- 上传与识别结果 -->
       <div class="flex-1 min-h-0 bg-white border border-line rounded-2xl p-6 shadow-panel flex flex-col gap-5 overflow-auto">
         <div class="flex items-center justify-between flex-none">
           <span class="text-[15px] font-bold">图纸上传</span>
@@ -330,15 +372,15 @@ async function applyRecognitionToCanvas() {
 
         <div
           class="border border-dashed border-[#dbc4ad] rounded-xl bg-[#fffcf9] min-h-[160px] flex flex-col items-center justify-center gap-3 cursor-pointer transition hover:bg-[#fdf8f2] hover:border-bronze flex-none"
-          @click="fileInput?.click()"
+          @click="!uploadBusy && fileInput?.click()"
           @drop.prevent="onDrop"
           @dragover.prevent
         >
           <div class="w-12 h-12 rounded-full bg-[#f4e9dc] text-bronze grid place-items-center">
             <AppIcon name="upload" size="6" />
           </div>
-          <strong class="text-sm">点击或拖放办公图纸到这里</strong>
-          <span class="text-xs text-muted">支持 PDF、PNG、JPG、DWG、DXF</span>
+          <strong class="text-sm">{{ store.files.length ? '点击或拖放以更换图纸' : '点击或拖放办公图纸到这里' }}</strong>
+          <span class="text-xs text-muted">一次只能上传一张图纸 · 支持 PDF、PNG、JPG、DWG、DXF</span>
           <div class="flex gap-2 mt-1 flex-wrap justify-center">
             <span class="px-2.5 py-1.5 rounded-lg text-[11px] text-[#837265] bg-white border border-[#e8e1da] flex items-center gap-1">
               <AppIcon name="file" size="3.5" /> PDF
@@ -351,12 +393,14 @@ async function applyRecognitionToCanvas() {
             </span>
           </div>
         </div>
-        <input ref="fileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.dwg,.dxf" hidden @change="onFileChange">
+        <input ref="fileInput" type="file" :disabled="uploadBusy" aria-label="上传一张办公图纸" accept=".pdf,.png,.jpg,.jpeg,.dwg,.dxf" hidden @change="onFileChange">
+
+        <div v-if="uploadError" role="alert" class="rounded-xl border border-[#f5d8d8] bg-[#fff5f5] p-3 text-sm text-[#9e3a3a]">{{ uploadError }}</div>
 
         <!-- 已上传文件 -->
         <div v-if="store.files.length > 0" class="flex flex-col gap-2 flex-none max-h-[180px] overflow-auto">
           <div class="flex items-center justify-between">
-            <strong class="text-sm">已上传文件</strong>
+            <strong class="text-sm">当前图纸</strong>
             <span class="text-xs text-muted">{{ store.files.length }} 个</span>
           </div>
           <div class="space-y-2">
@@ -376,7 +420,7 @@ async function applyRecognitionToCanvas() {
                 <label v-if="fileType(f.name) === 'PDF' && !f.mock" class="flex items-center gap-1 mr-2 text-xs text-muted">
                   第
                   <input v-model.number="pdfPages[f.name]" :placeholder="'1'" type="number" min="1" step="1"
-                    :disabled="isParsing" :aria-label="`${f.name} 识别页码`"
+                    :disabled="uploadBusy" :aria-label="`${f.name} 识别页码`"
                     class="w-14 rounded border border-line px-2 py-1 bg-white text-ink" @click.stop>
                   页
                 </label>
@@ -386,7 +430,7 @@ async function applyRecognitionToCanvas() {
                   :class="canRecognize(f)
                     ? 'text-bronze-dark bg-cream hover:bg-[#ebe3d8]'
                     : 'text-muted bg-[#f4f4f4] cursor-not-allowed'"
-                  :disabled="isParsing || !canRecognize(f)"
+                  :disabled="uploadBusy || !canRecognize(f)"
                   :title="f.mock ? '演示文件无法识别，请重新上传真实文件' : ''"
                   @click.stop="recognizeFile(f)"
                 >
@@ -395,6 +439,8 @@ async function applyRecognitionToCanvas() {
                 </button>
                 <button
                   class="w-7 h-7 rounded-lg hover:bg-[#f0e8dd] text-muted hover:text-[#9e3a3a] grid place-items-center transition"
+                  :disabled="uploadBusy"
+                  :aria-label="`移除 ${f.name}`"
                   @click.stop="removeFile(f.name)"
                 >
                   <AppIcon name="close" size="3.5" />
@@ -499,6 +545,7 @@ async function applyRecognitionToCanvas() {
               v-if="recognitionResult.rooms?.length"
               type="button"
               class="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-bronze px-5 py-3 text-sm font-semibold text-white shadow-md shadow-[rgba(167,123,81,0.18)] transition hover:bg-bronze-dark"
+              :disabled="uploadBusy"
               @click="applyRecognitionToCanvas"
             >
               <AppIcon name="map" size="4" />
@@ -519,12 +566,12 @@ async function applyRecognitionToCanvas() {
     </div>
 
     <div class="bg-white border border-line rounded-xl p-3 flex items-center justify-between flex-none">
-      <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef] flex items-center gap-2" @click="store.loadSample">
+      <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef] flex items-center gap-2" :disabled="uploadBusy" @click="store.loadSample">
         <AppIcon name="reset" size="4" /> 恢复演示示例
       </button>
       <div class="flex gap-2.5">
-        <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" @click="fileInput?.click()">
-          <AppIcon name="plus" size="3" /> 继续上传
+        <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" :disabled="uploadBusy" @click="!uploadBusy && fileInput?.click()">
+          <AppIcon name="upload" size="3" /> {{ store.files.length ? '更换图纸' : '上传图纸' }}
         </button>
         <NuxtLink to="/canvas" class="px-5 py-2.5 rounded-lg text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2">
           进入空间总览 <AppIcon name="arrowRight" size="4" />

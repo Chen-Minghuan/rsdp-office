@@ -88,7 +88,6 @@ export const PRODUCT_COMBOS: ProductCombo[] = [
 export function sampleFiles(): ProjectFile[] {
   return [
     { name: '演示办公平面图.pdf', size: 12800000, type: 'PDF', mock: true },
-    { name: '现代办公风格参考.png', size: 3200000, type: 'PNG', mock: true },
   ]
 }
 

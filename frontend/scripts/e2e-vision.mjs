@@ -58,7 +58,26 @@ try {
   })
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   const upload = page.locator('input[type="file"]').first()
+  const waitForUpload = () => page.waitForFunction(() => !document.querySelector('input[type="file"]').disabled)
+  assert.equal(await upload.getAttribute('multiple'), null)
   await upload.setInputFiles({ name: 'test-plan.png', mimeType: 'image/png', buffer: png })
+  await waitForUpload()
+  await page.getByRole('button', { name: '更换图纸', exact: true }).waitFor()
+  // 拖入多个文件必须整体拒绝，不能悄悄采用第一张或污染已存文件。
+  const multipleDrop = await page.evaluateHandle(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(['first'], 'first.png', { type: 'image/png' }))
+    data.items.add(new File(['second'], 'second.png', { type: 'image/png' }))
+    return data
+  })
+  await page.getByText('点击或拖放以更换图纸', { exact: true }).dispatchEvent('drop', { dataTransfer: multipleDrop })
+  await page.getByRole('alert').filter({ hasText: '一次只能上传一张图纸' }).waitFor()
+  assert.equal(await page.getByLabel('移除 test-plan.png').count(), 1)
+  assert.equal(await page.getByText('first.png', { exact: true }).count(), 0)
+  await upload.setInputFiles({ name: 'invalid.txt', mimeType: 'text/plain', buffer: Buffer.from('invalid') })
+  await waitForUpload()
+  await page.getByRole('alert').filter({ hasText: '请选择 PDF' }).waitFor()
+  assert.equal(await page.getByText('invalid.txt', { exact: true }).count(), 0)
   await page.getByRole('button', { name: '识别图纸', exact: true }).click()
   await page.getByText('实际尺寸与面积待校准', { exact: true }).waitFor()
   assert.equal(await page.getByText('待校准', { exact: true }).count(), 1)
@@ -68,6 +87,26 @@ try {
 
   mode = 'pdf'
   await upload.setInputFiles({ name: 'two-pages.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\nUI-only-fixture') })
+  await waitForUpload()
+  await page.getByLabel('移除 two-pages.pdf').waitFor()
+  assert.equal(await page.getByLabel('移除 test-plan.png').count(), 0)
+  assert.equal(await page.getByAltText('图纸预览').count(), 0, '换图后不能残留旧识别结果')
+  assert.equal(await page.getByRole('alert').count(), 0)
+  const persistedNames = await page.evaluate(() => new Promise((resolve, reject) => {
+    const open = indexedDB.open('rsdp-office-files', 1)
+    open.onerror = () => reject(open.error)
+    open.onsuccess = () => {
+      const db = open.result
+      const request = db.transaction('files', 'readonly').objectStore('files').getAllKeys()
+      request.onsuccess = () => { resolve(request.result); db.close() }
+      request.onerror = () => { reject(request.error); db.close() }
+    }
+  }))
+  assert.deepEqual(persistedNames, ['two-pages.pdf'])
+  // 刷新后仍然只有当前文件，且能从 IndexedDB 恢复二进制继续识别。
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByLabel('移除 two-pages.pdf').waitFor()
+  assert.equal(await page.getByLabel('移除 test-plan.png').count(), 0)
   const pdfPage = page.getByLabel('two-pages.pdf 识别页码')
   await pdfPage.fill('2')
   const recognizePdf = pdfPage.locator('..').locator('..').getByRole('button', { name: '识别图纸', exact: true })
@@ -81,8 +120,28 @@ try {
   await page.getByText(/尚未配置图片\/PDF 识别密钥/).waitFor()
   assert.equal(await page.getByText('测试会议室', { exact: true }).count(), 0)
   assert.equal(await page.getByAltText('图纸预览').count(), 0)
+  await page.getByLabel('移除 two-pages.pdf').click()
+  await page.getByText('暂无图纸', { exact: false }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '更换图纸', exact: true }).count(), 0)
+  await page.waitForFunction(() => !document.querySelector('input[type="file"]').disabled)
+  const singleDrop = await page.evaluateHandle(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(['single'], 'test-plan.png', { type: 'image/png' }))
+    return data
+  })
+  await page.getByText('点击或拖放办公图纸到这里', { exact: true }).dispatchEvent('drop', { dataTransfer: singleDrop })
+  await page.getByLabel('移除 test-plan.png').waitFor()
+  await page.waitForFunction(() => !document.querySelector('input[type="file"]').disabled)
+  await page.evaluate(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    draft.files.push({ name: 'legacy-extra.png', size: 1, type: 'PNG', mock: false })
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByLabel('移除 test-plan.png').waitFor()
+  assert.equal(await page.getByLabel('移除 legacy-extra.png').count(), 0)
   assert.deepEqual(errors, [])
-  console.log('图片/PDF 上传页验证通过：预览、待校准、置信度、选页与失败反馈。使用模拟 API，未调用百炼。')
+  console.log('图片/PDF 上传页验证通过：单图选择、批量拖放拒绝、格式校验、换图/移除/刷新、单文件持久化及识别预览/选页/失败反馈。使用模拟 API，未调用百炼。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) {

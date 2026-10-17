@@ -34,6 +34,14 @@ class OfficeProductCatalogTest {
         assertEquals(new BigDecimal("1200.01"), result.getWidthMm()); assertEquals(121, result.getWidthCm());
         assertEquals(new BigDecimal("750"), result.getHeightMm());
     }
+    @Test void rejectsMultipleDrawingFilesBeforeWritingCanvas() {
+        var locks = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
+        var service = new OfficeService(locks, canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
+        var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setMode("overview");
+        request.setFiles(List.of(Map.of("name", "first.png"), Map.of("name", "second.pdf")));
+        assertEquals("一次只能上传一张图纸，请移除多余文件", assertThrows(BusinessException.class, () -> service.saveCanvas(request)).getMessage());
+        verifyNoInteractions(locks, canvases);
+    }
     @Test void staleDebouncedCanvasWritesCannotOverwriteNewerModuleSelections() {
         var projects = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
         var service = new OfficeService(projects, canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());

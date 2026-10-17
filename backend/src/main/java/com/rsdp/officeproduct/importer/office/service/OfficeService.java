@@ -57,6 +57,9 @@ public class OfficeService {
 
     @Transactional
     public CanvasDto saveCanvas(SaveCanvasRequest request) {
+        if (request.getFiles() != null && request.getFiles().size() > 1) {
+            throw new BusinessException("一次只能上传一张图纸，请移除多余文件");
+        }
         if ("design".equals(request.getMode())) {
             OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(request.getObjects()), request.getDesignZoneId());
         }

@@ -106,6 +106,11 @@ function defaultState(): OfficeState {
   }
 }
 
+function singleDrawing(files: ProjectFile[] = [], sourceName?: string): ProjectFile[] {
+  const file = files.find(file => file.name === sourceName) || files[0]
+  return file ? [file] : []
+}
+
 function loadLocalState(): Partial<OfficeState> {
   if (typeof window === 'undefined') return {}
   try {
@@ -122,6 +127,7 @@ function loadLocalState(): Partial<OfficeState> {
       if (key === 'source' && value === 'demo') return 'sample'
       return value
     }) as OfficeState
+    parsed.files = singleDrawing(parsed.files, parsed.floorPlan?.sourceName)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
     localStorage.removeItem(LEGACY_STORAGE_KEY)
     const { undoStack, ...rest } = parsed
@@ -143,7 +149,7 @@ export const useOfficeStore = defineStore('office', {
   state: (): OfficeState => ({ ...defaultState(), ...loadLocalState(), initialized: false, loading: false, floorPlanLoading: false, syncState: 'idle', syncError: null }),
 
   getters: {
-    drawingName: (state): string => state.floorPlan?.sourceName || state.files[0]?.name || '办公空间',
+    drawingName: (state): string => state.files[0]?.name || state.floorPlan?.sourceName || '办公空间',
     zones: (state): ZoneObject[] => state.objects.filter((o) => o.kind === 'zone') as ZoneObject[],
     activeZone: (state): ZoneObject | null => {
       const list = (state.objects.filter((o) => o.kind === 'zone') as ZoneObject[])
@@ -209,7 +215,7 @@ export const useOfficeStore = defineStore('office', {
         const canvas = canvasResult.canvas
         if (canvas && Array.isArray(canvas.objects) && canvas.revision >= this.canvasRevision) {
           this.objects = canvas.objects
-          this.files = canvas.files
+          this.files = singleDrawing(canvas.files, this.floorPlan?.sourceName)
           this.canvasMode = canvas.mode
           this.designZoneId = canvas.designZoneId
           this.canvasRevision = canvas.revision
@@ -346,20 +352,6 @@ export const useOfficeStore = defineStore('office', {
       this.blank = true
       this.objects = []
       this.canvasRevision++
-      this.schedulePersist()
-    },
-
-    addFiles(list: FileList | null) {
-      if (!list) return
-      const allowed = ['pdf', 'png', 'jpg', 'jpeg', 'dwg', 'dxf']
-      const accepted = Array.from(list).filter((f) => {
-        const ext = (f.name.split('.').pop() || '').toLowerCase()
-        return allowed.includes(ext)
-      })
-      for (const f of accepted) {
-        const ext = (f.name.split('.').pop() || '').toUpperCase()
-        this.files.push({ name: f.name, size: f.size, type: ext, mock: false })
-      }
       this.schedulePersist()
     },
 

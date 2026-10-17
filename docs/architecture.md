@@ -38,6 +38,8 @@ Viewport（平移、缩放）独立于上述物理几何
 
 2026-10-17 移除项目资料及 office_project 表；保留业务表 project_id 和现有路径中的 projects 以兼容稳定 ID。上传、画布、模板、选品与预览无需先创建项目资料。启动迁移仅删除旧表及指向它的外键，不级联删除业务记录。画布保存、模块选品与预览创建共用按隔离键获取的 PostgreSQL 事务 advisory lock，替代原项目行锁，详见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。
 
+当前上传页和 office_canvas.files_json 使用零或一张当前图纸；后端保存拒绝多文件。旧草稿恢复时优先选择与底图同名的文件，否则保留首个。更换文件只更新上传文件和二进制缓存、清除上传页旧识别预览，不删除已保存几何或历史识别；见 [UPLOAD-001](tasks/UPLOAD-001-single-drawing.md)。
+
 所有关联使用稳定 ID。文件名、数组下标、可修改的房间名称不能作为唯一关联键。
 重识别生成新的识别版本；以映射/比较方式处理用户编辑，不沿用序号误配空间。
 当前兼容导入会通过分析详情的 `imageSha256` / `designCorrections` 继承同项目、同标准底图、唯一同名的人工轮廓；原始 `rooms` / `sourcePolygon` 与新来源版本保留，毫米稿还原为来源像素后再应用到新设计副本。`contourGrounded` 记录独立房名定位和封闭墙线证据，防止完全错位的历史框覆盖新定位的封闭房间；不代表人工确认或比例确认。见 [RECOG-005](tasks/RECOG-005-label-grounding-and-correction-reuse.md)。
