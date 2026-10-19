@@ -10,9 +10,9 @@ const actionMessage = ref<string | null>(null)
 const search = ref('')
 const status = ref('')
 const currentPage = ref(1)
-const pageSize = ref(12)
+const pageSize = ref(20)
 const pageInput = ref(1)
-const pageSizeOptions = [12, 24, 48, 96]
+const pageSizeOptions = [10, 20, 50, 100]
 const selectedIds = ref<Set<string>>(new Set())
 const isDeleting = ref(false)
 const deleteDialog = ref<HTMLDialogElement | null>(null)
@@ -30,6 +30,21 @@ const filteredProducts = computed(() => {
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredProducts.value.length / pageSize.value)))
 const pageProducts = computed(() => filteredProducts.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+const pageStart = computed(() => filteredProducts.value.length ? (currentPage.value - 1) * pageSize.value + 1 : 0)
+const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, filteredProducts.value.length))
+const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
+  const total = pageCount.value
+  const current = currentPage.value
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
+  const pages = new Set([1, total, current, current - 1, current + 1])
+  const sorted = [...pages].filter(page => page >= 1 && page <= total).sort((a, b) => a - b)
+  const items: Array<number | 'ellipsis'> = []
+  sorted.forEach((page, index) => {
+    if (index > 0 && page - sorted[index - 1] > 1) items.push('ellipsis')
+    items.push(page)
+  })
+  return items
+})
 const pageProductIds = computed(() => pageProducts.value.map(product => product.rspuId))
 const allPageSelected = computed(() => pageProductIds.value.length > 0 && pageProductIds.value.every(id => selectedIds.value.has(id)))
 const somePageSelected = computed(() => pageProductIds.value.some(id => selectedIds.value.has(id)) && !allPageSelected.value)
@@ -113,9 +128,10 @@ function closeDeleteDialog() {
   if (!isDeleting.value) deleteDialog.value?.close()
 }
 
-function goToPage() {
-  const target = Math.min(pageCount.value, Math.max(1, Math.trunc(Number(pageInput.value) || 1)))
+function goToPage(value = pageInput.value) {
+  const target = Math.min(pageCount.value, Math.max(1, Math.trunc(Number(value) || 1)))
   currentPage.value = target
+  pageInput.value = target
 }
 
 async function deleteSelectedProducts() {
@@ -229,7 +245,7 @@ onMounted(loadProducts)
               <td class="px-5 py-4"><input type="checkbox" :checked="selectedIds.has(product.rspuId)" :disabled="isDeleting" :aria-label="`选择${product.productName || '商品'}`" @change="toggleProduct(product.rspuId)"></td>
               <td class="px-2 py-3">
                 <NuxtLink :to="`/products/${product.rspuId}`" class="group flex w-fit items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2" :aria-label="`查看${product.productName || '商品'}详情`">
-                  <div class="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg border border-line transition group-hover:border-bronze"><ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" /></div>
+                  <div class="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg border border-line bg-white transition group-hover:border-bronze"><ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" /></div>
                   <div class="min-w-0 max-w-[250px]"><div class="truncate font-medium group-hover:text-bronze-dark group-hover:underline" :title="product.productName || undefined">{{ product.productName || '未命名商品' }}</div><div class="mt-1 text-xs text-muted">{{ product.rspuCode || product.externalCode || product.rspuId }}</div></div>
                 </NuxtLink>
               </td>
@@ -244,9 +260,39 @@ onMounted(loadProducts)
         </table>
       </div>
 
-      <div v-if="statsAvailable && products.length" class="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs text-muted">
-        <span aria-live="polite">共 {{ filteredProducts.length }} 件商品 · 每页 {{ pageSize }} 件</span>
-        <div class="flex flex-wrap items-center justify-end gap-3"><label class="flex items-center gap-2">每页<select v-model.number="pageSize" class="rounded-md border border-line bg-white px-2 py-1.5 text-ink"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select>件</label><button type="button" class="rounded-md border border-line px-3 py-2 text-ink disabled:opacity-40" :disabled="currentPage === 1" @click="currentPage--">上一页</button><label class="flex items-center gap-1">第<input v-model.number="pageInput" type="number" min="1" :max="pageCount" class="w-14 rounded-md border border-line px-2 py-1.5 text-center text-ink" aria-label="跳转到页码" @keyup.enter="goToPage" @blur="goToPage">页 / {{ pageCount }}</label><button type="button" class="rounded-md border border-line px-3 py-2 text-ink disabled:opacity-40" :disabled="currentPage === pageCount" @click="currentPage++">下一页</button></div>
+      <div v-if="statsAvailable && filteredProducts.length" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div class="text-xs text-muted" aria-live="polite">
+            正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ filteredProducts.length }}</strong> 件商品
+          </div>
+
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <label class="flex items-center gap-2 text-xs text-muted">
+              每页显示
+              <select v-model.number="pageSize" aria-label="每页显示数量" class="rounded-lg border border-line bg-white px-2.5 py-2 text-xs font-medium text-ink outline-bronze">
+                <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }} 条</option>
+              </select>
+            </label>
+
+            <nav class="flex items-center gap-1 overflow-x-auto" aria-label="商品列表页码">
+              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === 1" aria-label="第一页" @click="goToPage(1)">首页</button>
+              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === 1" aria-label="上一页" @click="goToPage(currentPage - 1)">上一页</button>
+              <template v-for="(item, index) in paginationItems" :key="`${item}-${index}`">
+                <span v-if="item === 'ellipsis'" class="grid h-9 w-8 shrink-0 place-items-center text-xs text-muted" aria-hidden="true">…</span>
+                <button v-else type="button" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border text-xs font-medium transition" :class="item === currentPage ? 'border-bronze bg-bronze text-white' : 'border-line bg-white text-ink hover:bg-cream'" :aria-current="item === currentPage ? 'page' : undefined" :aria-label="`第${item}页`" @click="goToPage(item)">{{ item }}</button>
+              </template>
+              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === pageCount" aria-label="下一页" @click="goToPage(currentPage + 1)">下一页</button>
+              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === pageCount" aria-label="最后一页" @click="goToPage(pageCount)">末页</button>
+            </nav>
+
+            <label class="flex items-center gap-2 text-xs text-muted">
+              跳至
+              <input v-model.number="pageInput" type="number" min="1" :max="pageCount" class="h-9 w-16 rounded-lg border border-line bg-white px-2 text-center text-xs text-ink outline-bronze" aria-label="跳转到页码" @keyup.enter="goToPage()">
+              <span>页</span>
+              <button type="button" class="h-9 rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream" @click="goToPage()">跳转</button>
+            </label>
+          </div>
+        </div>
       </div>
     </section>
 
