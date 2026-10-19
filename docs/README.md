@@ -40,6 +40,10 @@
 | [一键多排与空间利用](tasks/LAYOUT-003-auto-multi-row.md) | 自动横纵比较、多排、间距、轮廓约束与恢复验证 |
 | [常用排布与间距初值](tasks/LAYOUT-007-arrangement-presets-and-spacing.md) | 面对面、错位排、中间通道和默认 0 mm 列间距 |
 | [单位模块共用家具图例](tasks/LAYOUT-002-shared-furniture-legend.md) | 手动布局同源目录、毫米规格、参数化线稿与排版恢复验证 |
+| [产品样式与专用排布规则](tasks/LAYOUT-010-product-style-arrangement-rules.md) | 一字/L 型职员台、屏风卡位样式、F/T/C/十字模板与规则版本 |
+| [按空间用途分流排版](tasks/LAYOUT-011-space-layout-profiles.md) | 会议室单桌居中与开放办公区多排工位的流程分流 |
+| [排版画布尺寸标注](tasks/LAYOUT-012-layout-dimensions.md) | 单空间画布显示空间外接尺寸、模块规格、排布总长与排间净距 |
+| [排版面板操作体验](tasks/LAYOUT-013-layout-panel-ux.md) | 模块、排布、参数三步导航与紧凑操作区 |
 | [按标注修正开放分区](tasks/GEOM-008-annotated-open-zones.md) | 当前方案五处分区、比例保留、修正包及真实 API 保存记录 |
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |
 | [沿墙轮廓修正](tasks/GEOM-006-wall-contour-correction.md) | 入口/退台完整边界、补转折点、沿墙重描与撤销恢复 |

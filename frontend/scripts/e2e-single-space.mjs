@@ -139,7 +139,7 @@ try {
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   assert.equal(await canvas().locator('img').count(), 0)
   // Applying a layout in the newly selected room never replaces the previous room's furniture.
-  await page.getByRole('button', { name: '一键自动排版', exact: true }).click()
+  await page.getByTestId('apply-layout').click()
   assert.ok((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-B').length > 1)
   assert.deepEqual((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L'), confirmedFurniture)
   await page.getByRole('button', { name: '撤销', exact: true }).click()

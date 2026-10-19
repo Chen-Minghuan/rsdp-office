@@ -1,8 +1,6 @@
 import type { ManualFurnitureItem, ManualLayoutRect, ManualLayoutRoom, FurnitureCategory, FurnitureKind, FurnitureTemplate } from '~/types/manualCanvas'
 import { manualRectContainedByUnion } from '~/utils/manualLayoutGeometry'
 
-export type { FurnitureKind, FurnitureTemplate }
-
 export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
   { id: 'desk-straight', name: '职员直线桌', category: '职员桌', kind: 'desk', widthMm: 1200, depthMm: 600,
     sizeOptions: [[1200, 600], [1400, 600], [1400, 700], [1600, 700]] },

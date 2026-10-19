@@ -26,6 +26,8 @@ export interface LayoutRect {
   w: number
   h: number
   rotation: number
+  /** Reflect the glyph within its footprint; used by mirrored L desk diagrams. */
+  mirrorX?: boolean
 }
 
 function clampInside(rect: LayoutRect, zone: ZoneObject): LayoutRect {

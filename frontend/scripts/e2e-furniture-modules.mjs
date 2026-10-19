@@ -40,7 +40,11 @@ try {
   })
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
   const furniture = async () => (await state()).objects.filter(object => object.kind === 'furniture')
-  const layout = () => page.getByRole('button', { name: '一键自动排版', exact: true }).click()
+  const layout = async () => {
+    const meetingLayout = page.getByRole('button', { name: '应用单桌居中', exact: true })
+    if (await meetingLayout.count()) return meetingLayout.click()
+    return page.getByTestId('apply-layout').click()
+  }
   const catalog = () => page.getByTestId('unit-module-catalog')
   const canvas = () => page.getByTestId('office-design-canvas')
   const width = () => page.getByLabel('模块宽度（毫米）')
@@ -55,6 +59,13 @@ try {
   await page.getByRole('button', { name: '选择空间 办公家具测试空间', exact: true }).waitFor()
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await catalog().waitFor()
+  const productStyle = label => page.getByRole('button', { name: label, exact: true })
+  await productStyle('L 型职员台').click()
+  assert.equal(await catalog().locator('[data-module-id="desk-l"]').getAttribute('aria-pressed'), 'true', '选择 L 型产品样式应同步选中职员 L 桌')
+  assert.equal(await productStyle('L 型职员台').getAttribute('aria-pressed'), 'true')
+  await productStyle('一字屏风卡位').click()
+  assert.equal(await catalog().locator('[data-module-id="desk-straight"]').getAttribute('aria-pressed'), 'true', '屏风样式当前复用一字桌占地时应同步选中一字职员桌')
+  assert.equal(await productStyle('一字屏风卡位').getAttribute('aria-pressed'), 'true')
   const modules = await catalog().locator('[data-module-id]').evaluateAll(cards => cards.map(card => ({
     id: card.dataset.moduleId, name: card.getAttribute('aria-label'),
     geometry: card.querySelector('.manual-furniture-glyph').innerHTML,
@@ -78,7 +89,7 @@ try {
     assert.ok(capacity > 0, module.name)
     await layout()
     const placed = await furniture()
-    assert.equal(placed.length, capacity)
+    assert.equal(placed.length, capacity, `${module.name} 应按当前空间类型应用当前预估`)
     assert.ok(placed.every(item => item.furnitureTemplateId === module.id && item.productId === '' && item.w === w && item.h === d && item.zoneId === 'MODULE-ROOM' && item.spaceTemplateId && item.templateSpaceId === 'MODULE-ROOM'))
     assert.equal(await canvas().locator('[data-furniture-template="' + module.id + '"] .manual-furniture-glyph').count(), capacity)
   }
@@ -100,11 +111,11 @@ try {
   await page.screenshot({ path: outDir + '/01-shared-legend.png' })
   const beforeInvalid = await furniture()
   await width().fill('0')
-  assert.ok(await page.getByRole('button', { name: '一键自动排版', exact: true }).isDisabled())
+  assert.ok(await page.getByTestId('apply-layout').isDisabled())
   assert.deepEqual(await furniture(), beforeInvalid)
   await width().fill('20000')
   assert.equal(await page.getByTestId('module-capacity').innerText(), '0')
-  assert.ok(await page.getByRole('button', { name: '一键自动排版', exact: true }).isDisabled())
+  assert.ok(await page.getByTestId('apply-layout').isDisabled())
   assert.deepEqual(await furniture(), beforeInvalid, '无效或放不下不能清空已有布局')
 
   await choose('table-conference-oval')
@@ -118,11 +129,11 @@ try {
   assert.equal(await canvas().locator('[data-furniture-template="desk-l-rounded"]').count(), beforeInvalid.length)
 
   await choose('desk-straight')
-  await page.getByRole('button', { name: '沿边', exact: true }).click()
-  await page.getByRole('button', { name: '应用沿边方案', exact: true }).click()
-  const perimeter = await furniture()
-  assert.ok(perimeter.some(item => item.rotation === 90))
-  assert.ok(perimeter.every(item => item.w === 1200 && item.h === 600), '旋转占地不能改写家具实际宽深')
+  await page.getByRole('button', { name: '一字单排', exact: true }).click()
+  await page.getByTestId('apply-layout').click()
+  const strictRow = await furniture()
+  assert.ok(strictRow.every(item => item.rotation === 0))
+  assert.ok(strictRow.every(item => item.w === 1200 && item.h === 600), '严格排布不能改写家具实际宽深')
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   assert.ok((await furniture()).every(item => item.layoutConfirmed))
   await page.getByText('排版已确认', { exact: true }).waitFor()

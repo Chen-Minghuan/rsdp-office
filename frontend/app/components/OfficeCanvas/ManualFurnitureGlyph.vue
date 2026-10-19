@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { ManualFurnitureItem } from '~/types/manualCanvas'
 import { furnitureById } from '~/utils/manualFurniture'
 
-const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number }>()
+const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number; showSeat?: boolean }>()
 const template = computed(() => furnitureById.get(props.item.templateId))
 const w = computed(() => props.item.widthMm)
 const d = computed(() => props.item.depthMm)
@@ -46,6 +46,10 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <path v-else :d="`M 0 0 H ${w} V ${d} H ${w - wing} V ${desktopDepth} H 0 Z`" />
       <rect v-if="rightPanel" class="reference-guide" :x="w - panelWidth" y="0" :width="panelWidth" :height="desktopDepth" />
       <rect v-if="leftPanel" class="reference-guide" x="0" y="0" :width="panelWidth" :height="desktopDepth" />
+      <g v-if="showSeat" class="layout-seat" fill="none">
+        <ellipse :cx="w * 0.39" :cy="d * 0.77" :rx="w * 0.18" :ry="d * 0.14" />
+        <path :d="`M ${w * 0.27} ${d * 0.83} Q ${w * 0.39} ${d * 0.91} ${w * 0.51} ${d * 0.83}`" />
+      </g>
     </template>
     <template v-else-if="template.kind === 'l-desk'">
       <path :d="`M 0 0 H ${w} V ${wing} H ${wing} V ${d} H 0 Z`" />

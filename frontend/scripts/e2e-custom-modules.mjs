@@ -143,7 +143,7 @@ try {
   assert.deepEqual(await placed(), beforeEdit, '编辑目录不改写已摆实例的几何和图例快照')
   assert.equal((await state()).customModules[0].glyphTemplateId, 'table-meeting-round')
   assert.equal(await page.getByTestId('office-design-canvas').locator('[data-furniture-template="desk-l"]').count(), 2)
-  await page.getByRole('button', { name: '一键自动排版', exact: true }).click()
+  await page.getByTestId('apply-layout').click()
   const auto = await placed()
   assert.ok(auto.length > 2 && auto.every(item => item.furnitureTemplateId === module.id && item.moduleSnapshot.glyphTemplateId === 'table-meeting-round' && item.productId === ''))
   await page.getByRole('button', { name: '撤销', exact: true }).click()

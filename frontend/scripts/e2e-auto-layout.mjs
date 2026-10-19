@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
-import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -11,190 +10,75 @@ const reservation = createServer()
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
 const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
-const baseUrl = 'http://127.0.0.1:' + port
+const baseUrl = `http://127.0.0.1:${port}`
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
-const outDir = process.env.OUT_DIR || '/tmp/rsdp-auto-layout'
-let browser, debugPage
+let browser
 try {
   for (let attempt = 0; ; attempt++) {
     try { if ((await fetch(baseUrl)).ok) break } catch {}
     if (attempt >= 75 || app.exitCode !== null) throw new Error('请先 pnpm build；预览服务未就绪')
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
-  const context = await browser.newContext({ viewport: { width: 1800, height: 1200 } })
-  const page = await context.newPage(), errors = []
-  debugPage = page
+  const context = await browser.newContext({ viewport: { width: 1700, height: 1100 } })
+  const page = await context.newPage()
+  const errors = []
   page.on('pageerror', error => errors.push(error.message))
   const source = {
-    analysisId: 'AUTO-TEST', analysisRevision: 1, status: 'awaiting_confirm', sourceName: '自动多排测试.dxf',
+    analysisId: 'STRICT-TEST', analysisRevision: 1, status: 'awaiting_confirm', sourceName: '严格排布测试.dxf',
     inputMode: 'cad', geometrySource: 'cad_geometry', evidenceKind: 'REAL_SERVICE',
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
-    rooms: [
-      { roomId: 'AUTO-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0,0],[4358,0],[4358,4376],[0,4376]] },
-      { roomId: 'OTHER-ROOM', label: '其他空间', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[10000,0],[16000,0],[16000,4000],[10000,4000]] },
-    ],
+    rooms: [{ roomId: 'STRICT-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0,0],[16000,0],[16000,10000],[0,10000]] }],
   }
+  let floorPlanRequests = 0
   await context.route('**/api/v1/**', route => {
     const path = new URL(route.request().url()).pathname
-    const data = path.endsWith('/floor-plan/AUTO-TEST') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
+    const data = path.endsWith('/floor-plan/STRICT-TEST') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
-  const furniture = async () => (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'AUTO-ROOM')
-  const apply = () => page.getByRole('button', { name: '一键自动排版', exact: true }).click()
-  const capacity = () => page.getByTestId('module-capacity').innerText()
-  await page.goto(baseUrl + '/canvas?analysisId=AUTO-TEST', { waitUntil: 'networkidle' })
+  await page.goto(`${baseUrl}/canvas?analysisId=STRICT-TEST`, { waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '选择空间 开放办公区', exact: true }).waitFor()
+  // The mock source is intentionally converted to a calibrated design copy so
+  // this UI test exercises the layout stage rather than the review gate.
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
-    const room = draft.objects.find(object => object.id === 'AUTO-ROOM')
-    for (let i = 0; i < 3; i++) draft.objects.push({ id: 'OLD-' + i, kind: 'furniture', furnitureTemplateId: 'desk-straight', productId: '', zoneId: room.id, x: room.x + 20 + i * 1210, y: room.y + 20, w: 1200, h: 600, rotation: 0, layoutConfirmed: true, layoutSettings: { mode: 'row', spacing: { wallMm: 300, aisleMm: 900, gapMm: 100 } } })
-    draft.objects.push({ id: 'KEEP-OTHER', kind: 'furniture', furnitureTemplateId: 'chair-office', productId: '', zoneId: 'OTHER-ROOM', x: 11000, y: -3000, w: 650, h: 650, rotation: 0 })
+    for (const zone of draft.objects.filter(object => object.kind === 'zone')) zone.reviewUnit = 'mm'
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
-  await page.goto(baseUrl + '/canvas?analysisId=AUTO-TEST&mode=design&zoneId=AUTO-ROOM', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '自动优化', exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: '单排', exact: true }).getAttribute('aria-pressed'), 'true')
-  assert.equal(await capacity(), '2')
-  assert.equal(await page.getByTestId('current-furniture-count').innerText(), '3 件')
-  assert.equal(await page.getByTestId('auto-layout-capacity').innerText(), '6 件 · 3 排')
-  await page.getByTestId('layout-pending').waitFor()
-  await page.screenshot({ path: outDir + '/00-restored-single-row.png' })
-  assert.equal((await furniture()).length, 3, '预览不能自动替换原有布局')
-  const geometry = (await state()).objects.filter(object => object.kind === 'zone')
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const primaryBox = await page.getByRole('button', { name: '一键自动排版', exact: true }).boundingBox()
-  assert.ok(primaryBox.y >= 0 && primaryBox.y + primaryBox.height <= 900, '常见视口下自动排版主按钮始终可见')
-  await page.setViewportSize({ width: 1800, height: 1200 })
-  await apply()
-  const generated = await furniture()
-  assert.equal(generated.length, 6)
-  assert.equal(await page.getByRole('button', { name: '自动优化', exact: true }).getAttribute('aria-pressed'), 'true')
-  assert.equal(await page.getByRole('button', { name: '单排', exact: true }).getAttribute('aria-pressed'), 'false')
-  await page.getByRole('status').filter({ hasText: '已应用自动多排：6 件' }).waitFor()
-  assert.equal(await page.getByTestId('layout-pending').count(), 0)
-  assert.equal(new Set(generated.map(item => item.y)).size, 3)
-  const room = geometry.find(object => object.id === 'AUTO-ROOM')
-  assert.ok(Math.max(...generated.map(item => item.y + item.h)) > room.y + room.h * 0.8)
-  assert.ok(generated.every(item => item.w === 1200 && item.h === 600 && item.layoutConfirmed === false && item.layoutSettings.mode === 'auto'))
-  await page.getByTestId('layout-row-summary').filter({ hasText: '3 排' }).waitFor()
-  assert.equal(await page.getByTestId('office-design-canvas').locator('polygon.board-element').count(), 1)
-  await page.screenshot({ path: outDir + '/01-auto-multi-row.png', animations: 'disabled' })
-  const first = await page.getByTestId('office-design-canvas').locator('[data-id="' + generated[0].id + '"]').boundingBox()
-  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(first.x + first.width / 2 + 12, first.y + first.height / 2 + 12, { steps: 4 })
-  await page.mouse.up()
-  assert.equal((await furniture()).length, 6)
-  await page.getByTestId('layout-pending').waitFor()
-  assert.equal(await page.getByRole('status').filter({ hasText: '已应用自动多排' }).count(), 0, '家具位置改变后旧成功提示失效')
-  await apply()
-  assert.equal(await page.getByTestId('layout-pending').count(), 0)
-  await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
-  await page.getByText('排版已确认', { exact: true }).waitFor()
-  await page.getByLabel('排间净距（毫米）').fill('1600')
-  assert.equal(await capacity(), '4')
-  assert.equal((await furniture()).length, 6, '更改参数只更新预估，点击后才替换家具')
-  await apply()
-  const spaced = await furniture()
-  assert.equal(spaced.length, 4)
-  assert.ok(spaced.every(item => !item.layoutConfirmed && item.layoutSettings.spacing.aisleMm === 1600))
-  const ys = [...new Set(spaced.map(item => item.y))].sort((a,b) => a-b)
-  assert.ok(ys[1] - ys[0] - 600 >= 1600)
-  await page.reload({ waitUntil: 'networkidle' })
-  await page.getByTestId('office-design-canvas').waitFor()
-  assert.deepEqual(await furniture(), spaced)
-  assert.equal(await capacity(), '4')
-  assert.equal(await page.getByLabel('排间净距（毫米）').inputValue(), '1600')
-  await page.getByLabel('排间净距（毫米）').fill('-1')
-  assert.ok(await page.getByRole('button', { name: '一键自动排版', exact: true }).isDisabled())
-  assert.deepEqual(await furniture(), spaced)
-  await page.getByLabel('排间净距（毫米）').fill('900')
-  await apply()
-  assert.equal((await furniture()).length, 6)
-  await page.getByRole('button', { name: '撤销', exact: true }).click()
-  assert.deepEqual(await furniture(), spaced)
-  assert.equal(await page.getByLabel('排间净距（毫米）').inputValue(), '1600', '撤销同时恢复参数')
-  await page.getByRole('button', { name: '单排', exact: true }).click()
-  await page.getByRole('button', { name: '应用单排方案', exact: true }).click()
-  assert.equal((await furniture()).length, 2)
-  assert.equal(new Set((await furniture()).map(item => item.y)).size, 1)
-  await page.reload({ waitUntil: 'networkidle' })
-  await page.getByTestId('office-design-canvas').waitFor()
-  assert.equal(await page.getByRole('button', { name: '单排', exact: true }).getAttribute('aria-pressed'), 'true')
-  await apply()
-  assert.equal((await furniture()).length, 4, '恢复单排后主入口直接按自动多排执行，保留 1600mm 净距')
-  await page.getByLabel('排间净距（毫米）').fill('900')
-  await page.getByLabel('离墙距离（毫米）').fill('1000')
-  assert.ok(Number(await capacity()) < 6)
-  await page.getByLabel('离墙距离（毫米）').fill('300')
-  await page.getByLabel('同排间距（毫米）').fill('2000')
-  assert.ok(Number(await capacity()) < 6)
-  await page.getByLabel('同排间距（毫米）').fill('100')
-  await apply()
-  for (const label of ['单排', '背靠背', '矩阵', '面对面', '错位排', '中间通道', '沿边']) {
-    await page.getByRole('button', { name: label, exact: true }).click()
-    assert.ok(Number(await capacity()) > 0, label + ' 应有可用方案')
-    if (label === '面对面') assert.equal(await page.getByLabel('对排中缝（毫米）').inputValue(), '900')
-    await page.getByRole('button', { name: `应用${label}方案`, exact: true }).click()
-    const items = await furniture()
-    assert.ok(items.length > 0)
-    if (label === '单排') assert.ok(items.every(item => item.y === room.y + 300), '单排应靠上布置')
-    if (label === '背靠背' || label === '面对面') {
-      const rowYs = [...new Set(items.map(item => item.y))].sort((a, b) => a - b)
-      const gap = label === '背靠背' ? 0 : 900
-      assert.equal(rowYs[1] - rowYs[0] - 600, gap, label + ' 的对排净距应符合名称')
-      const firstRow = items.filter(item => item.y === rowYs[0])
-      const secondRow = items.filter(item => item.y === rowYs[1])
-      assert.ok(firstRow.every(item => item.rotation === (label === '背靠背' ? 0 : 180)))
-      assert.ok(secondRow.every(item => item.rotation === (label === '背靠背' ? 180 : 0)))
-    }
-    if (label === '中间通道') {
-      const left = items.filter(item => item.x < room.x + room.w / 2)
-      const right = items.filter(item => item.x > room.x + room.w / 2)
-      assert.ok(left.length > 0 && right.length > 0 && left.every(item => item.rotation === 90) && right.every(item => item.rotation === 270), '中间通道应左右分列并朝向通道')
-    }
-    if (label === '沿边') assert.ok(items.some(item => item.rotation === 90) && items.some(item => item.rotation === 270), '沿边应覆盖左右两侧')
-    await page.screenshot({ path: outDir + `/mode-${label}.png`, animations: 'disabled' })
-  }
-  await page.getByRole('button', { name: '面对面', exact: true }).click()
-  await page.getByLabel('对排中缝（毫米）').fill('200')
-  await page.getByRole('button', { name: '应用面对面方案', exact: true }).click()
-  assert.ok((await furniture()).every(item => item.layoutSettings.spacing.faceGapMm === 200))
-  await page.reload({ waitUntil: 'networkidle' })
-  assert.equal(await page.getByRole('button', { name: '面对面', exact: true }).getAttribute('aria-pressed'), 'true')
-  assert.equal(await page.getByLabel('对排中缝（毫米）').inputValue(), '200')
-  await page.getByLabel('对排中缝（毫米）').scrollIntoViewIfNeeded()
-  await page.screenshot({ path: outDir + '/02-spacing-settings.png' })
-  assert.deepEqual((await state()).objects.filter(object => object.kind === 'zone'), geometry)
-  assert.equal((await state()).objects.find(object => object.id === 'KEEP-OTHER').zoneId, 'OTHER-ROOM')
-  await page.evaluate(() => localStorage.removeItem('rsdp-office-v01'))
-  await page.goto(baseUrl + '/canvas?analysisId=AUTO-TEST', { waitUntil: 'networkidle' })
-  await page.goto(baseUrl + '/canvas?analysisId=AUTO-TEST&mode=design&zoneId=AUTO-ROOM', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '自动优化', exact: true }).waitFor()
-  assert.equal(await page.getByLabel('同排间距（毫米）').inputValue(), '0', '新方案的同排间距默认 0mm')
-  assert.equal(await page.getByLabel('左右桌子留缝').isChecked(), false)
-  await apply()
-  assert.equal((await furniture()).length, 9)
-  await page.getByLabel('左右桌子留缝').check()
-  assert.equal(await page.getByLabel('同排间距（毫米）').inputValue(), '100')
-  assert.equal((await furniture()).length, 9, '修改间距只能更新预估')
-  await apply()
-  assert.equal((await furniture()).length, 6)
-  await page.getByLabel('同排间距（毫米）').fill('250')
-  await apply()
-  const adjusted = await furniture()
-  assert.equal(adjusted[1].x - adjusted[0].x - 1200, 250, '每列桌子间距应按输入毫米数生成')
-  assert.ok(adjusted.every(item => item.layoutSettings.spacing.gapMm === 250))
-  await page.getByLabel('左右桌子留缝').uncheck()
-  assert.equal(await page.getByLabel('同排间距（毫米）').inputValue(), '0')
+  await page.goto(`${baseUrl}/canvas?analysisId=STRICT-TEST`, { waitUntil: 'networkidle' })
+  const enter = page.getByRole('button', { name: '进入家具排版 →', exact: true })
+  await enter.click()
+  await page.getByTestId('unit-module-catalog').waitFor()
+
+  assert.equal(await page.getByRole('button', { name: '自动优化', exact: true }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: '矩阵', exact: true }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: '一字单排', exact: true }).count(), 1)
+  assert.equal(await page.getByRole('button', { name: '一字对坐', exact: true }).count(), 1)
+  assert.equal(await page.getByLabel('对排中缝（毫米）').inputValue(), '1000')
+  const initialCapacity = Number(await page.getByTestId('module-capacity').innerText())
+  assert.ok(initialCapacity > 0)
+  await page.getByTestId('apply-layout').click()
+  let furniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'STRICT-ROOM')
+  assert.equal(furniture.length, initialCapacity)
+  assert.ok(furniture.every(item => item.layoutSettings.arrangementPresetId === 'straight-desk-row' && item.layoutSettings.arrangementRuleVersion === '2026-10-style-v3'))
+
+  await page.getByRole('button', { name: '一字对坐', exact: true }).click()
+  assert.equal(await page.getByLabel('对排中缝（毫米）').inputValue(), '1600')
+  await page.getByTestId('apply-layout').click()
+  furniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'STRICT-ROOM')
+  assert.ok(furniture.some(item => item.rotation === 180))
+
+  await page.getByRole('button', { name: 'L 型屏风卡位', exact: true }).click()
+  for (const label of ['F 型单排', 'T 型对坐', 'C 型对坐', '十字型对坐']) assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1)
+  assert.equal(await page.getByRole('button', { name: '背靠背', exact: true }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: '中间通道', exact: true }).count(), 0)
+  await page.getByRole('button', { name: '十字型对坐', exact: true }).click()
+  assert.equal(await page.getByLabel('排间净距（毫米）').inputValue(), '900')
+  assert.equal(await page.getByLabel('对排中缝（毫米）').count(), 0)
+  assert.ok(Number(await page.getByTestId('module-capacity').innerText()) > 0)
   assert.deepEqual(errors, [])
-  console.log('自动排版入口 UI 通过：旧方案恢复、新布局默认 0mm/左右留缝、三种新模式、对排中缝与刷新恢复、预估/应用分离及900高视口主按钮可见。全部 API 模拟。')
-} catch (failure) {
-  await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
-  throw failure
+  console.log('严格产品样式 UI 通过：样式兼容排布过滤、1000/1600/900mm 默认间距、四种 L 型屏风拓扑和布局快照版本均通过。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

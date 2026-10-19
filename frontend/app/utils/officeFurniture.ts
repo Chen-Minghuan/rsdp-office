@@ -1,11 +1,12 @@
 import type { FurnitureObject, Product, ZoneObject } from '~/types/office'
 import type { FurnitureTemplate, ManualFurnitureItem } from '~/types/manualCanvas'
-import { planOfficeFurniture, OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { planMeetingFurniture, planOfficeFurniture, planStrictArrangement, OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { LayoutRect } from '~/utils/layout'
 import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import type { OfficeModuleTemplate } from '~/types/officeModule'
+import type { OfficeLayoutSettingsMeta } from '~/types/officeArrangement'
 
 /** Local SVG coordinates; the canvas applies the instance position and rotation. */
 export function furnitureGlyphItem(template: FurnitureTemplate, widthMm = template.widthMm, depthMm = template.depthMm): ManualFurnitureItem {
@@ -27,8 +28,13 @@ export function officeFurnitureTemplateId(item: FurnitureObject, product?: Produ
   return product ? legacy[product.kind] : undefined
 }
 
-export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing) {
-  return planOfficeFurniture(zone, widthMm, depthMm, arrangement, spacing).slots
+export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId']) {
+  const plan = context === 'meeting'
+    ? planMeetingFurniture(zone, widthMm, depthMm, spacing)
+    : productStyleId && arrangementPresetId
+      ? planStrictArrangement(zone, widthMm, depthMm, productStyleId, arrangementPresetId, spacing)
+      : planOfficeFurniture(zone, widthMm, depthMm, arrangement, spacing)
+  return plan.slots
 }
 
 /** Compare actual instances, including manual moves, to the unapplied preview. */
@@ -40,13 +46,22 @@ export function furnitureMatchesPlan(items: FurnitureObject[], templateId: strin
     const turned = item.rotation === 90 || item.rotation === 270
     const w = turned ? item.h : item.w, h = turned ? item.w : item.h
     return (item.heightMm ?? null) === (heightMm ?? null) && item.furnitureTemplateId === templateId && (!glyphTemplateId || officeFurnitureTemplateId(item) === glyphTemplateId) && near(item.w, widthMm) && near(item.h, depthMm)
-      && item.rotation === slot.rotation && near(w, slot.w) && near(h, slot.h)
+      && item.rotation === slot.rotation && !!item.mirrorX === !!slot.mirrorX && near(w, slot.w) && near(h, slot.h)
       && near(item.x + (item.w - w) / 2, slot.x) && near(item.y + (item.h - h) / 2, slot.y)
   })
 }
 
-export function createTemplateFurniture(zone: ZoneObject, template: OfficeModuleTemplate, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing): FurnitureObject[] {
-  return furnitureTemplateArrangement(zone, widthMm, depthMm, arrangement, spacing).map((slot, index) => {
+export function createTemplateFurniture(
+  zone: ZoneObject,
+  template: OfficeModuleTemplate,
+  widthMm: number,
+  depthMm: number,
+  arrangement: OfficeLayoutMode,
+  spacing?: OfficeLayoutSpacing,
+  meta?: OfficeLayoutSettingsMeta,
+): FurnitureObject[] {
+  const context: 'meeting' | 'workstation' = meta?.layoutContext === 'meeting' || template.category === '会议与洽谈' ? 'meeting' : 'workstation'
+  return furnitureTemplateArrangement(zone, widthMm, depthMm, arrangement, spacing, context, meta?.productStyleId, meta?.arrangementPresetId).map((slot, index) => {
     // Slots describe the rotated footprint; stored width/depth describe the actual object.
     const turned = slot.rotation === 90 || slot.rotation === 270
     const w = turned ? slot.h : slot.w, h = turned ? slot.w : slot.h
@@ -54,9 +69,10 @@ export function createTemplateFurniture(zone: ZoneObject, template: OfficeModule
       id: uid('f'), kind: 'furniture', furnitureTemplateId: template.id,
       ...('custom' in template ? { moduleSnapshot: { ...template } } : {}),
       x: slot.x + (slot.w - w) / 2, y: slot.y + (slot.h - h) / 2,
-      w, h, rotation: slot.rotation, productId: '', zoneId: zone.id,
+      w, h, rotation: slot.rotation, ...(slot.mirrorX ? { mirrorX: true } : {}), productId: '', zoneId: zone.id,
       label: `${template.name} ${index + 1}`, wingWidthMm: 550, heightMm: template.heightMm,
-      layoutConfirmed: false, layoutSettings: { mode: arrangement, spacing: { ...(spacing || OFFICE_LAYOUT_SPACING) } },
+      layoutConfirmed: false,
+      layoutSettings: { mode: arrangement, spacing: { ...(spacing || OFFICE_LAYOUT_SPACING) }, ...(meta || {}) },
     }
   })
 }

@@ -7,6 +7,7 @@ import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
 import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
 import { officeFurnitureTemplateId } from '~/utils/officeFurniture'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone } from '~/utils/officeCanvasView'
+import { formatDimensionMm, officeDimensionBounds, officeDimensionRows, officeFurnitureFootprintBounds } from '~/utils/officeDimensionAnnotations'
 
 const store = useOfficeStore()
 const tool = defineModel<string>('tool', { default: 'select' })
@@ -77,6 +78,22 @@ const furniture = computed(() => {
   if (mode.value !== 'design') return []
   return visibleObjects.value.filter((o) => o.kind === 'furniture') as FurnitureObject[]
 })
+const dimensionBounds = computed(() => designZone.value ? officeDimensionBounds(designZone.value) : null)
+const dimensionFurniture = computed(() => furniture.value.map(item => {
+  if (drag.value?.mode !== 'furniture' || !drag.value.ids?.includes(item.id)) return item
+  return { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) }
+}))
+const dimensionRows = computed(() => officeDimensionRows(dimensionFurniture.value))
+const dimensionFontSize = computed(() => Math.max(24, Math.min(140, 11 / Math.max(store.zoom, 0.00001))))
+const dimensionStrokeWidth = computed(() => Math.max(2, 2 / Math.max(store.zoom, 0.00001)))
+
+function furnitureDimensionLabel(item: FurnitureObject) {
+  return `${Math.round(item.w)} × ${Math.round(item.h)} mm`
+}
+
+function rowDimensionLabel(row: { count: number; minX: number; maxX: number }) {
+  return `${row.count} 件 · 总长 ${formatDimensionMm(row.maxX - row.minX)}`
+}
 
 const placementPointer = ref<{ x: number; y: number } | null>(null)
 const placementMessage = ref('')
@@ -556,7 +573,7 @@ function furnitureStyle(o: FurnitureObject) {
     top: o.y + 'px',
     width: o.w + 'px',
     height: o.h + 'px',
-    transform: o.rotation ? `rotate(${o.rotation}deg)` : undefined,
+    transform: o.rotation || o.mirrorX ? `${o.rotation ? `rotate(${o.rotation}deg) ` : ''}${o.mirrorX ? 'scaleX(-1)' : ''}` : undefined,
   }
 }
 
@@ -757,10 +774,87 @@ function furnitureProduct(o: FurnitureObject) {
         >
           <OfficeCanvasFurniturePreview v-if="officeFurnitureTemplateId(f, furnitureProduct(f))"
             :template-id="officeFurnitureTemplateId(f, furnitureProduct(f))!" :width-mm="f.w" :depth-mm="f.h"
-            :wing-width-mm="f.wingWidthMm" :selected="selectedFurnitureIds.includes(f.id)" :stroke-scale="1 / store.zoom" />
+            :wing-width-mm="f.wingWidthMm" :show-seat="f.layoutSettings?.arrangementPresetId === 'l-desk-face-to-face'"
+            :selected="selectedFurnitureIds.includes(f.id)" :stroke-scale="1 / store.zoom" />
           <div v-else class="h-full w-full border border-[#78736d] bg-white/90 flex items-center justify-center text-[10px]">{{ f.label || furnitureProduct(f)?.name || '家具' }}</div>
         </div>
       </div>
+
+      <!-- 尺寸标注：与空间和家具共用毫米世界坐标，随画布缩放/平移同步。 -->
+      <svg
+        v-if="mode === 'design' && dimensionBounds"
+        :width="worldBounds.width"
+        :height="worldBounds.height"
+        :viewBox="`0 0 ${worldBounds.width} ${worldBounds.height}`"
+        class="absolute inset-0 pointer-events-none overflow-visible"
+        aria-label="排版尺寸标注"
+      >
+        <g fill="none" stroke="#9a7657" :stroke-width="dimensionStrokeWidth" stroke-linecap="round">
+          <line :x1="dimensionBounds.minX" :y1="dimensionBounds.minY - 120" :x2="dimensionBounds.maxX" :y2="dimensionBounds.minY - 120" />
+          <line :x1="dimensionBounds.minX" :y1="dimensionBounds.minY - 150" :x2="dimensionBounds.minX" :y2="dimensionBounds.minY - 90" />
+          <line :x1="dimensionBounds.maxX" :y1="dimensionBounds.minY - 150" :x2="dimensionBounds.maxX" :y2="dimensionBounds.minY - 90" />
+          <line :x1="dimensionBounds.maxX + 120" :y1="dimensionBounds.minY" :x2="dimensionBounds.maxX + 120" :y2="dimensionBounds.maxY" />
+          <line :x1="dimensionBounds.maxX + 90" :y1="dimensionBounds.minY" :x2="dimensionBounds.maxX + 150" :y2="dimensionBounds.minY" />
+          <line :x1="dimensionBounds.maxX + 90" :y1="dimensionBounds.maxY" :x2="dimensionBounds.maxX + 150" :y2="dimensionBounds.maxY" />
+          <template v-for="row in dimensionRows" :key="`${row.id}-line`">
+            <line :x1="row.minX" :y1="row.minY - 54" :x2="row.maxX" :y2="row.minY - 54" />
+            <line :x1="row.minX" :y1="row.minY - 72" :x2="row.minX" :y2="row.minY - 36" />
+            <line :x1="row.maxX" :y1="row.minY - 72" :x2="row.maxX" :y2="row.minY - 36" />
+          </template>
+          <template v-for="(row, index) in dimensionRows" :key="`${row.id}-gap`">
+            <template v-if="row.gapFromPreviousMm !== null && row.gapFromPreviousMm > 0">
+              <line :x1="dimensionBounds.maxX + 58" :y1="dimensionRows[index - 1]!.maxY" :x2="dimensionBounds.maxX + 58" :y2="row.minY" />
+              <line :x1="dimensionBounds.maxX + 40" :y1="dimensionRows[index - 1]!.maxY" :x2="dimensionBounds.maxX + 76" :y2="dimensionRows[index - 1]!.maxY" />
+              <line :x1="dimensionBounds.maxX + 40" :y1="row.minY" :x2="dimensionBounds.maxX + 76" :y2="row.minY" />
+            </template>
+          </template>
+        </g>
+
+        <g
+          fill="#795a41"
+          :font-size="dimensionFontSize"
+          font-family="Arial, 'Microsoft YaHei', sans-serif"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          paint-order="stroke"
+          stroke="#fffdf9"
+          :stroke-width="Math.max(5, dimensionFontSize * 0.16)"
+          stroke-linejoin="round"
+        >
+          <text :x="(dimensionBounds.minX + dimensionBounds.maxX) / 2" :y="dimensionBounds.minY - 120">
+            空间外接尺寸 {{ formatDimensionMm(dimensionBounds.width) }} × {{ formatDimensionMm(dimensionBounds.height) }}
+          </text>
+          <text :x="dimensionBounds.maxX + 120" :y="(dimensionBounds.minY + dimensionBounds.maxY) / 2" :transform="`rotate(90 ${dimensionBounds.maxX + 120} ${(dimensionBounds.minY + dimensionBounds.maxY) / 2})`">
+            {{ formatDimensionMm(dimensionBounds.height) }}
+          </text>
+          <text v-for="row in dimensionRows" :key="`${row.id}-label`" :x="(row.minX + row.maxX) / 2" :y="row.minY - 54">
+            {{ rowDimensionLabel(row) }}
+          </text>
+          <template v-for="(row, index) in dimensionRows" :key="`${row.id}-gap-label`">
+            <text v-if="row.gapFromPreviousMm !== null && row.gapFromPreviousMm > 0" :x="dimensionBounds.maxX + 58" :y="(dimensionRows[index - 1]!.maxY + row.minY) / 2" :transform="`rotate(90 ${dimensionBounds.maxX + 58} ${(dimensionRows[index - 1]!.maxY + row.minY) / 2})`">
+              排间净距 {{ formatDimensionMm(row.gapFromPreviousMm) }}
+            </text>
+          </template>
+        </g>
+
+        <g
+          v-for="item in dimensionFurniture"
+          :key="`${item.id}-dimension`"
+          fill="#4f4a45"
+          :font-size="dimensionFontSize"
+          font-family="Arial, 'Microsoft YaHei', sans-serif"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          paint-order="stroke"
+          stroke="#fffdf9"
+          :stroke-width="Math.max(4, dimensionFontSize * 0.14)"
+          stroke-linejoin="round"
+        >
+          <text :x="officeFurnitureFootprintBounds(item).x + officeFurnitureFootprintBounds(item).w / 2" :y="officeFurnitureFootprintBounds(item).y + officeFurnitureFootprintBounds(item).h / 2">
+            {{ furnitureDimensionLabel(item) }}
+          </text>
+        </g>
+      </svg>
 
       <div v-if="placementPreview" data-testid="furniture-placement-preview" class="absolute pointer-events-none opacity-60"
         :data-valid="!placementProblem" :style="{ ...furnitureStyle(placementPreview), outline: `${2 / store.zoom}px dashed ${placementProblem ? '#c45c4c' : '#306fcb'}` }">

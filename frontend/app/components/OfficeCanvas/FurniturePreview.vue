@@ -8,6 +8,7 @@ const props = defineProps<{
   widthMm?: number
   depthMm?: number
   wingWidthMm?: number
+  showSeat?: boolean
   selected?: boolean
   thumbnail?: boolean
   strokeScale?: number
@@ -27,6 +28,6 @@ const viewBox = computed(() => {
 
 <template>
   <svg :viewBox="viewBox" :data-furniture-template="templateId" class="block h-full w-full overflow-visible" aria-hidden="true">
-    <ManualFurnitureGlyph v-if="item" :item="item" :selected="selected" :stroke-scale="strokeScale" />
+    <ManualFurnitureGlyph v-if="item" :item="item" :selected="selected" :stroke-scale="strokeScale" :show-seat="showSeat" />
   </svg>
 </template>

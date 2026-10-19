@@ -28,6 +28,7 @@ import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLa
 import { furnitureById } from '~/utils/manualFurniture'
 import { createTemplateFurniture } from '~/utils/officeFurniture'
 import type { CustomOfficeModule, OfficeModuleInput } from '~/types/officeModule'
+import type { OfficeLayoutSettingsMeta } from '~/types/officeArrangement'
 import { customModuleDefinition, moduleInputProblem, restoreCustomModules } from '~/utils/officeModules'
 import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, identifyManualFurniture } from '~/utils/officeManualPlacement'
 import type { OfficeFurniturePlacement } from '~/utils/officeManualPlacement'
@@ -1034,12 +1035,20 @@ export const useOfficeStore = defineStore('office', {
       })
     },
 
-    layoutFurnitureTemplate(zoneId: string, templateId: string, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing) {
+    layoutFurnitureTemplate(
+      zoneId: string,
+      templateId: string,
+      widthMm: number,
+      depthMm: number,
+      arrangement: OfficeLayoutMode,
+      spacing?: OfficeLayoutSpacing,
+      meta?: OfficeLayoutSettingsMeta,
+    ) {
       if (!this.canEnterLayout) return false
       const zone = this.zones.find(zone => zone.id === zoneId)
       const template = this.customModules.find(module => module.id === templateId) || furnitureById.get(templateId)
       if (!zone || !template) return false
-      const placed = createTemplateFurniture(zone, template, widthMm, depthMm, arrangement, spacing)
+      const placed = createTemplateFurniture(zone, template, widthMm, depthMm, arrangement, spacing, meta)
       if (!placed.length) return false
       this.cancelFurniturePlacement()
       if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false

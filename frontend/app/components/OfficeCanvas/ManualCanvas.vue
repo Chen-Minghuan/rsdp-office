@@ -7,7 +7,8 @@ import {
   furnitureCatalogTemplates, furnitureById, furnitureBounds, furnitureCategories,
   furnitureInsideRoom, furnitureOverlap, newFurnitureItem,
 } from '~/utils/manualFurniture'
-import type { FurnitureArrangement, FurnitureTemplate } from '~/utils/manualFurniture'
+import type { FurnitureArrangement } from '~/utils/manualFurniture'
+import type { FurnitureTemplate } from '~/types/manualCanvas'
 import {
   manualRectContainedByUnion,
   manualPlacementZones,

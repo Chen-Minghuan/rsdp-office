@@ -1,5 +1,6 @@
 import type { CustomOfficeModule } from './officeModule'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
+import type { OfficeLayoutSettingsMeta } from './officeArrangement'
 import type { DimensionCalibrationEvidence } from './dimensionCalibration'
 
 export type ZoneType =
@@ -93,7 +94,7 @@ export interface FurnitureObject {
   furnitureTemplateId?: string
   /** Immutable definition for a custom instance, independent of local catalog edits. */
   moduleSnapshot?: CustomOfficeModule
-  layoutSettings?: { mode: OfficeLayoutMode; spacing: OfficeLayoutSpacing }
+  layoutSettings?: { mode: OfficeLayoutMode; spacing: OfficeLayoutSpacing } & OfficeLayoutSettingsMeta
   wingWidthMm?: number
   heightMm?: number
   spaceTemplateId?: string
@@ -105,6 +106,8 @@ export interface FurnitureObject {
   w: number
   h: number
   rotation: number
+  /** Reflect the drawn glyph within the same physical footprint. */
+  mirrorX?: boolean
   productId: string
   zoneId: string
   label?: string
