@@ -3,6 +3,7 @@ import type { SpatialGeometry, SpatialSceneSnapshot, SpatialSpace } from '~/type
 import type { CameraTransform } from '~/utils/spatial/camera'
 import type { DimensionReferenceOverlay } from '~/types/dimensionCalibration'
 import { fromScreen, toScreen } from '~/utils/spatial/camera'
+import { withApiBase } from '~/utils/apiBase'
 import { polygonCentroid, polygonBounds } from '~/utils/spatial/geometry'
 import type { ContourOperation, ResizeHandle } from '~/utils/spatial/contourTransform'
 
@@ -195,7 +196,7 @@ onBeforeUnmount(() => observer?.disconnect())
     <g v-if="scene">
       <g v-if="showUnderlay && scene.underlays[0]" :transform="underlayTransform()" :opacity="underlayOpacity" data-layer="underlay">
         <image v-if="fallbackImageUrl || scene.underlays[0].assetId"
-          :href="scene.underlays[0].assetId ? '/uploads/floor-plan/' + scene.underlays[0].assetId : fallbackImageUrl"
+          :href="scene.underlays[0].assetId ? withApiBase('/uploads/floor-plan/' + scene.underlays[0].assetId) : fallbackImageUrl"
           :width="scene.underlays[0].widthPx" :height="scene.underlays[0].heightPx" preserveAspectRatio="none" />
       </g>
       <g v-if="showOutline" data-layer="design">

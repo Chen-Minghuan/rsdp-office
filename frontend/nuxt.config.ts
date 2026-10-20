@@ -15,4 +15,10 @@ export default defineNuxtConfig({
   imports: {
     dirs: ['stores'],
   },
+  runtimeConfig: {
+    public: {
+      // Build-time same-origin API prefix; '/office' for the domain subpath build.
+      apiBaseUrl: '',
+    },
+  },
 })

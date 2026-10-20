@@ -70,6 +70,26 @@ services:
       cad-parser:
         condition: service_healthy
 
+  frontend-office:
+    build:
+      context: ./frontend
+      args:
+        NUXT_APP_BASE_URL: /office/
+        VITE_API_BASE_URL: /office
+        NUXT_PUBLIC_API_BASE_URL: /office
+    image: rsdp-office-frontend-office:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${RSDP_OFFICE_SUBPATH_PORT:-3002}:80'
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1/healthz]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    depends_on:
+      office-backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend

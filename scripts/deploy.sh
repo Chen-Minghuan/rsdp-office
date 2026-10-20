@@ -62,7 +62,7 @@ case "${1:-check}" in
         ;;
     deploy)
         check
-        for image in "rsdp-office-backend:$IMAGE_TAG" "rsdp-office-cad-parser:$IMAGE_TAG" "rsdp-office-frontend:$IMAGE_TAG" postgres:16-alpine; do
+        for image in "rsdp-office-backend:$IMAGE_TAG" "rsdp-office-cad-parser:$IMAGE_TAG" "rsdp-office-frontend:$IMAGE_TAG" "rsdp-office-frontend-office:$IMAGE_TAG" postgres:16-alpine; do
             docker image inspect "$image" >/dev/null
         done
         exec 9>"$DEPLOY_ROOT/release/deploy.lock"
