@@ -5,6 +5,7 @@ import com.rsdp.officeproduct.importer.dto.request.ManualProductEntryRequest;
 import com.rsdp.officeproduct.importer.dto.request.ProductImportRequest;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportPreview;
+import com.rsdp.officeproduct.importer.dto.response.BatchAuditResult;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportResult;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.entity.RspuMaster;
@@ -13,6 +14,7 @@ import com.rsdp.officeproduct.importer.service.ProductImportService;
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
 import com.rsdp.officeproduct.importer.util.ProductImportTemplateBuilder;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -63,6 +65,21 @@ public class ProductImportController {
     public Result<RspuMaster> rejectProduct(@PathVariable String rspuId,
                                             @RequestBody(required = false) AuditRemarkRequest request) {
         return Result.ok(productAuditService.reject(rspuId, request != null ? request.getRemark() : null));
+    }
+
+    @PostMapping("/audit/batch-approve")
+    public Result<BatchAuditResult> batchApproveProducts(@Valid @RequestBody BatchAuditRequest request) {
+        return Result.ok(productAuditService.approveBatch(request.getRspuIds()));
+    }
+
+    @PostMapping("/audit/batch-reject")
+    public Result<BatchAuditResult> batchRejectProducts(@Valid @RequestBody BatchAuditRequest request) {
+        return Result.ok(productAuditService.rejectBatch(request.getRspuIds(), request.getRemark()));
+    }
+
+    @PostMapping("/audit/approve-all")
+    public Result<BatchAuditResult> approveAllPendingProducts() {
+        return Result.ok(productAuditService.approveAllPending());
     }
 
     @GetMapping("/import-template")

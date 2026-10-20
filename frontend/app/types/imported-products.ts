@@ -176,3 +176,8 @@ export interface ProductDetail {
   variants: ProductVariant[]
   images: ProductImage[]
 }
+
+export interface BatchAuditResult {
+  processedCount: number
+  skippedCount: number
+}

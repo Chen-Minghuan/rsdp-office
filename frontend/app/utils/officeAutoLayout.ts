@@ -226,7 +226,7 @@ export function planStrictArrangement(
     'straight-desk': ['straight-desk-row', 'straight-desk-face-to-face'],
     'straight-screen': ['straight-screen-row', 'straight-screen-face-to-face'],
     'l-desk': ['l-desk-row', 'l-desk-face-to-face'],
-    'l-screen': ['screen-f-row', 'screen-t-face-to-face', 'screen-c-face-to-face', 'screen-cross-face-to-face'],
+    'l-screen': ['l-desk-row', 'l-desk-face-to-face', 'screen-f-row', 'screen-t-face-to-face', 'screen-c-face-to-face', 'screen-cross-face-to-face'],
   }
   if (!compatible[productStyleId]?.includes(presetId)) return empty('该产品样式没有对应的图例排布')
   if (['straight-desk-row', 'straight-screen-row', 'l-desk-row', 'screen-f-row'].includes(presetId)) {

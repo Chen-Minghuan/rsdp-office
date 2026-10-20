@@ -98,7 +98,7 @@ try {
   assert.equal((await state()).cart[0].id, 'CART-OLD', 'undo restores associated selections')
   await page.getByRole('tab', { name: '选择模块', exact: true }).click()
   await catalog.locator('summary').filter({ hasText: '职员桌' }).click()
-  await catalog.locator('[data-module-id="desk-l-rounded"]').click()
+  await catalog.locator('[data-module-id="desk-l"]').click()
   assert.ok(await page.getByTestId('apply-layout').isEnabled(), 'meeting room allows staff desks')
   assert.ok(await page.getByRole('button', { name: '逐件添加', exact: true }).isEnabled())
   await catalog.locator('[data-module-id="table-conference-rect"]').click()

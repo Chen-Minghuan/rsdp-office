@@ -50,6 +50,7 @@ try {
   const width = () => page.getByLabel('模块宽度（毫米）')
   const depth = () => page.getByLabel('模块进深（毫米）')
   async function choose(id) {
+    await page.getByRole('tab', { name: '选择模块', exact: true }).click()
     const card = catalog().locator('[data-module-id="' + id + '"]')
     const section = card.locator('xpath=ancestor::details')
     if (!(await section.getAttribute('open') !== null)) await section.locator('summary').click()
@@ -59,41 +60,58 @@ try {
   await page.getByRole('button', { name: '选择空间 办公家具测试空间', exact: true }).waitFor()
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await catalog().waitFor()
-  const productStyle = label => page.getByRole('button', { name: label, exact: true })
-  await productStyle('L 型职员台').click()
-  assert.equal(await catalog().locator('[data-module-id="desk-l"]').getAttribute('aria-pressed'), 'true', '选择 L 型产品样式应同步选中职员 L 桌')
-  assert.equal(await productStyle('L 型职员台').getAttribute('aria-pressed'), 'true')
-  await productStyle('一字屏风卡位').click()
-  assert.equal(await catalog().locator('[data-module-id="desk-straight"]').getAttribute('aria-pressed'), 'true', '屏风样式当前复用一字桌占地时应同步选中一字职员桌')
-  assert.equal(await productStyle('一字屏风卡位').getAttribute('aria-pressed'), 'true')
-  const modules = await catalog().locator('[data-module-id]').evaluateAll(cards => cards.map(card => ({
-    id: card.dataset.moduleId, name: card.getAttribute('aria-label'),
-    geometry: card.querySelector('.manual-furniture-glyph').innerHTML,
-  })))
-  assert.equal(modules.length, 28)
+  assert.equal(await catalog().locator('[data-module-id="desk-l-rounded"]').count(), 0, '职员圆角 L 桌并入 L 型屏风卡位，不再出现在目录')
+  await choose('desk-l')
+  assert.equal(await catalog().locator('[data-module-id="desk-l"]').getAttribute('aria-pressed'), 'true', '选择职员 L 桌模块')
+  await choose('desk-screen-l')
+  assert.equal(await catalog().locator('[data-module-id="desk-screen-l"]').getAttribute('aria-pressed'), 'true', '选择 L 型屏风卡位模块')
+  await page.getByRole('tab', { name: '选择排布', exact: true }).click()
+  for (const label of ['L 型单排', 'L 型对坐', 'F 型单排', 'T 型对坐', 'C 型对坐', '十字型对坐']) {
+    assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1, 'L 型屏风卡位提供' + label)
+  }
+  await page.getByRole('tab', { name: '选择模块', exact: true }).click()
+  // 排版目录在座席示意后追加 .layout-seat，与手动布局比较线稿前先剔除。
+  const modules = await catalog().locator('[data-module-id]').evaluateAll(cards => cards.map(card => {
+    const glyph = card.querySelector('.manual-furniture-glyph').cloneNode(true)
+    glyph.querySelectorAll('.layout-seat').forEach(node => node.remove())
+    const comments = []
+    const walker = document.createTreeWalker(glyph, NodeFilter.SHOW_COMMENT)
+    while (walker.nextNode()) comments.push(walker.currentNode)
+    comments.forEach(node => node.remove())
+    return { id: card.dataset.moduleId, name: card.getAttribute('aria-label'), geometry: glyph.innerHTML }
+  }))
+  assert.equal(modules.length, 29)
   assert.equal(await catalog().locator('details').count(), 9)
-  assert.equal(modules.some(module => module.id === 'desk-u'), false, '与手动布局一致，不暴露隐藏目录项')
+  assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '与手动布局一致，不暴露隐藏目录项')
   const manual = await context.newPage()
   await manual.goto(baseUrl + '/manual-canvas', { waitUntil: 'networkidle' })
-  const manualModules = await manual.locator('.furniture-catalog .furniture-template-grid button').evaluateAll(cards => cards.map(card => ({
-    name: card.querySelector('.furniture-template-copy b').textContent,
-    geometry: card.querySelector('.manual-furniture-glyph').innerHTML,
-  })))
+  const manualModules = await manual.locator('.furniture-catalog .furniture-template-grid button').evaluateAll(cards => cards.map(card => {
+    const glyph = card.querySelector('.manual-furniture-glyph').cloneNode(true)
+    glyph.querySelectorAll('.layout-seat').forEach(node => node.remove())
+    const comments = []
+    const walker = document.createTreeWalker(glyph, NodeFilter.SHOW_COMMENT)
+    while (walker.nextNode()) comments.push(walker.currentNode)
+    comments.forEach(node => node.remove())
+    return { name: card.querySelector('.furniture-template-copy b').textContent, geometry: glyph.innerHTML }
+  }))
   assert.deepEqual(modules.map(({ id, ...module }) => module), manualModules, '目录与每个缩略线稿必须和手动布局完全一致')
   await manual.close()
 
   for (const module of modules) {
     await choose(module.id)
+    await page.getByRole('tab', { name: '调整参数', exact: true }).click()
     const w = Number(await width().inputValue()), d = Number(await depth().inputValue())
-    const capacity = Number(await page.getByTestId('module-capacity').innerText())
+    const capacity = Number((await page.getByTestId('module-capacity').innerText()).replace(/[^0-9]/g, ''))
     assert.ok(capacity > 0, module.name)
     await layout()
     const placed = await furniture()
     assert.equal(placed.length, capacity, `${module.name} 应按当前空间类型应用当前预估`)
-    assert.ok(placed.every(item => item.furnitureTemplateId === module.id && item.productId === '' && item.w === w && item.h === d && item.zoneId === 'MODULE-ROOM' && item.spaceTemplateId && item.templateSpaceId === 'MODULE-ROOM'))
-    assert.equal(await canvas().locator('[data-furniture-template="' + module.id + '"] .manual-furniture-glyph').count(), capacity)
+    const primary = placed.filter(item => item.layoutRole !== 'seat')
+    assert.ok(primary.length && primary.every(item => item.furnitureTemplateId === module.id && item.productId === '' && item.w === w && item.h === d && item.zoneId === 'MODULE-ROOM' && item.spaceTemplateId && item.templateSpaceId === 'MODULE-ROOM'))
+    assert.equal(await canvas().locator('[data-furniture-template="' + module.id + '"] .manual-furniture-glyph').count(), primary.length)
   }
-  await choose('desk-l-rounded')
+  await choose('desk-screen-l')
+  await page.getByRole('tab', { name: '调整参数', exact: true }).click()
   await page.getByLabel('模块常用规格').selectOption('1600,1600')
   assert.equal(await width().inputValue(), '1600')
   assert.equal(await depth().inputValue(), '1600')
@@ -114,21 +132,22 @@ try {
   assert.ok(await page.getByTestId('apply-layout').isDisabled())
   assert.deepEqual(await furniture(), beforeInvalid)
   await width().fill('20000')
-  assert.equal(await page.getByTestId('module-capacity').innerText(), '0')
+  assert.equal(await page.getByTestId('module-capacity').innerText(), '0 件')
   assert.ok(await page.getByTestId('apply-layout').isDisabled())
   assert.deepEqual(await furniture(), beforeInvalid, '无效或放不下不能清空已有布局')
 
   await choose('table-conference-oval')
   await layout()
-  assert.ok((await furniture()).every(item => item.furnitureTemplateId === 'table-conference-oval'))
+  assert.ok((await furniture()).filter(item => item.layoutRole !== 'seat').every(item => item.furnitureTemplateId === 'table-conference-oval'))
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await furniture(), beforeInvalid, '撤销恢复图例、尺寸及归属')
   await page.reload({ waitUntil: 'networkidle' })
   await canvas().waitFor()
   assert.deepEqual(await furniture(), beforeInvalid, '刷新保留图例及尺寸')
-  assert.equal(await canvas().locator('[data-furniture-template="desk-l-rounded"]').count(), beforeInvalid.length)
+  assert.equal(await canvas().locator('[data-furniture-template="desk-screen-l"]').count(), beforeInvalid.length)
 
   await choose('desk-straight')
+  await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   await page.getByRole('button', { name: '一字单排', exact: true }).click()
   await page.getByTestId('apply-layout').click()
   const strictRow = await furniture()
@@ -138,7 +157,7 @@ try {
   assert.ok((await furniture()).every(item => item.layoutConfirmed))
   await page.getByText('排版已确认', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('单位模块 UI 通过：28 个可见图例/9 类与手动布局目录和线稿一致、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
+  console.log('单位模块 UI 通过：29 个可见图例/9 类与手动布局目录和线稿一致、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

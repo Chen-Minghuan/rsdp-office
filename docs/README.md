@@ -78,6 +78,8 @@ API 名称、字段与状态标为“目标”时，表示后续设计契约，�
 
 - [家具选择统一与空间用途建议](tasks/LAYOUT-017-module-selection-and-space-advice.md)：单一模块入口、兼容排布和任意空间选家具。
 
+- [圆角 L 桌并入 L 型屏风卡位](tasks/LAYOUT-019-merge-rounded-l-desk-into-l-screen.md)：目录去重与六种排布。
+
 - [参考尺寸、座椅图例与场景旋转](tasks/LAYOUT-018-reference-dimensions-and-view-rotation.md)：实际离墙/组间距、完整座席示意与旋转视图。
 
 - [效果图使用所选商品图片](tasks/RENDER-003-selected-product-image-references.md)：商品外观参考、家具对应与历史任务核查。

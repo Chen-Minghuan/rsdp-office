@@ -10,8 +10,9 @@ export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
     sizeOptions: [[1400, 1400], [1500, 1500], [1600, 1600]] },
   { id: 'desk-l', name: '职员 L 桌', category: '职员桌', kind: 'l-desk', widthMm: 1400, depthMm: 1400,
     sizeOptions: [[1200, 1200], [1400, 1400], [1600, 1400]] },
+  // 行业上圆角 L 桌即 L 型屏风卡位，目录只保留 desk-screen-l；本项为旧实例保留图例。
   { id: 'desk-l-rounded', name: '职员圆角 L 桌', category: '职员桌', kind: 'rounded-l-desk', widthMm: 1400, depthMm: 1400,
-    sizeOptions: [[1400, 1400], [1500, 1500], [1600, 1600]] },
+    sizeOptions: [[1400, 1400], [1500, 1500], [1600, 1600]], catalogHidden: true },
   { id: 'desk-u', name: 'U 形办公桌', category: '职员桌', kind: 'u-desk', widthMm: 2000, depthMm: 1600, catalogHidden: true },
   { id: 'desk-manager', name: '主管直线桌', category: '主管桌', kind: 'desk', widthMm: 1400, depthMm: 600,
     sizeOptions: [[1400, 600], [1400, 700], [1600, 750], [1600, 800]] },
