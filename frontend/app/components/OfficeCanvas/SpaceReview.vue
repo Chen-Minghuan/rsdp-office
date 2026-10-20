@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import SpatialInspector from './SpatialInspector.vue'
 import DimensionCalibration from './DimensionCalibration.vue'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
@@ -45,7 +46,7 @@ const calibrated = computed(() => scene.value.workingCoordinateSystem === 'WORLD
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
 const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
-const imageUrl = computed(() => store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || '')
+const imageUrl = computed(() => sameOriginAssetUrl(store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || ''))
 const isExample = computed(() => store.zones.some(zone => zone.evidenceKind === 'DEMO'))
 const dimensionCalibrationEnabled = computed(() => !!store.floorPlan?.analysisId && !isExample.value && ['image', 'pdf'].includes(store.floorPlan.inputMode || '') && store.floorPlan.geometrySource !== 'cad_geometry')
 const dimensionReferenceOverlay = computed<DimensionReferenceOverlay | null>(() => {

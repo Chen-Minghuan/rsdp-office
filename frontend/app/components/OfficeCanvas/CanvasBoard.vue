@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { uid } from '~/utils/helpers'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { TONES } from '~/utils/sample'
 import type { OfficeObject, ZoneObject, FurnitureObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
@@ -106,7 +107,7 @@ watch(tool, value => { selectedFurnitureIds.value = []; if (!['select', 'pan'].i
 // 识别图层：底图 + 多边形
 const floorPlan = computed<FloorPlanAnalysisResponse | null>(() => store.floorPlan)
 const floorPlanRooms = computed(() => floorPlan.value?.rooms || [])
-const floorPlanImageUrl = computed(() => floorPlan.value?.previewUrl || floorPlan.value?.referenceImageUrl || floorPlan.value?.imageUrl)
+const floorPlanImageUrl = computed(() => sameOriginAssetUrl(floorPlan.value?.previewUrl || floorPlan.value?.referenceImageUrl || floorPlan.value?.imageUrl || ''))
 const canonicalPlan = computed(() => zones.value.length > 0 && zones.value.every(zone => zone.reviewUnit === 'mm'))
 const alignedImageStyle = computed(() => {
   if (!canonicalPlan.value) return { left: '230px', top: '170px', width: '1090px', height: '640px' }
