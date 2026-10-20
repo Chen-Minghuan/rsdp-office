@@ -1,6 +1,6 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
-import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
+import type { ImportedProduct, BatchAuditResult, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 const PROJECT_ID = 'OFFICE-PROJECT-001'
@@ -205,6 +205,18 @@ export function useOfficeApi() {
     return await request<ImportedProduct>('POST', `/api/v1/products/${rspuId}/reject`, { remark })
   }
 
+  async function approveProductsBatch(rspuIds: string[]): Promise<BatchAuditResult> {
+    return await request<BatchAuditResult>('POST', '/api/v1/products/audit/batch-approve', { rspuIds })
+  }
+
+  async function rejectProductsBatch(rspuIds: string[], remark?: string): Promise<BatchAuditResult> {
+    return await request<BatchAuditResult>('POST', '/api/v1/products/audit/batch-reject', { rspuIds, remark })
+  }
+
+  async function approveAllPendingProducts(): Promise<BatchAuditResult> {
+    return await request<BatchAuditResult>('POST', '/api/v1/products/audit/approve-all', {})
+  }
+
   async function parseCad(file: File): Promise<unknown> {
     const formData = new FormData()
     formData.append('file', file)
@@ -344,6 +356,9 @@ export function useOfficeApi() {
     loadPendingProducts,
     approveProduct,
     rejectProduct,
+    approveProductsBatch,
+    rejectProductsBatch,
+    approveAllPendingProducts,
     parseCad,
     recognizeImage,
     previewImport,
