@@ -32,7 +32,8 @@ export function officeFurnitureTemplateId(item: FurnitureObject, product?: Produ
 
 /** Reference chairs are seat illustrations attached to each workstation module. */
 export function officeFurnitureShowsSeat(item: FurnitureObject): boolean {
-  return ['straight-desk-row', 'straight-desk-face-to-face', 'straight-screen-row', 'straight-screen-face-to-face', 'l-desk-face-to-face'].includes(item.layoutSettings?.arrangementPresetId || '')
+  const template = furnitureById.get(officeFurnitureTemplateId(item) || '')
+  return !!template && ['职员桌', '主管桌', '高管桌'].includes(template.category)
 }
 
 export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' | 'other' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId']) {

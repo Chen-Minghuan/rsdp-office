@@ -85,7 +85,7 @@ try {
     assert.ok(placed.every(item => item.layoutSettings.arrangementPresetId === preset && item.layoutSettings.arrangementRuleVersion === '2026-10-module-selection-v6'))
     if (preset.startsWith('screen-')) assert.equal(await page.getByTestId('office-design-canvas').locator('[data-furniture-template="desk-screen-l"]').count(), count)
     const seatGlyphs = await page.getByTestId('office-design-canvas').locator('.layout-seat').count()
-    assert.equal(seatGlyphs, preset.includes('straight-') || preset === 'l-desk-face-to-face' ? count : 0, 'reference seat illustrations')
+    assert.equal(seatGlyphs, count, 'reference seat illustrations')
     await page.getByTestId('office-design-canvas').screenshot({ path: 'C:/Users/cmh/AppData/Local/Temp/rsdp-reference-' + preset + '.png' })
   }
   await page.reload({ waitUntil: 'networkidle' })

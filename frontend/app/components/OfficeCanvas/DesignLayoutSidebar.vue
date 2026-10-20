@@ -12,7 +12,7 @@ import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/of
 import { moduleGlyphId } from '~/utils/officeModules'
 import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
 
-const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; seatClearanceMm: number; exclusions: LayoutPreferences['exclusions'] } | null] }>()
+const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: LayoutPreferences['exclusions'] } | null] }>()
 const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
 const showPreview = ref(true)
 const store = useOfficeStore()
@@ -155,7 +155,7 @@ const autoPlan = plan
 const capacity = computed(() => proposal.value?.furniture.length || 0)
 watch([proposal, showPreview, draftApplied], () => {
   applicationMessage.value = ''
-  emit('preview', zone.value && showPreview.value ? { zoneId: zone.value.id, furniture: draftApplied.value ? [] : proposal.value?.furniture || [], seatClearanceMm: preferences.seatClearanceMm, exclusions: preferences.exclusions } : null)
+  emit('preview', zone.value && showPreview.value ? { zoneId: zone.value.id, furniture: draftApplied.value ? [] : proposal.value?.furniture || [], replaceIds: proposal.value?.replaceIds || [], seatClearanceMm: preferences.seatClearanceMm, exclusions: preferences.exclusions } : null)
 }, { immediate: true, deep: true })
 onUnmounted(() => emit('preview', null))
 

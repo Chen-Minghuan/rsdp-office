@@ -7,11 +7,13 @@ const router = useRouter()
 
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
-const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null>(null)
+const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const overviewCollapsed = ref(false)
-const boardRef = ref<{ fitBoard: () => void } | null>(null)
+const viewRotation = ref(0)
+const showDimensions = ref(true)
+const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
 
 const mode = computed<'overview' | 'design'>(() => store.canvasMode)
 const designZoneId = computed(() => store.designZoneId)
@@ -183,14 +185,17 @@ const subtitle = computed(() => mode.value === 'design'
       <div class="flex-1 min-w-0 flex flex-col bg-white border border-line rounded-2xl shadow-panel overflow-hidden">
         <OfficeCanvasToolbar
           v-model:tool="tool"
+          v-model:show-dimensions="showDimensions"
+          :view-rotation="viewRotation"
           :mode="mode"
           @undo="store.undo"
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
           @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"
           @render="showRenderPreview = true"
+          @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" :show-dimensions="showDimensions" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">
