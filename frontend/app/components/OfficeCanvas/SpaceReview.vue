@@ -135,7 +135,6 @@ function restoreSelectedSource() {
 function deleteSelectedSpace() {
   const zone = selected.value
   if (!zone || tracing.value || calibrating.value) return
-  if (typeof window !== 'undefined' && !window.confirm(`确定删除「${zone.name}」？删除后不会进入空间模板和家具排版，可通过“撤销”恢复。`)) return
   if (!store.deleteZone(zone.id)) return
   selectedId.value = store.zones[0]?.id || null
   notify(`已删除「${zone.name}」，可点击“撤销”恢复`)

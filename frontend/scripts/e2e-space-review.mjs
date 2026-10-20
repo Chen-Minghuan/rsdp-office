@@ -28,11 +28,13 @@ try {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   const page = await context.newPage()
   const errors = []
+  const dialogs = []
   const profileRequests = []
   context.on('request', request => {
     if (/^\/api\/v1\/office\/projects(?:\/[^/]+)?$/.test(new URL(request.url()).pathname)) profileRequests.push(request.url())
   })
   page.on('pageerror', error => errors.push(error.message))
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.dismiss() })
   const sourceSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600"><rect width="1100" height="600" fill="white"/><path d="M100 100H700V500H100Z M750 100H1000V200H850V500H750Z" fill="none" stroke="black" stroke-width="4"/></svg>'
   const source = {
     analysisId: 'REVIEW-TEST', status: 'awaiting_confirm', sourceName: '平面图测试.png', inputMode: 'image',
@@ -365,7 +367,6 @@ try {
   }
   // Removing an unused space excludes it from the current layout/template and remains undoable.
   await choose('L 形办公区')
-  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '删除空间', exact: true }).click()
   assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, '删除空间同步移除空间')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
@@ -373,13 +374,12 @@ try {
   // Deleting the last remaining space keeps the canvas intentionally empty
   // even when the route reloads and tries to auto-import the source analysis.
   await page.getByRole('button', { name: '选择空间 L 形办公区', exact: true }).click()
-  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '删除空间', exact: true }).click()
-  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).click()
   await page.getByRole('button', { name: '删除空间', exact: true }).click()
   assert.equal(await page.locator('.review-room-card').count(), 0, '删除最后空间后列表为空')
   assert.equal((await stored()).blank, true, '最后空间删除后保存空画布标记')
+  assert.deepEqual(dialogs, [], '删除空间不再弹出确认框')
   await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
     state.floorPlan = null
