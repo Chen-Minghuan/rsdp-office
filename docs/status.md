@@ -1,5 +1,11 @@
 # 开发进度与下一步
 
+2026-10-20 HTTP 上传追修：[DEPLOY-003](tasks/DEPLOY-003-http-uuid.md) 已复现公网 HTTP 缺少 `crypto.randomUUID` 导致文件选择失败。五处 UUID 调用统一增加 getRandomValues 回退；单元检查、前端构建及禁用 randomUUID 的图纸/模板/效果预览三项 UI 回归通过。已仅构建并发布前端镜像 `956c41117698-httpuuid`（其余三服务不动），公网真实登录复测文件选择生成 v4 UUID 通过，未触发识别；401 与此错误独立核对，用户最新登录日志为 200。
+
+2026-10-20 公网部署追加：[DEPLOY-002](tasks/DEPLOY-002-public-http.md) 已以 `956c41117698` 镜像运行真实 PostgreSQL/CAD/Java/前端，备份、迁移、四服务健康检查通过。按用户选择使用 HTTP 8081，安全组放行后，公网 IP 的真实浏览器登录、商品页、画布和退出失效通过。入口为 `http://101.200.81.123:8081/`；`rooom.vip` 仍有旧 IP `120.77.15.115`，域名稳定性待删除旧 A 记录后复核。未配置 `/office/` 或 HTTPS，未迁移本地业务数据，未扩大真实识别/排版业务验收。
+
+2026-10-20 Jenkins 启动追修：[DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md) 已定位 `No such DSL method 'pipeline'` 为声明式插件缺失 `joda-time-api` 依赖。补装官方插件、校验 SHA256 并重启后，实际第 3 次 Jenkins 构建（main `956c411`）为 SUCCESS：预检、180 项测试（177 通过、3 跳过）、JUnit 报告发布及三个镜像构建通过。`DEPLOY=false`，部署阶段 skipped；SCM 轮询和默认参数保留。未修改流水线代码或正式应用，正式发布与 HTTPS 仍待验证。
+
 2026-10-20 追加：[DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md) 的 Jenkinsfile 与云服务器 `.env` 配置已交付。独立生产 Compose、前端容器及持久目录/数据库备份/显式 Spatial 迁移入口已编码；服务器 `.env` 为 `root:jenkins 0640`，Jenkins 用户预检通过。前端 build/同源静态生成、本地 clean Java 与 Linux 镜像 Java（各 163 通过、3 跳过）、三个服务器镜像构建、隔离 mock 后端的容器代理核对及文档/差异检查通过。Docker Hub 超时通过导入官方基础镜像缓存完成本轮构建，未更改全局网络配置；尚未推送、运行实际 SCM 流水线、部署正式服务或切换公网 HTTPS。
 
 2026-10-17 提交前复核：当前识别/上传/空间核对版本的 `pnpm build`、`pnpm test:design-corrections`、`pnpm e2e:recognition-progress`、`pnpm e2e:drawing-entry`、`pnpm e2e:space-review` 全部通过；三项 UI 使用隔离预览与模拟 API。后端沿用本轮 RECOG-015 的 clean test 149 通过/3 跳过记录。未新增真实模型调用，不扩大识别边界精度或业务验收结论。

@@ -6,6 +6,8 @@
 
 Jenkins 构建节点与 Docker、部署目录位于同一台 Linux 服务器。需要 Bash、Git、Docker Compose、Python 3、curl、gzip、flock，以及 Jenkins 的 Pipeline、Git 和 JUnit 插件。节点账号需要现有的 Docker 使用权限。
 
+插件文件存在不代表已经加载。`No flow definition, cannot run` 表示当次任务未取得流水线定义；如果后续日志已显示 `Obtained Jenkinsfile`，但报 `No such DSL method 'pipeline'`，应检查 Pipeline: Declarative 及其依赖的实际加载状态。本轮发现 `joda-time-api` 下载未完成，补齐官方插件并重启后恢复流水线启动，插件安装和重启规则见 [Jenkins 插件管理文档](https://www.jenkins.io/doc/book/managing/plugins/)。
+
 | 路径 | 用途 |
 | --- | --- |
 | `/opt/rsdp-office/.env` | 服务器配置，`root:jenkins`、`0640`，不加入 Git、不归档 |
@@ -39,9 +41,19 @@ Jenkins 构建节点与 Docker、部署目录位于同一台 Linux 服务器。�
 
 Java 中依赖数据库的测试是否运行以实际报告为准；未提供数据库集成测试配置时仍会跳过。CAD 镜像构建不等于 CAD 金样本测试或业务验收。
 
-## HTTPS 入口
+## 当前公网 HTTP 入口（2026-10-20）
 
-生产 Compose 只将前端映射到 `127.0.0.1:3001`，数据库、Java、CAD 没有宿主机端口。登录 Cookie 固定启用 Secure，因此用户需要通过 HTTPS 访问。
+已部署 main `956c411`，镜像标签 `956c41117698`，四个容器健康。按用户允许的独立端口方案，应用入口为 `http://101.200.81.123:8081/`；域名入口计划使用 `http://rooom.vip:8081/`，未实现 `/office/` 子路径。当前域名仍有 `120.77.15.115` 和 `101.200.81.123` 两条 A 记录，需要移除旧地址才能稳定落到本实例。
+
+服务器外层 Nginx 配置见 [HTTP 入口模板](../deploy/nginx-office-http.conf)，实际路径为 `/etc/nginx/sites-available/rsdp-office-http`，转发到 `127.0.0.1:3001`。UFW 已允许 TCP 8081，用户已在 ECS 安全组允许 TCP 8081、来源 `0.0.0.0/0`；公网健康检查、真实浏览器登录、商品页、画布和退出失效均通过。原有 80 端口网站和 8080 Jenkins 保留。
+
+HTTP 入口仅在代理层移除 `RSDP_SESSION` 的 Secure 标记，保留 HttpOnly / SameSite；后端默认 Secure 配置保留。外层覆盖来源转发头并清空客户端 `Forwarded`、`X-Forwarded-Prefix`。同时将 `/login/` 统一到 `/login`，直接提供 SPA 入口，避免静态目录重定向触发现有路由守卫的登录页自跳转。切换 HTTPS 时应取消 HTTP Cookie 例外。按用户要求暂不申请证书；certbot 已安装，本轮没有签发证书或启用 HTTPS。
+
+部署、备份、迁移及公网验证证据见 [DEPLOY-002](tasks/DEPLOY-002-public-http.md)。首次云端数据库为空，不包含本地已有商品、图纸和方案。
+
+## 后续 HTTPS 入口
+
+生产 Compose 只将前端映射到 `127.0.0.1:3001`，数据库、Java、CAD 没有宿主机端口。后端默认登录 Cookie 启用 Secure；除上述用户指定的 HTTP 入口例外外，浏览器应通过 HTTPS 使用。
 
 将下面配置加入已有且证书有效的 HTTPS `server` 中；示例不替换服务器现有站点，也不自行申请证书：
 
