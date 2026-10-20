@@ -10,6 +10,7 @@
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
 | [Jenkins 与服务器部署](deployment.md) | 流水线、生产 Compose、服务器 `.env`、持久存储和公网入口 |
 | [公网 HTTP 部署记录](tasks/DEPLOY-002-public-http.md) | 8081 入口、真实部署和公网验证、域名 DNS 待办 |
+| [域名子路径入口](tasks/DEPLOY-004-domain-subpath.md) | rooom.vip/office/ 双基座构建、代理与跨入口底图同源化 |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
 | [底图先行与后台并行识别](tasks/RECOG-007-progressive-recognition.md) | 预览先到、模型并行、真实进度和标准图缓存 |

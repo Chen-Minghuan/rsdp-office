@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-20 域名子路径入口：[DEPLOY-004](tasks/DEPLOY-004-domain-subpath.md) 已实现 `http://rooom.vip/office/`。新增 `frontend-office` 双基座容器与 80 站点 `/office/` 代理，IP 8081 与原站点不受影响；识别绝对资源地址跨入口 401 由前端同源化修复，新识别经 `X-Forwarded-Prefix` 落子路径。强制解析公网复测（登录/文件选择/云端画布/底图/退出）与 8081 回归通过；DNS 旧 A 记录 `120.77.15.115` 待用户删除后域名正式生效。
+
 2026-10-20 公网识别配置追修：用户公网识别 9.png 失败，定位为服务器百炼密钥未开通 `qwen3-vl-max`（404 model_not_found）且 `RSDP_RENDER_API_KEY` 迁移值无效（401）。服务器 `.env` 已改 `qwen3-vl-plus` 并回退生图密钥，仅重建后端容器；plus 对话探测、`qwen-image-3.0` 提交/轮询实测通过（见 [DEPLOY-002](tasks/DEPLOY-002-public-http.md) 追修记录与[模型配置](vision-configuration.md)）。本地密钥继续用 `qwen3-vl-max`。用户图纸的公网重新识别待用户重试验证。
 
 2026-10-20 HTTP 上传追修：[DEPLOY-003](tasks/DEPLOY-003-http-uuid.md) 已复现公网 HTTP 缺少 `crypto.randomUUID` 导致文件选择失败。五处 UUID 调用统一增加 getRandomValues 回退；单元检查、前端构建及禁用 randomUUID 的图纸/模板/效果预览三项 UI 回归通过。已仅构建并发布前端镜像 `956c41117698-httpuuid`（其余三服务不动），公网真实登录复测文件选择生成 v4 UUID 通过，未触发识别；401 与此错误独立核对，用户最新登录日志为 200。

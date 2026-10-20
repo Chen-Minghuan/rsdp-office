@@ -51,6 +51,8 @@ HTTP 入口仅在代理层移除 `RSDP_SESSION` 的 Secure 标记，保留 HttpO
 
 部署、备份、迁移及公网验证证据见 [DEPLOY-002](tasks/DEPLOY-002-public-http.md)。首次云端数据库为空，不包含本地已有商品、图纸和方案。
 
+2026-10-20 追加域名子路径入口：现有 rooom.vip 80 站点内新增 `/office/` 代理段（模板 [nginx-office-subpath.conf](../deploy/nginx-office-subpath.conf)），由 `frontend-office` 容器（`/office/` 基座构建，127.0.0.1:3002）提供应用；IP 8081 根路径入口与原静态站不受影响。`X-Forwarded-Prefix /office` 使新识别的资源地址落在子路径下；历史识别写入的 8081 绝对地址由前端 `sameOriginAssetUrl` 归一为当前入口同源路径。详见 [DEPLOY-004](tasks/DEPLOY-004-domain-subpath.md)。
+
 ## 后续 HTTPS 入口
 
 生产 Compose 只将前端映射到 `127.0.0.1:3001`，数据库、Java、CAD 没有宿主机端口。后端默认登录 Cookie 启用 Secure；除上述用户指定的 HTTP 入口例外外，浏览器应通过 HTTPS 使用。
