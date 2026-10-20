@@ -2,6 +2,7 @@
 import type { ProjectFile, ZoneObject, ToneKey, ZoneType } from '~/types/office'
 import { drawingFileDescriptor } from '~/utils/drawingUpload'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
+import { createUuid } from '~/utils/uuid'
 
 const store = useOfficeStore()
 const api = useOfficeApi()
@@ -82,7 +83,7 @@ onMounted(() => {
       if (!task || task.projectId !== api.projectId || task.name !== drawing?.name || task.size !== drawing?.size) return
       if (task.drawingId && task.drawingId !== drawing?.drawingId) return
       if (drawing && (!drawing.drawingId || drawing.analysisId !== task.analysisId)) {
-        const bound = { ...drawing, drawingId: drawing.drawingId || crypto.randomUUID(), analysisId: task.analysisId, analysisPageNumber: task.pageNumber }
+        const bound = { ...drawing, drawingId: drawing.drawingId || createUuid(), analysisId: task.analysisId, analysisPageNumber: task.pageNumber }
         store.$patch({ files: [bound] })
         store.schedulePersist()
         sessionStorage.setItem(taskStorageKey, JSON.stringify({ ...task, drawingId: bound.drawingId }))

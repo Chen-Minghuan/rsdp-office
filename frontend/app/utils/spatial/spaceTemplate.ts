@@ -5,6 +5,7 @@ import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import { reviewScene, zoneMeasurements, zoneReviewMessage } from './review'
 import { polygonBounds } from './geometry'
 import { mapRoomType } from '~/utils/floorPlan'
+import { createUuid } from '../uuid'
 
 export function templateSignature(scene: SpatialSceneSnapshot) {
   return JSON.stringify(scene.spaces.map(space => ({
@@ -19,7 +20,7 @@ export function captureSpaceTemplate(zones: ZoneObject[], plan: FloorPlanAnalysi
     const message = zoneReviewMessage(zone, zones)
     return message ? [{ issueId: 'REVIEW-' + zone.id, code: 'REVIEW_SUGGESTED', severity: 'WARN', spaceIds: [zone.id], objectIds: [], message, blocksConfirmation: false }] : []
   })
-  const templateId = 'LSTPL-' + crypto.randomUUID()
+  const templateId = 'LSTPL-' + createUuid()
   scene.sceneId = templateId
   return {
     templateId, projectId: scene.projectId, name,

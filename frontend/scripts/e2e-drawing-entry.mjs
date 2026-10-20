@@ -27,6 +27,9 @@ try {
   assert.ok(ready, '测试预览服务没有就绪')
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext()
+  // Match public HTTP: randomUUID is unavailable, getRandomValues still works.
+  await context.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }))
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))

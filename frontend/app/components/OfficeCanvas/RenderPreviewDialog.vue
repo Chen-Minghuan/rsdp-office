@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
 import { renderPreviewSnapshot, renderSnapshotKey, renderPreviewActive } from '~/utils/renderPreview'
+import { createUuid } from '~/utils/uuid'
 
 const show = defineModel<boolean>('show', { default: false })
 const dialogElement = ref<HTMLElement | null>(null)
@@ -85,7 +86,7 @@ async function generate() {
   const expectedSnapshot = JSON.parse(JSON.stringify(snapshot.value))
   const options = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: view.value, instructions: instructions.value.trim() }
   if (!pending || renderSnapshotKey({ ...pending, clientChangeId: '', canvasRevision: 0 }) !== renderSnapshotKey({ ...options, clientChangeId: '', canvasRevision: 0 })) {
-    remember({ ...options, clientChangeId: crypto.randomUUID() })
+    remember({ ...options, clientChangeId: createUuid() })
   } else remember({ ...pending, canvasRevision: revision })
   const request = pending!
   submitting.value = true; error.value = ''; notice.value = ''

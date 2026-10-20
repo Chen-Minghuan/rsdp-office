@@ -17,6 +17,7 @@
     "test:auto-layout": "node scripts/test-auto-layout.mjs",
     "test:arrangement-presets": "node scripts/test-arrangement-presets.mjs",
     "test:design-corrections": "node scripts/test-design-corrections.mjs",
+    "test:uuid": "node scripts/test-uuid.mjs",
     "e2e:auto-layout": "node scripts/e2e-auto-layout.mjs",
     "e2e:delete-modules": "node scripts/e2e-delete-modules.mjs",
     "e2e:multi-furniture": "node scripts/e2e-multi-furniture.mjs",

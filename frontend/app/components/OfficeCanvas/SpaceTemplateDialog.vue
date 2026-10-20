@@ -2,6 +2,7 @@
 import SpaceTemplatePlan from './SpaceTemplatePlan.vue'
 import type { SpaceTemplate, SpaceTemplateSummary, SpaceTemplateCreateRequest } from '~/types/spaceTemplate'
 import { templateMatches, templateLayoutProblem } from '~/utils/spatial/spaceTemplate'
+import { createUuid } from '~/utils/uuid'
 const emit = defineEmits<{ (event: 'close'): void; (event: 'layout', zoneId: string): void }>()
 const store = useOfficeStore(), api = useSpaceTemplateApi()
 const candidate = ref<SpaceTemplate | null>(store.spaceTemplateCurrent ? JSON.parse(JSON.stringify(store.spaceTemplate)) : store.captureSpaceTemplate())
@@ -43,7 +44,7 @@ async function save() {
   const source = projectScope(), canvasRevision = store.canvasRevision, requestId = ++generation
   const body = { name: name.value.trim(), sourceCanvasRevision: snapshot.sourceCanvasRevision, sourceAnalysisRevision: snapshot.sourceAnalysisRevision ?? null, scene: JSON.parse(JSON.stringify(snapshot.scene)) }
   const signature = JSON.stringify(body)
-  if (!pendingSave || pendingSave.signature !== signature) pendingSave = { signature, request: { ...body, clientChangeId: crypto.randomUUID() } }
+  if (!pendingSave || pendingSave.signature !== signature) pendingSave = { signature, request: { ...body, clientChangeId: createUuid() } }
   busy.value = 'saving'; error.value = ''; notice.value = ''
   try {
     const result = await api.create(pendingSave.request)
