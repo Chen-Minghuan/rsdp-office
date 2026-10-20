@@ -14,7 +14,7 @@ onMounted(() => {
     <main :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-w-0 min-h-0'">
       <AppTopbar v-if="!isSpatialWorkbench" />
       <AppProjectSteps v-if="!isSpatialWorkbench && isProjectWorkflow" />
-      <div :class="isSpatialWorkbench ? '' : 'flex flex-col flex-1 min-h-0 p-4 gap-4 md:p-5'">
+      <div :class="isSpatialWorkbench ? '' : 'flex flex-col flex-1 min-h-0 overflow-y-auto p-4 gap-4 md:p-5'">
         <NuxtPage />
       </div>
     </main>

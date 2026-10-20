@@ -51,6 +51,7 @@
 | [单空间视图隔离](tasks/GEOM-005-single-space-view.md) | 当前房间/家具隔离、底图留在总览、负坐标适屏与视图回归 |
 | [空间模板与布局复用](tasks/GEOM-004-space-template.md) | 彩色整层模板、保存/读取、独立布局副本与来源版本 |
 | [空间复核提示规则](tasks/FLOW-002-advisory-space-review.md) | 无需逐个确认，提示复核后直接排版；前后端一致的计算条件 |
+| [方案确认工作台](tasks/FLOW-003-proposal-confirmation-workbench.md) | 参考方案确认板的楼层→类别→空间分层、模块详情和最终确认入口 |
 | [工装空间核对工作台](tasks/GEOM-003-space-review-workbench.md) | 原图贴合、毫米编辑、图层对照与进入排版前的复核门禁；本轮实现和模拟验证 |
 | [空间首期文档调整](tasks/DOC-002-spatial-canvas-first-phase.md) | PDF/PNG 识别、画布编辑与保存确认的首期范围和调整证据 |
 | [Spatial 系统架构](../Spatial_Canvas_Engine_空间解析编辑与无限画布系统架构设计_V1.1.md) | PDF/PNG 如何成为可校准、可编辑的无限画布空间 |
