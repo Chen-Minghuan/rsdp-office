@@ -48,7 +48,7 @@ Compose 已传入生图配置并为默认图片目录配置独立持久卷。手
 `view` 为 `ISOMETRIC` 或 `INTERIOR`。快照的字段投影见前端 `renderPreview.ts` 与后端 `RenderPreviewScene`，包含空间轮廓、家具毫米位置/尺寸/旋转、目录快照和已选商品引用，不包含视图缩放、便签或确认标记。
 所有结果固定 `purpose=CONCEPT_PREVIEW`，包含实际 `model`、任务/请求 ID、来源快照、生成参数和时间。修改当前空间、排版或商品选择后，旧图保留并标为历史；其他空间和仅视图变化不会导致此空间预览失效。
 
-百炼创建任务使用 `POST /api/v1/services/aigc/image-generation/generation`，带 `X-DashScope-Async: enable`；查询使用 `GET /api/v1/tasks/{task_id}`。提交 1 张布局参考图和 1 条文字提示，`n=1`、`size=1536*1024`、`prompt_extend=false`，避免自动改写扩充家具需求。
+百炼创建任务使用 `POST /api/v1/services/aigc/image-generation/generation`，带 `X-DashScope-Async: enable`；查询使用 `GET /api/v1/tasks/{task_id}`。未选品时提交 1 张布局参考图和 1 条文字提示；已选品时追加最多 2 张包含所选商品照片的参考板和家具序号对应关系，`n=1`、`size=1536*1024`、`prompt_extend=false`，避免自动改写扩充家具需求。
 本地状态为 `SUBMITTING → PENDING/RUNNING → SUCCEEDED/FAILED`；服务端以工作区事务 advisory lock（按 projectId，与画布保存/选品共用）串行化同一提交，以任务行锁防止同时查询/保存结果。
 重复的 `clientChangeId` 和相同内容返回原任务；不同内容不能复用同一 ID。前端在会话存储保留结果不明的请求 ID；相同参数重试复用 ID。明确失败后按当前布局重试会创建新任务。
 连接超时可能已在供应商受理，页面会提示核对百炼记录；没有任务 ID 时无法查询或保证供应商侧去重，不自动重提交。
@@ -61,6 +61,18 @@ Compose 已传入生图配置并为默认图片目录配置独立持久卷。手
 查询或图片下载暂时失败时保留原任务，可点 **重新查询任务**；不自动重新计费。未配置密钥、权限/地域错误、限流、任务失败均明确反馈，无演示结果回退。
 项目重置不删除预览历史；被删除空间的任务继续保存在数据库，当前 UI 只提供当前空间记录入口，不提供全项目归档管理。
 
-正式“已确认商品方案 → 效果图”的条件核验、真实商品外观还原与精确对应验收仍属于 RENDER-001 后续范围；本入口不声称完成这些能力。
+正式“已确认商品方案 → 效果图”的条件核验、真实商品外观的精确对应验收仍属于 RENDER-001 后续范围；本入口不声称完成这些能力。
 
 参考：[千问图像生成与编辑 3.0 官方接口](https://help.aliyun.com/zh/model-studio/qwen-image-generation-and-editing-api-reference)。
+
+## 所选商品外观参考（2026-10-20）
+
+已选品模块会按后端可用商品目录读取图片，去重并生成 P 编号参考板，同排版图一起发送给模型；最多 24 种商品、总计最多三张输入图。缺图或商品不可用时生成前报错，不退回通用家具。记录包含 productImagesUsed 和 productReferences（商品/规格/照片摘要、家具序号及 sheetUrls），页面可查看实际使用的参考板。旧图没有自动补用照片，需要重新生成；尚未选品仍可生成概念预览。文件从本系统 uploads/images 读取，独立外链应先入库，格式不可解码时补充 PNG/JPG。详见 [RENDER-003](tasks/RENDER-003-selected-product-image-references.md)。
+
+## 多角度商品参考与完整场景（2026-10-20）
+
+新版从商品图库选择主图及当前变体/公共辅助图，去除重复内容，单款最多 4 个可用视角；每款合为同一 P 编号，照片数不表示家具数量。任务返回 usedImageCount/images，界面显示款数及使用图片张数。生成输入的第一张图改为无文字立体空间引导，原平面图只在页面作核对；正向与 negative_prompt 均禁止中央图板、平面叠图、文字清单和分栏拼贴。实际引导图以 layoutGuideUrl 保留，旧任务不会更新成新输入。规则和验证见 [RENDER-004](tasks/RENDER-004-multiview-products-and-scene-guide.md)。
+
+## 实际空间约束（2026-10-20）
+
+新任务自动从当前毫米设计测量房间比例/净面积、主模块行列、真实离墙和组间净距、方向/镜像与禁放区域，随提示发送；不是将排版参数默认值当成实际净距。原户型按来源修订和稳定空间 ID 核对，整张底图不送入生成，以减少插图污染；未知门窗不作为事实。页面可展开查看 layoutContext；L 型占地与镜像进入无文字立体引导。重启新版后端并新建任务生效，历史任务不回填。详见 [RENDER-005](tasks/RENDER-005-physical-layout-context.md)。

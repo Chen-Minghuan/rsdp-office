@@ -180,3 +180,15 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 ### 家具模块决定排布，空间用途只建议（LAYOUT-017）
 
 家具模块目录是唯一家具选择入口；productStyleId 由模块及自定义模块 glyphTemplateId 派生，arrangementPresetId 仅允许该结构的兼容方式。房间用途不限制家具，也不用于推断目标计数。自动组主模块 layoutContext 为 meeting 时按实际椅子计座位，workstation 时按桌计工位，other 时按同模块实例计件数。现有 targetSeats 字段据该上下文解释为目标人数或件数；预览、应用、刷新、前后端确认一致。空间用途建议与选品可用性分离，见 [LAYOUT-017](tasks/LAYOUT-017-module-selection-and-space-advice.md)。
+
+### 排版参考测量与相机旋转（LAYOUT-018）
+
+排版标注从实际/待应用家具的旋转外包占地派生；离墙距离以实际 polygon 射线相交求得，组间距使用共截面的最近相邻家具，紧贴模块不算通道。预览携带 replaceIds，用于排除即将替换的自动组，同时保留人工家具；拖动期间测量当前拖动几何。所有数据为毫米，椅子图例仅示意、不会添加实例。视图角度留在页面相机模型，CSS 变换与指针逆变换共用中心、角度、zoom、屏幕 pan；适屏按旋转范围计算，旋转不触发设计保存或确认失效。见 [LAYOUT-018](tasks/LAYOUT-018-reference-dimensions-and-view-rotation.md)。
+
+### 效果预览的商品外观附件（RENDER-003）
+
+生图从已保存家具 productId 核验可用商品并读取商品库本地图片，P编号映射家具清单序号，最多两张商品板加布局图。图片缺失/商品失效在供应商调用前阻断。不可变商品附件存于预览 snapshot_json.renderProductReferences，响应拆为 productReferences 与 productImagesUsed，几何 snapshot 投影仍与客户端一致，不引入迁移列。任务保留原图摘要与已发送参考板，旧任务不能冒充使用商品照片；未选品概念预览保持可用。见 [RENDER-003](tasks/RENDER-003-selected-product-image-references.md)。
+
+RENDER-004 更新：RenderProductReferences 按有效商品的 rspuId 从 image_assets 读取公共/当前变体图片，主图优先、内容去重、每款最多 4 个角度；每款参考块合图后仍限制为两板。版本 selected-products-multiview-v2，保存每张来源与摘要及实际使用张数。provider 第一张图片改为 RenderSceneGuide 的无文字立体代理图，原 referencePng 仅供平面核对；实际引导 URL 随任务保存并响应 layoutGuideUrl。正向与负向提示共同限定完整场景，不能将图纸或清单绘入场景。见 [RENDER-004](tasks/RENDER-004-multiview-products-and-scene-guide.md)。
+
+RENDER-005 更新：RenderLayoutContext 从不可变当前设计计算多边形净面积、旋转外包离墙/相邻净距、主模块行列与朝向，并按项目/空间稳定 ID/来源修订/图片摘要关联原识别记录。原始轮廓不覆盖用户几何，来源不可用可降级，门窗未知明确标记。汇总提示替代逐件大坐标清单；RenderSceneGuide 支持 L 型与镜像。测量存于服务端附件、响应 layoutContext，客户端 snapshot 投影包含排版角色/分组/设置及来源比例字段。见 [RENDER-005](tasks/RENDER-005-physical-layout-context.md)。
