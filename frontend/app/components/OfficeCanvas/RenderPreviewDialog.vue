@@ -8,6 +8,7 @@ const store = useOfficeStore()
 const api = useRenderPreviewApi()
 const zoneId = computed(() => store.designZoneId || '')
 const snapshot = computed(() => renderPreviewSnapshot(store.objects, zoneId.value))
+const selectedProductCount = computed(() => new Set(snapshot.value?.furniture.map(item => item.productId).filter(Boolean)).size)
 const currentKey = computed(() => renderSnapshotKey(snapshot.value))
 const style = ref('现代简约')
 const view = ref<'ISOMETRIC' | 'INTERIOR'>('ISOMETRIC')
@@ -148,6 +149,7 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
             <label>观察视角<select v-model="view" aria-label="效果图视角" :disabled="submitting"><option value="ISOMETRIC">45° 鸟瞰 · 查看整体布局</option><option value="INTERIOR">室内透视 · 查看空间氛围</option></select></label>
             <label>补充偏好<textarea v-model="instructions" aria-label="效果图补充偏好" maxlength="500" rows="3" :disabled="submitting" placeholder="例如：灰色地毯、柔和自然光"></textarea></label>
             <p class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成，无需先绑定商品。未提供的层高、门窗和材质由模型作概念补充。</p>
+            <p v-if="selectedProductCount" class="render-hint" data-testid="render-selected-products">已绑定 {{ selectedProductCount }} 款商品，将使用主图及可用辅助图参考外观，单款最多 4 个不同视角。</p>
             <button class="render-primary" :disabled="!ready || submitting || activeCurrent || !style.trim()" @click="generate">{{ submitting ? '正在保存并提交…' : activeCurrent ? '当前布局正在生成…' : '生成效果预览' }}</button>
             <p v-if="!ready" class="render-hint">请先校准当前空间，并摆放家具。</p>
             <p v-if="pending && !submitting" class="render-hint">上次提交结果可能未知。保持参数重试会查询同一生成请求；改动参数会创建新任务。</p>
@@ -163,11 +165,23 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
             <p v-if="notice" role="status" class="render-hint">{{ notice }}</p>
             <template v-if="selected">
               <div class="render-result-heading"><strong>{{ selected.zoneName }} · {{ statusText(selected.status) }}</strong><span>{{ stale(selected) ? '布局已变化，需重新生成' : '对应当前布局' }}</span></div>
+              <p v-if="selected.snapshot.furniture.some(item => item.productId) && !selected.productImagesUsed" class="render-outdated" role="status">此任务未使用所选商品图片，请重新生成以参考商品外观。</p>
+              <p v-if="selected.productImagesUsed" class="render-hint" data-testid="render-product-images-used">已使用 {{ selected.productReferences?.items.length || 0 }} 款所选商品、{{ selected.productReferences?.items.reduce((sum, item) => sum + (item.usedImageCount || 1), 0) || 0 }} 张图片作为外观参考。</p>
+              <p v-for="item in selected.productReferences?.items.filter(item => item.warnings?.length)" :key="item.productId" class="render-hint">{{ item.name }}：部分图片不可读，已使用其余可用图片。</p>
               <p v-if="stale(selected)" class="render-outdated" role="status">此图绑定生成时的布局快照，仅作为历史预览。</p>
               <img v-if="selected.status === 'SUCCEEDED' && selected.imageUrl" class="render-image" :src="api.imageUrl(selected.imageUrl)" :alt="selected.zoneName + '概念效果图'">
               <div v-else-if="renderPreviewActive(selected.status)" class="render-wait" role="status"><div class="render-spinner"></div><strong>{{ statusText(selected.status) }}，请稍候</strong><p>可关闭窗口继续排版，稍后打开查看。</p></div>
               <div v-else class="render-wait"><strong>本次生成未完成</strong><p>{{ selected.errorMessage || '请重试生成' }}</p><button class="render-primary" :disabled="submitting || !ready || activeCurrent" @click="generate">按当前布局重试生成</button></div>
               <div v-if="selected.status === 'SUCCEEDED'" class="render-actions"><span>AI 生成 · 概念预览 · {{ selected.model }}</span><button @click="download(selected)">下载图片</button></div>
+              <details v-if="selected.productReferences?.sheetUrls.length" class="render-reference"><summary>查看生成时使用的商品图片</summary><img v-for="url in selected.productReferences.sheetUrls" :key="url" :src="api.imageUrl(url)" alt="生成时所选商品外观参考板"><p>图片编号对应家具清单中的商品，生成结果仍需核对外观和布局。</p></details>
+              <details v-if="selected.layoutContext" class="render-reference" data-testid="render-layout-context"><summary>查看本次生成参考的空间与间距</summary><div class="render-hint">
+                <p>空间 {{ selected.layoutContext.widthMm }} × {{ selected.layoutContext.depthMm }} mm · 净面积 {{ selected.layoutContext.netAreaM2.toFixed(2) }} ㎡</p>
+                <p>主体 {{ selected.layoutContext.primaryCount }} 件 · {{ selected.layoutContext.rowCount }} 排 × {{ selected.layoutContext.columnCount }} 列（混合尺寸按实际位置）</p>
+                <p>离墙净距：<span v-for="side in (['left','right','top','bottom'] as const)" :key="side">{{ {left:'左',right:'右',top:'上',bottom:'下'}[side] }} {{ selected.layoutContext.wallClearancesMm[side] ?? '未知' }} mm　</span></p>
+                <p v-for="gap in selected.layoutContext.groupGaps" :key="gap.axis + ':' + gap.distanceMm">{{ gap.axis === 'x' ? '横向' : '纵向' }}组间净距 {{ gap.distanceMm }} mm · {{ gap.count }} 处</p>
+                <p>{{ selected.layoutContext.sourceDrawing.status === 'AVAILABLE' ? '已关联原户型中的当前空间，采用当前编辑后的轮廓。' : '原户型来源未能可靠对应，采用当前空间轮廓。' }} 门窗位置未有可靠数据，生成时不作为既有事实。</p>
+              </div></details>
+              <details v-if="selected.layoutGuideUrl" class="render-reference"><summary>查看生成时的空间参考</summary><img :src="api.imageUrl(selected.layoutGuideUrl)" alt="生成时使用的空间立体参考"><p>只引导空间与家具位置，最终画面应为完整场景，不包含图纸、清单或参考板。</p></details>
               <details v-if="selected.referenceUrl" class="render-reference"><summary>查看生成时的布局参考 · {{ selected.snapshot.furniture.length }} 个模块</summary><img :src="api.imageUrl(selected.referenceUrl)" alt="生成时的空间与家具布局参考图"><p>保留原始毫米轮廓、家具占地和旋转；朝向同时通过家具清单提供给模型。</p></details>
             </template>
             <div v-else class="render-empty"><span>空间排版 → 效果预览</span><h3>看看这个空间的立体效果</h3><p>选择风格和视角，生成带有材质、透视和光影的二维效果图。</p></div>

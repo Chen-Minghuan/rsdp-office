@@ -7,12 +7,13 @@ import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
 import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
-import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone } from '~/utils/officeCanvasView'
-import { formatDimensionMm, officeDimensionBounds, officeDimensionRows, officeFurnitureFootprintBounds } from '~/utils/officeDimensionAnnotations'
+import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld } from '~/utils/officeCanvasView'
+
 
 const store = useOfficeStore()
-const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null }>()
+const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null; showDimensions?: boolean }>()
 const activePreview = computed(() => props.layoutPreview?.zoneId === store.designZoneId ? props.layoutPreview : null)
+const viewRotation = defineModel<number>('viewRotation', { default: 0 })
 const tool = defineModel<string>('tool', { default: 'select' })
 const selectedId = defineModel<string | null>('selectedId')
 const showSubmit = defineModel<boolean>('showSubmit')
@@ -81,22 +82,12 @@ const furniture = computed(() => {
   if (mode.value !== 'design') return []
   return visibleObjects.value.filter((o) => o.kind === 'furniture') as FurnitureObject[]
 })
-const dimensionBounds = computed(() => designZone.value ? officeDimensionBounds(designZone.value) : null)
-const dimensionFurniture = computed(() => furniture.value.map(item => {
-  if (drag.value?.mode !== 'furniture' || !drag.value.ids?.includes(item.id)) return item
-  return { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) }
-}))
-const dimensionRows = computed(() => officeDimensionRows(dimensionFurniture.value))
-const dimensionFontSize = computed(() => Math.max(24, Math.min(140, 11 / Math.max(store.zoom, 0.00001))))
-const dimensionStrokeWidth = computed(() => Math.max(2, 2 / Math.max(store.zoom, 0.00001)))
-
-function furnitureDimensionLabel(item: FurnitureObject) {
-  return `${Math.round(item.w)} × ${Math.round(item.h)} mm`
-}
-
-function rowDimensionLabel(row: { count: number; minX: number; maxX: number }) {
-  return `${row.count} 件 · 总长 ${formatDimensionMm(row.maxX - row.minX)}`
-}
+const dimensionFurniture = computed(() => {
+  const pending = activePreview.value
+  const items = drag.value?.mode !== 'furniture' && pending?.furniture.length ? [...furniture.value.filter(item => !pending.replaceIds.includes(item.id)), ...pending.furniture] : furniture.value
+  return items.map(item => drag.value?.mode === 'furniture' && drag.value.ids?.includes(item.id)
+    ? { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) } : item)
+})
 
 const placementPointer = ref<{ x: number; y: number } | null>(null)
 const placementMessage = ref('')
@@ -167,7 +158,7 @@ function zonePolygonPoints(zone: ZoneObject): string {
 
 function placeBoard() {
   if (!board.value) return
-  board.value.style.transform = `translate(calc(-50% + ${store.panX}px), calc(-50% + ${store.panY}px)) scale(${store.zoom})`
+  board.value.style.transform = `translate(calc(-50% + ${store.panX}px), calc(-50% + ${store.panY}px)) rotate(${viewRotation.value}deg) scale(${store.zoom})`
 }
 
 function fitBoard() {
@@ -187,7 +178,7 @@ function fitBoard() {
 function fitZone(z: ZoneObject, padding = 80) {
   const v = canvasWindow.value
   if (!v || !v.clientWidth || !v.clientHeight) return
-  const camera = fitCanvasZone(z, worldBounds.value, v.clientWidth, v.clientHeight, padding)
+  const camera = fitCanvasZone(z, worldBounds.value, Math.max(80, v.clientWidth - 110), Math.max(80, v.clientHeight - 110), padding, viewRotation.value)
   store.zoom = camera.zoom
   store.panX = camera.panX
   store.panY = camera.panY
@@ -195,11 +186,16 @@ function fitZone(z: ZoneObject, padding = 80) {
 }
 
 function point(e: PointerEvent) {
-  const r = board.value!.getBoundingClientRect()
-  return {
-    x: Math.round((e.clientX - r.left) / store.zoom + worldBounds.value.minX),
-    y: Math.round((e.clientY - r.top) / store.zoom + worldBounds.value.minY),
-  }
+  const rect = canvasWindow.value!.getBoundingClientRect()
+  const world = canvasPointerWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }, { width: rect.width, height: rect.height }, worldBounds.value, store, viewRotation.value)
+  return { x: Math.round(world.x), y: Math.round(world.y) }
+}
+
+function rotateView(degrees: number) {
+  if (drag.value || mode.value !== 'design') return
+  viewRotation.value = ((viewRotation.value + degrees) % 360 + 360) % 360
+  placementPointer.value = null
+  nextTick(fitBoard)
 }
 
 interface DragState {
@@ -534,7 +530,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
 })
 
-watch([() => store.zoom, () => store.panX, () => store.panY], placeBoard)
+watch([() => store.zoom, () => store.panX, () => store.panY, viewRotation], placeBoard)
 
 watch(() => store.objects.length, () => {
   nextTick(placeBoard)
@@ -548,7 +544,7 @@ watch([mode, designZone], () => {
   nextTick(() => fitBoard())
 }, { immediate: true })
 
-defineExpose({ fitBoard })
+defineExpose({ fitBoard, rotateView })
 
 function objectStyle(o: OfficeObject) {
   const base: Record<string, string> = { position: 'absolute', left: o.x + 'px', top: o.y + 'px' }
@@ -598,8 +594,11 @@ function furnitureProduct(o: FurnitureObject) {
     @pointercancel="onPointerCancel"
     @pointerleave="placementPointer = null"
   >
+    <div v-if="mode === 'design' && props.showDimensions !== false" class="absolute right-3 bottom-12 z-10 rounded-lg border border-[#e8dfd5] bg-white/90 px-2 py-1 text-[10px] text-[#786b5d] pointer-events-none">绿色：离墙 · 棕色：组间净距<br>按家具外包占地测量，椅子为座席示意</div>
     <div
       ref="board"
+      data-testid="office-scene-board"
+      :data-view-rotation="viewRotation"
       class="absolute left-1/2 top-1/2"
       :style="{
         width: `${worldBounds.width}px`,
@@ -793,81 +792,7 @@ function furnitureProduct(o: FurnitureObject) {
         <div v-for="area in activePreview.exclusions" :key="area.id" :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px', border: `${2 / store.zoom}px dashed #c45c4c`, background: '#c45c4c22', fontSize: `${11 / store.zoom}px` }">{{ area.label }}</div>
       </div>
 
-      <!-- 尺寸标注：与空间和家具共用毫米世界坐标，随画布缩放/平移同步。 -->
-      <svg
-        v-if="mode === 'design' && dimensionBounds"
-        :width="worldBounds.width"
-        :height="worldBounds.height"
-        :viewBox="`0 0 ${worldBounds.width} ${worldBounds.height}`"
-        class="absolute inset-0 pointer-events-none overflow-visible"
-        aria-label="排版尺寸标注"
-      >
-        <g fill="none" stroke="#9a7657" :stroke-width="dimensionStrokeWidth" stroke-linecap="round">
-          <line :x1="dimensionBounds.minX" :y1="dimensionBounds.minY - 120" :x2="dimensionBounds.maxX" :y2="dimensionBounds.minY - 120" />
-          <line :x1="dimensionBounds.minX" :y1="dimensionBounds.minY - 150" :x2="dimensionBounds.minX" :y2="dimensionBounds.minY - 90" />
-          <line :x1="dimensionBounds.maxX" :y1="dimensionBounds.minY - 150" :x2="dimensionBounds.maxX" :y2="dimensionBounds.minY - 90" />
-          <line :x1="dimensionBounds.maxX + 120" :y1="dimensionBounds.minY" :x2="dimensionBounds.maxX + 120" :y2="dimensionBounds.maxY" />
-          <line :x1="dimensionBounds.maxX + 90" :y1="dimensionBounds.minY" :x2="dimensionBounds.maxX + 150" :y2="dimensionBounds.minY" />
-          <line :x1="dimensionBounds.maxX + 90" :y1="dimensionBounds.maxY" :x2="dimensionBounds.maxX + 150" :y2="dimensionBounds.maxY" />
-          <template v-for="row in dimensionRows" :key="`${row.id}-line`">
-            <line :x1="row.minX" :y1="row.minY - 54" :x2="row.maxX" :y2="row.minY - 54" />
-            <line :x1="row.minX" :y1="row.minY - 72" :x2="row.minX" :y2="row.minY - 36" />
-            <line :x1="row.maxX" :y1="row.minY - 72" :x2="row.maxX" :y2="row.minY - 36" />
-          </template>
-          <template v-for="(row, index) in dimensionRows" :key="`${row.id}-gap`">
-            <template v-if="row.gapFromPreviousMm !== null && row.gapFromPreviousMm > 0">
-              <line :x1="dimensionBounds.maxX + 58" :y1="dimensionRows[index - 1]!.maxY" :x2="dimensionBounds.maxX + 58" :y2="row.minY" />
-              <line :x1="dimensionBounds.maxX + 40" :y1="dimensionRows[index - 1]!.maxY" :x2="dimensionBounds.maxX + 76" :y2="dimensionRows[index - 1]!.maxY" />
-              <line :x1="dimensionBounds.maxX + 40" :y1="row.minY" :x2="dimensionBounds.maxX + 76" :y2="row.minY" />
-            </template>
-          </template>
-        </g>
-
-        <g
-          fill="#795a41"
-          :font-size="dimensionFontSize"
-          font-family="Arial, 'Microsoft YaHei', sans-serif"
-          text-anchor="middle"
-          dominant-baseline="middle"
-          paint-order="stroke"
-          stroke="#fffdf9"
-          :stroke-width="Math.max(5, dimensionFontSize * 0.16)"
-          stroke-linejoin="round"
-        >
-          <text :x="(dimensionBounds.minX + dimensionBounds.maxX) / 2" :y="dimensionBounds.minY - 120">
-            空间外接尺寸 {{ formatDimensionMm(dimensionBounds.width) }} × {{ formatDimensionMm(dimensionBounds.height) }}
-          </text>
-          <text :x="dimensionBounds.maxX + 120" :y="(dimensionBounds.minY + dimensionBounds.maxY) / 2" :transform="`rotate(90 ${dimensionBounds.maxX + 120} ${(dimensionBounds.minY + dimensionBounds.maxY) / 2})`">
-            {{ formatDimensionMm(dimensionBounds.height) }}
-          </text>
-          <text v-for="row in dimensionRows" :key="`${row.id}-label`" :x="(row.minX + row.maxX) / 2" :y="row.minY - 54">
-            {{ rowDimensionLabel(row) }}
-          </text>
-          <template v-for="(row, index) in dimensionRows" :key="`${row.id}-gap-label`">
-            <text v-if="row.gapFromPreviousMm !== null && row.gapFromPreviousMm > 0" :x="dimensionBounds.maxX + 58" :y="(dimensionRows[index - 1]!.maxY + row.minY) / 2" :transform="`rotate(90 ${dimensionBounds.maxX + 58} ${(dimensionRows[index - 1]!.maxY + row.minY) / 2})`">
-              排间净距 {{ formatDimensionMm(row.gapFromPreviousMm) }}
-            </text>
-          </template>
-        </g>
-
-        <g
-          v-for="item in dimensionFurniture"
-          :key="`${item.id}-dimension`"
-          fill="#4f4a45"
-          :font-size="dimensionFontSize"
-          font-family="Arial, 'Microsoft YaHei', sans-serif"
-          text-anchor="middle"
-          dominant-baseline="middle"
-          paint-order="stroke"
-          stroke="#fffdf9"
-          :stroke-width="Math.max(4, dimensionFontSize * 0.14)"
-          stroke-linejoin="round"
-        >
-          <text :x="officeFurnitureFootprintBounds(item).x + officeFurnitureFootprintBounds(item).w / 2" :y="officeFurnitureFootprintBounds(item).y + officeFurnitureFootprintBounds(item).h / 2">
-            {{ furnitureDimensionLabel(item) }}
-          </text>
-        </g>
-      </svg>
+      <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && props.showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />
 
       <div v-if="placementPreview" data-testid="furniture-placement-preview" class="absolute pointer-events-none opacity-60"
         :data-valid="!placementProblem" :style="{ ...furnitureStyle(placementPreview), outline: `${2 / store.zoom}px dashed ${placementProblem ? '#c45c4c' : '#306fcb'}` }">

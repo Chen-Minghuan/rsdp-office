@@ -75,3 +75,11 @@
 API 名称、字段与状态标为“目标”时，表示后续设计契约，不代表现有接口已支持。
 
 - [家具选择统一与空间用途建议](tasks/LAYOUT-017-module-selection-and-space-advice.md)：单一模块入口、兼容排布和任意空间选家具。
+
+- [参考尺寸、座椅图例与场景旋转](tasks/LAYOUT-018-reference-dimensions-and-view-rotation.md)：实际离墙/组间距、完整座席示意与旋转视图。
+
+- [效果图使用所选商品图片](tasks/RENDER-003-selected-product-image-references.md)：商品外观参考、家具对应与历史任务核查。
+
+- [商品多图与完整场景输出](tasks/RENDER-004-multiview-products-and-scene-guide.md)：辅助角度、立体空间参考与禁止平面叠图。
+
+- [实际空间与排版约束参与生图](tasks/RENDER-005-physical-layout-context.md)：来源核对、真实离墙/组间净距与无文字 L 型引导。

@@ -35,7 +35,9 @@
     "e2e:reference-layouts": "node scripts/e2e-reference-layouts.mjs",
     "test:adaptive-layout": "node scripts/test-adaptive-layout.mjs",
     "e2e:adaptive-layout": "node scripts/e2e-adaptive-layout.mjs",
-    "e2e:module-selection": "node scripts/e2e-module-selection.mjs"
+    "e2e:module-selection": "node scripts/e2e-module-selection.mjs",
+    "test:layout-references": "node scripts/test-layout-references.mjs",
+    "e2e:layout-references": "node scripts/e2e-layout-references.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

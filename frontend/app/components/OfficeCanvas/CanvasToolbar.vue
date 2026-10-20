@@ -1,5 +1,7 @@
 <script setup lang="ts">
 const store = useOfficeStore()
+const props = defineProps<{ viewRotation?: number }>()
+const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const tool = defineModel<string>('tool', { default: 'select' })
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
 
@@ -27,6 +29,7 @@ const emit = defineEmits<{
   zoomOut: []
   fit: []
   render: []
+  rotate: [degrees: number]
 }>()
 
 watch(tools, () => {
@@ -59,6 +62,11 @@ watch(tools, () => {
       </div>
     </div>
     <div class="flex gap-1 items-center text-sm">
+      <template v-if="mode === 'design'">
+        <button class="px-2 py-1.5 rounded-lg text-[11px] border border-line" :aria-pressed="showDimensions" aria-label="显示参考尺寸" @click="showDimensions = !showDimensions">尺寸</button>
+        <button class="px-2 py-1.5 rounded-lg text-[11px] border border-line" aria-label="旋转场景视图" title="顺时针旋转视图 90°，不改变排版" @click="emit('rotate', 90)">↻ {{ props.viewRotation || 0 }}°</button>
+        <button v-if="props.viewRotation" class="px-2 py-1.5 rounded-lg text-[11px] border border-line" aria-label="复位场景视图" @click="emit('rotate', -props.viewRotation)">复位</button>
+      </template>
       <button class="p-1.5 rounded-lg text-[11px] border border-line hover:bg-[#f7f3ef] flex items-center gap-1" title="撤销" @click="emit('undo')">
         <AppIcon name="undo" size="4" />
       </button>

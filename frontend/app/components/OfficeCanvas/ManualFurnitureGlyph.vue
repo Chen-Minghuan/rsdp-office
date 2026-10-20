@@ -27,6 +27,10 @@ const leftPanel = computed(() => [
 const panelWidth = computed(() => Math.min(w.value * 0.24, 340))
 const desktopDepth = computed(() => Math.min(d.value * 0.48, props.item.templateId.startsWith('desk-executive') ? 800 : 650))
 const innerRadius = computed(() => Math.min(wing.value * 0.9, desktopDepth.value * 0.9))
+const seatX = computed(() => (w.value - wing.value) * 0.42)
+const seatY = computed(() => (d.value + desktopDepth.value) / 2)
+const seatRx = computed(() => Math.min(220, (w.value - wing.value) * 0.24))
+const seatRy = computed(() => Math.min(220, (d.value - desktopDepth.value) * 0.26))
 const isReferenceCabinet = computed(() => ['cabinet-low', 'cabinet-short', 'cabinet-high'].includes(props.item.templateId))
 const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400)))
 </script>
@@ -51,8 +55,8 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <rect v-if="rightPanel" class="reference-guide" :x="w - panelWidth" y="0" :width="panelWidth" :height="desktopDepth" />
       <rect v-if="leftPanel" class="reference-guide" x="0" y="0" :width="panelWidth" :height="desktopDepth" />
       <g v-if="showSeat" class="layout-seat" fill="none">
-        <ellipse :cx="w * 0.39" :cy="d * 0.77" :rx="w * 0.18" :ry="d * 0.14" />
-        <path :d="`M ${w * 0.27} ${d * 0.83} Q ${w * 0.39} ${d * 0.91} ${w * 0.51} ${d * 0.83}`" />
+        <ellipse :cx="seatX" :cy="seatY" :rx="seatRx" :ry="seatRy" />
+        <path :d="`M ${seatX - seatRx * 0.7} ${seatY + seatRy * 0.45} Q ${seatX} ${seatY + seatRy} ${seatX + seatRx * 0.7} ${seatY + seatRy * 0.45}`" />
       </g>
     </template>
     <template v-else-if="template.kind === 'l-desk'">

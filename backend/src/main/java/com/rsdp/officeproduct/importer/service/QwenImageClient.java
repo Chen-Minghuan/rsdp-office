@@ -11,6 +11,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.RestClientException;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -27,11 +28,18 @@ public class QwenImageClient {
     }
 
     public JsonNode submit(byte[] reference, String prompt) {
+        return submit(List.of(reference), prompt);
+    }
+
+    public JsonNode submit(List<byte[]> references, String prompt) {
         requireConfigured();
-        var body = Map.of("model", properties.getModel(), "input", Map.of("messages", List.of(Map.of("role", "user", "content", List.of(
-            Map.of("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(reference)), Map.of("text", prompt))))),
+        if (references == null || references.isEmpty() || references.size() > 3) throw new BusinessException("生成参考图数量须为 1 至 3 张");
+        List<Map<String, String>> content = new ArrayList<>();
+        for (byte[] reference : references) content.add(Map.of("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(reference)));
+        content.add(Map.of("text", prompt));
+        var body = Map.of("model", properties.getModel(), "input", Map.of("messages", List.of(Map.of("role", "user", "content", content))),
             // Avoid automatic prompt rewrites changing the requested layout or adding furniture.
-            "parameters", Map.of("n", 1, "size", "1536*1024", "prompt_extend", false, "watermark", false));
+            "parameters", Map.of("n", 1, "size", "1536*1024", "prompt_extend", false, "watermark", false, "negative_prompt", "二维平面布局图叠加，中央竖立的平面图板，悬浮图纸，横置展示板，商品清单，编号，文字，尺寸标注，拼贴画，分屏，白边，水印"));
         HttpHeaders headers = headers();
         headers.set("X-DashScope-Async", "enable");
         return exchange(base() + "/services/aigc/image-generation/generation", HttpMethod.POST, new HttpEntity<>(body, headers));
