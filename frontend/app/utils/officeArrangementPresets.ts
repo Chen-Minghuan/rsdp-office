@@ -7,7 +7,7 @@ export const OFFICE_PRODUCT_STYLES: Array<{ id: OfficeProductStyleId; label: str
   { id: 'straight-desk', label: '一字职员台', description: '仅提供素材中的单排、对坐' },
   { id: 'l-desk', label: 'L 型职员台', description: '保留转角关系，仅提供单排、对坐' },
   { id: 'straight-screen', label: '一字屏风卡位', description: '一字卡位，仅提供单排、对坐' },
-  { id: 'l-screen', label: 'L 型屏风卡位', description: '仅提供 F 型、T 型、C 型和十字型' },
+  { id: 'l-screen', label: 'L 型屏风卡位', description: '提供 L 型单排、对坐和 F 型、T 型、C 型、十字型' },
 ]
 
 export const OFFICE_MEETING_PRODUCT_STYLES: Array<{ id: OfficeProductStyleId; label: string; description: string }> = [
@@ -37,8 +37,8 @@ export const OFFICE_ARRANGEMENT_PRESETS: OfficeArrangementPreset[] = [
   { id: 'meeting-center', label: '单桌居中', description: '会议桌居中布置，外围预留拉椅和通行空间', styleIds: ALL_MEETING, baseMode: 'auto', defaults: { wallMm: 1200, aisleMm: 1200, gapMm: 0 }, topology: 'row', sourceLabel: '会议空间：单桌居中' },
   { id: 'straight-desk-row', label: '一字单排', description: '按素材的单排组合生成两排同向桌列，默认净距 1000mm', styleIds: ['straight-desk'], baseMode: 'faceToFace', defaults: { faceGapMm: 1000 }, topology: 'paired', sourceLabel: '素材：一字职员台·单排' },
   { id: 'straight-desk-face-to-face', label: '一字对坐', description: '一字职员台两排相对，默认面对净距 1600mm', styleIds: ['straight-desk'], baseMode: 'faceToFace', defaults: { faceGapMm: 1600 }, topology: 'paired', sourceLabel: '素材：一字职员台·对坐' },
-  { id: 'l-desk-row', label: 'L 型单排', description: '按素材的单排组合生成两排同向桌列，默认净距 600mm', styleIds: ['l-desk'], baseMode: 'faceToFace', defaults: { faceGapMm: 600 }, topology: 'paired', sourceLabel: '素材：L 型职员台·单排' },
-  { id: 'l-desk-face-to-face', label: 'L 型对坐', description: 'L 型职员台镜像相对，默认转角净距 600mm', styleIds: ['l-desk'], baseMode: 'faceToFace', defaults: { faceGapMm: 600 }, topology: 'paired', sourceLabel: '素材：L 型职员台·对坐' },
+  { id: 'l-desk-row', label: 'L 型单排', description: '按素材的单排组合生成两排同向桌列，默认净距 600mm', styleIds: ['l-desk', 'l-screen'], baseMode: 'faceToFace', defaults: { faceGapMm: 600 }, topology: 'paired', sourceLabel: '素材：L 型职员台·单排' },
+  { id: 'l-desk-face-to-face', label: 'L 型对坐', description: 'L 型卡位镜像相对，默认转角净距 600mm', styleIds: ['l-desk', 'l-screen'], baseMode: 'faceToFace', defaults: { faceGapMm: 600 }, topology: 'paired', sourceLabel: '素材：L 型职员台·对坐' },
   { id: 'straight-screen-row', label: '一字屏风卡位·单排', description: '一字屏风卡位单排布置，默认净距 1000mm', styleIds: ['straight-screen'], baseMode: 'faceToFace', defaults: { faceGapMm: 1000 }, topology: 'paired', sourceLabel: '素材：一字屏风卡位·单排' },
   { id: 'straight-screen-face-to-face', label: '一字屏风卡位·对坐', description: '一字屏风卡位对坐布置，默认净距 1600mm', styleIds: ['straight-screen'], baseMode: 'faceToFace', defaults: { faceGapMm: 1600 }, topology: 'paired', sourceLabel: '素材：一字屏风卡位·对坐' },
   { id: 'l-screen-row', label: 'L 型屏风单排', description: '按素材的单排组合生成两排同向桌列，默认净距 900mm', styleIds: ['l-screen'], baseMode: 'faceToFace', defaults: { faceGapMm: 900 }, topology: 'paired', sourceLabel: '素材：L 型屏风卡位·单排' },
@@ -55,7 +55,7 @@ const STRICT_PRESETS: Record<OfficeProductStyleId, OfficeArrangementPresetId[]> 
   'straight-desk': ['straight-desk-row', 'straight-desk-face-to-face'],
   'l-desk': ['l-desk-row', 'l-desk-face-to-face'],
   'straight-screen': ['straight-screen-row', 'straight-screen-face-to-face'],
-  'l-screen': ['screen-f-row', 'screen-t-face-to-face', 'screen-c-face-to-face', 'screen-cross-face-to-face'],
+  'l-screen': ['l-desk-row', 'l-desk-face-to-face', 'screen-f-row', 'screen-t-face-to-face', 'screen-c-face-to-face', 'screen-cross-face-to-face'],
   'meeting-table': ['meeting-center'],
   general: ['general-center', 'general-auto'],
 }

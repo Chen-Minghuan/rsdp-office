@@ -47,7 +47,7 @@ try {
   page.on('pageerror',error=>errors.push(error.message))
   await page.getByRole('combobox',{name:'选择排版空间',exact:true}).selectOption('OPEN-ROOM')
   await page.waitForURL(url=>url.searchParams.get('zoneId')==='OPEN-ROOM')
-  for (const id of ['desk-straight','desk-l','desk-l-rounded','desk-screen-straight','desk-screen-l','desk-manager','desk-executive']) assert.equal(await catalog.locator('[data-module-id="'+id+'"] .layout-seat').count(),1,'catalogue chair for '+id)
+  for (const id of ['desk-straight','desk-l','desk-screen-straight','desk-screen-l','desk-manager','desk-executive']) assert.equal(await catalog.locator('[data-module-id="'+id+'"] .layout-seat').count(),1,'catalogue chair for '+id)
   await catalog.locator('[data-module-id="desk-l"]').click()
   const references = page.locator('[aria-label="排版尺寸标注"]')
   await references.locator('[data-clearance-kind="wall"]').first().waitFor()

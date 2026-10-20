@@ -74,9 +74,11 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   await choose('DELETE-A')
   // Focused fields and dialog controls must never send deletion through to the canvas.
+  await page.getByRole('tab', { name: '调整参数', exact: true }).click()
   await page.getByLabel('模块宽度（毫米）').focus()
   await page.keyboard.press('Backspace')
   assert.equal((await furniture()).length, 3)
+  await page.getByRole('tab', { name: '选择模块', exact: true }).click()
   await page.getByRole('button', { name: /新增单位模块/ }).click()
   const dialog = page.getByRole('dialog', { name: '新增单位模块', exact: true })
   await dialog.getByRole('button', { name: '保存模块', exact: true }).focus()
