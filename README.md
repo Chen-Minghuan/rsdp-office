@@ -58,6 +58,8 @@ pnpm dev --port 3001
 
 ## 状态和日志
 
+服务器 Jenkins 流水线、生产容器、`.env` 路径及 HTTPS 接入说明见 [部署文档](docs/deployment.md)。生产入口为 `compose.deploy.yaml`，本地开发仍使用上面的原有命令。
+
 ```bash
 docker compose ps
 docker compose logs -f cad-parser postgres

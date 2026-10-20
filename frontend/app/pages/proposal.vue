@@ -56,7 +56,7 @@ const renderApi = useRenderPreviewApi()
 
 const previewMode = computed(() => route.query.preview === '1')
 const products = computed(() => previewMode.value ? (store.products.length ? store.products : PRODUCTS) : store.products)
-const assetBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
+const assetBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
 function assetUrl(url: string | undefined) {
   if (!url || /^(?:https?:|data:|blob:)/i.test(url)) return url || ''

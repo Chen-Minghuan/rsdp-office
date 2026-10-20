@@ -62,7 +62,7 @@
 | 差异检查 | `git diff --check`，检查相关文件差异 | 不混入无关、临时和生成文件 |
 | 文档检查 | 本地链接、命令、目标/现状及状态表一致性检查 | Markdown-only 变更适用 |
 
-独立 lint/typecheck 和统一 CI 当前尚未配置，不能把计划中的命令写成已执行检查。
+独立 lint/typecheck 当前尚未配置。Jenkins 流水线入口见 [部署文档](deployment.md)；新增文件不表示服务器已运行该流水线，执行证据见 [DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md)。不能把计划中的命令写成已执行检查。
 CAD 金样本缺失时部分用例会提前返回，即使报告通过也不能据此认为对应样本已验收。
 
 ## 6. 按任务补充有意义的测试

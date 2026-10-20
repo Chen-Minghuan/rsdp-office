@@ -8,6 +8,7 @@
 | [产品需求与验收](product-requirements.md) | 用户要完成什么，每一步怎样算完成 |
 | [架构与空间数据契约](architecture.md) | 识别、画布、排版、商品和效果图如何对应 |
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
+| [Jenkins 与服务器部署](deployment.md) | 流水线、生产 Compose、服务器 `.env`、持久存储和 HTTPS |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
 | [底图先行与后台并行识别](tasks/RECOG-007-progressive-recognition.md) | 预览先到、模型并行、真实进度和标准图缓存 |

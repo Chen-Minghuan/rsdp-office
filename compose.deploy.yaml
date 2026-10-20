@@ -1,0 +1,87 @@
+name: rsdp-office
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-office}
+      POSTGRES_USER: ${POSTGRES_USER:-office}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the server .env}
+    volumes:
+      - ${RSDP_DATA_DIR:-/opt/rsdp-office/data}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  cad-parser:
+    build:
+      context: ./backend/cad-parser
+    image: rsdp-office-cad-parser:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      CAD_PARSER_PORT: '8090'
+    healthcheck:
+      test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8090']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  office-backend:
+    build:
+      context: ./backend
+    image: rsdp-office-backend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-office}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-office}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the server .env}
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      SPRING_APPLICATION_JSON: '{"rsdp":{"cad-parser":{"url":"http://cad-parser:8090"}}}'
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?Set DASHSCOPE_API_KEY in the server .env}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      RSDP_VISION_MODEL: ${RSDP_VISION_MODEL:-qwen3-vl-max}
+      RSDP_VISION_URL: ${RSDP_VISION_URL:-}
+      RSDP_VISION_REFINE_ROOM_CONTOURS: ${RSDP_VISION_REFINE_ROOM_CONTOURS:-true}
+      RSDP_RENDER_API_KEY: ${RSDP_RENDER_API_KEY:-${DASHSCOPE_API_KEY}}
+      RSDP_RENDER_BASE_URL: ${RSDP_RENDER_BASE_URL:-https://dashscope.aliyuncs.com/api/v1}
+      RSDP_RENDER_MODEL: ${RSDP_RENDER_MODEL:-qwen-image-3.0}
+      RSDP_AUTH_ENABLED: 'true'
+      RSDP_AUTH_SECRET: ${RSDP_AUTH_SECRET:?Set RSDP_AUTH_SECRET in the server .env}
+      RSDP_AUTH_SESSION_TTL_SECONDS: ${RSDP_AUTH_SESSION_TTL_SECONDS:-43200}
+      RSDP_AUTH_REMEMBER_TTL_SECONDS: ${RSDP_AUTH_REMEMBER_TTL_SECONDS:-2592000}
+      RSDP_AUTH_COOKIE_SECURE: 'true'
+      RSDP_BOOTSTRAP_USERNAME: ${RSDP_BOOTSTRAP_USERNAME:-admin}
+      RSDP_BOOTSTRAP_PASSWORD: ${RSDP_BOOTSTRAP_PASSWORD:-}
+    volumes:
+      - ${RSDP_DATA_DIR:-/opt/rsdp-office/data}/uploads:/app/uploads
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8082/actuator/health]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cad-parser:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    image: rsdp-office-frontend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${RSDP_HTTP_PORT:-3001}:80'
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1/healthz]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    depends_on:
+      office-backend:
+        condition: service_healthy

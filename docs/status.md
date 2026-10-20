@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-20 追加：[DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md) 的 Jenkinsfile 与云服务器 `.env` 配置已交付。独立生产 Compose、前端容器及持久目录/数据库备份/显式 Spatial 迁移入口已编码；服务器 `.env` 为 `root:jenkins 0640`，Jenkins 用户预检通过。前端 build/同源静态生成、本地 clean Java 与 Linux 镜像 Java（各 163 通过、3 跳过）、三个服务器镜像构建、隔离 mock 后端的容器代理核对及文档/差异检查通过。Docker Hub 超时通过导入官方基础镜像缓存完成本轮构建，未更改全局网络配置；尚未推送、运行实际 SCM 流水线、部署正式服务或切换公网 HTTPS。
+
 2026-10-17 提交前复核：当前识别/上传/空间核对版本的 `pnpm build`、`pnpm test:design-corrections`、`pnpm e2e:recognition-progress`、`pnpm e2e:drawing-entry`、`pnpm e2e:space-review` 全部通过；三项 UI 使用隔离预览与模拟 API。后端沿用本轮 RECOG-015 的 clean test 149 通过/3 跳过记录。未新增真实模型调用，不扩大识别边界精度或业务验收结论。
 
 2026-10-17 追加：[RECOG-015](tasks/RECOG-015-remove-unused-segformer.md) 清理完成。已删除未启用的 SegFormer 服务及 Java 接入、容器和环境配置，保留 Qwen 候选与 Java 栅格墙线核查；Java clean test 149 通过/3 跳过，Compose、文档及差异检查通过。本地后端已重启且健康检查 UP，历史分析可读取。
