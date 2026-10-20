@@ -39,4 +39,6 @@
 
 2026-10-20 按用户后续要求，将现有 admin 密码更新为用户指定值（数据库保存随机盐 PBKDF2 哈希），撤销旧会话并同步服务器引导配置，文件权限保持 0640。通过 SSH 在服务器 HTTP 入口验证新密码登录、me 和退出成功；密码值不写入仓库。引导配置只在账号不存在时生效，后续部署不会覆盖现有账号密码。
 
+2026-10-20 模型配置追修：用户在公网识别 9.png 报 HTTP 404（任务 FPA-958492B8 失败记录保留）。直连探测确认服务器密钥未开通 `qwen3-vl-max`（404 `model_not_found`）而 `qwen3-vl-plus` 可用，且 `.env` 中迁移来的 `RSDP_RENDER_API_KEY` 与有效密钥不一致（401 InvalidApiKey）。已将服务器 `.env` 改为 `RSDP_VISION_MODEL='qwen3-vl-plus'`、`RSDP_RENDER_API_KEY=''`（回退 DASHSCOPE_API_KEY），改动前配置备份于 `backups/.env-20261020-pre-vlplus`（0640 root:jenkins），仅重建 office-backend 容器。容器内确认为 plus 与回退密钥；`qwen-image-3.0` 生图提交/轮询实测 SUCCEEDED（一次最小真实调用）。用户图纸的业务级重新识别待用户在公网重试，不据此扩大识别精度验收。
+
 域名目标入口：`http://rooom.vip:8081/`。删除 `rooom.vip` 指向 `120.77.15.115` 的旧 A 记录，保留本实例地址；DNS 生效后复核正常域名访问。HTTPS、子路径和本地业务数据迁移不属于本次已验证结论。

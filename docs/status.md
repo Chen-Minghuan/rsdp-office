@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-20 公网识别配置追修：用户公网识别 9.png 失败，定位为服务器百炼密钥未开通 `qwen3-vl-max`（404 model_not_found）且 `RSDP_RENDER_API_KEY` 迁移值无效（401）。服务器 `.env` 已改 `qwen3-vl-plus` 并回退生图密钥，仅重建后端容器；plus 对话探测、`qwen-image-3.0` 提交/轮询实测通过（见 [DEPLOY-002](tasks/DEPLOY-002-public-http.md) 追修记录与[模型配置](vision-configuration.md)）。本地密钥继续用 `qwen3-vl-max`。用户图纸的公网重新识别待用户重试验证。
+
 2026-10-20 HTTP 上传追修：[DEPLOY-003](tasks/DEPLOY-003-http-uuid.md) 已复现公网 HTTP 缺少 `crypto.randomUUID` 导致文件选择失败。五处 UUID 调用统一增加 getRandomValues 回退；单元检查、前端构建及禁用 randomUUID 的图纸/模板/效果预览三项 UI 回归通过。已仅构建并发布前端镜像 `956c41117698-httpuuid`（其余三服务不动），公网真实登录复测文件选择生成 v4 UUID 通过，未触发识别；401 与此错误独立核对，用户最新登录日志为 200。
 
 2026-10-20 公网部署追加：[DEPLOY-002](tasks/DEPLOY-002-public-http.md) 已以 `956c41117698` 镜像运行真实 PostgreSQL/CAD/Java/前端，备份、迁移、四服务健康检查通过。按用户选择使用 HTTP 8081，安全组放行后，公网 IP 的真实浏览器登录、商品页、画布和退出失效通过。入口为 `http://101.200.81.123:8081/`；`rooom.vip` 仍有旧 IP `120.77.15.115`，域名稳定性待删除旧 A 记录后复核。未配置 `/office/` 或 HTTPS，未迁移本地业务数据，未扩大真实识别/排版业务验收。
