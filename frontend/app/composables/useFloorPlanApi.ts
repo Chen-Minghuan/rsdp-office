@@ -5,7 +5,7 @@ import type {
 } from '~/types/floorPlan'
 import type { DimensionCalibrationReport, DimensionUnit } from '~/types/dimensionCalibration'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
 interface ApiResponse<T> {
   code: number

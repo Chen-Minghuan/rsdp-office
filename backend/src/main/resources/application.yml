@@ -27,6 +27,17 @@ mybatis-plus:
       logic-delete-value: "now()"
 
 rsdp:
+  auth:
+    enabled: ${RSDP_AUTH_ENABLED:false}
+    secret: ${RSDP_AUTH_SECRET:local-only-change-me}
+    session-ttl-seconds: ${RSDP_AUTH_SESSION_TTL_SECONDS:43200}
+    remember-ttl-seconds: ${RSDP_AUTH_REMEMBER_TTL_SECONDS:2592000}
+    cookie-secure: ${RSDP_AUTH_COOKIE_SECURE:false}
+    captcha-after-failures: ${RSDP_AUTH_CAPTCHA_AFTER_FAILURES:2}
+    lock-after-failures: ${RSDP_AUTH_LOCK_AFTER_FAILURES:5}
+    lock-seconds: ${RSDP_AUTH_LOCK_SECONDS:900}
+    bootstrap-username: ${RSDP_BOOTSTRAP_USERNAME:}
+    bootstrap-password: ${RSDP_BOOTSTRAP_PASSWORD:}
   render:
     api-key: ${RSDP_RENDER_API_KEY:${DASHSCOPE_API_KEY:}}
     base-url: ${RSDP_RENDER_BASE_URL:https://dashscope.aliyuncs.com/api/v1}

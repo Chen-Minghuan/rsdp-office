@@ -1,5 +1,11 @@
 <script setup lang="ts">
 const { isProjectWorkflow } = useWorkspaceNavigation()
+const auth = useAuth()
+
+async function logout() {
+  await auth.logout()
+  await navigateTo('/login')
+}
 </script>
 
 <template>
@@ -12,6 +18,7 @@ const { isProjectWorkflow } = useWorkspaceNavigation()
     <div class="flex shrink-0 items-center gap-2 text-sm text-[#615b55]">
       <span class="grid h-8 w-8 place-items-center rounded-full bg-[#e8ddd0] text-xs font-semibold text-[#886a4a]" aria-hidden="true">R</span>
       <span class="hidden sm:inline">设计师</span>
+      <button v-if="authEnabled" type="button" class="rounded-lg px-2 py-1 text-xs text-muted hover:bg-cream hover:text-ink" @click="logout">退出登录</button>
     </div>
   </header>
 </template>

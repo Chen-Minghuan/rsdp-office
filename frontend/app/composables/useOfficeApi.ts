@@ -2,7 +2,7 @@ import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSe
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
 import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 const PROJECT_ID = 'OFFICE-PROJECT-001'
 
 interface ApiResponse<T> {

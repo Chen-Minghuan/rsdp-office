@@ -1,6 +1,6 @@
 import type { RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 export function useRenderPreviewApi() {
   const base = API_BASE + '/api/v1/office/projects/' + encodeURIComponent(useOfficeApi().projectId) + '/render-previews'
   async function request<T>(path: string, body?: RenderPreviewRequest): Promise<T> {

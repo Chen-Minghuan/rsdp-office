@@ -24,6 +24,7 @@
 | [语义切换空间丢失修复](tasks/RECOG-013-recognition-pipeline-recovery.md) | 主请求文字定位补位、同名部分匹配、未命名墙网候选与真实输入回归 |
 | [尺寸标注与比例确认](tasks/RECOG-003-dimension-calibration.md) | 自动读取标注、一致性校验、用户确认和真实图纸实测 |
 | [单张图纸上传](tasks/UPLOAD-001-single-drawing.md) | 单图选择/拖放、更换与旧识别预览清理 |
+| [用户登录与认证](tasks/AUTH-001-user-login.md) | 数据库用户、密码哈希、HttpOnly 会话、API 拦截与部署配置 |
 | [当前图纸进入对应空间](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 上传 ID/识别绑定、后台空间入口、旧底图/模板/家具隔离与空稿恢复 |
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 上传页面精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |

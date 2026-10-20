@@ -36,6 +36,21 @@ mvn spring-boot:run
 
 服务默认监听 `8082` 端口。
 
+### 用户登录
+
+开启公网认证时，后端使用 `office_user` 表保存用户和 PBKDF2 加盐密码哈希，不保存明文密码。首次部署可以通过环境变量创建一个用户：
+
+```bash
+RSDP_AUTH_ENABLED=true \
+RSDP_AUTH_SECRET="$(openssl rand -hex 32)" \
+RSDP_BOOTSTRAP_USERNAME=admin \
+RSDP_BOOTSTRAP_PASSWORD='首次密码' \
+RSDP_AUTH_COOKIE_SECURE=true \
+mvn spring-boot:run
+```
+
+用户已经存在时不会覆盖密码；首次启动成功后可以移除 `RSDP_BOOTSTRAP_PASSWORD`。前端同源构建需要 `VITE_AUTH_ENABLED=1` 和空的 `VITE_API_BASE_URL`，让浏览器通过当前 HTTPS 域名访问 `/api`。认证只保护访问和当前用户记录，项目多租户及角色权限仍需后续实现。
+
 2026-10-17 起删除全局项目信息。新版 Java 启动时在事务中执行 `db/migrations/20261017_remove_office_project.sql`，移除旧 `office_project` 表及指向它的外键，保留画布、识别、模板、清单、预览记录和原有 project_id。新库不创建此表，重复启动可安全重跑。无需重新初始化数据库或删除数据卷；请先停止旧版 Java 再启动新版，避免旧代码继续访问已删除表。相关模型及 GET/POST/PUT 项目资料接口已移除，其余 `/projects/{projectId}/...` 路径继续使用隔离键。验证与当前运行库状态见 [WORKSPACE-001](../docs/tasks/WORKSPACE-001-remove-project-info.md)。
 
 ### 3. 下载模板

@@ -1,6 +1,31 @@
 -- 办公产品导入模块数据库初始化脚本
 -- 先创建数据库：CREATE DATABASE office OWNER postgres;
 
+-- 用户认证；密码只保存 PBKDF2 加盐哈希，业务数据仍按现有 project_id 隔离。
+create table if not exists office_user (
+    user_id varchar(64) primary key,
+    username varchar(128) not null unique,
+    password_hash varchar(255) not null,
+    display_name varchar(255) not null,
+    role varchar(32) not null default 'USER',
+    status varchar(20) not null default 'active',
+    last_login_at timestamp,
+    created_at timestamp not null default now(),
+    updated_at timestamp not null default now()
+);
+
+-- 登录会话；退出登录立即删除记录实现服务端吊销，过期由 expires_at 判定。
+create table if not exists office_user_session (
+    session_id varchar(64) primary key,
+    user_id varchar(64) not null references office_user(user_id),
+    remember_me boolean not null default false,
+    expires_at timestamp not null,
+    last_used_at timestamp,
+    created_ip varchar(64),
+    created_at timestamp not null default now()
+);
+create index if not exists idx_office_user_session_user on office_user_session(user_id);
+
 -- Independent concept previews. Snapshots never confirm or overwrite a design scheme.
 create table if not exists office_render_preview (
     preview_id varchar(64) primary key,

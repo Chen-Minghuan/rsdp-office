@@ -42,8 +42,11 @@ public class SchemaInitializer {
             Resource projectInfoCleanup = new ClassPathResource("db/migrations/20261017_remove_office_project.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(projectInfoCleanup), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            Resource userAuth = new ClassPathResource("db/migrations/20261019_user_auth.sql");
+            ScriptUtils.executeSqlScript(connection, userAuth);
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
+            log.info("用户认证表迁移完成");
         } catch (Exception e) {
             throw new IllegalStateException("数据库结构更新失败", e);
         }

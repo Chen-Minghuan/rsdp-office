@@ -1,7 +1,7 @@
 import type { ProductImportRecord, ProductImportResult } from '~/types/imported-products'
 import { uid } from '~/utils/helpers'
 
-const storageKey = `rsdp-product-import-history:${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'}`
+const storageKey = `rsdp-product-import-history:${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'}`
 
 function isResult(value: unknown): value is ProductImportResult {
   if (!value || typeof value !== 'object') return false

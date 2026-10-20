@@ -1,5 +1,5 @@
 import type { SpaceTemplate, SpaceTemplateSummary, SpaceTemplateCreateRequest } from '~/types/spaceTemplate'
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 export function useSpaceTemplateApi() {
   const base = API_BASE + '/api/v1/office/projects/' + encodeURIComponent(useOfficeApi().projectId) + '/space-templates'
   async function request<T>(path: string, body?: SpaceTemplateCreateRequest): Promise<T> {
