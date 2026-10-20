@@ -21,6 +21,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class RenderPreviewService {
     private final OfficeService office;
+    private final RenderProductReferences productReferences;
+    private final RenderLayoutContext layoutContext;
     private final OfficeWorkspaceLockMapper workspaceLocks;
     private final RenderPreviewMapper previews;
     private final QwenImageClient provider;
@@ -47,6 +49,8 @@ public class RenderPreviewService {
         if (!scene.equals(expected)) throw new BusinessException("当前保存的空间或家具已变化，请重新读取后生成");
         RenderPreviewScene.validate(scene);
         // Concept preview is deliberately allowed before product selection. It cannot confirm a final scheme.
+        var physicalContext=layoutContext.prepare(projectId,scene);
+        var products=productReferences.prepare(scene);
         provider.requireConfigured();
         RenderPreview entry=new RenderPreview();
         entry.setPreviewId("RPRE-"+UUID.randomUUID()); entry.setProjectId(projectId); entry.setZoneId(request.getZoneId());
@@ -55,12 +59,22 @@ public class RenderPreviewService {
         entry.setStyle(request.getStyle()); entry.setView(request.getView()); entry.setInstructions(request.getInstructions());
         entry.setModel(properties.getModel()); entry.setProviderBaseUrl(provider.base()); entry.setStatus("SUBMITTING");
         entry.setCreatedAt(LocalDateTime.now()); entry.setUpdatedAt(entry.getCreatedAt());
-        entry.setPrompt(RenderPreviewScene.prompt(scene,entry.getStyle(),entry.getView(),entry.getInstructions()));
+        entry.setPrompt(RenderPreviewScene.prompt(scene,entry.getStyle(),entry.getView(),entry.getInstructions()) + physicalContext.prompt() + products.prompt());
         byte[] reference=RenderPreviewScene.referencePng(scene);
         entry.setReferenceUrl(files.reference(entry.getPreviewId(),reference));
+        byte[] guide=RenderSceneGuide.png(scene,entry.getView());
+        var referenceImages=new ArrayList<byte[]>(); referenceImages.add(guide); referenceImages.addAll(products.images());
+        ObjectNode storedScene=scene.deepCopy();
+        ObjectNode references=storedScene.putObject("renderProductReferences");
+        references.set("layoutContext",physicalContext.facts());
+        references.put("guideUrl",files.reference(entry.getPreviewId()+"-space-guide",guide));
+        references.put("version",RenderProductReferences.VERSION); references.set("items",products.manifest());
+        var urls=references.putArray("sheetUrls");
+        for (int i=0;i<products.images().size();i++) urls.add(files.reference(entry.getPreviewId()+"-products-"+(i+1),products.images().get(i)));
+        entry.setSnapshotJson(encode(storedScene));
         previews.insert(entry);
         try {
-            JsonNode result=provider.submit(reference,entry.getPrompt());
+            JsonNode result=provider.submit(referenceImages,entry.getPrompt());
             String taskId=result.path("output").path("task_id").asText();
             if (!taskId.matches("[A-Za-z0-9_-]{1,128}")) throw new BusinessException("生图服务没有返回有效任务，请核对百炼请求记录后重试");
             entry.setProviderTaskId(taskId); entry.setProviderRequestId(result.path("request_id").asText());
@@ -112,7 +126,11 @@ public class RenderPreviewService {
 
     private ObjectNode response(RenderPreview entry) {
         ObjectNode result=json.valueToTree(entry);
-        JsonNode snapshot=decode(entry.getSnapshotJson()); result.set("snapshot",snapshot);
+        ObjectNode snapshot=(ObjectNode)decode(entry.getSnapshotJson());
+        JsonNode references=snapshot.remove("renderProductReferences");
+        result.set("snapshot",snapshot);
+        if (references!=null) { result.set("productReferences",references); if(references.has("layoutContext")) result.set("layoutContext",references.get("layoutContext")); if(references.hasNonNull("guideUrl")) result.put("layoutGuideUrl",references.path("guideUrl").asText()); }
+        result.put("productImagesUsed", references!=null && !references.path("items").isEmpty());
         boolean stale=true;
         try {
             var canvas=office.getCanvas(entry.getProjectId());
