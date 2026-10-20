@@ -41,6 +41,8 @@ import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFrom
 import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
+import type { LayoutRequest } from '~/types/layoutPlanning'
+import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem } from '~/utils/layoutPlanning'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 // Read existing drafts once so the workspace rename preserves browser data.
@@ -190,10 +192,10 @@ export const useOfficeStore = defineStore('office', {
       return this.zones.length > 0 && this.zones.every((z) => z.confirmed && !zoneProblem(z, this.zones))
     },
     layoutConfirmedForZone(): (zoneId: string) => boolean {
-      return (zoneId: string) =>
-        this.objects
-          .filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
-          .some((f) => f.layoutConfirmed)
+      return (zoneId: string) => {
+        const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
+        return items.length > 0 && items.every(item => item.layoutConfirmed)
+      }
     },
     comboById(): (id: string) => ProductCombo | undefined {
       const allCombos = this.combos.length ? this.combos : SAMPLE_COMBOS
@@ -293,7 +295,7 @@ export const useOfficeStore = defineStore('office', {
     }, 800),
 
     snapshotUndo() {
-      this.undoStack.push(JSON.stringify({ objects: this.objects, blank: this.blank, floorPlan: this.floorPlan, spaceTemplate: this.spaceTemplate }))
+      this.undoStack.push(JSON.stringify({ objects: this.objects, blank: this.blank, floorPlan: this.floorPlan, spaceTemplate: this.spaceTemplate, cart: this.cart, submitted: this.submitted }))
       if (this.undoStack.length > 20) this.undoStack.shift()
     },
 
@@ -470,6 +472,8 @@ export const useOfficeStore = defineStore('office', {
       this.blank = prev.blank
       if ('floorPlan' in prev) this.floorPlan = prev.floorPlan
       if ('spaceTemplate' in prev) this.spaceTemplate = prev.spaceTemplate
+      if ('cart' in prev) this.cart = prev.cart
+      if ('submitted' in prev) this.submitted = prev.submitted
       if (!this.canEnterLayout) { this.canvasMode = 'overview'; this.designZoneId = null }
       this.canvasRevision++
       this.schedulePersist()
@@ -646,7 +650,12 @@ export const useOfficeStore = defineStore('office', {
 
     confirmLayout(zoneId: string) {
       const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
-      if (items.length === 0) return
+      const zone = this.zones.find(zone => zone.id === zoneId)
+      if (!zone || !this.canEnterLayout || !items.length || confirmedLayoutProblem(zone, items)) return false
+      const target = zone.layoutPreferences?.targetSeats || 0
+      const primary = items.find(item => item.layoutRole === 'primary')
+      const seats = primary?.layoutSettings?.layoutContext === 'other' ? items.filter(item => item.furnitureTemplateId === primary.furnitureTemplateId).length : furnitureSeatCount(items, items.some(item => item.layoutSettings?.layoutContext === 'meeting'))
+      if (target && seats < target) return false
       this.objectUpdate(() => {
         for (const o of this.objects) {
           if (o.kind === 'furniture' && o.zoneId === zoneId) {
@@ -654,6 +663,7 @@ export const useOfficeStore = defineStore('office', {
           }
         }
       })
+      return true
     },
 
     unconfirmLayout(zoneId: string) {
@@ -1033,6 +1043,36 @@ export const useOfficeStore = defineStore('office', {
       this.objectUpdate(() => {
         this.objects = this.objects.filter((o) => !(o.kind === 'furniture' && o.zoneId === zoneId))
       })
+    },
+
+    applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string) {
+      const zone = this.zones.find(zone => zone.id === zoneId)
+      if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
+      const existing = this.furnitureForZone(zoneId)
+      if (sourceKey !== layoutSourceKey(zone, existing)) return false
+      const template = this.customModules.find(module => module.id === request.module.id) || furnitureById.get(request.module.id)
+      if (!template) return false
+      const proposal = planLayoutProposal(zone, existing, { ...request, module: template })
+      if (proposal.problem || !proposal.furniture.length) return false
+      this.cancelFurniturePlacement()
+      if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
+      this.objectUpdate(() => {
+        const removedProducts = new Map<string, number>()
+        for (const item of existing) if (proposal.replaceIds.includes(item.id) && item.productId) removedProducts.set(item.productId, (removedProducts.get(item.productId) || 0) + 1)
+        this.objects = this.objects.filter(object => !proposal.replaceIds.includes(object.id))
+        for (const furniture of proposal.furniture) this.objects.push({ ...furniture, id: uid('f'), spaceTemplateId: this.spaceTemplate!.templateId, templateSpaceId: zoneId })
+        zone.layoutPreferences = JSON.parse(JSON.stringify(request.preferences))
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+        this.cart = this.cart.flatMap(item => {
+          const removed = item.zoneId === zoneId ? removedProducts.get(item.productId) || 0 : 0
+          if (!removed) return [item]
+          const deduction = Math.min(item.qty, removed)
+          removedProducts.set(item.productId, removed - deduction)
+          return item.qty > deduction ? [{ ...item, qty: item.qty - deduction }] : []
+        })
+      })
+      return true
     },
 
     layoutFurnitureTemplate(

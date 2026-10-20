@@ -7,6 +7,7 @@ const router = useRouter()
 
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
+const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const overviewCollapsed = ref(false)
@@ -176,7 +177,7 @@ const subtitle = computed(() => mode.value === 'design'
     <div class="flex-1 min-h-0 flex gap-3">
       <!-- Left sidebar -->
       <OfficeCanvasOverviewSidebar v-if="mode === 'overview'" v-model="selectedId" />
-      <OfficeCanvasDesignLayoutSidebar v-else />
+      <OfficeCanvasDesignLayoutSidebar v-else @preview="layoutPreview = $event" />
 
       <!-- Canvas -->
       <div class="flex-1 min-w-0 flex flex-col bg-white border border-line rounded-2xl shadow-panel overflow-hidden">
@@ -189,7 +190,7 @@ const subtitle = computed(() => mode.value === 'design'
           @fit="fitBoard"
           @render="showRenderPreview = true"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
+        <OfficeCanvasBoard ref="boardRef" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">

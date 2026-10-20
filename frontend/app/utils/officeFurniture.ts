@@ -1,6 +1,7 @@
 import type { FurnitureObject, Product, ZoneObject } from '~/types/office'
 import type { FurnitureTemplate, ManualFurnitureItem } from '~/types/manualCanvas'
-import { planMeetingFurniture, planOfficeFurniture, planStrictArrangement, OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { planMeetingFurniture, planOfficeFurniture, OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { planAdaptiveArrangement } from '~/utils/officeAdaptiveLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { LayoutRect } from '~/utils/layout'
 import { furnitureById } from '~/utils/manualFurniture'
@@ -19,6 +20,7 @@ export function furnitureGlyphItem(template: FurnitureTemplate, widthMm = templa
 
 /** Keep old product-bound instances readable without rewriting their saved data. */
 export function officeFurnitureTemplateId(item: FurnitureObject, product?: Product): string | undefined {
+  if (!item.moduleSnapshot && !item.furnitureTemplateId?.startsWith('desk-screen-') && item.layoutSettings?.productStyleId === 'l-screen') return 'desk-l-rounded'
   if (item.moduleSnapshot && furnitureById.has(item.moduleSnapshot.glyphTemplateId)) return item.moduleSnapshot.glyphTemplateId
   if (item.furnitureTemplateId && furnitureById.has(item.furnitureTemplateId)) return item.furnitureTemplateId
   const legacy: Partial<Record<Product['kind'], string>> = {
@@ -28,11 +30,18 @@ export function officeFurnitureTemplateId(item: FurnitureObject, product?: Produ
   return product ? legacy[product.kind] : undefined
 }
 
-export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId']) {
+/** Reference chairs are seat illustrations attached to each workstation module. */
+export function officeFurnitureShowsSeat(item: FurnitureObject): boolean {
+  return ['straight-desk-row', 'straight-desk-face-to-face', 'straight-screen-row', 'straight-screen-face-to-face', 'l-desk-face-to-face'].includes(item.layoutSettings?.arrangementPresetId || '')
+}
+
+export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' | 'other' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId']) {
   const plan = context === 'meeting'
     ? planMeetingFurniture(zone, widthMm, depthMm, spacing)
+    : productStyleId === 'general'
+      ? arrangementPresetId === 'general-center' ? planMeetingFurniture(zone, widthMm, depthMm, spacing) : planOfficeFurniture(zone, widthMm, depthMm, 'auto', spacing)
     : productStyleId && arrangementPresetId
-      ? planStrictArrangement(zone, widthMm, depthMm, productStyleId, arrangementPresetId, spacing)
+      ? planAdaptiveArrangement(zone, widthMm, depthMm, productStyleId, arrangementPresetId, spacing)
       : planOfficeFurniture(zone, widthMm, depthMm, arrangement, spacing)
   return plan.slots
 }

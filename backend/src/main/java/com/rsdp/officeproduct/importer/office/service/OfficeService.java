@@ -57,6 +57,7 @@ public class OfficeService {
 
     @Transactional
     public CanvasDto saveCanvas(SaveCanvasRequest request) {
+        OfficeLayoutValidationPolicy.requireConfirmedValid(objectMapper.valueToTree(request.getObjects()));
         if (request.getFiles() != null && request.getFiles().size() > 1) {
             throw new BusinessException("一次只能上传一张图纸，请移除多余文件");
         }

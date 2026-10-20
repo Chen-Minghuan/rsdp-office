@@ -119,11 +119,11 @@ for (const [preset, expectedRows] of [['screen-f-row', 2], ['screen-t-face-to-fa
 }
 assert.equal(planStrict(strictZone, 1200, 600, 'l-screen', 'screen-f-row', strictSpacing).slots.length, 8, 'F 型单排应严格保留图例的 4×2 模块')
 const strictT = planStrict(strictZone, 1200, 600, 'l-screen', 'screen-t-face-to-face', strictSpacing)
-assert.equal(strictT.slots.length, 10, 'T 型对坐应由两个 5 槽位成组单元组成')
+assert.equal(strictT.slots.length, 12, 'T 型对坐严格为左右两组 2×3，共12件')
 const strictC = planStrict(strictZone, 1200, 600, 'l-screen', 'screen-c-face-to-face', strictSpacing)
 assert.equal(strictC.slots.length, 8, 'C 型对坐应由两个 2×2 围合单元组成')
 const strictCross = planStrict(strictZone, 1200, 600, 'l-screen', 'screen-cross-face-to-face', strictSpacing)
-assert.equal(strictCross.slots.length, 8, '十字型对坐应由上下两个十字单元组成')
+assert.equal(strictCross.slots.length, 16, '十字型对坐严格为上下两组4×2，共16件')
 
 // A narrow notch can cross a rectangle without containing any rectangle corner.
 const notch = [[0,0],[4000,0],[4000,4000],[2100,4000],[2100,900],[1900,900],[1900,4000],[0,4000]]

@@ -1,0 +1,186 @@
+import type { FurnitureObject, ZoneObject } from '~/types/office'
+import type { LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
+import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture } from './officeAutoLayout'
+import { planAdaptiveArrangement } from './officeAdaptiveLayout'
+import { officeFurnitureFootprint, officePlacementProblem } from './officeManualPlacement'
+import { canvasZoneBounds } from './officeCanvasView'
+import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
+
+export function defaultLayoutPreferences(): LayoutPreferences {
+  return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, exclusions: [] }
+}
+
+export function layoutSourceKey(zone: ZoneObject, existing: FurnitureObject[]) {
+  return JSON.stringify([zone, existing])
+}
+
+export function automaticModuleProblem(zone: ZoneObject, request: LayoutRequest): string | null {
+  const style = productStyleForTemplate(request.module)
+  if (style !== request.productStyleId || !presetsForProductStyle(style).some(preset => preset.id === request.presetId)) return '排布方式与当前家具不匹配，请重新选择排布'
+  return null
+}
+
+export function furnitureSeatCount(items: FurnitureObject[], meeting: boolean) {
+  return items.filter(item => meeting
+    ? item.furnitureTemplateId?.startsWith('chair-') || item.moduleSnapshot?.kind === 'chair'
+    : item.furnitureTemplateId?.startsWith('desk-') || item.moduleSnapshot?.category === '职员桌').length
+}
+
+export function replaceableLayoutIds(zone: ZoneObject, existing: FurnitureObject[], request: LayoutRequest) {
+  return existing.filter(item => item.zoneId === zone.id && (item.layoutGroupId === `auto:${zone.id}`
+    || !item.layoutGroupId && !!item.layoutSettings && (item.furnitureTemplateId === request.module.id
+      || zone.zoneType === 'MEETING_ROOM' && item.layoutSettings.layoutContext === 'meeting'))).map(item => item.id)
+}
+
+type Rect = { x: number; y: number; w: number; h: number }
+function overlap(a: Rect, b: Rect, gap = 0) {
+  return a.x < b.x + b.w + gap - 0.001 && b.x < a.x + a.w + gap - 0.001 && a.y < b.y + b.h + gap - 0.001 && b.y < a.y + a.h + gap - 0.001
+}
+
+/** Chair-front clearance rotates with the chair; it is separate from the physical footprint. */
+export function chairActivityRect(item: FurnitureObject, clearance: number): Rect | null {
+  if (item.layoutRole !== 'seat' || clearance <= 0) return null
+  const radians = item.rotation * Math.PI / 180
+  const offset = -item.h / 2 - clearance / 2
+  const cx = item.x + item.w / 2 - Math.sin(radians) * offset
+  const cy = item.y + item.h / 2 + Math.cos(radians) * offset
+  return officeFurnitureFootprint({ x: cx - item.w / 2, y: cy - clearance / 2, w: item.w, h: clearance, rotation: item.rotation })
+}
+
+export function confirmedLayoutProblem(zone: ZoneObject, furniture: FurnitureObject[]) {
+  for (const item of furniture) {
+    const others = furniture.filter(other => other.id !== item.id)
+    const saved = item.layoutGroupId ? item.layoutSettings?.spacing : undefined
+    const problem = officePlacementProblem(zone, item, others, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
+    if (problem) return problem
+    const activity = chairActivityRect(item, zone.layoutPreferences?.seatClearanceMm || 0)
+    if (activity && (!layoutRectInsideRing(activity, zone.polygon || []) || others.some(other => overlap(activity, officeFurnitureFootprint(other))) || zone.layoutPreferences?.exclusions.some(area => overlap(activity, area)))) return '椅子活动区被占用，请调整位置或拉椅预留'
+  }
+  return null
+}
+
+export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[], request: LayoutRequest): LayoutProposal {
+  // Preserve the reference topology while adapting its repeat count to the room.
+  if (request.module.category === '职员桌') request = { ...request, spacing: { ...request.spacing, gapMm: 0 } }
+  const prefs = request.preferences
+  const replaceIds = replaceableLayoutIds(zone, existing, request)
+  const retained = existing.filter(item => item.zoneId === zone.id && !replaceIds.includes(item.id))
+  const result: LayoutProposal = { furniture: [], replaceIds, retainedIds: retained.map(item => item.id), seats: 0, shortfall: prefs.targetSeats, label: '', problem: null, warnings: ['门窗、柱及真实通道尚未自动核验；请按现场补充入口或禁放区'], sourceKey: layoutSourceKey(zone, existing) }
+  const problem = automaticModuleProblem(zone, request)
+  if (problem) return { ...result, problem }
+  const { widthMm: w, depthMm: d, spacing } = request
+  const values = [w, d, spacing.wallMm, spacing.aisleMm, spacing.gapMm, prefs.targetSeats, prefs.seatClearanceMm]
+  if (zone.reviewUnit !== 'mm' || !zone.polygon?.length || values.some(v => !Number.isFinite(v) || v < 0) || w < 10 || d < 10
+    || !Number.isInteger(prefs.targetSeats) || prefs.targetSeats > 500 || prefs.exclusions.some(r => ![r.x, r.y, r.w, r.h].every(Number.isFinite) || r.w <= 0 || r.h <= 0)) {
+    return { ...result, problem: '请检查毫米尺寸、非负间距、目标人数或数量（0—500 整数）及禁放区尺寸' }
+  }
+  const bounds = canvasZoneBounds(zone)
+  const blockers = [...retained.map(officeFurnitureFootprint), ...prefs.exclusions]
+  const valid = (item: FurnitureObject, peers: FurnitureObject[], wall = spacing.wallMm, clearance = 0) => {
+    const footprint = officeFurnitureFootprint(item)
+    const expanded = { x: footprint.x - wall, y: footprint.y - wall, w: footprint.w + wall * 2, h: footprint.h + wall * 2 }
+    return layoutRectInsideRing(expanded, zone.polygon!) && !blockers.some(b => overlap(footprint, b, Math.max(spacing.gapMm, clearance)))
+      && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
+  }
+  const item = (id: string, x: number, y: number, width: number, depth: number, rotation: number, seat = false): FurnitureObject => ({
+    id, kind: 'furniture', zoneId: zone.id, productId: '', x, y, w: width, h: depth, rotation,
+    furnitureTemplateId: seat ? 'chair-meeting' : request.module.id,
+    ...(!seat && 'custom' in request.module ? { moduleSnapshot: { ...request.module } } : {}),
+    label: seat ? '会议椅' : request.module.name, layoutGroupId: `auto:${zone.id}`, layoutRole: seat ? 'seat' : 'primary', layoutConfirmed: false,
+    heightMm: seat ? undefined : request.module.heightMm, wingWidthMm: seat ? undefined : 550,
+    layoutSettings: { mode: 'auto', spacing: { ...spacing }, productStyleId: request.productStyleId, arrangementPresetId: request.presetId,
+      arrangementRuleVersion: OFFICE_ARRANGEMENT_RULE_VERSION, layoutContext: request.module.category === '会议与洽谈' ? 'meeting' : request.module.category === '职员桌' ? 'workstation' : 'other' },
+  })
+  const meeting = request.module.category === '会议与洽谈'
+  const general = request.productStyleId === 'general'
+  const retainedSeats = general ? retained.filter(entry => entry.furnitureTemplateId === request.module.id).length : furnitureSeatCount(retained, meeting)
+  const neededSeats = Math.max(0, prefs.targetSeats - retainedSeats)
+  if (!meeting && prefs.targetSeats > 0 && neededSeats === 0) return { ...result, seats: retainedSeats, shortfall: 0, problem: '保留家具已满足目标，无需自动添加；可调整目标或逐件编辑' }
+  const candidates: Array<{ furniture: FurnitureObject[]; seats: number; label: string; rows?: number; columns?: number; rotated?: boolean }> = []
+  if (meeting) {
+    const round = ['round-table', 'oval-table'].includes(request.module.kind)
+    // Resize only explicitly, preserving round/oval proportions and the entered depth.
+    const requestedW = prefs.resizeMeetingTable && prefs.targetSeats > 0
+      ? Math.max(w, round ? Math.ceil(prefs.targetSeats * 650 / Math.PI) : Math.ceil(Math.max(1, prefs.targetSeats - 2 * Math.floor(Math.max(0, d - 100) / 650)) / 2) * 650 + 100) : w
+    const sizeOptions = [[requestedW, round ? d * requestedW / w : d]]
+    if (requestedW !== w) {
+      const margin = prefs.includeChairs ? Math.max(spacing.wallMm, spacing.aisleMm) + 580 + prefs.seatClearanceMm : Math.max(spacing.wallMm, spacing.aisleMm)
+      for (const span of [bounds.maxX - bounds.minX, bounds.maxY - bounds.minY]) {
+        const fitted = Math.max(w, Math.min(requestedW, span - margin * 2))
+        sizeOptions.push([fitted, round ? d * fitted / w : d])
+      }
+    }
+    if (requestedW !== w) sizeOptions.push([w, d])
+    for (const [width, depth] of sizeOptions) for (const angle of [0, 90]) {
+      const positions = prefs.strategy === 'recommended' ? [0.5, 0.25, 0.75, 0.375, 0.625] : [0.5]
+      for (const px of positions) for (const py of positions) {
+        const cx = bounds.minX + (bounds.maxX - bounds.minX) * px, cy = bounds.minY + (bounds.maxY - bounds.minY) * py
+        const table = item('plan-table', cx - width! / 2, cy - depth! / 2, width!, depth!, angle)
+        const margin = prefs.includeChairs ? Math.max(spacing.wallMm, spacing.aisleMm) + 580 + prefs.seatClearanceMm : Math.max(spacing.wallMm, spacing.aisleMm)
+        if (!valid(table, [], margin)) continue
+        const furniture = [table]
+        const chairs: Array<{ x: number; y: number; rotation: number }> = []
+        const radiusX = width! / 2 + 290 + prefs.seatClearanceMm, radiusY = depth! / 2 + 290 + prefs.seatClearanceMm
+        if (round) {
+          const count = Math.min(100, Math.floor(Math.PI * (width! + depth!) / 2 / 650))
+          for (let i = 0; i < count; i++) {
+            const a = i * 2 * Math.PI / count
+            chairs.push({ x: Math.cos(a) * radiusX, y: Math.sin(a) * radiusY, rotation: a * 180 / Math.PI - 90 })
+          }
+        } else {
+          const nx = Math.floor(Math.max(0, width! - 100) / 650), ny = Math.floor(Math.max(0, depth! - 100) / 650)
+          for (let i = 0; i < nx; i++) for (const sign of [-1, 1]) chairs.push({ x: (i - (nx - 1) / 2) * 650, y: sign * radiusY, rotation: sign < 0 ? 180 : 0 })
+          for (let i = 0; i < ny; i++) for (const sign of [-1, 1]) chairs.push({ x: sign * radiusX, y: (i - (ny - 1) / 2) * 650, rotation: sign < 0 ? 90 : 270 })
+        }
+        if (prefs.includeChairs) for (const local of chairs) {
+          if (prefs.targetSeats && furniture.length - 1 >= neededSeats) break
+          const x = angle ? -local.y : local.x, y = angle ? local.x : local.y
+          const chair = item(`plan-chair-${furniture.length}`, cx + x - 275, cy + y - 290, 550, 580, (local.rotation + angle + 360) % 360, true)
+          const activity = chairActivityRect(chair, prefs.seatClearanceMm)
+          if (valid(chair, furniture, Math.max(spacing.wallMm, spacing.aisleMm), prefs.seatClearanceMm)
+            && (!activity || layoutRectInsideRing(activity, zone.polygon!) && ![...blockers, ...furniture.map(officeFurnitureFootprint)].some(rect => overlap(activity, rect)))
+            && !furniture.some(other => { const area = chairActivityRect(other, prefs.seatClearanceMm); return area && overlap(area, officeFurnitureFootprint(chair)) })) furniture.push(chair)
+        }
+        candidates.push({ furniture, seats: furniture.length - 1 + retainedSeats, label: `会议桌椅组合 · ${angle ? '纵向' : '横向'}${width !== w ? ' · 调整桌长' : ''}` })
+      }
+    }
+  } else {
+    const plans = [general
+      ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing)
+      : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)]
+    for (const plan of plans) {
+      const furniture: FurnitureObject[] = []
+      for (const slot of plan.slots) {
+        const entry = item(`plan-desk-${furniture.length}`, slot.x + (slot.w - w) / 2, slot.y + (slot.h - d) / 2, w, d, slot.rotation)
+        if (general && prefs.targetSeats > 0 && furniture.length >= neededSeats) break
+        if (slot.mirrorX) entry.mirrorX = true
+        entry.layoutClusterId = slot.clusterId
+        if (entry.layoutSettings && plan.presetId) entry.layoutSettings.arrangementPresetId = plan.presetId
+        if (valid(entry, furniture, spacing.wallMm, spacing.aisleMm)) furniture.push(entry)
+      }
+      // The planner has already skipped complete blocked cells, never individual members.
+      if (!general && furniture.length !== plan.slots.length) continue
+      if (furniture.length) candidates.push({ furniture, seats: furniture.length + retainedSeats, label: `按场地排布 · ${plan.rotated ? '纵向' : '横向'}`, rows: general ? new Set(furniture.map(entry => Math.round(entry.y))).size : plan.rows, columns: general ? new Set(furniture.map(entry => Math.round(entry.x))).size : plan.columns, rotated: plan.rotated })
+      if (plan.problem && !candidates.length) result.problem = general ? plan.problem.replace('会议桌', '家具') : plan.problem
+    }
+  }
+  candidates.sort((a, b) => {
+    const target = prefs.targetSeats
+    const score = (c: typeof a) => target ? Math.min(target, c.seats) * 1000 - Math.max(0, c.seats - target) : c.seats
+    return score(b) - score(a)
+  })
+  const best = candidates[0]
+  if (!best) return { ...result, problem: result.problem || '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }
+  return { ...result, ...best, shortfall: Math.max(0, prefs.targetSeats - best.seats), problem: null }
+}
+
+export function proposalDifference(current: FurnitureObject[], proposal: LayoutProposal) {
+  const replaced = current.filter(item => proposal.replaceIds.includes(item.id))
+  if (!proposal.furniture.length) return proposal.problem || '暂无可应用方案'
+  if (replaced.length !== proposal.furniture.length) return `自动组 ${replaced.length} → ${proposal.furniture.length} 件；保留 ${proposal.retainedIds.length} 件`
+  const keys = ['furnitureTemplateId', 'x', 'y', 'w', 'h', 'rotation', 'mirrorX', 'wingWidthMm', 'heightMm', 'moduleSnapshot', 'layoutRole', 'layoutSettings'] as const
+  const signature = (items: FurnitureObject[]) => items.map(item => JSON.stringify(keys.map(key => item[key] ?? null))).sort().join('|')
+  if (signature(replaced) === signature(proposal.furniture)) return '与当前布局一致'
+  const sizes = (items: FurnitureObject[]) => items.map(item => `${item.furnitureTemplateId}:${item.w}:${item.h}`).sort().join('|')
+  return sizes(replaced) !== sizes(proposal.furniture) ? '模块或尺寸已变化，应用后更新自动组' : '位置、朝向、间距或组合已变化，应用后更新自动组'
+}

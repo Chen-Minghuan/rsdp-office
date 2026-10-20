@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FurnitureObject, Product, ZoneObject } from '~/types/office'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
-import { officeFurnitureTemplateId } from '~/utils/officeFurniture'
+import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { officeFurnitureFootprintBounds } from '~/utils/officeDimensionAnnotations'
 
 const props = defineProps<{
@@ -44,7 +44,7 @@ function templateId(item: FurnitureObject) {
       <foreignObject x="0" y="0" :width="item.w" :height="item.h" overflow="visible">
         <OfficeCanvasFurniturePreview v-if="templateId(item)" :template-id="templateId(item)!"
           :width-mm="item.w" :depth-mm="item.h" :wing-width-mm="item.wingWidthMm"
-          :show-seat="item.layoutSettings?.arrangementPresetId === 'l-desk-face-to-face'" :stroke-scale="scene.strokeScale" />
+          :show-seat="officeFurnitureShowsSeat(item)" :stroke-scale="scene.strokeScale" />
         <div v-else class="layout-plan-fallback" :style="{ fontSize: `${Math.min(item.w, item.h) / 8}px` }">{{ item.label || '家具' }}</div>
       </foreignObject>
     </g>

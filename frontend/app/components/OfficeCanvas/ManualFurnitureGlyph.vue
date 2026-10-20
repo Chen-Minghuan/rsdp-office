@@ -11,14 +11,14 @@ const wing = computed(() => Math.min(props.item.wingWidthMm ?? 550, w.value / 2,
 const transform = computed(() => `translate(${props.item.xMm} ${props.item.yMm}) rotate(${props.item.rotationDeg}) translate(${-w.value / 2} ${-d.value / 2})`)
 const sofaSeats = computed(() => props.item.templateId === 'sofa-triple' ? 3 : props.item.templateId === 'sofa-double' ? 2 : 1)
 const isReferenceStraightDesk = computed(() => [
-  'desk-straight', 'desk-manager', 'desk-manager-double', 'desk-executive',
+  'desk-straight', 'desk-screen-straight', 'desk-manager', 'desk-manager-double', 'desk-executive',
 ].includes(props.item.templateId))
 const isReferenceLDesk = computed(() => [
-  'desk-l', 'desk-l-rounded', 'desk-manager-l',
+  'desk-l', 'desk-l-rounded', 'desk-screen-l', 'desk-manager-l',
   'desk-executive-l',
 ].includes(props.item.templateId))
 const rightPanel = computed(() => [
-  'desk-straight', 'desk-l', 'desk-manager', 'desk-manager-double',
+  'desk-straight', 'desk-screen-straight', 'desk-l', 'desk-manager', 'desk-manager-double',
   'desk-manager-l', 'desk-executive', 'desk-executive-l',
 ].includes(props.item.templateId))
 const leftPanel = computed(() => [
@@ -37,6 +37,10 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <rect x="0" y="0" :width="w" :height="d" />
       <rect v-if="rightPanel" class="reference-guide" :x="w - panelWidth" y="0" :width="panelWidth" :height="d" />
       <rect v-if="leftPanel" class="reference-guide" x="0" y="0" :width="panelWidth" :height="d" />
+      <g v-if="showSeat" class="layout-seat" fill="none">
+        <ellipse :cx="w * 0.39" :cy="d + 290" :rx="Math.min(250, w * 0.21)" ry="220" />
+        <path :d="`M ${w * 0.39 - Math.min(180, w * 0.15)} ${d + 170} Q ${w * 0.39} ${d + 90} ${w * 0.39 + Math.min(180, w * 0.15)} ${d + 170}`" />
+      </g>
     </template>
     <template v-else-if="isReferenceLDesk">
       <path

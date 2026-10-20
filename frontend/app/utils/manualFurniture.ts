@@ -4,6 +4,10 @@ import { manualRectContainedByUnion } from '~/utils/manualLayoutGeometry'
 export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
   { id: 'desk-straight', name: '职员直线桌', category: '职员桌', kind: 'desk', widthMm: 1200, depthMm: 600,
     sizeOptions: [[1200, 600], [1400, 600], [1400, 700], [1600, 700]] },
+  { id: 'desk-screen-straight', name: '一字屏风卡位', category: '职员桌', kind: 'desk', widthMm: 1200, depthMm: 600,
+    sizeOptions: [[1200, 600], [1400, 600], [1400, 700], [1600, 700]] },
+  { id: 'desk-screen-l', name: 'L 型屏风卡位', category: '职员桌', kind: 'rounded-l-desk', widthMm: 1400, depthMm: 1400,
+    sizeOptions: [[1400, 1400], [1500, 1500], [1600, 1600]] },
   { id: 'desk-l', name: '职员 L 桌', category: '职员桌', kind: 'l-desk', widthMm: 1400, depthMm: 1400,
     sizeOptions: [[1200, 1200], [1400, 1400], [1600, 1400]] },
   { id: 'desk-l-rounded', name: '职员圆角 L 桌', category: '职员桌', kind: 'rounded-l-desk', widthMm: 1400, depthMm: 1400,

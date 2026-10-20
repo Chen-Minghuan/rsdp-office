@@ -7,6 +7,7 @@ export type OfficeProductStyleId =
   | 'straight-screen'
   | 'l-screen'
   | 'meeting-table'
+  | 'general'
 
 /** 素材中的排布拓扑；generic-* 仅用于旧布局兼容读取。 */
 export type OfficeArrangementPresetId =
@@ -31,6 +32,8 @@ export type OfficeArrangementPresetId =
   | 'screen-c-face-to-face'
   | 'screen-cross-face-to-face'
   | 'meeting-center'
+  | 'general-center'
+  | 'general-auto'
 
 export interface OfficeArrangementPreset {
   id: OfficeArrangementPresetId

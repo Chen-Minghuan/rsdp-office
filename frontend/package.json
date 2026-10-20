@@ -28,7 +28,14 @@
     "e2e:module-recommendations": "node scripts/e2e-module-recommendations.mjs",
     "e2e:upload-hmr": "node scripts/e2e-upload-hmr.mjs",
     "e2e:recognition-progress": "node scripts/e2e-recognition-progress.mjs",
-    "e2e:drawing-entry": "node scripts/e2e-drawing-entry.mjs"
+    "e2e:drawing-entry": "node scripts/e2e-drawing-entry.mjs",
+    "test:layout-planning": "node scripts/test-layout-planning.mjs",
+    "e2e:layout-planning": "node scripts/e2e-layout-planning.mjs",
+    "test:reference-layouts": "node scripts/test-reference-layouts.mjs",
+    "e2e:reference-layouts": "node scripts/e2e-reference-layouts.mjs",
+    "test:adaptive-layout": "node scripts/test-adaptive-layout.mjs",
+    "e2e:adaptive-layout": "node scripts/e2e-adaptive-layout.mjs",
+    "e2e:module-selection": "node scripts/e2e-module-selection.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

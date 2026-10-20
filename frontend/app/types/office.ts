@@ -55,6 +55,7 @@ export interface ZoneObject {
   mmPerSourceUnit?: number
   evidenceKind?: 'DEMO' | 'REAL_SERVICE' | 'MANUAL' | 'ESTIMATED'
   calibrationEvidence?: DimensionCalibrationEvidence
+  layoutPreferences?: import('./layoutPlanning').LayoutPreferences
 }
 
 export interface NoteObject {
@@ -90,6 +91,10 @@ export interface ReferenceObject {
 }
 
 export interface FurnitureObject {
+  /** Only an explicitly generated group may be replaced by replanning. */
+  layoutGroupId?: string
+  layoutClusterId?: string
+  layoutRole?: 'primary' | 'seat'
   /** 手动布局共用的家具图例；与实际商品引用分开。 */
   furnitureTemplateId?: string
   /** Immutable definition for a custom instance, independent of local catalog edits. */

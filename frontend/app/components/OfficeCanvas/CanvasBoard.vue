@@ -5,11 +5,14 @@ import type { OfficeObject, ZoneObject, FurnitureObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
 import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
-import { officeFurnitureTemplateId } from '~/utils/officeFurniture'
+import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
+import { chairActivityRect } from '~/utils/layoutPlanning'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone } from '~/utils/officeCanvasView'
 import { formatDimensionMm, officeDimensionBounds, officeDimensionRows, officeFurnitureFootprintBounds } from '~/utils/officeDimensionAnnotations'
 
 const store = useOfficeStore()
+const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null }>()
+const activePreview = computed(() => props.layoutPreview?.zoneId === store.designZoneId ? props.layoutPreview : null)
 const tool = defineModel<string>('tool', { default: 'select' })
 const selectedId = defineModel<string | null>('selectedId')
 const showSubmit = defineModel<boolean>('showSubmit')
@@ -774,10 +777,20 @@ function furnitureProduct(o: FurnitureObject) {
         >
           <OfficeCanvasFurniturePreview v-if="officeFurnitureTemplateId(f, furnitureProduct(f))"
             :template-id="officeFurnitureTemplateId(f, furnitureProduct(f))!" :width-mm="f.w" :depth-mm="f.h"
-            :wing-width-mm="f.wingWidthMm" :show-seat="f.layoutSettings?.arrangementPresetId === 'l-desk-face-to-face'"
+            :wing-width-mm="f.wingWidthMm" :show-seat="officeFurnitureShowsSeat(f)"
             :selected="selectedFurnitureIds.includes(f.id)" :stroke-scale="1 / store.zoom" />
           <div v-else class="h-full w-full border border-[#78736d] bg-white/90 flex items-center justify-center text-[10px]">{{ f.label || furnitureProduct(f)?.name || '家具' }}</div>
         </div>
+      </div>
+
+      <div v-if="mode === 'design' && activePreview" class="absolute inset-0 pointer-events-none" data-testid="layout-plan-preview">
+        <template v-for="item in activePreview.furniture" :key="'activity-' + item.id">
+          <div v-if="chairActivityRect(item, activePreview.seatClearanceMm)" :style="{ position: 'absolute', left: chairActivityRect(item, activePreview.seatClearanceMm)?.x + 'px', top: chairActivityRect(item, activePreview.seatClearanceMm)?.y + 'px', width: chairActivityRect(item, activePreview.seatClearanceMm)?.w + 'px', height: chairActivityRect(item, activePreview.seatClearanceMm)?.h + 'px', border: `${1 / store.zoom}px dotted #306fcb`, opacity: 0.35 }" />
+        </template>
+        <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id" class="absolute opacity-50" :style="{ ...furnitureStyle(item), outline: `${1.5 / store.zoom}px dashed #306fcb` }">
+          <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(item)!" :width-mm="item.w" :depth-mm="item.h" :wing-width-mm="item.wingWidthMm" :stroke-scale="1 / store.zoom" :show-seat="officeFurnitureShowsSeat(item)" />
+        </div>
+        <div v-for="area in activePreview.exclusions" :key="area.id" :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px', border: `${2 / store.zoom}px dashed #c45c4c`, background: '#c45c4c22', fontSize: `${11 / store.zoom}px` }">{{ area.label }}</div>
       </div>
 
       <!-- 尺寸标注：与空间和家具共用毫米世界坐标，随画布缩放/平移同步。 -->

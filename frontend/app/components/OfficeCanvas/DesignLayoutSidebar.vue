@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFurniture'
-import { planMeetingFurniture, planStrictArrangement, OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
-import { furnitureMatchesPlan } from '~/utils/officeFurniture'
+import type { FurnitureObject } from '~/types/office'
+import type { LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
+import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
+import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
 import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
 import { moduleGlyphId } from '~/utils/officeModules'
-import { OFFICE_MEETING_PRODUCT_STYLES, OFFICE_PRODUCT_STYLES, defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate, OFFICE_ARRANGEMENT_RULE_VERSION } from '~/utils/officeArrangementPresets'
+import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
 
+const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; seatClearanceMm: number; exclusions: LayoutPreferences['exclusions'] } | null] }>()
+const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
+const showPreview = ref(true)
 const store = useOfficeStore()
 const templateRouter = useRouter()
 const collapsed = ref(false)
@@ -38,8 +44,16 @@ const productStyle = ref<OfficeProductStyleId>(productStyleForTemplate(builtInMo
 const presetId = ref<OfficeArrangementPresetId>(defaultPresetForProductStyle(productStyle.value).id)
 const spacing = reactive<OfficeLayoutSpacing>({ ...OFFICE_LAYOUT_SPACING })
 const isMeetingSpace = computed(() => zone.value?.zoneType === 'MEETING_ROOM')
-const isMeetingLayout = computed(() => isMeetingSpace.value || selectedModule.value.category === '会议与洽谈')
-const availableProductStyles = computed(() => isMeetingLayout.value ? OFFICE_MEETING_PRODUCT_STYLES : OFFICE_PRODUCT_STYLES)
+const isMeetingLayout = computed(() => selectedModule.value.category === '会议与洽谈')
+const isWorkstation = computed(() => selectedModule.value.category === '职员桌')
+const isGeneral = computed(() => productStyle.value === 'general')
+const catalogCategories = computed(() => isMeetingSpace.value ? ['会议与洽谈', ...furnitureCategories.filter(category => category !== '会议与洽谈')] : furnitureCategories)
+const nameSeatSuggestion = computed(() => Number(zone.value?.name.match(/(?:\(|（)?(\d+)\s*人/)?.[1] || 0))
+const zoneBounds = computed(() => zone.value ? canvasZoneBounds(zone.value) : { minX: 0, minY: 0 })
+watch(() => zone.value?.id, () => {
+  Object.assign(preferences, defaultLayoutPreferences(), JSON.parse(JSON.stringify(zone.value?.layoutPreferences || {})))
+  activeStep.value = 'module'
+}, { immediate: true })
 const pairGap = computed({
   get: () => arrangement.value === 'faceToFace' ? spacing.faceGapMm ?? 900 : spacing.backGapMm ?? 0,
   set: (value: number) => { if (arrangement.value === 'faceToFace') spacing.faceGapMm = value; else spacing.backGapMm = value },
@@ -60,17 +74,19 @@ function defaultModuleForZone(currentZone: typeof zone.value) {
   return builtInModules[0]!
 }
 
-watch([() => zone.value?.id, () => zone.value ? store.furnitureForZone(zone.value.id)[0]?.id : undefined], () => {
-  const item = zone.value ? store.furnitureForZone(zone.value.id)[0] : null
+watch(() => zone.value?.id, () => {
+  const item = zone.value ? store.furnitureForZone(zone.value.id).find(item => item.layoutRole === 'primary') || store.furnitureForZone(zone.value.id).find(item => item.layoutSettings) : null
   const settings = item?.layoutSettings
-  const template = modules.value.find(template => template.id === item?.furnitureTemplateId) || builtInModules.find(template => template.id === item?.moduleSnapshot?.glyphTemplateId)
+  let template = modules.value.find(template => template.id === item?.furnitureTemplateId) || builtInModules.find(template => template.id === item?.moduleSnapshot?.glyphTemplateId)
+  // Migrate legacy screen choices to explicit modules; custom modules retain their source.
+  if (template && !('custom' in template) && ['straight-screen', 'l-screen'].includes(settings?.productStyleId || '')) template = builtInModules.find(module => module.id === (settings?.productStyleId === 'l-screen' ? 'desk-screen-l' : 'desk-screen-straight')) || template
   if (template) {
     selectedModule.value = template
     unitW.value = item!.w
     unitD.value = item!.h
-  } else if (zone.value && !item) {
+  } else if (zone.value) {
     const recommended = defaultModuleForZone(zone.value)
-    if (selectedModule.value.id !== recommended.id) selectModule(recommended)
+    if (selectedModule.value.id !== recommended.id) selectedModule.value = recommended
   }
   if (!settings || !['auto', 'row', 'grid', 'backToBack', 'perimeter', 'faceToFace', 'staggered', 'centerAisle'].includes(settings.mode)) {
     if (isMeetingLayout.value) {
@@ -88,7 +104,7 @@ watch([() => zone.value?.id, () => zone.value ? store.furnitureForZone(zone.valu
   }
   arrangement.value = settings.mode
   if (isMeetingLayout.value) productStyle.value = 'meeting-table'
-  else if (settings.productStyleId) productStyle.value = settings.productStyleId
+  else productStyle.value = productStyleForTemplate(selectedModule.value)
   if (settings.arrangementPresetId) presetId.value = settings.arrangementPresetId
   else {
     const legacyPreset: Partial<Record<OfficeLayoutMode, OfficeArrangementPresetId>> = {
@@ -121,90 +137,37 @@ const effectivePresetId = computed<OfficeArrangementPresetId>(() => {
 // This also prevents an older, now-retired preset from leaking back into the
 // summary when a saved layout is opened.
 const selectedPreset = computed(() => availablePresets.value.find(preset => preset.id === effectivePresetId.value) || availablePresets.value[0])
-const screenGeometryPending = computed(() => !isMeetingLayout.value && productStyle.value.endsWith('screen') && !selectedModule.value.name.includes('屏风'))
-const selectedStyleLabel = computed(() => availableProductStyles.value.find(style => style.id === productStyle.value)?.label || '未选择样式')
+const selectedStyleLabel = computed(() => selectedPreset.value?.label || '')
 const activeStepIndex = computed(() => layoutPanelSteps.findIndex(step => step.id === activeStep.value) + 1)
 
 const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, d]) => w === unitW.value && d === unitD.value)
   ? `${unitW.value},${unitD.value}` : '')
 
-const plan = computed(() => zone.value
-  ? isMeetingLayout.value
-    ? planMeetingFurniture(zone.value, unitW.value, unitD.value, spacing)
-    : planStrictArrangement(zone.value, unitW.value, unitD.value, productStyle.value, effectivePresetId.value, spacing)
-  : null)
-const capacity = computed(() => plan.value?.slots.length || 0)
 const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
-const autoPlan = computed(() => zone.value
-  ? isMeetingLayout.value
-    ? planMeetingFurniture(zone.value, unitW.value, unitD.value, spacing)
-    : plan.value
-  : null)
-const draftApplied = computed(() => furnitureMatchesPlan(currentFurniture.value, selectedModule.value.id, unitW.value, unitD.value, plan.value?.slots || [], moduleGlyphId(selectedModule.value), selectedModule.value.heightMm))
-const mountedForDraftInvalidation = ref(false)
-watch(draftApplied, applied => { if (!applied) applicationMessage.value = '' }, { flush: 'sync' })
-watch([selectedModule, unitW, unitD, arrangement, productStyle, presetId, () => spacing.aisleMm, () => spacing.wallMm, () => spacing.gapMm, () => spacing.faceGapMm, () => spacing.backGapMm, () => zone.value?.id], () => {
+const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
+const proposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
+const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
+const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
+const draftApplied = computed(() => difference.value === '与当前布局一致' && !preferencesChanged.value)
+const differenceText = computed(() => difference.value === '与当前布局一致' && preferencesChanged.value ? '需求或预留参数已变化，应用后保存新参数' : difference.value)
+const plan = computed(() => proposal.value ? { slots: proposal.value.furniture, rows: proposal.value.rows || new Set(proposal.value.furniture.filter(f => f.layoutRole === 'primary').map(f => Math.round(f.y))).size, columns: proposal.value.columns || 0, rotated: proposal.value.rotated || false, problem: proposal.value.problem } : null)
+const autoPlan = plan
+const capacity = computed(() => proposal.value?.furniture.length || 0)
+watch([proposal, showPreview, draftApplied], () => {
   applicationMessage.value = ''
-  // A confirmed layout is tied to its module size and spacing. Keep the
-  // existing furniture visible, but require a new explicit application after
-  // any input that changes the calculated slots.
-  if (mountedForDraftInvalidation.value && zone.value && currentFurniture.value.length && layoutConfirmed.value && !draftApplied.value) {
-    store.unconfirmLayout(zone.value.id)
-  }
-}, { flush: 'sync' })
-onMounted(() => { mountedForDraftInvalidation.value = true })
+  emit('preview', zone.value && showPreview.value ? { zoneId: zone.value.id, furniture: draftApplied.value ? [] : proposal.value?.furniture || [], seatClearanceMm: preferences.seatClearanceMm, exclusions: preferences.exclusions } : null)
+}, { immediate: true, deep: true })
+onUnmounted(() => emit('preview', null))
+
+function addExclusion() {
+  if (!zone.value) return
+  const bounds = canvasZoneBounds(zone.value)
+  preferences.exclusions.push({ id: 'reserved-' + Date.now(), label: '入口或禁放区', x: bounds.minX, y: bounds.minY, w: 1000, h: 1000 })
+}
 
 function selectModule(template: OfficeModuleTemplate) {
   store.cancelFurniturePlacement()
   selectedModule.value = template
-  activeStep.value = 'settings'
-}
-
-function selectProductStyle(styleId: OfficeProductStyleId) {
-  // Keep the two selectors in sync in both directions. Product styles describe
-  // the layout geometry, while the module catalog supplies the concrete glyph
-  // and dimensions used by the planner. Screen styles currently reuse the
-  // matching desk glyph until dedicated screen geometry is available.
-  if (styleId === 'meeting-table') {
-    const targetModule = builtInModules.find(module => module.category === '会议与洽谈')
-    if (targetModule) selectModule(targetModule)
-    productStyle.value = styleId
-    presetId.value = 'meeting-center'
-    arrangement.value = 'auto'
-    Object.assign(spacing, OFFICE_LAYOUT_SPACING, { wallMm: 1200, aisleMm: 1200 })
-    if (targetModule) {
-      nextTick(() => {
-        const moduleCard = Array.from(document.querySelectorAll<HTMLElement>('[data-module-id]'))
-          .find(element => element.dataset.moduleId === targetModule.id)
-        moduleCard?.scrollIntoView({ block: 'nearest' })
-      })
-    }
-    return
-  }
-  const targetKind = styleId === 'l-desk' || styleId === 'l-screen'
-    ? ['l-desk', 'rounded-l-desk']
-    : ['desk']
-  const targetModule = builtInModules.find(module =>
-    module.category === '职员桌' && targetKind.includes(module.kind),
-  )
-  if (targetModule && productStyleForTemplate(targetModule) !== styleId) {
-    selectModule(targetModule)
-  } else if (targetModule && productStyleForTemplate(selectedModule.value) !== styleId) {
-    selectModule(targetModule)
-  }
-  // Selecting a screen style intentionally remains a screen rule selection;
-  // its desk glyph is only the current editable footprint placeholder.
-  productStyle.value = styleId
-  const current = availablePresets.value.find(preset => preset.id === presetId.value)
-  if (!current) selectPreset(defaultPresetForProductStyle(styleId).id)
-
-  if (targetModule) {
-    nextTick(() => {
-      const moduleCard = Array.from(document.querySelectorAll<HTMLElement>('[data-module-id]'))
-        .find(element => element.dataset.moduleId === targetModule.id)
-      moduleCard?.scrollIntoView({ block: 'nearest' })
-    })
-  }
 }
 
 function selectPreset(id: OfficeArrangementPresetId) {
@@ -255,16 +218,11 @@ function addToCanvas() {
 }
 
 function applyLayout() {
-  if (!zone.value || capacity.value <= 0) return
-  const applied = store.layoutFurnitureTemplate(zone.value.id, selectedModule.value.id, unitW.value, unitD.value, arrangement.value, { ...spacing }, {
-    productStyleId: productStyle.value,
-    arrangementPresetId: effectivePresetId.value,
-    arrangementRuleVersion: OFFICE_ARRANGEMENT_RULE_VERSION,
-    layoutContext: isMeetingLayout.value ? 'meeting' : 'workstation',
-  })
-  if (!applied) { applicationMessage.value = '排版未应用，请检查空间和尺寸后重试'; return }
-  const message = `已应用${isMeetingLayout.value ? '会议桌居中' : selectedPreset.value?.label || '当前排布'}：${store.furnitureForZone(zone.value.id).length} 件`
-  nextTick(() => { applicationMessage.value = message })
+  if (!zone.value || !proposal.value || proposal.value.problem || draftApplied.value) return
+  const planned = proposal.value
+  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey)
+  if (!applied) { applicationMessage.value = '空间或家具已变化，请重新预览后应用'; return }
+  nextTick(() => { applicationMessage.value = '已应用：' + planned.furniture.length + ' 件，保留 ' + planned.retainedIds.length + ' 件' })
 }
 
 function applyAutoLayout() {
@@ -273,7 +231,7 @@ function applyAutoLayout() {
 
 function confirmLayout() {
   if (!zone.value) return
-  store.confirmLayout(zone.value.id)
+  if (store.confirmLayout(zone.value.id) === false) applicationMessage.value = '当前家具存在越界、重叠、禁放区冲突或目标不足，请检查后确认'
 }
 
 function unconfirmLayout() {
@@ -301,7 +259,7 @@ function clearLayout() {
         </button>
         <div class="flex items-center gap-2 text-[15px] font-bold text-[#4f493f]">
           <AppIcon name="cube" size="4" />
-          <span>单位模块与排版</span>
+          <span>家具选择与排版</span>
         </div>
         <p class="text-[10px] text-muted mt-1 pr-6 truncate">
           {{ zone ? zone.name : '未选择空间' }}
@@ -354,7 +312,7 @@ function clearLayout() {
               </div>
             </div>
           </details>
-          <details v-for="category in furnitureCategories" :key="category" :open="category === furnitureCategories[0]" class="mb-2">
+          <details v-for="category in catalogCategories" :key="category" :open="category === catalogCategories[0]" class="mb-2">
             <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">{{ category }} <span class="text-muted">{{ builtInModules.filter(module => module.category === category).length }} 款</span></summary>
             <div class="grid grid-cols-2 gap-2 mt-1">
               <button v-for="module in builtInModules.filter(module => module.category === category)" :key="module.id"
@@ -371,6 +329,29 @@ function clearLayout() {
             下一步：设置尺寸和间距
             <AppIcon name="arrowRight" size="3" class="ml-1 inline-block" />
           </button>
+        </div>
+
+        <div class="px-3 py-3 border-b border-line text-[11px] space-y-2">
+          <div class="font-semibold">方案需求</div>
+          <div v-if="isMeetingLayout" class="flex gap-2"><button type="button" :aria-pressed="preferences.strategy === 'template'" class="flex-1 rounded border border-line py-2" @click="preferences.strategy = 'template'">{{ isMeetingLayout ? '单桌居中' : '按场地排布' }}</button><button v-if="isMeetingLayout" type="button" :aria-pressed="preferences.strategy === 'recommended'" class="flex-1 rounded border border-line py-2" @click="preferences.strategy = 'recommended'">自动推荐</button></div>
+          <label class="flex items-center justify-between gap-2">{{ isGeneral ? '目标数量' : '目标人数' }}<input v-model.number="preferences.targetSeats" :aria-label="isGeneral ? '目标数量' : '目标人数'" type="number" min="0" max="500" class="w-24 rounded border border-line px-2 py-1"></label>
+          <p class="text-[10px] text-muted">{{ isGeneral ? '0 表示未指定数量；多件请选择按场地排布。' : '0 表示未指定；房名中的人数需确认后使用。' }}</p>
+          <button v-if="!isGeneral && nameSeatSuggestion && nameSeatSuggestion <= 500 && !preferences.targetSeats" class="text-bronze underline" @click="preferences.targetSeats = nameSeatSuggestion">采用房名建议 {{ nameSeatSuggestion }} 人</button>
+          <template v-if="isMeetingLayout">
+            <label class="block"><input v-model="preferences.includeChairs" type="checkbox" aria-label="生成会议椅"> 同时生成会议椅</label>
+            <label class="block"><input v-model="preferences.resizeMeetingTable" type="checkbox" aria-label="按人数调整桌长"> 按目标人数调整桌长（预览实际尺寸）</label>
+            <label class="flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded border border-line px-2 py-1"></label>
+          </template>
+          <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
+          <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
+          <details><summary class="cursor-pointer">入口与禁放区 · {{ preferences.exclusions.length }}</summary>
+            <p class="mt-2 text-[10px] text-muted">从空间左上角起量，单位 mm；红框区域不可摆放。</p>
+            <div v-for="area in preferences.exclusions" :key="area.id" class="mt-2 rounded border border-line p-2">
+              <input v-model="area.label" aria-label="预留区域名称" class="w-full border border-line px-1">
+              <div class="grid grid-cols-2 gap-1 mt-1"><label v-for="key in (['x', 'y', 'w', 'h'] as const)" :key="key">{{ { x: '距左', y: '距上', w: '宽', h: '深' }[key] }} mm<input :value="area[key] - (key === 'x' ? zoneBounds.minX : key === 'y' ? zoneBounds.minY : 0)" @input="area[key] = Number(($event.target as HTMLInputElement).value) + (key === 'x' ? zoneBounds.minX : key === 'y' ? zoneBounds.minY : 0)" :aria-label="'预留区域 ' + key" type="number" :min="key === 'w' || key === 'h' ? 1 : undefined" class="w-full border border-line px-1"></label></div>
+              <button class="mt-1 text-bronze underline" @click="preferences.exclusions = preferences.exclusions.filter(item => item.id !== area.id)">移除预留区域</button>
+            </div><button class="mt-2 text-bronze underline" @click="addExclusion">添加入口或禁放区</button>
+          </details>
         </div>
 
         <!-- Dimensions -->
@@ -397,15 +378,16 @@ function clearLayout() {
               <span class="text-[9px] text-muted">单位：mm</span>
             </div>
             <div class="grid grid-cols-2 gap-2 text-[10px] text-muted">
-              <label>{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <label v-if="!isWorkstation">{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <label v-if="isWorkstation">图例组间净距<input v-model.number="spacing.faceGapMm" aria-label="图例组间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
               <label>离墙距离<input v-model.number="spacing.wallMm" aria-label="离墙距离（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
-              <label>同排间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
-              <label v-if="arrangement === 'backToBack' || arrangement === 'faceToFace'">{{ arrangement === 'faceToFace' ? '面对净距' : '背靠中缝' }}<input v-model.number="pairGap" aria-label="对排中缝（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <label v-if="!isWorkstation">同排间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <label v-if="isMeetingLayout && (arrangement === 'backToBack' || arrangement === 'faceToFace')">{{ arrangement === 'faceToFace' ? '面对净距' : '背靠中缝' }}<input v-model.number="pairGap" aria-label="对排中缝（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
             </div>
-            <label class="mt-2 flex items-center gap-2 rounded-lg bg-[#faf7f3] px-2 py-1.5 text-[10px] text-muted"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">启用同排留缝</label>
-            <p class="mt-2 text-[9px] leading-relaxed text-muted">默认间距来自当前产品图例，可按项目现场调整。</p>
+            <label v-if="isMeetingLayout" class="mt-2 flex items-center gap-2 rounded-lg bg-[#faf7f3] px-2 py-1.5 text-[10px] text-muted"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">启用同排留缝</label>
+            <p class="mt-2 text-[9px] leading-relaxed text-muted">{{ isWorkstation ? '保持参考图的朝向、镜像和紧贴关系，按空间大小自动增加排数、列数或组合；横纵方向自动比较。' : '按当前家具实际尺寸及间距检查方案，已放置的其他家具会保留并避让。' }}</p>
           <p v-if="currentFurniture.length && !draftApplied" class="mt-3 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2.5 py-2 text-[10px] leading-relaxed text-[#8a6a2c]">
-            尺寸或间距已变化，当前画布保留原排版。请完成参数设置后进入“排布”，重新应用方案。
+            {{ differenceText }}。画布虚线为待应用预览，原排版保留。
           </p>
           <button class="mt-3 w-full rounded-lg border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" @click="goToStep('style')">
             下一步：选择排布
@@ -426,27 +408,7 @@ function clearLayout() {
             </span>
             <AppIcon name="arrowRight" size="3.5" class="flex-none text-[#aa8a6a]" />
           </button>
-          <div class="text-[11px] font-semibold text-[#5b5751] mb-2">{{ isMeetingLayout ? '会议空间样式' : '产品样式' }}</div>
-          <div class="grid grid-cols-2 gap-2">
-            <button
-              v-for="style in availableProductStyles"
-              :key="style.id"
-              :class="['px-2 py-1.5 rounded-lg text-[10px] border text-left transition', productStyle === style.id ? 'bg-bronze text-white border-bronze' : 'bg-white border-line hover:bg-[#f9f7f4]']"
-              :aria-label="style.label"
-              :aria-pressed="productStyle === style.id"
-              @click="selectProductStyle(style.id)"
-            >
-              <span class="font-semibold">{{ style.label }}</span>
-              <span class="block mt-0.5 opacity-75 leading-tight">{{ style.description }}</span>
-            </button>
-          </div>
-          <p v-if="isMeetingLayout" class="mt-2 rounded-lg bg-[#eef6f2] px-2 py-1.5 text-[10px] leading-tight text-[#356451]">
-            会议空间默认采用“单桌居中”，外围为拉椅和通行预留；职员桌多排只在开放办公区使用。
-          </p>
-          <p v-if="screenGeometryPending" class="mt-2 rounded-lg bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-tight text-[#8a6a2c]">
-            当前目录没有独立屏风线稿，排布槽位已严格按屏风图例生成；屏风共享线段暂按对应卡位占地显示。
-          </p>
-          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">排布方式</div>
+          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-2">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。座椅为座席示意，可另行选配。</p>
           <div class="grid grid-cols-2 gap-2">
             <button
               v-for="preset in availablePresets"
@@ -476,8 +438,12 @@ function clearLayout() {
               <strong data-testid="module-capacity" class="mt-0.5 block text-sm text-bronze">{{ capacity }} <span class="text-[10px] font-normal">件</span></strong>
             </div>
           </div>
-          <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ plan.rows }} 排 · 每排最多 {{ plan.columns }} 件 · {{ plan.rotated ? '纵向' : '横向' }}</div>
-          <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">画布仍是原排布 {{ currentFurniture.length }} 件；点击下方应用按钮后替换为 {{ capacity }} 件。</p>
+          <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
+          <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
+          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}<span v-if="proposal.shortfall" class="text-[#a65e4c]"> · 尚缺 {{ proposal.shortfall }} {{ isGeneral ? '件' : '人' }}</span></p>
+          <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>
+          <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
+          <p v-if="proposal" class="mt-1 text-[9px] text-muted">门窗、柱及连续通道待现场核验；可添加预留区域。</p>
           <p v-if="applicationMessage" role="status" class="mt-1 text-[10px] text-[#56636e]">{{ applicationMessage }}</p>
           <p v-if="plan?.problem" role="status" class="mt-1 text-[10px] text-[#a65e4c]">{{ plan.problem }}</p>
         </div>
@@ -486,17 +452,17 @@ function clearLayout() {
         <div class="px-3 py-3 mt-auto border-t border-line flex flex-col gap-2 flex-none bg-white">
           <div v-if="store.furniturePlacement" class="text-[10px] text-muted">点击空间内放置，R 旋转，Esc 结束。<button class="ml-1 text-bronze underline" @click="store.rotateFurniturePlacement()">旋转 90°</button></div>
           <div v-if="autoPlan?.slots.length" class="flex items-center justify-between rounded-lg bg-[#faf7f3] px-2.5 py-1.5 text-[10px] text-muted">
-            <span>{{ isMeetingLayout ? '会议桌居中方案' : (selectedPreset?.label || '当前排布') }}</span>
-            <strong data-testid="auto-layout-capacity" class="text-[#5d554c]">{{ autoPlan.slots.length }} 件 · {{ autoPlan.rows }} 排</strong>
+            <span>{{ proposal?.label || '当前方案' }}</span>
+            <strong data-testid="auto-layout-capacity" class="text-[#5d554c]">{{ autoPlan.slots.length }} 件</strong>
           </div>
           <button
             data-testid="apply-layout"
             class="w-full px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="!autoPlan?.slots.length"
+            :disabled="!autoPlan?.slots.length || !!proposal?.problem || draftApplied"
             @click="applyAutoLayout"
           >
             <AppIcon name="cube" size="3.5" />
-            <span>{{ isMeetingLayout ? '应用单桌居中' : currentFurniture.length && !draftApplied ? `替换为${selectedPreset?.label || '当前排布'} · ${capacity}件` : `应用${selectedPreset?.label || '当前排布'}` }}</span>
+            <span>{{ draftApplied ? '与当前布局一致' : isMeetingLayout && preferences.strategy === 'recommended' ? '应用自动推荐方案' : '应用当前方案' }}</span>
           </button>
           <div class="grid grid-cols-2 gap-2">
             <button :class="['px-2.5 py-2 rounded-xl text-[11px] border font-semibold', store.furniturePlacement ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line hover:bg-[#f9f7f4]']" @click="addToCanvas">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
@@ -515,7 +481,7 @@ function clearLayout() {
             class="w-full px-3 py-2 rounded-xl text-[11px] font-semibold border border-line hover:bg-[#fff0f0] hover:text-red-500 flex items-center justify-center gap-1.5"
             @click="unconfirmLayout"
           >
-            <AppIcon name="arrowPath" size="3.5" />
+            <AppIcon name="reset" size="3.5" />
             <span>重新调整排版</span>
           </button>
         </div>

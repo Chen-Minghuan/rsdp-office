@@ -44,6 +44,9 @@
 | [按空间用途分流排版](tasks/LAYOUT-011-space-layout-profiles.md) | 会议室单桌居中与开放办公区多排工位的流程分流 |
 | [排版画布尺寸标注](tasks/LAYOUT-012-layout-dimensions.md) | 单空间画布显示空间外接尺寸、模块规格、排布总长与排间净距 |
 | [排版面板操作体验](tasks/LAYOUT-013-layout-panel-ux.md) | 模块、排布、参数三步导航与紧凑操作区 |
+| [用途匹配与分组排版](tasks/LAYOUT-014-layout-planning-review.md) | 会议桌椅、目标人数、保留手动家具、自动推荐、禁放区域和待应用预览 |
+| [严格按图例排布](tasks/LAYOUT-015-exact-reference-presets.md) | 四类产品的 10 种固定组合、T/C/十字镜像、座席方向与默认净距 |
+| [按场地自适应排布](tasks/LAYOUT-016-space-adaptive-reference-layout.md) | 样式不变、数量随空间变化、横纵比较及完整最小单元避障 |
 | [按标注修正开放分区](tasks/GEOM-008-annotated-open-zones.md) | 当前方案五处分区、比例保留、修正包及真实 API 保存记录 |
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |
 | [沿墙轮廓修正](tasks/GEOM-006-wall-contour-correction.md) | 入口/退台完整边界、补转折点、沿墙重描与撤销恢复 |
@@ -69,3 +72,5 @@
 根目录原型设计和模块抽取文档保留为历史设计资料；与新目标不一致的内容不作为当前验收标准。
 根目录上述三份 Spatial 文档是本轮目标设计，正文版本已升级，保留旧文件名以维持引用；它们不是已实现能力证明。
 API 名称、字段与状态标为“目标”时，表示后续设计契约，不代表现有接口已支持。
+
+- [家具选择统一与空间用途建议](tasks/LAYOUT-017-module-selection-and-space-advice.md)：单一模块入口、兼容排布和任意空间选家具。

@@ -194,9 +194,9 @@ export function planMeetingFurniture(
 }
 
 /**
- * Material-defined workstation arrangements. These deliberately do not call
- * the generic matrix planner: each preset has its own row/cluster relation so
- * changing the label cannot silently change the geometry.
+ * Reference illustration specimens used to verify the supplied diagrams.
+ * Runtime capacity is computed by planAdaptiveArrangement, which repeats
+ * their minimum topology cells to fit the actual room.
  */
 export function planStrictArrangement(
   zone: ZoneObject,
@@ -214,153 +214,55 @@ export function planStrictArrangement(
   const bounds = polygonBoundsMm(zone.polygon)
   if (!bounds || !Object.values(bounds).every(Number.isFinite)) return empty('空间缺少有效轮廓')
   const spanX = bounds.maxX - bounds.minX, spanY = bounds.maxY - bounds.minY
-  const fit = (length: number, item: number, gap: number) => Math.max(0, Math.floor((length + gap + EPS) / (item + gap)))
-  const availableWidth = spanX - 2 * spacing.wallMm
-  const fittedColumns = fit(availableWidth, widthMm, spacing.gapMm)
-  // The material diagrams are fixed composition templates. Do not stretch a
-  // three-seat example into ten columns just because the room is wider.
-  const diagramColumns = [
-    'straight-desk-row', 'straight-desk-face-to-face',
-    'l-desk-row', 'l-desk-face-to-face',
-    'straight-screen-row', 'straight-screen-face-to-face',
-  ].includes(presetId) ? 3 : presetId === 'screen-f-row' ? 4 : fittedColumns
-  if (!fittedColumns || fittedColumns < diagramColumns) return empty('当前家具尺寸和离墙距离无法放入该图例排布')
-  const columns = diagramColumns
-  const valid = (slot: LayoutRect) => layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + 2 * spacing.wallMm, h: slot.h + 2 * spacing.wallMm }, zone.polygon!)
-  const addRows = (rows: Array<{ y: number; rotation: number; mirrorX?: boolean; xOffset?: number; count?: number }>, totalHeight: number) => {
-    if (!rows.length || totalHeight > spanY - 2 * spacing.wallMm + EPS) return empty('当前默认间距和家具尺寸无法放入此空间')
-    const y0 = bounds.minY + spacing.wallMm + (spanY - 2 * spacing.wallMm - totalHeight) / 2
-    const usedWidth = columns * widthMm + (columns - 1) * spacing.gapMm
-    const x0 = bounds.minX + spacing.wallMm + (spanX - 2 * spacing.wallMm - usedWidth) / 2
-    const slots: LayoutRect[] = []
-    for (const row of rows) {
-      const count = Math.min(columns, row.count ?? columns)
-      const offset = row.xOffset ?? 0
-      for (let col = 0; col < count; col++) {
-        const slot = { x: x0 + offset + col * (widthMm + spacing.gapMm), y: y0 + row.y, w: widthMm, h: depthMm, rotation: row.rotation, ...(row.mirrorX ? { mirrorX: true } : {}) }
-        if (valid(slot) && !slots.some(other => overlaps(slot, other))) slots.push(slot)
+  const groupGap = spacing.faceGapMm ?? 900
+  const slots: LayoutRect[] = []
+  const add = (col: number, y: number, rotation = 0, mirrorX = false, xOffset = 0) => {
+    slots.push({ x: col * widthMm + xOffset, y, w: widthMm, h: depthMm, rotation, ...(mirrorX ? { mirrorX: true } : {}) })
+  }
+  const line = (count: number, y: number, rotation = 0, mirrorX = false) => {
+    for (let col = 0; col < count; col++) add(col, y, rotation, mirrorX)
+  }
+  const compatible: Record<string, string[]> = {
+    'straight-desk': ['straight-desk-row', 'straight-desk-face-to-face'],
+    'straight-screen': ['straight-screen-row', 'straight-screen-face-to-face'],
+    'l-desk': ['l-desk-row', 'l-desk-face-to-face'],
+    'l-screen': ['screen-f-row', 'screen-t-face-to-face', 'screen-c-face-to-face', 'screen-cross-face-to-face'],
+  }
+  if (!compatible[productStyleId]?.includes(presetId)) return empty('该产品样式没有对应的图例排布')
+  if (['straight-desk-row', 'straight-screen-row', 'l-desk-row', 'screen-f-row'].includes(presetId)) {
+    const count = presetId === 'screen-f-row' ? 4 : 3
+    line(count, 0)
+    line(count, depthMm + groupGap)
+  } else if (['straight-desk-face-to-face', 'straight-screen-face-to-face', 'l-desk-face-to-face'].includes(presetId)) {
+    // Reflect vertically: panels and L returns stay on the right, seats face out.
+    for (const y of [0, depthMm * 2 + groupGap]) {
+      line(3, y, 180, true)
+      line(3, y + depthMm)
+    }
+  } else if (presetId === 'screen-t-face-to-face' || presetId === 'screen-c-face-to-face') {
+    // Exactly two groups. Every pair shares the central returns.
+    for (const x of [0, widthMm * 2 + groupGap]) {
+      if (presetId === 'screen-t-face-to-face') {
+        for (let row = 0; row < 3; row++) { add(0, row * depthMm, 0, false, x); add(1, row * depthMm, 0, true, x) }
+      } else {
+        add(0, 0, 0, false, x); add(1, 0, 0, true, x)
+        add(0, depthMm, 180, true, x); add(1, depthMm, 180, false, x)
       }
     }
-    const expected = rows.reduce((sum, row) => sum + Math.min(columns, row.count ?? columns), 0)
-    if (slots.length !== expected) return empty('当前空间轮廓无法完整容纳该图例排布')
-    return { slots, rows: rows.length, columns, rotated: false, problem: null, presetId, productStyleId }
-  }
-
-  const groupGap = spacing.faceGapMm ?? spacing.aisleMm ?? 900
-  const row = (y: number, rotation = 0, xOffset = 0, count?: number, mirrorX = false) => ({ y, rotation, xOffset, count, mirrorX })
-  const twoRowHeight = depthMm * 2 + groupGap
-  const fourRowHeight = depthMm * 4 + groupGap
-
-  if (presetId === 'straight-desk-row' || presetId === 'straight-screen-row') {
-    // Two same-direction module lines, exactly as the single-row material.
-    return addRows([row(0), row(depthMm + groupGap)], depthMm * 2 + groupGap)
-  }
-  if (presetId === 'l-desk-row') {
-    // L desks keep the same return direction in the two parallel lines.
-    return addRows([row(0), row(depthMm + groupGap)], depthMm * 2 + groupGap)
-  }
-  if (presetId === 'l-desk-face-to-face') {
-    // The reference has the return panel on the right of both facing desks.
-    // Rotate and reflect the upper row; the lower row keeps the base glyph.
-    return addRows([row(0, 180, 0, undefined, true), row(depthMm, 0), row(depthMm * 2 + groupGap, 180, 0, undefined, true), row(depthMm * 3 + groupGap, 0)], fourRowHeight)
-  }
-  if (presetId === 'straight-desk-face-to-face' || presetId === 'straight-screen-face-to-face') {
-    // Each face-to-face group is a touching pair; the two groups are separated
-    // by the material's 1600/600mm aisle.
-    return addRows([row(0, 0), row(depthMm, 180), row(depthMm * 2 + groupGap, 0), row(depthMm * 3 + groupGap, 180)], fourRowHeight)
-  }
-  if (presetId === 'screen-f-row') {
-    // F: repeated L card positions on two continuous, parallel screen lines.
-    return addRows([row(0), row(depthMm + groupGap)], twoRowHeight)
-  }
-  if (presetId === 'screen-t-face-to-face') {
-    // T: compact 2-column / 3-row groups. The short middle row forms the
-    // stem and groups are separated horizontally by the 900mm clear gap.
-    const groupGap = spacing.faceGapMm ?? 900
-    const groupWidth = widthMm * 2 + spacing.gapMm
-    const groupHeight = depthMm * 3
-    const availableWidth = spanX - 2 * spacing.wallMm
-    const groupCount = Math.min(2, Math.floor((availableWidth + groupGap + EPS) / (groupWidth + groupGap)))
-    const totalWidth = groupCount * groupWidth + Math.max(0, groupCount - 1) * groupGap
-    if (groupCount < 1 || groupHeight > spanY - 2 * spacing.wallMm + EPS) return empty('当前默认间距和家具尺寸无法放入 T 型图例排布')
-    const x0 = bounds.minX + spacing.wallMm + (availableWidth - totalWidth) / 2
-    const y0 = bounds.minY + spacing.wallMm + (spanY - 2 * spacing.wallMm - groupHeight) / 2
-    const slots: LayoutRect[] = []
-    for (let group = 0; group < groupCount; group++) {
-      const gx = x0 + group * (groupWidth + groupGap)
-      const middleX = gx + (groupWidth - widthMm) / 2
-      const groupSlots: LayoutRect[] = [
-        { x: gx, y: y0, w: widthMm, h: depthMm, rotation: 0 },
-        { x: gx + widthMm + spacing.gapMm, y: y0, w: widthMm, h: depthMm, rotation: 0 },
-        { x: middleX, y: y0 + depthMm, w: widthMm, h: depthMm, rotation: 180 },
-        { x: gx, y: y0 + depthMm * 2, w: widthMm, h: depthMm, rotation: 0 },
-        { x: gx + widthMm + spacing.gapMm, y: y0 + depthMm * 2, w: widthMm, h: depthMm, rotation: 0 },
-      ]
-      for (const slot of groupSlots) {
-        if (!valid(slot) || slots.some(other => overlaps(slot, other))) return empty('当前空间轮廓无法完整容纳 T 型图例排布')
-        slots.push(slot)
-      }
+  } else if (presetId === 'screen-cross-face-to-face') {
+    // Two horizontal double-cross banks, each 4 columns x 2 rows (8 modules).
+    for (const y of [0, depthMm * 2 + groupGap]) for (let col = 0; col < 4; col++) {
+      add(col, y, 180, col % 2 === 0)
+      add(col, y + depthMm, 0, col % 2 === 1)
     }
-    return { slots, rows: 3, columns: groupCount * 2, rotated: false, problem: null, presetId, productStyleId }
   }
-  if (presetId === 'screen-c-face-to-face') {
-    // C: each group is a 2-by-2 mirrored enclosure. Keep the two groups
-    // separate so the 900mm opening is visible in the plan.
-    const centerGap = spacing.faceGapMm ?? 900
-    const groupWidth = widthMm * 2 + spacing.gapMm
-    const availableWidth = spanX - 2 * spacing.wallMm
-    const groupCount = Math.min(2, Math.floor((availableWidth + centerGap + EPS) / (groupWidth + centerGap)))
-    const totalWidth = groupCount * groupWidth + Math.max(0, groupCount - 1) * centerGap
-    const totalHeight = depthMm * 2
-    if (groupCount < 1 || totalWidth > availableWidth + EPS || totalHeight > spanY - 2 * spacing.wallMm + EPS) return empty('当前默认间距和家具尺寸无法放入 C 型图例排布')
-    const x0 = bounds.minX + spacing.wallMm + (spanX - 2 * spacing.wallMm - totalWidth) / 2
-    const y0 = bounds.minY + spacing.wallMm + (spanY - 2 * spacing.wallMm - totalHeight) / 2
-    const slots: LayoutRect[] = []
-    for (let group = 0; group < groupCount; group++) {
-      const gx = x0 + group * (groupWidth + centerGap)
-      const groupSlots: LayoutRect[] = [
-        { x: gx, y: y0, w: widthMm, h: depthMm, rotation: 0 },
-        { x: gx + widthMm + spacing.gapMm, y: y0, w: widthMm, h: depthMm, rotation: 180 },
-        { x: gx, y: y0 + depthMm, w: widthMm, h: depthMm, rotation: 180 },
-        { x: gx + widthMm + spacing.gapMm, y: y0 + depthMm, w: widthMm, h: depthMm, rotation: 0 },
-      ]
-      for (const slot of groupSlots) {
-        if (!valid(slot) || slots.some(other => overlaps(slot, other))) return empty('当前空间轮廓无法完整容纳 C 型图例排布')
-        slots.push(slot)
-      }
-    }
-    return { slots, rows: 2, columns: groupCount * 2, rotated: false, problem: null, presetId, productStyleId }
-  }
-  if (presetId === 'screen-cross-face-to-face') {
-    // Cross: four rotated L modules meet around a central junction. Repeat
-    // the cross vertically, with 900mm clear distance between groups.
-    const sideGap = spacing.aisleMm ?? 900
-    const groupWidth = widthMm * 2 + spacing.gapMm
-    const groupHeight = depthMm * 2 + spacing.gapMm
-    const availableHeight = spanY - 2 * spacing.wallMm
-    const groupCount = Math.min(2, Math.floor((availableHeight + sideGap + EPS) / (groupHeight + sideGap)))
-    const totalWidth = groupWidth
-    const totalHeight = groupCount * groupHeight + Math.max(0, groupCount - 1) * sideGap
-    if (groupCount < 1 || totalWidth > spanX - 2 * spacing.wallMm + EPS || totalHeight > availableHeight + EPS) return empty('当前默认间距和家具尺寸无法放入十字型图例排布')
-    const x0 = bounds.minX + spacing.wallMm + (spanX - 2 * spacing.wallMm - totalWidth) / 2
-    const y0 = bounds.minY + spacing.wallMm + (availableHeight - totalHeight) / 2
-    const slots: LayoutRect[] = []
-    for (let group = 0; group < groupCount; group++) {
-      const gy = y0 + group * (groupHeight + sideGap)
-      const groupSlots: LayoutRect[] = [
-        { x: x0, y: gy, w: widthMm, h: depthMm, rotation: 0 },
-        { x: x0 + widthMm + spacing.gapMm, y: gy, w: widthMm, h: depthMm, rotation: 90 },
-        { x: x0, y: gy + depthMm + spacing.gapMm, w: widthMm, h: depthMm, rotation: 270 },
-        { x: x0 + widthMm + spacing.gapMm, y: gy + depthMm + spacing.gapMm, w: widthMm, h: depthMm, rotation: 180 },
-      ]
-      for (const slot of groupSlots) {
-        if (!valid(slot) || slots.some(other => overlaps(slot, other))) return empty('当前空间轮廓无法完整容纳十字型图例排布')
-        slots.push(slot)
-      }
-    }
-    return { slots, rows: groupCount * 2, columns: 2, rotated: false, problem: null, presetId, productStyleId }
-  }
-  return empty('该产品样式没有对应的图例排布')
+  const usedWidth = Math.max(...slots.map(slot => slot.x + slot.w))
+  const usedHeight = Math.max(...slots.map(slot => slot.y + slot.h))
+  if (usedWidth > spanX - 2 * spacing.wallMm + EPS || usedHeight > spanY - 2 * spacing.wallMm + EPS) return empty('当前空间无法完整容纳该图例组合；请调整模块尺寸或组间净距')
+  const x0 = bounds.minX + (spanX - usedWidth) / 2, y0 = bounds.minY + (spanY - usedHeight) / 2
+  const placed = slots.map(slot => ({ ...slot, x: x0 + slot.x, y: y0 + slot.y }))
+  if (placed.some((slot, i) => !layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + spacing.wallMm * 2, h: slot.h + spacing.wallMm * 2 }, zone.polygon!) || placed.slice(0, i).some(other => overlaps(slot, other)))) return empty('当前空间轮廓无法完整容纳该图例排布')
+  return { slots: placed, rows: new Set(placed.map(slot => slot.y)).size, columns: new Set(placed.map(slot => slot.x)).size, rotated: false, problem: null, presetId, productStyleId }
 }
 
 const STRICT_PRESET_SPACING: Partial<Record<OfficeArrangementPresetId, Partial<OfficeLayoutSpacing>>> = {

@@ -45,5 +45,6 @@ public final class OfficeCanvasReviewPolicy {
 
         }
         if (ids.isEmpty() || designZoneId == null || !ids.contains(designZoneId)) throw new BusinessException("请选择有效的排版空间");
+        OfficeLayoutValidationPolicy.requireConfirmedValid(objects);
     }
 }

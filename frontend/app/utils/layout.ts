@@ -21,6 +21,8 @@ function cmToPx(cm: number, zone: ZoneObject): number {
 }
 
 export interface LayoutRect {
+  /** Indivisible topology cell when adapting a reference style to a room. */
+  clusterId?: string
   x: number
   y: number
   w: number
