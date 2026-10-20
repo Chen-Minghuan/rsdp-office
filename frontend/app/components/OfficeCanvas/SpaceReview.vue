@@ -273,7 +273,7 @@ function pointerUp() {
 function advance() {
   if (tracing.value) return
   if (!store.canEnterLayout || store.floorPlanLoading || store.floorPlanError) return
-  const zone = store.zones.find(item => item.zoneType === 'OPEN_OFFICE') || store.zones[0]
+  const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
   if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id } })
 }
 function loadExample() {
