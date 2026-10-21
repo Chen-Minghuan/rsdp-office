@@ -24,6 +24,8 @@ const calibrating = ref(false), calibrationPoints = ref<Array<{ x: number; y: nu
 const calibrationLength = ref(6000), calibrationInput = ref<HTMLInputElement | null>(null)
 const drag = ref<{ zoneId: string; index: number; polygon: Array<[number, number]>; initial?: Array<[number, number]>; start?: ContourPoint; operation?: ContourOperation } | null>(null)
 const keepAspect = ref(false)
+// Stays false while the camera is only auto-fitted; manual pan/zoom disables resize refit.
+const cameraTouched = ref(false)
 const shiftPressed = ref(false)
 const message = ref('')
 const tracing = ref<{ zoneId: string; points: Array<{ x: number; y: number }> } | null>(null)
@@ -90,15 +92,24 @@ function fit() {
   if (!viewport.value.width || !viewport.value.height) return
   camera.value = fitCameraToBoundsBySystem(reviewSceneBounds(scene.value), viewport.value.width, viewport.value.height, scene.value.workingCoordinateSystem, viewport.value.width > 800 ? 72 : 50)
   fittedZoom.value = camera.value.zoom
+  cameraTouched.value = false
+}
+function onCameraUpdate(value: CameraTransform) {
+  cameraTouched.value = true
+  camera.value = value
 }
 function onViewport(size: { width: number; height: number }) {
   const previous = viewport.value
   viewport.value = size
   if (!previous.width || !previous.height) fit()
+  // The first fit may have run on a tiny/transient viewport; recover once the canvas grows,
+  // but never override a camera the user already panned or zoomed.
+  else if (!cameraTouched.value && !drag.value && size.width * size.height > previous.width * previous.height * 1.4) fit()
   else camera.value = { ...camera.value, panX: camera.value.panX + (size.width - previous.width) / 2, panY: camera.value.panY + (size.height - previous.height) / 2 }
 }
 function zoom(factor: number) {
   if (drag.value) return
+  cameraTouched.value = true
   const center = { x: viewport.value.width / 2, y: viewport.value.height / 2 }
   const next = Math.max(0.00001, Math.min(20, camera.value.zoom * factor))
   const ratio = next / camera.value.zoom
@@ -364,7 +375,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             :pointer-in-source-coordinates="calibrating || !!tracing" :calibration-points="calibrationPoints" :trace-points="tracing?.points"
             :fallback-image-url="imageUrl" :show-underlay="showUnderlay || comparingOriginal" :show-outline="showOutline && !comparingOriginal"
             :show-dimensions="showDimensions" :underlay-opacity="underlayOpacity" :original-geometries="comparingOriginal ? [] : originalGeometries"
-            @viewport="onViewport" @update-camera="camera = $event" @select-space="selectSpace" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
+            @viewport="onViewport" @update-camera="onCameraUpdate" @select-space="selectSpace" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
             @pointer-down="pointerDown" @pointer-move="pointerMove" @pointer-up="pointerUp" />
           <div v-if="!imageReady" class="missing-source-note"><strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink></div>
           <div v-if="calibrating && calibrationPoints.length < 2" class="calibration-canvas-hint">两点校准：请依次点击已知尺寸边的两个端点<button @click="cancelCalibration">取消</button></div>

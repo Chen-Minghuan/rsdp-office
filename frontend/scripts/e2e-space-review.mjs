@@ -161,6 +161,16 @@ try {
 
   // Import an unknown-scale image through the actual upload target route.
   await page.goto(baseUrl + '/canvas?analysisId=REVIEW-TEST', { waitUntil: 'networkidle' })
+  // A first fit on a tiny viewport must not stick: growing the window refits until the user pans or zooms.
+  const designWidth = () => page.locator('[data-layer="design"]>g').first().evaluate(el => el.getBoundingClientRect().width)
+  await page.setViewportSize({ width: 700, height: 500 })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.waitForTimeout(500)
+  const narrowWidth = await designWidth()
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.waitForTimeout(500)
+  assert.ok((await designWidth()) > narrowWidth * 1.5, '小窗口初次适屏后放大窗口会自动重新适屏')
   await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
   assert.ok(await page.getByLabel('空间宽度（毫米）').isDisabled())
   assert.ok(await advance().isDisabled())
