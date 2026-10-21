@@ -1,6 +1,6 @@
 # DEPLOY-004 域名子路径入口 rooom.vip/office/
 
-状态：已实现并通过强制解析公网复测；DNS 旧 A 记录清理后生效
+状态：已实现并生效（真实 DNS 复测通过）
 更新日期：2026-10-20
 基线：main `b8f3288`，构建镜像 `rsdp-office-frontend-office:b8f3288`；入口见 [DEPLOY-002](DEPLOY-002-public-http.md)。
 
@@ -29,7 +29,7 @@
 
 ## 边界与待办
 
-- DNS：`rooom.vip` 仍有 `120.77.15.115` 与 `101.200.81.123` 两条 A 记录，`www` 仅旧地址。用户需在云解析控制台删除旧 A 记录；生效前域名可能落到旧服务器。本轮复测均为强制解析，不代表 DNS 已稳定。
+- DNS：2026-10-21 已删除 `@` → `120.77.15.115` 旧 A 记录，权威与主流递归实测只剩本实例地址；复测脚本改为默认真实 DNS（`RSDP_FORCE_RESOLVE=1` 可回到强制解析），真实 DNS 复测通过。`www.rooom.vip` 仍指旧服务器，如需使用另行改指；个别递归 TTL 内残留旧缓存属过渡现象。
 - 识别/生图业务验收不扩大：底图地址修复解决的是跨入口访问，不涉及识别精度。
 - 8081 前端与后端完整对齐（含同源化、LAYOUT-019/CAT-006 合入）待下次 `deploy.sh deploy`；`release/current-image-tag` 仍为 `956c41117698`。
 - HTTPS、证书申请仍未进行；两个 HTTP 入口切换 HTTPS 时取消 Cookie nosecure 例外。

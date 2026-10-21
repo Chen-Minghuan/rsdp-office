@@ -10,10 +10,12 @@ const username = process.env.RSDP_ADMIN_USERNAME || 'admin'
 const password = process.env.RSDP_ADMIN_PASSWORD
 assert.ok(password, '需要 RSDP_ADMIN_PASSWORD 环境变量（不写入仓库与文档）')
 
+// DNS 未切换期间用 RSDP_FORCE_RESOLVE=1 强制解析；默认使用真实 DNS。
+const forceResolve = process.env.RSDP_FORCE_RESOLVE === '1'
 const browser = await chromium.launch({
   headless: true,
   executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined,
-  args: ['--host-resolver-rules=MAP rooom.vip 101.200.81.123, MAP www.rooom.vip 101.200.81.123'],
+  args: forceResolve ? ['--host-resolver-rules=MAP rooom.vip 101.200.81.123, MAP www.rooom.vip 101.200.81.123'] : [],
 })
 try {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })

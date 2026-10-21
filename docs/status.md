@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-21 域名 DNS 切换完成：`rooom.vip` 旧 A 记录 `120.77.15.115` 已删除（此前双 A 轮询导致旧服务器 301 跳 `https://www.rooom.vip`，静态资源跨源失败）。权威与主流递归实测只剩本实例，`http://rooom.vip/office/` 真实 DNS 全流程复测通过；`www` 仍指旧服务器按需处理，个别递归 TTL 残留为过渡现象。
+
 2026-10-21 测试产物清理：按用户要求 e2e 脚本不再生成截图（space-review/space-template/dimension-calibration/workflows/render-preview/drawing-entry 及两个公网复测脚本），`output/` 与 `frontend/screenshots/` 已删除并加入 .gitignore。顺带修复三个被合并变更遗留下来的 UI 回归：space-review/dimension-calibration/workflows 补 auth mock，workflows 适配商品页 20 条分页、详情改路由页、导入改预览/校验/确认三段接口；import.vue 结果到达后清除离开守卫残留提示。build、drawing-entry、templates、render-preview、dimensions、space-review、workflows 及两个公网复测全部通过。
 
 2026-10-21 Jenkins 改造按用户决定从简：曾完成 CI/CD 双任务拆分方案（本地验证后已还原），最终保留现有单一 `rsdp-office` 任务与 `DEPLOY=false` 默认只构建、手动勾选才发布的流程，Jenkinsfile 与 deploy.sh 均不改动；仅补 `deploy/.env.example` 子路径端口示例。现有流程已满足：SCM 轮询自动测试构建、测试失败不进入部署、部署仅限当前 origin/main、健康检查失败即任务失败。
