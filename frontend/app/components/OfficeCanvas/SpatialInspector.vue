@@ -22,7 +22,6 @@ const emit = defineEmits<{
   (e: 'startCalibration'): void
   (e: 'cancelCalibration'): void
   (e: 'applyCalibration', length: number): void
-  (e: 'deleteSpace'): void
   (e: 'restoreSource'): void
 }>()
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
@@ -62,7 +61,6 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
         <p class="inspector-hint">{{ space.rectangleFrame ? '数值与轮廓联动；修改后更新关联排版。' : '可拖动选中顶点修正异形边界，面积按多边形计算。' }}<br>缺少入口或转折时，点“编辑轮廓”补点，或沿墙重描。底图保留原始状态。</p>
         <p v-if="issue" class="geometry-issue" :role="issueBlocking ? 'alert' : 'status'">{{ issue }}</p>
         <button v-if="canRestoreSource" class="calibration-button" type="button" @click="emit('restoreSource')">恢复本次识别轮廓</button>
-        <button class="delete-space-button" type="button" :disabled="!space" @click="emit('deleteSpace')">删除空间</button>
       </section>
     </template>
     <div v-else class="inspector-hint empty-selection">在左侧列表或画布中选择空间。</div>

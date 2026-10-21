@@ -132,12 +132,15 @@ function restoreSelectedSource() {
   } as Partial<ZoneObject>)
   notify('已恢复本次识别轮廓，可撤销；关联排版需重新核验')
 }
-function deleteSelectedSpace() {
-  const zone = selected.value
-  if (!zone || tracing.value || calibrating.value) return
-  if (!store.deleteZone(zone.id)) return
-  selectedId.value = store.zones[0]?.id || null
+function deleteSpace(zoneId: string) {
+  if (tracing.value || calibrating.value || drag.value) return
+  const zone = store.zones.find(item => item.id === zoneId)
+  if (!zone || !store.deleteZone(zone.id)) return
+  if (selectedId.value === zone.id) selectedId.value = store.zones[0]?.id || null
   notify(`已删除「${zone.name}」，可点击“撤销”恢复`)
+}
+function deleteSelectedSpace() {
+  if (selectedId.value) deleteSpace(selectedId.value)
 }
 function dimensions(zone: ZoneObject) {
   if (zone.reviewUnit !== 'mm') return '尺寸待校准'
@@ -232,6 +235,12 @@ function traceKey(event: KeyboardEvent) {
   shiftPressed.value = event.shiftKey
   if (event.key === 'Escape' && tracing.value) { event.preventDefault(); cancelTrace() }
   if (event.key === 'Escape' && drag.value) { event.preventDefault(); drag.value = null; notify('已取消本次轮廓调整') }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat && !tracing.value && !calibrating.value && !drag.value && selectedId.value) {
+    const target = event.target as HTMLElement | null
+    if (target?.closest('input, textarea, select, [contenteditable]')) return
+    event.preventDefault()
+    deleteSelectedSpace()
+  }
 }
 function keyUp(event: KeyboardEvent) { shiftPressed.value = event.shiftKey }
 function cancelInteraction() { drag.value = null; shiftPressed.value = false }
@@ -310,10 +319,13 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         </div>
         <div class="review-room-list">
           <div class="section-heading"><h4>识别空间</h4><small>{{ zones.length }} 个</small></div>
-          <button v-for="zone in displayedZones" :key="zone.id" class="review-room-card" :class="{ selected: zone.id === selectedId }" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)">
-            <div><strong>{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
-            <div><small>{{ dimensions(zone) }}</small><small>{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
-          </button>
+          <div v-for="zone in displayedZones" :key="zone.id" class="review-room-item" :class="{ selected: zone.id === selectedId }">
+            <button class="review-room-card" :class="{ selected: zone.id === selectedId }" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)">
+              <div><strong>{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
+              <div><small>{{ dimensions(zone) }}</small><small>{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
+            </button>
+            <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" title="删除空间（选中后也可按 Delete 键）" @click="deleteSpace(zone.id)">删除</button>
+          </div>
           <button v-if="zones.length > 6" class="show-more-rooms" @click="showAllSpaces = !showAllSpaces">{{ showAllSpaces ? '收起空间列表 ↑' : '查看其余 ' + (zones.length - 6) + ' 个空间 ↓' }}</button>
           <p v-if="!zones.length" class="inspector-hint">暂无可核对空间，请先上传并识别图纸。</p>
         </div>
@@ -371,12 +383,12 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         :source-note="selected?.note" :can-restore-source="restorable && !calibrating && !drag"
         :calibration-active="calibrating" :calibration-point-count="calibrationPoints.length"
         v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
-        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration" @delete-space="deleteSelectedSpace" @restore-source="restoreSelectedSource">
+        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration" @restore-source="restoreSelectedSource">
         <template #automatic-calibration><DimensionCalibration :enabled="dimensionCalibrationEnabled" :preview-area="automaticPreviewArea" @reference="selectedDimensionReference = $event" @applied="applyAutomaticCalibration" /></template>
       </SpatialInspector>
     </div>
     <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
-    <footer class="review-page-footer"><span>空间编辑 / 原图对照 → 比例校准 → 按需修正 → 家具排版</span><span>{{ isExample ? '交互示例 · 非真实识别结果' : '滚轮缩放 · 中键平移 · 选中顶点可编辑' }}</span></footer>
+    <footer class="review-page-footer"><span>空间编辑 / 原图对照 → 比例校准 → 按需修正 → 家具排版</span><span>{{ isExample ? '交互示例 · 非真实识别结果' : '滚轮缩放 · 中键平移 · Delete 删除选中空间' }}</span></footer>
   </div>
 </template>
 

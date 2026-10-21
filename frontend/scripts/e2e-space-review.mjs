@@ -368,16 +368,23 @@ try {
   }
   // Removing an unused space excludes it from the current layout/template and remains undoable.
   await choose('L 形办公区')
-  await page.getByRole('button', { name: '删除空间', exact: true }).click()
-  assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, '删除空间同步移除空间')
+  await page.getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
+  assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, '空间列表删除按钮同步移除空间')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), true, '删除空间可撤销恢复')
+  // The inspector no longer hosts a delete button; the Delete key removes the selected space and stays undoable.
+  assert.equal(await page.locator('.review-inspector').getByRole('button', { name: '删除空间', exact: true }).count(), 0, '右侧属性面板不再提供删除按钮')
+  await choose('L 形办公区')
+  await page.keyboard.press('Delete')
+  assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, 'Delete 键删除当前选中空间')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), true, 'Delete 键删除可撤销恢复')
   // Deleting the last remaining space keeps the canvas intentionally empty
   // even when the route reloads and tries to auto-import the source analysis.
   await page.getByRole('button', { name: '选择空间 L 形办公区', exact: true }).click()
-  await page.getByRole('button', { name: '删除空间', exact: true }).click()
+  await page.getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
   await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).click()
-  await page.getByRole('button', { name: '删除空间', exact: true }).click()
+  await page.getByRole('button', { name: '删除空间 测试会议室', exact: true }).click()
   assert.equal(await page.locator('.review-room-card').count(), 0, '删除最后空间后列表为空')
   assert.equal((await stored()).blank, true, '最后空间删除后保存空画布标记')
   assert.deepEqual(dialogs, [], '删除空间不再弹出确认框')
