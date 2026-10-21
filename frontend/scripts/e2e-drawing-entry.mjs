@@ -103,7 +103,6 @@ try {
   await page.getByAltText('当前图纸预览').waitFor()
   assert.equal(await page.locator('.review-room-card').count(), 0)
   assert.match(await page.getByAltText('当前图纸预览').getAttribute('src'), /^data:image\/svg/)
-  await page.screenshot({ path: '/tmp/rsdp-drawing-7-processing.png' })
   complete = true
   await page.getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
   const current = () => page.evaluate(() => {
@@ -126,7 +125,6 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '选择空间 7图已编辑空间', exact: true }).waitFor()
   assert.equal(posts, 1, '进入空间和刷新只查询同一任务，不重复识别')
-  await page.screenshot({ path: '/tmp/rsdp-drawing-7-current.png' })
   // 远端/本地空稿恢复只有任务绑定时，只补来源，不重新填回用户已删除的空间。
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')

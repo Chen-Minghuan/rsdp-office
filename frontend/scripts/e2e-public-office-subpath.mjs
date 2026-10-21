@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { mkdir } from 'node:fs/promises'
 import { chromium } from 'playwright'
 
 // DEPLOY-004 域名子路径复测：DNS 未切换前用 host-resolver-rules 强制
@@ -11,8 +10,6 @@ const username = process.env.RSDP_ADMIN_USERNAME || 'admin'
 const password = process.env.RSDP_ADMIN_PASSWORD
 assert.ok(password, '需要 RSDP_ADMIN_PASSWORD 环境变量（不写入仓库与文档）')
 
-const outDir = new URL('../../output/deploy/', import.meta.url).pathname
-await mkdir(outDir, { recursive: true })
 const browser = await chromium.launch({
   headless: true,
   executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined,
@@ -58,7 +55,7 @@ try {
   const underlay = await page.locator('[data-layer="underlay"] image').first().getAttribute('href').catch(() => null)
   if (underlay) {
     // 存储地址可能指向另一入口（跨源），用 Node 侧请求核验可达性，绕开页面 CORS。
-    const asset = await context.request.get(underlay)
+    const asset = await context.request.get(new URL(underlay, baseUrl).href)
     assert.equal(asset.status(), 200, `底图资源应可访问：${underlay}`)
   }
 
@@ -73,12 +70,11 @@ try {
   await page.evaluate(() => { localStorage.removeItem('rsdp-office-v01'); indexedDB.deleteDatabase('rsdp-office-files') })
   assert.equal(analyzeCalls, 0, '不应触发识别接口')
   assert.deepEqual(errors, [], `页面不应有未捕获错误：${errors.join('; ')}`)
-  await page.screenshot({ path: outDir + 'public-office-subpath.png' })
 
   await page.evaluate(async () => { await fetch('/office/api/auth/logout', { method: 'POST' }) })
   const after = await page.evaluate(async () => (await fetch('/office/api/auth/me')).status)
   assert.equal(after, 401, '退出后应为 401')
-  console.log('域名子路径复测通过：/office/ 守卫登录、子路径 API、文件选择、画布直达、原站点不受影响、退出失效。截图：output/deploy/public-office-subpath.png')
+  console.log('域名子路径复测通过：/office/ 守卫登录、子路径 API、文件选择、画布直达、原站点不受影响、退出失效')
 } finally {
   await browser.close()
 }

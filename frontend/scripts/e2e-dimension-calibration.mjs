@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
-import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -13,7 +12,6 @@ const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const baseUrl = 'http://127.0.0.1:' + port
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
-const outDir = process.env.OUT_DIR || './screenshots/dimension-calibration'
 let browser
 try {
   for (let attempt = 0; ; attempt++) {
@@ -21,9 +19,9 @@ try {
     if (attempt >= 75 || app.exitCode !== null) throw new Error('请先 pnpm build；预览服务未就绪')
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1100 } })
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const page = await context.newPage(), errors = []
   page.on('pageerror', error => errors.push(error.message))
   let sourceRevision = 1
@@ -97,7 +95,6 @@ try {
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).floorPlan.dimensionCalibration.assumedUnit === 'mm')
   assert.deepEqual(validations, ['cm', 'mm'])
   await panel().scrollIntoViewIfNeeded()
-  await page.screenshot({ path: outDir + '/01-candidate-review.png' })
   await confirm().click()
   await page.getByRole('button', { name: '✓ 自动比例已应用', exact: true }).waitFor()
   assert.equal((await room()).reviewUnit, 'mm')
@@ -125,7 +122,6 @@ try {
   await page.getByRole('button', { name: '✓ 自动比例已应用', exact: true }).waitFor()
   assert.equal(await page.getByTestId('selected-area').innerText(), '20.00 m²')
   await panel().scrollIntoViewIfNeeded()
-  await page.screenshot({ path: outDir + '/02-confirmed-restored.png' })
 
   mode = 'CONFLICT'
   await readAgain().click()
@@ -134,7 +130,6 @@ try {
   assert.equal((await room()).mmPerSourceUnit, 10)
   assert.deepEqual((await room()).polygon, edited)
   await panel().scrollIntoViewIfNeeded()
-  await page.screenshot({ path: outDir + '/03-conflict-manual-fallback.png' })
   mode = 'INSUFFICIENT'
   await readAgain().click()
   await page.getByText('参考数量不足', { exact: true }).waitFor()

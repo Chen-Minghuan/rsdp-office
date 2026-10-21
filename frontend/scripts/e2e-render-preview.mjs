@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
-import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -12,7 +11,6 @@ const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const baseUrl = `http://127.0.0.1:${port}`
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
-const outDir = process.env.OUT_DIR || 'C:/Users/cmh/AppData/Local/Temp/rsdp-render-preview'
 const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV1sAAAAASUVORK5CYII=', 'base64')
 const zone = { id: 'ROOM-X', kind: 'zone', x: -6000, y: -4000, w: 6000, h: 4000, name: '效果预览办公室', zoneType: 'OPEN_OFFICE', seats: 4, note: '', tone: 'sand', reviewUnit: 'mm', evidenceKind: 'MANUAL', polygon: [[-6000, -4000], [0, -4000], [0, -2000], [-2000, -2000], [-2000, 0], [-6000, 0]] }
 const furniture = { id: 'F1', kind: 'furniture', zoneId: zone.id, x: -5500, y: -3500, w: 1200, h: 600, rotation: 90, productId: '', label: '职员直线桌', furnitureTemplateId: 'desk-straight', layoutConfirmed: false }
@@ -27,7 +25,6 @@ try {
     if (attempt >= 75 || app.exitCode !== null) throw new Error('请先 pnpm build；预览服务未就绪')
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, acceptDownloads: true })
   await context.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }))
@@ -96,7 +93,6 @@ try {
   assert.equal(attemptedIds.length, 2)
   assert.equal(attemptedIds[0], attemptedIds[1], '丢失响应后复用生成请求 ID，不重复创建收费任务')
   assert.equal(await page.getByRole('button', { name: '当前布局正在生成…', exact: true }).isDisabled(), true)
-  await page.screenshot({ path: outDir + '/01-generating.png' })
 
   // Close/reload while pending, then edit this room before the late result arrives.
   await page.getByRole('button', { name: '关闭效果预览' }).click()
@@ -120,14 +116,12 @@ try {
   assert.match((await download).suggestedFilename(), /概念效果图.*\.png$/)
   await page.getByText('查看生成时的布局参考', { exact: false }).click()
   await page.getByAltText('生成时的空间与家具布局参考图').waitFor()
-  await page.screenshot({ path: outDir + '/02-historical-result.png' })
 
   failedSubmission = true
   await page.getByLabel('效果图视角').selectOption('INTERIOR')
   await page.getByRole('button', { name: '生成效果预览', exact: true }).click()
   await page.getByText('生图鉴权失败，请核对模型调用权限', { exact: true }).waitFor()
   assert.equal(submissions[1].view, 'INTERIOR')
-  await page.screenshot({ path: outDir + '/03-provider-failure.png' })
   failedSubmission = false; mode = 'ERROR'
   await page.getByRole('button', { name: '按当前布局重试生成', exact: true }).click()
   await page.getByText('暂时无法查询，请稍后重试', { exact: false }).waitFor()
@@ -161,7 +155,6 @@ try {
   assert.equal(submissions.at(-1).expectedSnapshot.furniture[0].productId,'SKU-SELECTED')
   await page.getByText('查看生成时使用的商品图片',{exact:true}).click()
   await page.getByAltText('生成时所选商品外观参考板').waitFor()
-  await page.screenshot({path:outDir+'/04-selected-products.png'})
   jobs[0].productImagesUsed = false; jobs[0].productReferences = undefined
   await page.getByRole('button',{name:'刷新记录',exact:true}).click()
   await page.getByText('此任务未使用所选商品图片，请重新生成以参考商品外观。',{exact:true}).waitFor()
@@ -170,9 +163,8 @@ try {
   await page.keyboard.press('Escape')
   await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor({ state: 'hidden' })
   assert.equal(await page.getByRole('dialog', { name: '单空间效果预览' }).count(), 0)
-  console.log('Render preview mock UI passed: snapshot, pending/reload, stale result, download, failure/retry, query recovery; screenshots: ' + outDir)
+  console.log('Render preview mock UI passed: snapshot, pending/reload, stale result, download, failure/retry, query recovery')
 } catch (error) {
-  if (page) await page.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw error
 } finally {
   await browser?.close()

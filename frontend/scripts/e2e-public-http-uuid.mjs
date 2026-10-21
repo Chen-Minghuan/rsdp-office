@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { mkdir } from 'node:fs/promises'
 import { chromium } from 'playwright'
 
 // DEPLOY-003 公网复测：真实 HTTP 入口、真实登录，验证文件选择在缺少
@@ -10,8 +9,6 @@ const username = process.env.RSDP_ADMIN_USERNAME || 'admin'
 const password = process.env.RSDP_ADMIN_PASSWORD
 assert.ok(password, '需要 RSDP_ADMIN_PASSWORD 环境变量（不写入仓库与文档）')
 
-const outDir = new URL('../../output/deploy/', import.meta.url).pathname
-await mkdir(outDir, { recursive: true })
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
 try {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
@@ -57,12 +54,11 @@ try {
   const uuidErrors = errors.filter(message => /randomUUID|唯一标识/.test(message))
   assert.deepEqual(errors, [], `页面不应有未捕获错误：${errors.join('; ')}`)
   assert.equal(uuidErrors.length, 0)
-  await page.screenshot({ path: outDir + 'public-uuid-retest.png' })
 
   await page.evaluate(async () => { await fetch('/api/auth/logout', { method: 'POST' }) })
   const after = await page.evaluate(async () => (await fetch('/api/auth/me')).status)
   assert.equal(after, 401, '退出后 /api/auth/me 应为 401')
-  console.log('公网复测通过：HTTP 环境确认 randomUUID 缺失，真实登录后文件选择生成 v4 UUID，无页面错误，未触发识别，退出失效。截图：output/deploy/public-uuid-retest.png')
+  console.log('公网复测通过：HTTP 环境确认 randomUUID 缺失，真实登录后文件选择生成 v4 UUID，无页面错误，未触发识别，退出失效')
 } finally {
   await browser.close()
 }

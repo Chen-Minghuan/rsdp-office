@@ -202,6 +202,8 @@ async function startImport() {
   clearError()
   try {
     importResult.value = await api.confirmImport(preview.value.rows, updateIfExists.value, selectedFile.value || undefined)
+    // 导入期间离开守卫提示的“正在处理导入”在结果到达后不再适用。
+    clearError()
     currentStep.value = 2
     addRecord({
       fileName: selectedFile.value?.name || 'unknown',
