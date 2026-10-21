@@ -43,7 +43,7 @@ Java 中依赖数据库的测试是否运行以实际报告为准；未提供数
 
 ## 当前公网 HTTP 入口（2026-10-20）
 
-已部署 main `956c411`，镜像标签 `956c41117698`，四个容器健康。按用户允许的独立端口方案，应用入口为 `http://101.200.81.123:8081/`；域名入口计划使用 `http://rooom.vip:8081/`，未实现 `/office/` 子路径。当前域名仍有 `120.77.15.115` 和 `101.200.81.123` 两条 A 记录，需要移除旧地址才能稳定落到本实例。
+已部署 main `956c411`，镜像标签 `956c41117698`，四个容器健康。按用户允许的独立端口方案，应用入口为 `http://101.200.81.123:8081/`；域名入口计划使用 `http://rooom.vip:8081/`，未实现 `/office/` 子路径。域名旧 A 记录已于 2026-10-21 删除，`rooom.vip` 稳定指向本实例；`www.rooom.vip` 仍指旧服务器，按需另行处理。
 
 服务器外层 Nginx 配置见 [HTTP 入口模板](../deploy/nginx-office-http.conf)，实际路径为 `/etc/nginx/sites-available/rsdp-office-http`，转发到 `127.0.0.1:3001`。UFW 已允许 TCP 8081，用户已在 ECS 安全组允许 TCP 8081、来源 `0.0.0.0/0`；公网健康检查、真实浏览器登录、商品页、画布和退出失效均通过。原有 80 端口网站和 8080 Jenkins 保留。
 
@@ -51,24 +51,15 @@ HTTP 入口仅在代理层移除 `RSDP_SESSION` 的 Secure 标记，保留 HttpO
 
 部署、备份、迁移及公网验证证据见 [DEPLOY-002](tasks/DEPLOY-002-public-http.md)。首次云端数据库为空，不包含本地已有商品、图纸和方案。
 
-## 后续 HTTPS 入口
+2026-10-20 追加域名子路径入口：现有 rooom.vip 80 站点内新增 `/office/` 代理段（模板 [nginx-office-subpath.conf](../deploy/nginx-office-subpath.conf)），由 `frontend-office` 容器（`/office/` 基座构建，127.0.0.1:3002）提供应用；IP 8081 根路径入口与原静态站不受影响。`X-Forwarded-Prefix /office` 使新识别的资源地址落在子路径下；历史识别写入的 8081 绝对地址由前端 `sameOriginAssetUrl` 归一为当前入口同源路径。详见 [DEPLOY-004](tasks/DEPLOY-004-domain-subpath.md)。
 
-生产 Compose 只将前端映射到 `127.0.0.1:3001`，数据库、Java、CAD 没有宿主机端口。后端默认登录 Cookie 启用 Secure；除上述用户指定的 HTTP 入口例外外，浏览器应通过 HTTPS 使用。
+## HTTPS 入口（2026-10-21 已启用）
 
-将下面配置加入已有且证书有效的 HTTPS `server` 中；示例不替换服务器现有站点，也不自行申请证书：
+用户提供阿里云免费 DV 证书（DigiCert 签发，覆盖 `rooom.vip` 与 `www.rooom.vip`，有效期 2026-10-19 至 2027-01-16，到期前需在阿里云控制台重新申请并替换 `/etc/nginx/ssl/rooom.vip.{pem,key}`，key 保持 0600 root:root）。证书由用户提供文件部署，未使用 certbot 自动签发与续期。
 
-```nginx
-client_max_body_size 150m;
-location / {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_read_timeout 300s;
-}
-```
+已在 `rooom.vip` 站点追加 443 server 块（模板说明见 [nginx-office-subpath.conf](../deploy/nginx-office-subpath.conf) 末尾，改动前备份于服务器 `backups/nginx-rooom.vip-20261021-pre-https`）：原静态站保留在 `/`，`/office/` 代理到 `frontend-office`（127.0.0.1:3002）；HTTPS 下不再移除 Cookie Secure 标记，实测会话 Cookie 为 `Secure; HttpOnly; SameSite=Lax`。按用户要求 80 端口 HTTP 入口与 8081 入口继续保留，未配置 80→443 跳转。
 
-外层代理应覆盖 `X-Forwarded-Proto`，容器 Nginx 将其传给 Java，确保图片绝对地址和会话使用公网 HTTPS 来源。`/uploads/` 经过 Java 的认证过滤器，不能直接由公网 Nginx 从磁盘提供。
+HTTPS 终止在外层 Nginx，Docker 内网与后端配置不变；`X-Forwarded-Proto` 随 scheme 传递。实测 `https://rooom.vip/office/` 200、登录页 200、匿名 API 401、原站点 200，真实 DNS 全流程（登录/文件选择/画布/退出）复测通过。`www.rooom.vip` 证书已覆盖但 DNS 仍指旧服务器，启用前需先改解析。
 
 ## 手动检查与部署
 

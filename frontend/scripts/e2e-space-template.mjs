@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
-import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -13,7 +12,6 @@ const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const baseUrl = 'http://127.0.0.1:' + port
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
-const outDir = process.env.OUT_DIR || './screenshots/space-template'
 let browser, debugPage
 try {
   for (let attempt = 0; ; attempt++) {
@@ -21,7 +19,6 @@ try {
     if (attempt >= 75 || app.exitCode !== null) throw new Error('请先 pnpm build；预览服务未就绪')
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1100 } })
   await context.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }))
@@ -81,7 +78,6 @@ try {
   await dialog().getByText('20.0 m²', { exact: true }).waitFor()
   assert.deepEqual((await state()).objects, initial, '生成预览不改设计稿')
   await dialog().getByLabel('空间模板名称').fill('总部一层空间模板')
-  await page.screenshot({ path: outDir + '/01-template-preview.png' })
   await save()
   await dialog().getByRole('alert').filter({ hasText: '模拟保存失败' }).waitFor()
   assert.equal((await state()).spaceTemplate, null)
@@ -94,7 +90,6 @@ try {
   const downloadEvent = page.waitForEvent('download')
   await dialog().getByRole('button', { name: '导出模板 JSON', exact: true }).click()
   assert.match((await downloadEvent).suggestedFilename(), /总部一层空间模板.*json/)
-  await page.screenshot({ path: outDir + '/02-template-saved.png' })
   await close()
   await page.getByLabel('空间宽度（毫米）').fill('5000')
   await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
@@ -132,7 +127,6 @@ try {
   await dialog().getByLabel('选择已保存空间模板').selectOption('STPL-MOCK-1')
   await dialog().getByRole('button', { name: '用此模板新建布局 →', exact: true }).waitFor()
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: outDir + '/03-template-mobile.png' })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   await close()
   await page.setViewportSize({ width: 1600, height: 1100 })
@@ -154,7 +148,6 @@ try {
   console.log('空间模板 UI 通过：彩色真实轮廓/面积、保存失败与幂等重试、历史模板、独立布局/撤销/刷新、导出、移动布局及过期保存保护。全部 API 模拟。')
 } catch (failure) {
   if (debugPage) {
-    await debugPage.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
     console.error('Template failure state:', await debugPage.evaluate(() => {
       const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
       return { source: state.floorPlan?.analysisId, mode: state.canvasMode, template: state.spaceTemplate?.templateId, rooms: state.objects?.filter(object => object.kind === 'zone').map(room => ({ id: room.id, unit: room.reviewUnit, width: room.actualWidthMm })), text: document.body.innerText.slice(-1800) }

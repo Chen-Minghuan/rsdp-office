@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
-import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -15,7 +14,6 @@ const baseUrl = 'http://127.0.0.1:' + port
 const app = spawn(process.execPath, ['.output/server/index.mjs'], {
   cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore',
 })
-const outDir = process.env.OUT_DIR || './screenshots/space-review'
 let browser
 try {
   for (let attempt = 0; ; attempt++) {
@@ -23,7 +21,6 @@ try {
     if (attempt >= 75 || app.exitCode !== null) throw new Error('请先执行 pnpm build；独立预览服务未就绪')
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
@@ -120,7 +117,6 @@ try {
   assert.equal(await page.getByTestId('selected-area').innerText(), '43.20 m²')
   await assertAlignment([1000, 1000])
   await page.setViewportSize({ width: 1952, height: 1278 })
-  await page.screenshot({ path: outDir + '/01-review-desktop.png' })
   await page.setViewportSize({ width: 1600, height: 1000 })
   const beforeZoom = (await stored()).objects.filter(object => object.kind === 'zone')
   await page.getByRole('button', { name: '放大画布' }).click()
@@ -143,7 +139,6 @@ try {
   await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
   assert.match(await page.getByRole('status').filter({ hasText: '边界重叠' }).innerText(), /重叠/)
   assert.ok(await advance().isEnabled(), '边界重叠只提示复核，不强制处理')
-  await page.screenshot({ path: outDir + '/06-advisory-overlap.png' })
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.ok(await advance().isEnabled())
   const beforeLayout = (await stored()).objects.filter(object => object.kind === 'zone')
@@ -151,7 +146,6 @@ try {
   await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
   await page.waitForURL(/mode=design/)
   assert.match(page.url(), /mode=design/)
-  await page.screenshot({ path: outDir + '/02-layout-gate-open.png' })
   assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入排版只绑定模板，不改写人工确认和几何')
   const designUrl = page.url()
   await page.reload({ waitUntil: 'networkidle' })
@@ -271,7 +265,6 @@ try {
   await choose('L 形办公区')
   assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-L').polygon, traced.polygon)
   await page.getByRole('button', { name: '编辑轮廓', exact: true }).click()
-  await page.screenshot({ path: outDir + '/03-image-calibration-edit.png' })
   // Direct transform uses design geometry, preserving concavity, source and neighbours.
   await page.getByRole('button', { name: '选择 / 缩放', exact: true }).click()
   assert.equal(await page.locator('[data-resize-handle]').count(), 8)
@@ -342,9 +335,7 @@ try {
   await page.locator('svg[aria-label="空间核对画布"]').dispatchEvent('pointercancel', { pointerId: 1 })
   await page.mouse.up()
   assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-L').polygon, baseRing, 'pointercancel restores geometry')
-  await page.screenshot({ path: outDir + '/07-free-transform.png' })
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: outDir + '/04-review-mobile.png', fullPage: true })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto(baseUrl + '/canvas?analysisId=CAD-TEST', { waitUntil: 'networkidle' })
@@ -353,7 +344,6 @@ try {
   await assertAlignment([1000, 1000])
   await page.getByRole('button', { name: '放大画布' }).click()
   await assertAlignment([1000, 1000])
-  await page.screenshot({ path: outDir + '/05-cad-axis-mock.png' })
   // A fresh analysis gets a new design overlay; its new raw recognition polygon remains intact.
   for (const id of ['CORRECTION-TEST', 'CORRECTION-TEST-2']) {
     await page.goto(baseUrl + '/canvas?analysisId=' + id, { waitUntil: 'networkidle' })
@@ -407,7 +397,6 @@ try {
   })
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
-  await page.screenshot({ path: outDir + '/08-reused-contour.png' })
   assert.deepEqual(profileRequests, [], '不调用已删除的项目资料接口')
   assert.deepEqual(errors, [])
   console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护。使用模拟 API。')

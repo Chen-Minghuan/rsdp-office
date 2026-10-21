@@ -30,3 +30,7 @@ frontend/node_modules
 
 # Jenkins reports
 test-results/
+
+# 部署验证与测试截图（脚本运行时自动重建目录）
+output/
+frontend/screenshots/

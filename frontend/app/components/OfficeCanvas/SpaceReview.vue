@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import SpatialInspector from './SpatialInspector.vue'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
@@ -54,7 +55,7 @@ const calibrationInputAnchor = computed(() => {
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
 const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
-const imageUrl = computed(() => store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || '')
+const imageUrl = computed(() => sameOriginAssetUrl(store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || ''))
 const isExample = computed(() => store.zones.some(zone => zone.evidenceKind === 'DEMO'))
 
 

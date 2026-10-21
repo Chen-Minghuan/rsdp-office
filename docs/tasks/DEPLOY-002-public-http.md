@@ -1,6 +1,6 @@
 # DEPLOY-002 正式启动与公网 HTTP 入口
 
-状态：部分实现（公网 IP 入口已验证，域名旧 A 记录待清理）
+状态：部分实现（公网 IP 与域名入口均已验证；HTTPS 与业务数据迁移待办）
 更新日期：2026-10-20
 发布版本：main `956c41117698c11c45e32de93876503a58694425`，镜像 `956c41117698`
 
@@ -41,4 +41,6 @@
 
 2026-10-20 模型配置追修：用户在公网识别 9.png 报 HTTP 404（任务 FPA-958492B8 失败记录保留）。直连探测确认服务器密钥未开通 `qwen3-vl-max`（404 `model_not_found`）而 `qwen3-vl-plus` 可用，且 `.env` 中迁移来的 `RSDP_RENDER_API_KEY` 与有效密钥不一致（401 InvalidApiKey）。已将服务器 `.env` 改为 `RSDP_VISION_MODEL='qwen3-vl-plus'`、`RSDP_RENDER_API_KEY=''`（回退 DASHSCOPE_API_KEY），改动前配置备份于 `backups/.env-20261020-pre-vlplus`（0640 root:jenkins），仅重建 office-backend 容器。容器内确认为 plus 与回退密钥；`qwen-image-3.0` 生图提交/轮询实测 SUCCEEDED（一次最小真实调用）。用户图纸的业务级重新识别待用户在公网重试，不据此扩大识别精度验收。
 
-域名目标入口：`http://rooom.vip:8081/`。删除 `rooom.vip` 指向 `120.77.15.115` 的旧 A 记录，保留本实例地址；DNS 生效后复核正常域名访问。HTTPS、子路径和本地业务数据迁移不属于本次已验证结论。
+域名目标入口：`http://rooom.vip:8081/`。HTTPS 和本地业务数据迁移不属于本次已验证结论。
+
+2026-10-21 DNS 切换完成：用户已在云解析删除 `@` → `120.77.15.115` 旧 A 记录（此前误暂停的是 `*` 泛解析记录，对根域名不生效；权威 DNS 实测定位）。权威 dns25/dns26 及递归 223.5.5.5 / 114.114.114.114 / 8.8.8.8 均只返回 `101.200.81.123`；119.29.29.29 等个别递归在 TTL 内短暂残留旧缓存。真实 DNS 下 `http://rooom.vip/office/` 完整复测通过（见 [DEPLOY-004](DEPLOY-004-domain-subpath.md)）。注意旧服务器对任意请求 301 到 `https://www.rooom.vip`，曾造成双 A 期间资源跨源失败；`www.rooom.vip` 仍指旧服务器，按需另行处理。
