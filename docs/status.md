@@ -1,5 +1,9 @@
 # 开发进度与下一步
 
+2026-10-21 测试产物清理：按用户要求 e2e 脚本不再生成截图（space-review/space-template/dimension-calibration/workflows/render-preview/drawing-entry 及两个公网复测脚本），`output/` 与 `frontend/screenshots/` 已删除并加入 .gitignore。顺带修复三个被合并变更遗留下来的 UI 回归：space-review/dimension-calibration/workflows 补 auth mock，workflows 适配商品页 20 条分页、详情改路由页、导入改预览/校验/确认三段接口；import.vue 结果到达后清除离开守卫残留提示。build、drawing-entry、templates、render-preview、dimensions、space-review、workflows 及两个公网复测全部通过。
+
+2026-10-21 Jenkins 改造按用户决定从简：曾完成 CI/CD 双任务拆分方案（本地验证后已还原），最终保留现有单一 `rsdp-office` 任务与 `DEPLOY=false` 默认只构建、手动勾选才发布的流程，Jenkinsfile 与 deploy.sh 均不改动；仅补 `deploy/.env.example` 子路径端口示例。现有流程已满足：SCM 轮询自动测试构建、测试失败不进入部署、部署仅限当前 origin/main、健康检查失败即任务失败。
+
 2026-10-20 域名子路径入口：[DEPLOY-004](tasks/DEPLOY-004-domain-subpath.md) 已实现 `http://rooom.vip/office/`。新增 `frontend-office` 双基座容器与 80 站点 `/office/` 代理，IP 8081 与原站点不受影响；识别绝对资源地址跨入口 401 由前端同源化修复，新识别经 `X-Forwarded-Prefix` 落子路径。强制解析公网复测（登录/文件选择/云端画布/底图/退出）与 8081 回归通过；DNS 旧 A 记录 `120.77.15.115` 待用户删除后域名正式生效。
 
 2026-10-20 公网识别配置追修：用户公网识别 9.png 失败，定位为服务器百炼密钥未开通 `qwen3-vl-max`（404 model_not_found）且 `RSDP_RENDER_API_KEY` 迁移值无效（401）。服务器 `.env` 已改 `qwen3-vl-plus` 并回退生图密钥，仅重建后端容器；plus 对话探测、`qwen-image-3.0` 提交/轮询实测通过（见 [DEPLOY-002](tasks/DEPLOY-002-public-http.md) 追修记录与[模型配置](vision-configuration.md)）。本地密钥继续用 `qwen3-vl-max`。用户图纸的公网重新识别待用户重试验证。
