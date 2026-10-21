@@ -3,7 +3,6 @@ import type {
   FloorPlanAnalyzeResponse,
   FloorPlanConfirmRequest,
 } from '~/types/floorPlan'
-import type { DimensionCalibrationReport, DimensionUnit } from '~/types/dimensionCalibration'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -82,8 +81,5 @@ export function useFloorPlanApi() {
     analyzeFloorPlan,
     getFloorPlan,
     confirmFloorPlanRooms,
-    recognizeDimensions: (id: string, revision: number) => request<DimensionCalibrationReport>('POST', '/api/v1/floor-plan/' + encodeURIComponent(id) + '/dimension-calibration/recognize?analysisRevision=' + revision),
-    validateDimensions: (id: string, revision: number, assumedUnit: DimensionUnit) => request<DimensionCalibrationReport | null>('GET', '/api/v1/floor-plan/' + encodeURIComponent(id) + '/dimension-calibration?analysisRevision=' + revision + '&assumedUnit=' + assumedUnit),
-    confirmDimensionCalibration: (id: string, analysisRevision: number, reportId: string, assumedUnit: DimensionUnit) => request<DimensionCalibrationReport>('POST', '/api/v1/floor-plan/' + encodeURIComponent(id) + '/dimension-calibration/confirm', { analysisRevision, reportId, assumedUnit }),
   }
 }

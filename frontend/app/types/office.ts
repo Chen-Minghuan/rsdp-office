@@ -1,7 +1,6 @@
 import type { CustomOfficeModule } from './officeModule'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutSettingsMeta } from './officeArrangement'
-import type { DimensionCalibrationEvidence } from './dimensionCalibration'
 
 export type ZoneType =
   | 'OPEN_OFFICE'
@@ -54,7 +53,6 @@ export interface ZoneObject {
   /** Original page units to canonical millimetres; shared by the page. */
   mmPerSourceUnit?: number
   evidenceKind?: 'DEMO' | 'REAL_SERVICE' | 'MANUAL' | 'ESTIMATED'
-  calibrationEvidence?: DimensionCalibrationEvidence
   layoutPreferences?: import('./layoutPlanning').LayoutPreferences
 }
 

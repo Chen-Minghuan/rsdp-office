@@ -63,8 +63,8 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
     <div v-else class="inspector-hint empty-selection">在左侧列表或画布中选择空间。</div>
     <section class="inspector-section calibration-section">
       <div class="section-heading"><h4>比例校准</h4><span class="calibration-state" :class="{ calibrated: isCalibrated }">{{ isCalibrated ? '比例已校准' : '待校准' }}</span></div>
-      <slot name="automatic-calibration" />
-      <button v-if="!calibrationActive" class="calibration-button" @click="emit('startCalibration')">两点校准图纸比例 <span>↗</span></button>
+      <p v-if="!isCalibrated && !calibrationActive" class="inspector-hint">识别完成后请先两点校准：在图上选择一处已知尺寸的两个端点并输入实际长度，校准后空间尺寸与面积即可用于排版。</p>
+      <button v-if="!calibrationActive" class="calibration-button" :class="{ highlight: !isCalibrated }" @click="emit('startCalibration')">两点校准图纸比例 <span>↗</span></button>
       <p v-else class="inspector-hint">正在两点校准：在图纸上所选两点旁输入实际长度并应用。</p>
     </section>
     <section class="inspector-section layers-section">

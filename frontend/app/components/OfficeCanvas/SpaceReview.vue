@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
 import SpatialInspector from './SpatialInspector.vue'
-import DimensionCalibration from './DimensionCalibration.vue'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
-import type { DimensionReference, DimensionReferenceOverlay } from '~/types/dimensionCalibration'
-import { polygonArea } from '~/utils/spatial/geometry'
 import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
 import type { CameraTransform } from '~/utils/spatial/camera'
@@ -19,7 +16,6 @@ const selectedId = ref<string | null>(null)
 const tool = ref('select'), showAllSpaces = ref(false)
 const showUnderlay = ref(true), showOutline = ref(true), showDimensions = ref(true), showOriginal = ref(false)
 const comparingOriginal = ref(false)
-const selectedDimensionReference = ref<DimensionReference | null>(null)
 const underlayOpacity = ref(0.75)
 const camera = ref<CameraTransform>({ zoom: 1, panX: 0, panY: 0 })
 const viewport = ref({ width: 0, height: 0 }), fittedZoom = ref(1)
@@ -58,20 +54,8 @@ const pendingCount = computed(() => reviewSpaceIds.value.length)
 const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
 const imageUrl = computed(() => store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || '')
 const isExample = computed(() => store.zones.some(zone => zone.evidenceKind === 'DEMO'))
-const dimensionCalibrationEnabled = computed(() => !!store.floorPlan?.analysisId && !isExample.value && ['image', 'pdf'].includes(store.floorPlan.inputMode || '') && store.floorPlan.geometrySource !== 'cad_geometry')
-const dimensionReferenceOverlay = computed<DimensionReferenceOverlay | null>(() => {
-  const reference = selectedDimensionReference.value
-  if (!reference?.start || !reference.end || calibrating.value || comparingOriginal.value) return null
-  const scale = calibrated.value ? store.zones[0]?.mmPerSourceUnit || 1 : 1
-  const point = ([x, y]: [number, number]) => ({ x: x * scale, y: y * scale * (calibrated.value ? -1 : 1) })
-  return { start: point(reference.start), end: point(reference.end), label: reference.text, accepted: reference.status === 'ACCEPTED' }
-})
-const automaticPreviewArea = computed(() => {
-  const report = store.floorPlan?.dimensionCalibration
-  if (!selected.value || report?.status !== 'READY' || !report.mmPerPixel) return null
-  const currentScale = calibrated.value ? store.zones[0]?.mmPerSourceUnit || 1 : 1
-  return polygonArea(geometryForZone(selected.value)) * (report.mmPerPixel / currentScale) ** 2 / 1_000_000
-})
+
+
 const imageReady = computed(() => !!imageUrl.value && scene.value.underlays.length > 0)
 const originalGeometries = computed(() => !showOriginal.value ? [] : store.zones.filter(zone => zone.sourcePolygon?.length).map(zone => geometryForZone({
   ...zone, polygon: zone.sourcePolygon!.map(([x, y]) => [x * (zone.reviewUnit === 'mm' ? zone.mmPerSourceUnit || 1 : 1), y * (zone.reviewUnit === 'mm' ? zone.mmPerSourceUnit || 1 : 1)]),
@@ -85,7 +69,6 @@ watch(() => store.zones.map(zone => zone.id).join(','), () => {
 }, { immediate: true })
 watch(() => store.floorPlan?.analysisId, () => {
   cancelTrace()
-  selectedDimensionReference.value = null
   cancelCalibration()
   nextTick(fit)
 }, { immediate: true })
@@ -203,11 +186,7 @@ function applyCalibrationInput() {
   if (!Number.isFinite(calibrationLength.value) || calibrationLength.value <= 0) return
   applyCalibration(Number(calibrationLength.value))
 }
-function applyAutomaticCalibration() {
-  cancelCalibration()
-  fit()
-  notify('自动比例已应用，可直接进入家具排版')
-}
+
 function pointerDown(point: { x: number; y: number }) {
   if (tracing.value) {
     const points = tracing.value.points, previous = points.at(-1)
@@ -385,7 +364,6 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             :pointer-in-source-coordinates="calibrating || !!tracing" :calibration-points="calibrationPoints" :trace-points="tracing?.points"
             :fallback-image-url="imageUrl" :show-underlay="showUnderlay || comparingOriginal" :show-outline="showOutline && !comparingOriginal"
             :show-dimensions="showDimensions" :underlay-opacity="underlayOpacity" :original-geometries="comparingOriginal ? [] : originalGeometries"
-            :dimension-reference="dimensionReferenceOverlay"
             @viewport="onViewport" @update-camera="camera = $event" @select-space="selectSpace" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
             @pointer-down="pointerDown" @pointer-move="pointerMove" @pointer-up="pointerUp" />
           <div v-if="!imageReady" class="missing-source-note"><strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink></div>
@@ -406,7 +384,6 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         :calibration-active="calibrating"
         v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
         @resize="resize" @category="category" @start-calibration="startCalibration" @restore-source="restoreSelectedSource">
-        <template #automatic-calibration><DimensionCalibration :enabled="dimensionCalibrationEnabled" :preview-area="automaticPreviewArea" @reference="selectedDimensionReference = $event" @applied="applyAutomaticCalibration" /></template>
       </SpatialInspector>
     </div>
     <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />

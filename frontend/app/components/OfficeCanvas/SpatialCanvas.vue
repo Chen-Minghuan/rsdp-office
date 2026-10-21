@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { SpatialGeometry, SpatialSceneSnapshot, SpatialSpace } from '~/types/spatial'
 import type { CameraTransform } from '~/utils/spatial/camera'
-import type { DimensionReferenceOverlay } from '~/types/dimensionCalibration'
 import { fromScreen, toScreen } from '~/utils/spatial/camera'
 import { withApiBase } from '~/utils/apiBase'
 import { polygonCentroid, polygonBounds } from '~/utils/spatial/geometry'
@@ -21,7 +20,6 @@ const props = withDefaults(defineProps<{
   tool?: string
   calibrationPoints?: Array<{ x: number; y: number }>
   originalGeometries?: SpatialGeometry[]
-  dimensionReference?: DimensionReferenceOverlay | null
   tracePoints?: Array<{ x: number; y: number }>
   interactionActive?: boolean
 }>(), { showUnderlay: true, showOutline: true, showDimensions: true, underlayOpacity: 0.65, tool: 'select' })
@@ -259,14 +257,7 @@ onBeforeUnmount(() => observer?.disconnect())
         <circle v-for="(point, index) in calibrationPoints" :key="index" :cx="pointToSvg(point).x" :cy="pointToSvg(point).y" r="5" fill="#b18452" stroke="#fff" stroke-width="2" />
         <line v-if="calibrationPoints.length === 2" :x1="pointToSvg(calibrationPoints[0]).x" :y1="pointToSvg(calibrationPoints[0]).y" :x2="pointToSvg(calibrationPoints[1]).x" :y2="pointToSvg(calibrationPoints[1]).y" stroke="#b18452" stroke-width="2" stroke-dasharray="5 4" />
       </g>
-      <g v-if="dimensionReference" data-layer="dimension-reference" pointer-events="none" :stroke="dimensionReference.accepted ? '#b1813e' : '#b97054'" stroke-width="2">
-        <line :x1="pointToSvg(dimensionReference.start).x" :y1="pointToSvg(dimensionReference.start).y" :x2="pointToSvg(dimensionReference.end).x" :y2="pointToSvg(dimensionReference.end).y" stroke-dasharray="5 3" />
-        <circle v-for="(point, index) in [dimensionReference.start, dimensionReference.end]" :key="index" :cx="pointToSvg(point).x" :cy="pointToSvg(point).y" r="5" fill="#fffaf1" />
-        <g :transform="'translate(' + ((pointToSvg(dimensionReference.start).x + pointToSvg(dimensionReference.end).x) / 2) + ',' + ((pointToSvg(dimensionReference.start).y + pointToSvg(dimensionReference.end).y) / 2 - 16) + ')'">
-          <rect x="-44" y="-12" width="88" height="23" rx="5" fill="#fff9ed" stroke-width="1" />
-          <text y="4" text-anchor="middle" font-size="11" fill="#9e713c" stroke="none">{{ dimensionReference.label }}</text>
-        </g>
-      </g>
+
     </g>
   </svg>
 </template>

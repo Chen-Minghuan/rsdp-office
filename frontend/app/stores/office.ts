@@ -13,7 +13,6 @@ import type {
   ProductCombo,
 } from '~/types/office'
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
-import type { DimensionCalibrationReport } from '~/types/dimensionCalibration'
 import { useFloorPlanApi } from '~/composables/useFloorPlanApi'
 import {
   sampleFiles,
@@ -590,7 +589,7 @@ export const useOfficeStore = defineStore('office', {
       return true
     },
 
-    calibrateReviewPage(referenceDistance: number, lengthMm: number, dimensionReport?: DimensionCalibrationReport) {
+    calibrateReviewPage(referenceDistance: number, lengthMm: number) {
       if (!Number.isFinite(referenceDistance) || !Number.isFinite(lengthMm) || referenceDistance <= 0 || lengthMm <= 0 || !this.zones.length) return false
       const factor = lengthMm / referenceDistance
       this.objectUpdate(() => {
@@ -603,37 +602,12 @@ export const useOfficeStore = defineStore('office', {
           zone.mmPerSourceUnit = (zone.mmPerSourceUnit || 1) * factor
           zone.reviewUnit = 'mm'
           zone.pixelToMeter = 0.001
-          zone.calibrationEvidence = dimensionReport?.confirmationId ? {
-            reportId: dimensionReport.reportId, confirmationId: dimensionReport.confirmationId,
-            sourceImageSha256: dimensionReport.imageSha256, assumedUnit: dimensionReport.assumedUnit,
-            mmPerPixel: dimensionReport.mmPerPixel!,
-          } : undefined
           zone.confirmed = false
           zone.confirmedAt = undefined
           this.invalidateZoneLayout(zone.id)
         })
-        if (dimensionReport && this.floorPlan) this.floorPlan.dimensionCalibration = dimensionReport
       })
       return true
-    },
-
-    setDimensionReport(report: DimensionCalibrationReport) {
-      if (!this.floorPlan || report.analysisId !== this.floorPlan.analysisId || report.analysisRevision !== (this.floorPlan.analysisRevision || 1)) return false
-      this.floorPlan.dimensionCalibration = report
-      this.saveLocal()
-      return true
-    },
-
-    applyDimensionCalibration(report: DimensionCalibrationReport) {
-      const plan = this.floorPlan
-      if (!plan || plan.analysisId !== report.analysisId || (plan.analysisRevision || 1) !== report.analysisRevision || plan.dimensionCalibration?.reportId !== report.reportId) return false
-      if (report.status !== 'READY' || !report.confirmationId || !Number.isFinite(report.mmPerPixel) || Number(report.mmPerPixel) <= 0) return false
-      if (!this.zones.length || this.zones.some(zone => zone.sourceAnalysisId !== plan.analysisId)) return false
-      const calibrated = this.zones.every(zone => zone.reviewUnit === 'mm')
-      if (!calibrated && this.zones.some(zone => zone.reviewUnit === 'mm')) return false
-      const currentScale = calibrated ? this.zones[0].mmPerSourceUnit || 1 : 1
-      if (!Number.isFinite(currentScale) || currentScale <= 0 || (calibrated && this.zones.some(zone => Math.abs((zone.mmPerSourceUnit || 1) - currentScale) > 1e-9))) return false
-      return this.calibrateReviewPage(1, report.mmPerPixel! / currentScale, report)
     },
 
     loadReviewExample() {

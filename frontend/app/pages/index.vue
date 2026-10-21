@@ -583,7 +583,7 @@ async function enterCurrentDrawing() {
 
           <div v-if="recognitionResult" class="flex flex-col gap-4">
             <div v-if="requiresCalibration && !hasRunningResult && recognitionResult.status !== 'failed'" class="rounded-xl border border-line bg-cream p-3 text-xs text-bronze-dark">
-              已识别图中空间候选，请核对轮廓并校准实际长度。校准前不计算实际尺寸与面积。
+              已识别图中空间候选，请核对轮廓；进入空间后先用「两点校准」标注一处已知尺寸的实际长度，校准前不计算实际尺寸与面积。
               <span v-if="recognitionResult.inputMode === 'pdf'">当前识别第 {{ recognitionResult.unitResolution.pageNumber }} 页，共 {{ recognitionResult.unitResolution.pageCount }} 页。</span>
             </div>
             <!-- 预览图 -->

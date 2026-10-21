@@ -120,6 +120,7 @@
 .calibration-state { color:#b28b4c; font-size:10px; }
 .calibration-state.calibrated { color:#669781; }
 .calibration-button { width:100%; display:flex; justify-content:space-between; color:#949c8a; padding:13px 0 2px; font-size:10px!important; }
+.calibration-button.highlight { color:#a27b49; font-weight:600; }
 .calibration-inline { position:absolute; z-index:4; transform:translate(-50%,14px); display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid #ead4ad; border-radius:8px; background:#fffcf2; box-shadow:0 6px 18px rgba(120,100,60,.12); }
 .calibration-inline label { display:flex; align-items:center; gap:6px; font-size:11px; color:#a38450; white-space:nowrap; }
 .calibration-inline input { width:88px; border:1px solid #dedfd3; padding:5px; border-radius:5px; background:#fff; }
@@ -226,29 +227,6 @@
   .review-page-footer { padding:16px; height:auto; align-items:flex-start; gap:15px; font-size:9px; }
 }
 
-.dimension-calibration { margin-top:14px; padding:12px; border:1px solid #e8dfcd; border-radius:8px; background:#fffcf5; }
-.dimension-calibration-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.dimension-calibration-heading strong { font-size:11px; color:#807455; font-weight:600; }
-.dimension-calibration-heading button { font-size:10px; color:#a27b49; text-decoration:underline; }
-.dimension-calibration button:disabled { cursor:not-allowed; opacity:.5; }
-.dimension-calibration-note { font-size:10px; line-height:1.8; color:#9c9a89; margin:9px 0; }
-.dimension-calibration-status { font-size:11px; margin:12px 0 7px; color:#a28b62; font-weight:600; }
-.dimension-calibration-status.ready { color:#75936c; }
-.dimension-calibration-status.conflict { color:#b77d57; }
-.dimension-unit-label { display:flex; align-items:center; gap:5px; font-size:10px; color:#a18b64; margin:10px 0; }
-.dimension-unit-label select { min-width:70px; padding:4px; border:1px solid #e1dccd; background:#fff; border-radius:5px; color:#857650; }
-.dimension-warning { color:#ae9167; font-size:10px; line-height:1.7; margin:7px 0; }
-.dimension-reference-list { max-height:164px; overflow:auto; scrollbar-width:thin; margin-top:10px; }
-.dimension-reference-list button { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:5px; width:100%; padding:8px; margin-top:5px; border:1px solid #eae7dc; border-radius:5px; text-align:left; background:#fff; color:#969a87; }
-.dimension-reference-list button.selected { background:#fff4db; border-color:#d9bc80; }
-.dimension-reference-list button strong { font-weight:500; font-size:11px; color:#9b8058; }
-.dimension-reference-list button span { font-size:9px; color:#839a72; }
-.dimension-reference-list button.rejected span { color:#b29679; }
-.dimension-reference-list button small { flex-basis:100%; font-size:9px; color:#a89b81; line-height:1.6; }
-.dimension-calibration-preview { font-size:10px; color:#9a957d; margin:12px 0; line-height:1.7; }
-.dimension-calibration-preview strong { color:#7e9471; }
-.dimension-confirm-button { margin-top:8px; display:block; width:100%; padding:10px 4px; background:#a78956; color:white; border-radius:6px; font-size:10px!important; }
-.dimension-error { margin:10px 0 0; color:#b06d4c; font-size:10px; line-height:1.7; }
 .contour-edit-bar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 16px; background:#f0f6fc; color:#456783; font-size:11px; border-bottom:1px solid #dce7f0; }
 .contour-edit-bar span { flex:1; min-width:160px; }
 .contour-edit-bar button { padding:5px 8px; background:white; border:1px solid #b7cde0; border-radius:5px; }
