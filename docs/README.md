@@ -55,6 +55,7 @@
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |
 | [沿墙轮廓修正](tasks/GEOM-006-wall-contour-correction.md) | 入口/退台完整边界、补转折点、沿墙重描与撤销恢复 |
 | [删除不参与排版的空间](tasks/GEOM-010-delete-spaces.md) | 删除空间及关联内容、撤销与刷新后保持空稿 |
+| [单空间建筑约束标注](tasks/GEOM-011-space-obstacles.md) | 放大核对、柱/门洞净空/禁放区人工标注、模板保留与排版避障 |
 | [单空间视图隔离](tasks/GEOM-005-single-space-view.md) | 当前房间/家具隔离、底图留在总览、负坐标适屏与视图回归 |
 | [空间模板与布局复用](tasks/GEOM-004-space-template.md) | 彩色整层模板、保存/读取、独立布局副本与来源版本 |
 | [空间复核提示规则](tasks/FLOW-002-advisory-space-review.md) | 无需逐个确认，提示复核后直接排版；前后端一致的计算条件 |

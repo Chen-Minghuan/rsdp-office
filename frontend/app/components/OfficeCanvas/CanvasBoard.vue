@@ -9,6 +9,8 @@ import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProbl
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld } from '~/utils/officeCanvasView'
+import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
+import type { LayoutExclusion } from '~/types/layoutPlanning'
 
 
 const store = useOfficeStore()
@@ -79,6 +81,11 @@ const zones = computed(() => store.objects.filter((o) => o.kind === 'zone') as Z
 const visibleZones = computed(() => visibleObjects.value.filter((o) => o.kind === 'zone') as ZoneObject[])
 const arrows = computed(() => visibleObjects.value.filter((o) => o.kind === 'arrow'))
 const designZone = computed(() => zones.value.find((z) => z.id === store.designZoneId) || null)
+const designObstacles = computed(() => designZone.value ? zoneLayoutExclusions(designZone.value, false) : [])
+function obstaclePoints(area: LayoutExclusion) {
+  const polygon = area.polygon || [[area.x, area.y], [area.x + area.w, area.y], [area.x + area.w, area.y + area.h], [area.x, area.y + area.h]]
+  return polygon.map(([x, y]) => `${x - area.x},${y - area.y}`).join(' ')
+}
 const furniture = computed(() => {
   if (mode.value !== 'design') return []
   return visibleObjects.value.filter((o) => o.kind === 'furniture') as FurnitureObject[]
@@ -760,6 +767,15 @@ function furnitureProduct(o: FurnitureObject) {
             <div class="text-[13px] text-center text-[#6b6056] pt-1 truncate">{{ (o as any).caption || '办公参考图' }}</div>
           </div>
         </template>
+
+        <div v-if="mode === 'design' && designObstacles.length" class="absolute inset-0 pointer-events-none" data-testid="design-obstacles">
+          <div v-for="area in designObstacles" :key="area.id" :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px' }">
+            <svg :viewBox="`0 0 ${area.w} ${area.h}`" width="100%" height="100%" style="overflow: visible">
+              <polygon :points="obstaclePoints(area)" :fill="area.label === '门洞净空' ? '#2586a022' : '#b44f4522'" :stroke="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :stroke-width="2 / store.zoom" stroke-dasharray="6 3" />
+              <text x="4" y="14" :fill="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :font-size="11 / store.zoom" font-weight="600">{{ area.label }}</text>
+            </svg>
+          </div>
+        </div>
 
         <!-- Furniture -->
         <div

@@ -3,7 +3,7 @@ import type { OfficeModuleTemplate } from './officeModule'
 import type { OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { OfficeProductStyleId, OfficeArrangementPresetId } from './officeArrangement'
 
-export interface LayoutExclusion { id: string; label: string; x: number; y: number; w: number; h: number }
+export interface LayoutExclusion { id: string; label: string; x: number; y: number; w: number; h: number; polygon?: Array<[number, number]> }
 export interface LayoutPreferences {
   strategy: 'template' | 'recommended'
   targetSeats: number

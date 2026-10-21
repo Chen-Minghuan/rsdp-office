@@ -2,7 +2,7 @@ import type { OfficeObject } from '~/types/office'
 import type { RenderPreviewSnapshot } from '~/types/renderPreview'
 
 // Must match RenderPreviewScene.java; omit view state and confirmation flags.
-const zoneFields = ['id', 'name', 'zoneType', 'reviewUnit', 'polygon', 'evidenceKind', 'sourceAnalysisId', 'sourceAnalysisRevision', 'spaceTemplateId', 'templateSpaceId', 'sourceImageSha256', 'mmPerSourceUnit', 'sourceYAxis', 'layoutPreferences']
+const zoneFields = ['id', 'name', 'zoneType', 'reviewUnit', 'polygon', 'obstacles', 'evidenceKind', 'sourceAnalysisId', 'sourceAnalysisRevision', 'spaceTemplateId', 'templateSpaceId', 'sourceImageSha256', 'mmPerSourceUnit', 'sourceYAxis', 'layoutPreferences']
 const furnitureFields = ['id', 'zoneId', 'x', 'y', 'w', 'h', 'rotation', 'heightMm', 'wingWidthMm', 'label', 'furnitureTemplateId', 'moduleSnapshot', 'productId', 'productSelection', 'mirrorX', 'layoutSettings', 'layoutGroupId', 'layoutClusterId', 'layoutRole']
 const project = (item: object, keys: string[]) => Object.fromEntries(keys.filter(key => (item as any)[key] != null).map(key => [key, (item as any)[key]]))
 

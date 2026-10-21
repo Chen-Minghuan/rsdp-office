@@ -99,7 +99,15 @@ public class RenderLayoutContext {
             Map<Long,Integer> counts=new TreeMap<>();corridors.values().forEach(g->counts.merge(Math.round(g),1,Integer::sum));
             counts.forEach((gap,count)->gaps.addObject().put("axis",horizontal?"x":"y").put("distanceMm",gap).put("count",count));
         }
-        result.set("reservedAreas",scene.path("zone").path("layoutPreferences").path("exclusions").isArray()?scene.path("zone").path("layoutPreferences").path("exclusions").deepCopy():JsonNodeFactory.instance.arrayNode());
+        ArrayNode reserved=scene.path("zone").path("layoutPreferences").path("exclusions").isArray()?scene.path("zone").path("layoutPreferences").path("exclusions").deepCopy():JsonNodeFactory.instance.arrayNode();
+        for(JsonNode obstacle:scene.path("zone").path("obstacles")) {
+            JsonNode outer=obstacle.path("geometry").path("outer");if(!outer.isArray()||outer.size()<3)continue;
+            double minX=Double.POSITIVE_INFINITY,minY=Double.POSITIVE_INFINITY,maxX=Double.NEGATIVE_INFINITY,maxY=Double.NEGATIVE_INFINITY;
+            for(JsonNode point:outer){double x=point.get(0).asDouble(),y=-point.get(1).asDouble();minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}
+            ObjectNode reservedObstacle=reserved.addObject().put("id",obstacle.path("obstacleId").asText()).put("label",obstacle.path("kind").asText()).put("x",minX).put("y",minY).put("w",maxX-minX).put("h",maxY-minY);
+            ArrayNode polygon=reservedObstacle.putArray("polygon");for(JsonNode point:outer)polygon.addArray().add(point.get(0).asDouble()).add(-point.get(1).asDouble());
+        }
+        result.set("reservedAreas",reserved);
         result.put("openingsKnown",false);
         return result;
     }

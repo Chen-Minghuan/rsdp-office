@@ -5,6 +5,7 @@ import { layoutRectInsideRing, OFFICE_LAYOUT_SPACING } from './officeAutoLayout'
 import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
 import { officeArrangementPreset, OFFICE_ARRANGEMENT_RULE_VERSION } from './officeArrangementPresets'
 import { canvasZoneBounds } from './officeCanvasView'
+import { rectOverlapsBlocker } from './layoutConstraints'
 
 type Rect = { x: number; y: number; w: number; h: number }
 const EPS = 0.001
@@ -67,7 +68,7 @@ export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, 
             rotation: (part.rotation + (turned ? 90 : 0)) % 360,
           }
         })
-        const valid = cell.every(slot => layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + spacing.wallMm * 2, h: slot.h + spacing.wallMm * 2 }, zone.polygon!) && !blockers.some(block => overlaps(slot, block, spacing.aisleMm)))
+        const valid = cell.every(slot => layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + spacing.wallMm * 2, h: slot.h + spacing.wallMm * 2 }, zone.polygon!) && !blockers.some(block => rectOverlapsBlocker(slot, block, spacing.aisleMm)))
         // A facing pair/T pair/C/cross cell is either kept whole or skipped whole.
         if (valid) slots.push(...cell)
       }

@@ -3,6 +3,8 @@ import type { OfficeModuleTemplate } from '~/types/officeModule'
 import type { OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import { layoutRectInsideRing } from '~/utils/officeAutoLayout'
 import { uid } from '~/utils/helpers'
+import { zoneLayoutExclusions } from './spatial/obstacles'
+import { rectOverlapsBlocker } from './layoutConstraints'
 
 export interface OfficeFurniturePlacement {
   zoneId: string
@@ -43,8 +45,8 @@ export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObj
     if (footprint.x < other.x + other.w + gap - eps && other.x < footprint.x + footprint.w + gap - eps
       && footprint.y < other.y + other.h + gap - eps && other.y < footprint.y + footprint.h + gap - eps) return '此位置与已有家具重叠或间距不足'
   }
-  for (const area of zone.layoutPreferences?.exclusions || []) {
-    if (footprint.x < area.x + area.w && area.x < footprint.x + footprint.w && footprint.y < area.y + area.h && area.y < footprint.y + footprint.h) return '此位置占用了入口或禁放区'
+  for (const area of zoneLayoutExclusions(zone)) {
+    if (rectOverlapsBlocker(footprint, area)) return '此位置占用了入口或禁放区'
   }
   return null
 }

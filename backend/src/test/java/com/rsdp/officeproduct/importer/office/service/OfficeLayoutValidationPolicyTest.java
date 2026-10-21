@@ -45,6 +45,35 @@ class OfficeLayoutValidationPolicyTest {
         final ArrayNode outside = scene(); ((ObjectNode) outside.get(1)).put("x", 7500);
         assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(outside));
     }
+    @Test void rejectsConfirmedFurnitureOverlappingSpatialObstacle() throws Exception {
+        ArrayNode objects = scene();
+        ObjectNode obstacle = ((ObjectNode) objects.get(0)).putArray("obstacles").addObject();
+        obstacle.put("obstacleId", "COL-1").put("kind", "COLUMN").put("spaceId", "R").put("excludesFloorArea", true);
+        ObjectNode geometry = obstacle.putObject("geometry").put("type", "POLYGON").put("coordinateSystem", "WORLD_MM");
+        geometry.putArray("outer").addArray().add(2200).add(-2200);
+        geometry.withArray("outer").addArray().add(2600).add(-2200);
+        geometry.withArray("outer").addArray().add(2600).add(-2600);
+        geometry.withArray("outer").addArray().add(2200).add(-2600);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ((ObjectNode) objects.get(1)).put("layoutConfirmed", false);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+    @Test void validatesDoorSectorInsteadOfItsBoundingBox() throws Exception {
+        ArrayNode objects = scene();
+        ObjectNode obstacle = ((ObjectNode) objects.get(0)).putArray("obstacles").addObject();
+        obstacle.put("obstacleId", "DOOR-1").put("kind", "DOOR_CLEARANCE").put("spaceId", "R").put("excludesFloorArea", false);
+        ObjectNode geometry = obstacle.putObject("geometry").put("type", "POLYGON").put("coordinateSystem", "WORLD_MM");
+        ArrayNode outer = geometry.putArray("outer");
+        outer.addArray().add(0).add(0);
+        for (int index = 0; index <= 16; index++) {
+            double angle = index * Math.PI / 32;
+            outer.addArray().add(1000 * Math.cos(angle)).add(-1000 * Math.sin(angle));
+        }
+        ObjectNode outsideArc = objects.addObject().put("id", "OUTSIDE-ARC").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("x", 900).put("y", 500).put("w", 100).put("h", 100).put("rotation", 0).put("furnitureTemplateId", "cabinet-mobile");
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        outsideArc.put("x", 100).put("y", 100);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
     @Test void rejectsSeatShortfallButRetainsEditableDraft() throws Exception {
         ArrayNode objects = scene(); ((ObjectNode) objects.get(0).path("layoutPreferences")).put("targetSeats", 60);
         assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));

@@ -16,7 +16,7 @@ import java.util.List;
 public final class RenderPreviewScene {
     private RenderPreviewScene() {}
     // Keep these projections in sync with frontend/app/utils/renderPreview.ts.
-    private static final List<String> ZONE_FIELDS = List.of("id", "name", "zoneType", "reviewUnit", "polygon", "evidenceKind", "sourceAnalysisId", "sourceAnalysisRevision", "spaceTemplateId", "templateSpaceId", "sourceImageSha256", "mmPerSourceUnit", "sourceYAxis", "layoutPreferences");
+    private static final List<String> ZONE_FIELDS = List.of("id", "name", "zoneType", "reviewUnit", "polygon", "obstacles", "evidenceKind", "sourceAnalysisId", "sourceAnalysisRevision", "spaceTemplateId", "templateSpaceId", "sourceImageSha256", "mmPerSourceUnit", "sourceYAxis", "layoutPreferences");
     private static final List<String> FURNITURE_FIELDS = List.of("id", "zoneId", "x", "y", "w", "h", "rotation", "heightMm", "wingWidthMm", "label", "furnitureTemplateId", "moduleSnapshot", "productId", "productSelection", "mirrorX", "layoutSettings", "layoutGroupId", "layoutClusterId", "layoutRole");
 
     public static ObjectNode snapshot(JsonNode objects, String zoneId) {

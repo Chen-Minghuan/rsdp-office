@@ -41,6 +41,8 @@ import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import type { LayoutRequest } from '~/types/layoutPlanning'
+import type { SpatialObstacle } from '~/types/spatial'
+import { migrateLegacyDoorClearances } from '~/utils/spatial/obstacles'
 import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem } from '~/utils/layoutPlanning'
 
 const STORAGE_KEY = 'rsdp-office-v01'
@@ -131,6 +133,12 @@ function loadLocalState(): Partial<OfficeState> {
       return value
     }) as OfficeState
     parsed.files = singleDrawing(parsed.files, parsed.floorPlan?.sourceName)
+    const migratedZoneIds = migrateLegacyDoorClearances(parsed.objects || [])
+    if (migratedZoneIds.length) {
+      parsed.canvasRevision = (parsed.canvasRevision || 0) + 1
+      parsed.objects?.forEach(object => { if (object.kind === 'furniture' && migratedZoneIds.includes(object.zoneId)) object.layoutConfirmed = false })
+      parsed.submitted = null
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
     localStorage.removeItem(LEGACY_STORAGE_KEY)
     const { undoStack, ...rest } = parsed
@@ -238,6 +246,14 @@ export const useOfficeStore = defineStore('office', {
         this.apiReady = false
         this.products = SAMPLE_PRODUCTS
         this.combos = SAMPLE_COMBOS
+      }
+      const migratedZoneIds = migrateLegacyDoorClearances(this.objects)
+      if (migratedZoneIds.length) {
+        this.snapshotUndo()
+        this.canvasRevision++
+        this.objects.forEach(object => { if (object.kind === 'furniture' && migratedZoneIds.includes(object.zoneId)) object.layoutConfirmed = false })
+        this.submitted = null
+        this.schedulePersist()
       }
 
       const templateId = this.zones[0]?.spaceTemplateId
@@ -373,7 +389,7 @@ export const useOfficeStore = defineStore('office', {
       if (idx === -1) return
       this.objectUpdate(() => {
         Object.assign(this.objects[idx], patch)
-        if (this.objects[idx].kind === 'zone' && ['polygon', 'x', 'y', 'w', 'h', 'zoneType', 'pixelToMeter'].some(key => key in patch)) {
+        if (this.objects[idx].kind === 'zone' && ['polygon', 'x', 'y', 'w', 'h', 'zoneType', 'pixelToMeter', 'obstacles'].some(key => key in patch)) {
           const zone = this.objects[idx] as ZoneObject
           zone.confirmed = false
           zone.confirmedAt = undefined
@@ -589,6 +605,25 @@ export const useOfficeStore = defineStore('office', {
       return true
     },
 
+    saveZoneObstacle(zoneId: string, obstacle: SpatialObstacle) {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone || obstacle.spaceId !== zoneId) return '建筑约束归属无效'
+      const obstacles = zone.obstacles?.some(item => item.obstacleId === obstacle.obstacleId)
+        ? zone.obstacles.map(item => item.obstacleId === obstacle.obstacleId ? obstacle : item)
+        : [...(zone.obstacles || []), obstacle]
+      const problem = zoneLayoutProblem({ ...zone, obstacles })
+      if (problem) return problem
+      this.updateObject(zoneId, { obstacles } as Partial<ZoneObject>)
+      return null
+    },
+
+    removeZoneObstacle(zoneId: string, obstacleId: string) {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone || !zone.obstacles?.some(item => item.obstacleId === obstacleId)) return false
+      this.updateObject(zoneId, { obstacles: zone.obstacles.filter(item => item.obstacleId !== obstacleId) } as Partial<ZoneObject>)
+      return true
+    },
+
     calibrateReviewPage(referenceDistance: number, lengthMm: number) {
       if (!Number.isFinite(referenceDistance) || !Number.isFinite(lengthMm) || referenceDistance <= 0 || lengthMm <= 0 || !this.zones.length) return false
       const factor = lengthMm / referenceDistance
@@ -597,6 +632,7 @@ export const useOfficeStore = defineStore('office', {
           const ring = zoneRing(zone)
           if (!zone.sourcePolygon) zone.sourcePolygon = ring.map(([x, y]) => [x, y])
           zone.polygon = ring.map(([x, y]) => [x * factor, y * factor])
+          zone.obstacles?.forEach(obstacle => { obstacle.geometry.outer = obstacle.geometry.outer.map(([x, y]) => [x * factor, y * factor]) })
           const bounds = polygonBoundsMm(zone.polygon)
           if (bounds) Object.assign(zone, { x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY, actualWidthMm: bounds.maxX - bounds.minX, actualDepthMm: bounds.maxY - bounds.minY })
           zone.mmPerSourceUnit = (zone.mmPerSourceUnit || 1) * factor

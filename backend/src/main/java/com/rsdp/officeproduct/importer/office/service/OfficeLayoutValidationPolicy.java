@@ -30,9 +30,13 @@ public final class OfficeLayoutValidationPolicy {
             ring.closePath();
             Area room = new Area(ring);
             List<Rectangle2D.Double> bounds = furniture.stream().map(OfficeLayoutValidationPolicy::footprint).toList();
-            List<Rectangle2D.Double> exclusions = new ArrayList<>();
+            List<Area> exclusions = new ArrayList<>();
             JsonNode preferences = zone.path("layoutPreferences");
-            for (JsonNode area : preferences.path("exclusions")) exclusions.add(rectangle(area));
+            for (JsonNode area : preferences.path("exclusions")) exclusions.add(new Area(rectangle(area)));
+            for (JsonNode obstacle : zone.path("obstacles")) {
+                if (!zone.path("id").asText().equals(obstacle.path("spaceId").asText())) throw new BusinessException("建筑约束归属无效");
+                exclusions.add(obstacleArea(obstacle));
+            }
             for (int i = 0; i < furniture.size(); i++) {
                 JsonNode item = furniture.get(i);
                 if (!item.path("layoutConfirmed").asBoolean()) continue;
@@ -47,14 +51,14 @@ public final class OfficeLayoutValidationPolicy {
                     expanded.subtract(room);
                     if (!expanded.isEmpty()) throw new BusinessException("已确认家具离墙或通行预留不足");
                 }
-                for (Rectangle2D.Double area : exclusions) if (bounds.get(i).intersects(area)) throw new BusinessException("已确认家具占用了入口或禁放区");
+                for (Area area : exclusions) if (overlaps(bounds.get(i), area)) throw new BusinessException("已确认家具占用了入口或禁放区");
                 for (int j = 0; j < furniture.size(); j++) if (i != j && bounds.get(i).intersects(bounds.get(j))) throw new BusinessException("已确认家具存在重叠");
                 double clearance = nonNegative(preferences, "seatClearanceMm");
                 if ("seat".equals(item.path("layoutRole").asText()) && clearance > 0) {
                     Rectangle2D.Double activity = chairActivity(item, clearance);
                     Area activityOutside = new Area(activity); activityOutside.subtract(room);
                     if (!activityOutside.isEmpty()) throw new BusinessException("椅子活动区超出空间");
-                    for (Rectangle2D.Double area : exclusions) if (activity.intersects(area)) throw new BusinessException("椅子活动区占用禁放区");
+                    for (Area area : exclusions) if (overlaps(activity, area)) throw new BusinessException("椅子活动区占用禁放区");
                     for (int j = 0; j < furniture.size(); j++) if (i != j && activity.intersects(bounds.get(j))) throw new BusinessException("椅子活动区被家具占用");
                 }
             }
@@ -93,6 +97,25 @@ public final class OfficeLayoutValidationPolicy {
         double x = number(node, "x"), y = number(node, "y"), w = number(node, "w"), h = number(node, "h");
         if (w <= 0 || h <= 0) throw new BusinessException("家具或预留区域尺寸无效");
         return new Rectangle2D.Double(x, y, w, h);
+    }
+    private static boolean overlaps(Rectangle2D.Double rectangle, Area exclusion) {
+        Area intersection = new Area(rectangle); intersection.intersect(exclusion);
+        return !intersection.isEmpty();
+    }
+    private static Area obstacleArea(JsonNode obstacle) {
+        JsonNode outer = obstacle.path("geometry").path("outer");
+        if (!"WORLD_MM".equals(obstacle.path("geometry").path("coordinateSystem").asText()) || !outer.isArray() || outer.size() < 3) throw new BusinessException("建筑约束需要有效毫米轮廓");
+        Path2D.Double path = new Path2D.Double();
+        for (int index = 0; index < outer.size(); index++) {
+            JsonNode point = outer.get(index);
+            if (!point.isArray() || point.size() != 2 || !point.get(0).isNumber() || !point.get(1).isNumber()) throw new BusinessException("建筑约束坐标无效");
+            double x = point.get(0).asDouble(), y = -point.get(1).asDouble();
+            if (!Double.isFinite(x) || !Double.isFinite(y)) throw new BusinessException("建筑约束坐标无效");
+            if (index == 0) path.moveTo(x, y); else path.lineTo(x, y);
+        }
+        path.closePath();
+        if (path.getBounds2D().getWidth() <= 0 || path.getBounds2D().getHeight() <= 0) throw new BusinessException("建筑约束尺寸无效");
+        return new Area(path);
     }
     private static Rectangle2D.Double footprint(JsonNode item) {
         Rectangle2D.Double rect = rectangle(item);

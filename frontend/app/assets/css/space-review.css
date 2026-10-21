@@ -67,6 +67,17 @@
 .review-zoom>span { min-width:40px; text-align:center; }
 .review-zoom button { padding:8px; }
 .review-canvas { position:relative; flex:1; min-height:0; overflow:hidden; background:#fbfbf9 radial-gradient(#dce0d5 .7px,transparent .7px) 0 0/20px 20px; }
+.constraint-edit-bar { display:flex; flex-wrap:wrap; align-items:center; gap:12px; min-height:42px; padding:6px 14px; border-bottom:1px solid #ece9e1; background:#fffdfa; color:#7f857a; font-size:10px; }
+.constraint-tool-buttons { display:flex; gap:4px; flex:none; }
+.constraint-tool-buttons button { padding:6px 9px; border:1px solid #e4ded4; border-radius:5px; color:#8a7565; background:#fff; }
+.constraint-tool-buttons button.active { color:#a24f45; border-color:#c89288; background:#f9eeeb; }
+.edge-snap-toggle { display:flex; align-items:center; gap:4px; flex:none; color:#8a7565; white-space:nowrap; }
+.edge-snap-active { padding:3px 6px; border-radius:4px; color:#4f8871; background:#e9f3ee; white-space:nowrap; }
+.selected-obstacle-editor { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.selected-obstacle-editor strong { color:#a24f45; }
+.selected-obstacle-editor label { display:flex; align-items:center; gap:4px; }
+.selected-obstacle-editor input { width:72px; padding:4px 5px; border:1px solid #e4ded4; border-radius:4px; }
+.selected-obstacle-editor button { color:#a24f45; text-decoration:underline; }
 .review-alignment-status { position:absolute; top:18px; left:18px; z-index:2; display:flex; align-items:center; gap:10px; font-size:10px; padding:11px 12px; border:1px solid #e5e5dc; background:#ffffffed; border-radius:7px; color:#7c8c7e; pointer-events:none; }
 .review-alignment-status>b { width:6px; height:6px; background:#4b997e; border-radius:50%; }
 .review-alignment-status>b.unknown { background:#bc955c; }
@@ -77,6 +88,8 @@
 .review-legend i { width:8px; height:8px; border:1px solid; }
 .review-legend i.outline { border:1px dashed #cc9b4d; background:#fff6e5; }
 .review-legend i.selected { border:2px solid #4b8bc6; background:#e3effd; }
+.review-legend i.obstacle { border-color:#b44f45; background:#b44f4533; }
+.review-legend i.door { border-color:#2586a0; background:#2586a033; }
 .review-scale { position:absolute; left:23px; bottom:23px; display:flex; justify-content:space-between; font-size:9px; color:#8a9686; }
 .review-scale i { position:absolute; top:21px; left:0; height:7px; border:1px solid #8e9e8d; border-top:0; }
 .review-canvas-actions { position:absolute; right:18px; bottom:22px; display:flex; gap:7px; }

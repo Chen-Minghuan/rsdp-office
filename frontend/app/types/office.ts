@@ -53,6 +53,7 @@ export interface ZoneObject {
   /** Original page units to canonical millimetres; shared by the page. */
   mmPerSourceUnit?: number
   evidenceKind?: 'DEMO' | 'REAL_SERVICE' | 'MANUAL' | 'ESTIMATED'
+  obstacles?: import('./spatial').SpatialObstacle[]
   layoutPreferences?: import('./layoutPlanning').LayoutPreferences
 }
 

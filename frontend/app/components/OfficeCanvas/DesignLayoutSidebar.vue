@@ -7,6 +7,7 @@ import type { FurnitureObject } from '~/types/office'
 import type { LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
+import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
 import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
 import { moduleGlyphId } from '~/utils/officeModules'
@@ -144,6 +145,7 @@ const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, 
   ? `${unitW.value},${unitD.value}` : '')
 
 const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
+const buildingConstraints = computed(() => zone.value ? zoneLayoutExclusions(zone.value, false) : [])
 const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
 const proposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
 const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
@@ -345,6 +347,7 @@ function clearLayout() {
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
           <details><summary class="cursor-pointer">入口与禁放区 · {{ preferences.exclusions.length }}</summary>
+            <p v-if="buildingConstraints.length" class="mt-2 rounded bg-[#f9eeeb] p-2 text-[10px] text-[#a24f45]">空间核对已标注 {{ buildingConstraints.length }} 处建筑约束，会自动参与避障；请返回空间核对修改。</p>
             <p class="mt-2 text-[10px] text-muted">从空间左上角起量，单位 mm；红框区域不可摆放。</p>
             <div v-for="area in preferences.exclusions" :key="area.id" class="mt-2 rounded border border-line p-2">
               <input v-model="area.label" aria-label="预留区域名称" class="w-full border border-line px-1">

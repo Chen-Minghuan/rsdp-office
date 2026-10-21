@@ -122,6 +122,17 @@ export interface SpatialSceneSnapshot {
   confirmedSceneId: string | null
 }
 
+export type SpatialObstacleKind = 'COLUMN' | 'SHAFT' | 'NO_PLACEMENT' | 'DOOR_CLEARANCE' | 'OTHER'
+
+export interface SpatialObstacle {
+  obstacleId: string
+  kind: SpatialObstacleKind
+  spaceId: string | null
+  geometry: SpatialGeometry
+  excludesFloorArea: boolean
+  source?: 'MANUAL' | 'CAD_GEOMETRY' | 'AI_VISION'
+}
+
 export interface DraftRequest {
   schemaVersion: string
   baseRevision: number

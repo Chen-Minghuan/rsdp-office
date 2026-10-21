@@ -2,6 +2,7 @@ import type { ZoneObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import type { SpatialGeometry, SpatialSceneSnapshot } from '~/types/spatial'
 import { inferRectangleFrame, polygonArea, polygonBounds } from '~/utils/spatial/geometry'
+import { obstacleRing } from './obstacles'
 
 export function zoneRing(zone: ZoneObject): Array<[number, number]> {
   return zone.polygon?.length ? zone.polygon : []
@@ -26,11 +27,14 @@ export function zoneMeasurements(zone: ZoneObject) {
     const p = point(a), q = point(b)
     return Math.hypot(q[0] - p[0], q[1] - p[1])
   }
+  const boundaryArea = zone.reviewUnit === 'mm' ? polygonArea(geometry) / 1_000_000 : null
+  const obstacleArea = boundaryArea === null ? 0 : (zone.obstacles || []).filter(obstacle => obstacle.excludesFloorArea).reduce((sum, obstacle) => sum + ringIntersectionArea(zoneRing(zone), obstacleRing(zone, obstacle)) / 1_000_000, 0)
   return {
     bounds, frame,
     width: frame ? distance(frame.cornerVertexIds.u0v0, frame.cornerVertexIds.u1v0) : bounds ? bounds.maxX - bounds.minX : null,
     depth: frame ? distance(frame.cornerVertexIds.u0v0, frame.cornerVertexIds.u0v1) : bounds ? bounds.maxY - bounds.minY : null,
-    area: zone.reviewUnit === 'mm' ? polygonArea(geometry) / 1_000_000 : null,
+    area: boundaryArea === null ? null : Math.max(0, boundaryArea - obstacleArea),
+    boundaryArea,
   }
 }
 
@@ -92,11 +96,57 @@ export function ringsOverlap(a: Array<[number, number]>, b: Array<[number, numbe
   return false
 }
 
+export function ringIntersectionArea(a: Array<[number, number]>, b: Array<[number, number]>): number {
+  if (a.length < 3 || b.length < 3) return 0
+  const heights = [...a, ...b].map(point => point[1])
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) {
+    const p = a[i], q = a[(i + 1) % a.length], r = b[j], s = b[(j + 1) % b.length]
+    const dx = q[0] - p[0], dy = q[1] - p[1], ex = s[0] - r[0], ey = s[1] - r[1]
+    const det = dx * ey - dy * ex
+    if (Math.abs(det) < 1e-9) continue
+    const t = ((r[0] - p[0]) * ey - (r[1] - p[1]) * ex) / det
+    const u = ((r[0] - p[0]) * dy - (r[1] - p[1]) * dx) / det
+    if (t > 0 && t < 1 && u > 0 && u < 1) heights.push(p[1] + t * dy)
+  }
+  heights.sort((x, y) => x - y)
+  const intervals = (ring: Array<[number, number]>, y: number) => {
+    const xs: number[] = []
+    ring.forEach((point, index) => {
+      const next = ring[(index + 1) % ring.length]
+      if ((point[1] > y) !== (next[1] > y)) xs.push(point[0] + (y - point[1]) * (next[0] - point[0]) / (next[1] - point[1]))
+    })
+    return xs.sort((x, y) => x - y)
+  }
+  const overlapWidth = (y: number) => {
+    const xs = intervals(a, y), ys = intervals(b, y)
+    let width = 0
+    for (let i = 0; i < xs.length - 1; i += 2) for (let j = 0; j < ys.length - 1; j += 2) width += Math.max(0, Math.min(xs[i + 1], ys[j + 1]) - Math.max(xs[i], ys[j]))
+    return width
+  }
+  let area = 0
+  for (let i = 0; i < heights.length - 1; i++) {
+    const low = heights[i], high = heights[i + 1], span = high - low
+    if (span < 1e-6) continue
+    const epsilon = span / 1000
+    area += (overlapWidth(low + epsilon) + overlapWidth(high - epsilon)) * span / 2
+  }
+  return area
+}
+
 /** Only conditions that prevent reliable physical layout calculations. */
 export function zoneLayoutProblem(zone: ZoneObject): string | null {
   const problem = ringProblem(zoneRing(zone))
   if (problem) return problem
   if (zone.reviewUnit !== 'mm') return '图纸比例待校准'
+  for (const obstacle of zone.obstacles || []) {
+    if (!['COLUMN', 'SHAFT', 'NO_PLACEMENT', 'DOOR_CLEARANCE', 'OTHER'].includes(obstacle.kind)) return '建筑约束类型无效'
+    if (obstacle.spaceId !== zone.id || obstacle.geometry?.coordinateSystem !== 'WORLD_MM') return '建筑约束归属或坐标无效'
+    const ring = obstacleRing(zone, obstacle)
+    if (ringProblem(ring)) return '柱或禁放区轮廓无效'
+    if (!ringsOverlap(zoneRing(zone), ring)) return '柱或禁放区未与所属空间相交，请调整'
+  }
+  const solid = (zone.obstacles || []).filter(obstacle => obstacle.excludesFloorArea)
+  for (let i = 0; i < solid.length; i++) for (let j = i + 1; j < solid.length; j++) if (ringsOverlap(obstacleRing(zone, solid[i]), obstacleRing(zone, solid[j]))) return '实体障碍占地重叠，请合并或调整'
   return null
 }
 
@@ -141,14 +191,14 @@ export function reviewScene(zones: ZoneObject[], plan: FloorPlanAnalysisResponse
         evidenceKind: zone.evidenceKind ?? 'ESTIMATED', sourceRef: null, confidence: null,
         geometryRevision: 1, requirementRevision: 1, metadataRevision: 1,
         derived: {
-          areaM2: metrics.area, boundaryAreaM2: metrics.area, boundsMm: calibrated ? metrics.bounds : null,
+          areaM2: metrics.area, boundaryAreaM2: metrics.boundaryArea, boundsMm: calibrated ? metrics.bounds : null,
           rectangleDimensions: calibrated && metrics.frame ? { widthMm: metrics.width!, depthMm: metrics.depth! } : null,
         },
         confirmation: { status: zone.confirmed && !zoneProblem(zone, zones) ? 'CONFIRMED' : 'UNCONFIRMED', confirmationId: null, confirmedRevision: null, confirmedGeometryRevision: null, calibrationRevision: null },
       }
     }),
-    walls: [], openings: [], obstacles: [], annotations: [], boundaryRelations: [], issueDispositions: [],
-    layerAvailability: { walls: 'UNKNOWN', openings: 'UNKNOWN', obstacles: 'UNKNOWN' },
+    walls: [], openings: [], obstacles: zones.flatMap(zone => zone.obstacles || []), annotations: [], boundaryRelations: [], issueDispositions: [],
+    layerAvailability: { walls: 'UNKNOWN', openings: zones.some(zone => zone.obstacles?.some(obstacle => obstacle.kind === 'DOOR_CLEARANCE')) ? 'PARTIAL' : 'UNKNOWN', obstacles: zones.some(zone => zone.obstacles?.length) ? 'PARTIAL' : 'UNKNOWN' },
     qualityIssues: [], tombstones: [], confirmedSceneId: null,
   }
 }

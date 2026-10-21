@@ -8,6 +8,7 @@ public class SpatialObstacle {
     public static final String KIND_COLUMN = "COLUMN";
     public static final String KIND_SHAFT = "SHAFT";
     public static final String KIND_NO_PLACEMENT = "NO_PLACEMENT";
+    public static final String KIND_DOOR_CLEARANCE = "DOOR_CLEARANCE";
     public static final String KIND_OTHER = "OTHER";
 
     private String obstacleId;
@@ -15,4 +16,5 @@ public class SpatialObstacle {
     private String spaceId;
     private SpatialGeometry geometry;
     private Boolean excludesFloorArea;
+    private String source;
 }

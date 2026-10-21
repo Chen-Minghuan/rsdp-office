@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import type { SpatialGeometry, SpatialSceneSnapshot, SpatialSpace } from '~/types/spatial'
+import type { SpatialGeometry, SpatialObstacleKind, SpatialSceneSnapshot, SpatialSpace } from '~/types/spatial'
 import type { CameraTransform } from '~/utils/spatial/camera'
 import { fromScreen, toScreen } from '~/utils/spatial/camera'
 import { withApiBase } from '~/utils/apiBase'
 import { polygonCentroid, polygonBounds } from '~/utils/spatial/geometry'
 import type { ContourOperation, ResizeHandle } from '~/utils/spatial/contourTransform'
+import { obstacleLabel } from '~/utils/spatial/obstacles'
 
 const props = withDefaults(defineProps<{
   scene: SpatialSceneSnapshot | null
   camera: CameraTransform
   selectedSpaceId?: string | null
   selectedVertexId?: string | null
+  selectedObstacleId?: string | null
+  obstacleDraft?: SpatialGeometry | null
+  obstacleDraftKind?: SpatialObstacleKind
   pointerInSourceCoordinates?: boolean
   fallbackImageUrl?: string
   showUnderlay?: boolean
@@ -26,6 +30,8 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'selectSpace', id: string): void
+  (e: 'selectObstacle', id: string | null): void
+  (e: 'obstacleTransformStart', id: string, handle: string, point: { x: number; y: number }): void
   (e: 'selectVertex', spaceId: string, vertexId: string): void
   (e: 'insertVertex', spaceId: string, edgeIndex: number): void
   (e: 'transformStart', spaceId: string, operation: ContourOperation, point: { x: number; y: number }): void
@@ -42,8 +48,15 @@ const drag = ref<{ pointerId: number; screen: { x: number; y: number }; camera: 
 let observer: ResizeObserver | null = null
 const coordinateSystem = computed(() => props.scene?.workingCoordinateSystem ?? 'SOURCE_PAGE')
 const selected = computed(() => props.scene?.spaces.find(space => space.spaceId === props.selectedSpaceId))
+const selectedObstacle = computed(() => props.scene?.obstacles.find(obstacle => obstacle.obstacleId === props.selectedObstacleId))
+const obstacleHandles = computed(() => {
+  const obstacle = selectedObstacle.value
+  if (!obstacle || props.tool !== 'select' || props.pointerInSourceCoordinates || props.interactionActive) return []
+  if (obstacle.kind === 'DOOR_CLEARANCE') return [{ handle: 'radius', point: obstacle.geometry.outer[Math.floor(obstacle.geometry.outer.length / 2)] }]
+  return obstacle.geometry.outer.slice(0, 4).map((point, index) => ({ handle: String(index), point }))
+})
 const selectionFrame = computed(() => {
-  if (!selected.value || props.tool !== 'select' || props.pointerInSourceCoordinates || !props.showOutline) return null
+  if (!selected.value || props.selectedObstacleId || props.tool !== 'select' || props.pointerInSourceCoordinates || !props.showOutline) return null
   const bounds = polygonBounds(selected.value.designGeometry)
   if (!bounds) return null
   const corners = selected.value.designGeometry.outer.map(([x, y]) => pointToSvg({ x, y }))
@@ -82,10 +95,25 @@ function svgToPoint(p: { x: number; y: number }) {
   return fromScreen(p, coordinateSystem.value, props.camera)
 }
 function polygonPath(space: SpatialSpace): string {
-  return [space.designGeometry.outer, ...space.designGeometry.holes].map(ring => ring.map((p, i) => {
+  return geometryPath(space.designGeometry)
+}
+function geometryPath(geometry: SpatialGeometry): string {
+  return [geometry.outer, ...geometry.holes].map(ring => ring.map((p, i) => {
     const screen = pointToSvg({ x: p[0], y: p[1] })
     return (i ? 'L' : 'M') + screen.x + ',' + screen.y
   }).join(' ') + 'Z').join(' ')
+}
+function obstacleColor(kind: SpatialObstacleKind) {
+  return kind === 'DOOR_CLEARANCE' ? '#2586a0' : kind === 'NO_PLACEMENT' ? '#b07b38' : '#b44f45'
+}
+function obstacleSize(geometry: SpatialGeometry, kind?: SpatialObstacleKind) {
+  const bounds = polygonBounds(geometry)
+  if (!bounds) return ''
+  return kind === 'DOOR_CLEARANCE' ? 'R ' + Math.round(Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)) + ' mm' : Math.round(bounds.maxX - bounds.minX) + ' × ' + Math.round(bounds.maxY - bounds.minY) + ' mm'
+}
+function obstacleLabelVisible(geometry: SpatialGeometry) {
+  const bounds = polygonBounds(geometry)
+  return !!bounds && (bounds.maxX - bounds.minX) * props.camera.zoom > 54 && (bounds.maxY - bounds.minY) * props.camera.zoom > 28
 }
 function edgeTransform(space: SpatialSpace, index: number) {
   const ring = space.designGeometry.outer, a = ring[index], b = ring[(index + 1) % ring.length]
@@ -128,7 +156,12 @@ function onPointerDown(event: PointerEvent) {
   const edgeIndex = element.getAttribute('data-edge-index')
   const handle = element.getAttribute('data-resize-handle') as ResizeHandle | null
   const boundaryEdge = element.getAttribute('data-boundary-edge')
-  if (!props.pointerInSourceCoordinates && spaceId) {
+  const obstacleId = element.closest('[data-obstacle-id]')?.getAttribute('data-obstacle-id')
+  if (obstacleId) {
+    emit('selectObstacle', obstacleId)
+    if (props.tool === 'select') emit('obstacleTransformStart', obstacleId, element.getAttribute('data-obstacle-handle') || 'move', svgToPoint(screen))
+  } else if (props.tool === 'select') emit('selectObstacle', null)
+  if (!props.pointerInSourceCoordinates && spaceId && !obstacleId) {
     emit('selectSpace', spaceId)
     if (props.tool === 'select') emit('transformStart', spaceId, handle || 'move', svgToPoint(screen))
     else if (props.tool === 'edit') {
@@ -229,6 +262,20 @@ onBeforeUnmount(() => observer?.disconnect())
               :data-vertex-id="space.designGeometry.outerVertexIds[index]" fill="#fff" stroke="#4b8bc6" stroke-width="1.8" class="cursor-move" />
           </template>
         </g>
+      </g>
+      <g v-if="scene?.obstacles?.length" data-layer="obstacles">
+        <g v-for="obstacle in scene.obstacles" :key="obstacle.obstacleId" :data-obstacle-id="obstacle.obstacleId" class="cursor-pointer">
+          <path :d="geometryPath(obstacle.geometry)" :fill="obstacleColor(obstacle.kind)" fill-opacity="0.24" :stroke="obstacleColor(obstacle.kind)" :stroke-width="selectedObstacleId === obstacle.obstacleId ? 3 : 1.8" stroke-dasharray="6 3" />
+          <text v-if="obstacleLabelVisible(obstacle.geometry)" :x="pointToSvg(polygonCentroid(obstacle.geometry)!).x" :y="pointToSvg(polygonCentroid(obstacle.geometry)!).y" text-anchor="middle" dominant-baseline="middle" :fill="obstacleColor(obstacle.kind)" font-size="11" font-weight="600" pointer-events="none">{{ obstacleLabel(obstacle.kind) }} · {{ obstacleSize(obstacle.geometry, obstacle.kind) }}</text>
+          <title>{{ obstacleLabel(obstacle.kind) }} · {{ obstacleSize(obstacle.geometry, obstacle.kind) }}</title>
+        </g>
+      </g>
+      <g v-if="obstacleDraft" data-layer="obstacle-draft" pointer-events="none">
+        <path :d="geometryPath(obstacleDraft)" :fill="obstacleColor(obstacleDraftKind || 'COLUMN')" fill-opacity="0.18" :stroke="obstacleColor(obstacleDraftKind || 'COLUMN')" stroke-width="2" stroke-dasharray="5 3" />
+      </g>
+      <g v-if="selectedObstacle && obstacleHandles.length" data-layer="obstacle-handles">
+        <rect v-for="handle in obstacleHandles" :key="handle.handle" :x="pointToSvg({ x: handle.point[0], y: handle.point[1] }).x - 5" :y="pointToSvg({ x: handle.point[0], y: handle.point[1] }).y - 5" width="10" height="10" rx="2"
+          :data-obstacle-id="selectedObstacle.obstacleId" :data-obstacle-handle="handle.handle" fill="#fff" :stroke="obstacleColor(selectedObstacle.kind)" stroke-width="2" class="cursor-move"><title>{{ selectedObstacle.kind === 'DOOR_CLEARANCE' ? '拖动调整门洞半径' : '拖动调整障碍尺寸' }}</title></rect>
       </g>
       <g v-if="selectionFrame && selected" :data-space-id="selected.spaceId" data-layer="selection-frame">
         <rect :x="selectionFrame.x" :y="selectionFrame.y" :width="selectionFrame.width" :height="selectionFrame.height" fill="none" stroke="#4b8bc6" stroke-width="1" stroke-dasharray="4 3" pointer-events="none" />

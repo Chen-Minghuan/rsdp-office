@@ -8,10 +8,13 @@ import { mapRoomType } from '~/utils/floorPlan'
 import { createUuid } from '../uuid'
 
 export function templateSignature(scene: SpatialSceneSnapshot) {
-  return JSON.stringify(scene.spaces.map(space => ({
-    id: space.spaceId, name: space.name, category: space.category,
-    geometry: { outer: space.designGeometry.outer, holes: space.designGeometry.holes || [] },
-  })).sort((a, b) => a.id.localeCompare(b.id)))
+  return JSON.stringify({
+    spaces: scene.spaces.map(space => ({
+      id: space.spaceId, name: space.name, category: space.category,
+      geometry: { outer: space.designGeometry.outer, holes: space.designGeometry.holes || [] },
+    })).sort((a, b) => a.id.localeCompare(b.id)),
+    obstacles: (scene.obstacles || []).map(obstacle => ({ id: obstacle.obstacleId, kind: obstacle.kind, spaceId: obstacle.spaceId, geometry: obstacle.geometry, excludesFloorArea: obstacle.excludesFloorArea })).sort((a, b) => a.id.localeCompare(b.id)),
+  })
 }
 export function captureSpaceTemplate(zones: ZoneObject[], plan: FloorPlanAnalysisResponse | null, revision: number, name: string): SpaceTemplate {
   const scene = JSON.parse(JSON.stringify(reviewScene(zones, plan))) as SpatialSceneSnapshot
@@ -37,7 +40,7 @@ export function templateMatches(template: SpaceTemplate, zones: ZoneObject[], pl
 export function templateLayoutProblem(template: SpaceTemplate): string | null {
   // The current Office Canvas layout does not support these layers. Preserve them in the template instead of dropping them.
   if (template.scene.boundaryRelations?.length || template.scene.spaces.some(space => space.parentSpaceId || space.kind !== 'ROOM' || space.includedInDesign === false)) return '此模板包含嵌套空间或边界关系，当前排版尚不支持；模板结构已保留，可导出使用'
-  if (template.scene.spaces.some(space => space.designGeometry.holes?.length) || template.scene.obstacles?.length || template.scene.walls?.length || template.scene.openings?.length) return '此模板包含孔洞或建筑约束层，当前排版尚不支持；模板结构已保留，可导出使用'
+  if (template.scene.spaces.some(space => space.designGeometry.holes?.length) || template.scene.walls?.length || template.scene.openings?.length) return '此模板包含孔洞或建筑约束层，当前排版尚不支持；模板结构已保留，可导出使用'
   return null
 }
 export function zonesFromTemplate(template: SpaceTemplate): ZoneObject[] {
@@ -52,6 +55,7 @@ export function zonesFromTemplate(template: SpaceTemplate): ZoneObject[] {
       source: 'recognition', geometrySource: space.origin === 'VISION' ? 'ai_vision' : space.origin === 'CAD' ? 'cad_geometry' : 'manual_geometry',
       evidenceKind: space.evidenceKind, sourceAnalysisId: template.templateId, sourceAnalysisRevision: 1, sourceYAxis: 'down',
       spaceTemplateId: template.templateId, templateSpaceId: space.spaceId, confirmed: false,
+      obstacles: (template.scene.obstacles || []).filter(obstacle => obstacle.spaceId === space.spaceId).map(obstacle => JSON.parse(JSON.stringify(obstacle))),
     }
   })
 }
