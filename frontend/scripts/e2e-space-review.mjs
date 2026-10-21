@@ -192,6 +192,8 @@ try {
     const screen = await sourceScreenPoint(point)
     await page.mouse.click(screen.x, screen.y)
   }
+  await page.locator('.calibration-inline').waitFor()
+  assert.equal(await page.locator('.review-inspector').getByLabel('校准参考长度（毫米）').count(), 0, '两点校准在画布两点旁输入，右侧面板不再重复输入框')
   await page.getByLabel('校准参考长度（毫米）').fill('6000')
   await page.getByRole('button', { name: '应用校准', exact: true }).click()
   assert.equal(await page.getByTestId('selected-area').innerText(), '24.00 m²')

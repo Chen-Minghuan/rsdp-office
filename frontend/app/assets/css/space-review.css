@@ -120,11 +120,13 @@
 .calibration-state { color:#b28b4c; font-size:10px; }
 .calibration-state.calibrated { color:#669781; }
 .calibration-button { width:100%; display:flex; justify-content:space-between; color:#949c8a; padding:13px 0 2px; font-size:10px!important; }
-.calibration-length { display:flex; align-items:center; gap:8px; font-size:10px; color:#929b88; }
-.calibration-length input { width:95px; border:1px solid #dedfd3; padding:5px; border-radius:5px; }
-.calibration-actions { display:flex; gap:10px; margin-top:10px; }
-.calibration-actions button { flex:1; background:#f2f2e9; border-radius:5px; padding:7px; color:#9a8059; font-size:10px; }
-.calibration-actions button:disabled { opacity:.4; cursor:not-allowed; }
+.calibration-inline { position:absolute; z-index:4; transform:translate(-50%,14px); display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid #ead4ad; border-radius:8px; background:#fffcf2; box-shadow:0 6px 18px rgba(120,100,60,.12); }
+.calibration-inline label { display:flex; align-items:center; gap:6px; font-size:11px; color:#a38450; white-space:nowrap; }
+.calibration-inline input { width:88px; border:1px solid #dedfd3; padding:5px; border-radius:5px; background:#fff; }
+.calibration-inline label span { color:#b9ab8c; font-size:10px; }
+.calibration-inline-actions { display:flex; gap:8px; }
+.calibration-inline-actions button { flex:1; background:#f2f2e9; border-radius:5px; padding:6px; color:#9a8059; font-size:10px; }
+.calibration-inline-actions button:disabled { opacity:.4; cursor:not-allowed; }
 .layers-section h4 { margin-bottom:17px; }
 .layer-toggle { display:flex; align-items:center; justify-content:space-between; margin:14px 0; color:#666f60; font-size:11px; }
 .layer-toggle input { appearance:none; width:25px; height:14px; border-radius:12px; background:#dde1d6; position:relative; cursor:pointer; transition:background .2s; }

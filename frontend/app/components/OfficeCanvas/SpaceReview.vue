@@ -6,7 +6,7 @@ import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import type { DimensionReference, DimensionReferenceOverlay } from '~/types/dimensionCalibration'
 import { polygonArea } from '~/utils/spatial/geometry'
 import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
-import { fitCameraToBoundsBySystem } from '~/utils/spatial/camera'
+import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
 import type { CameraTransform } from '~/utils/spatial/camera'
 import type { FloorPlanDrawingBounds } from '~/types/floorPlan'
 import type { ZoneObject } from '~/types/office'
@@ -25,6 +25,7 @@ const camera = ref<CameraTransform>({ zoom: 1, panX: 0, panY: 0 })
 const viewport = ref({ width: 0, height: 0 }), fittedZoom = ref(1)
 const pixelBounds = ref<FloorPlanDrawingBounds | null>(null)
 const calibrating = ref(false), calibrationPoints = ref<Array<{ x: number; y: number }>>([])
+const calibrationLength = ref(6000), calibrationInput = ref<HTMLInputElement | null>(null)
 const drag = ref<{ zoneId: string; index: number; polygon: Array<[number, number]>; initial?: Array<[number, number]>; start?: ContourPoint; operation?: ContourOperation } | null>(null)
 const keepAspect = ref(false)
 const shiftPressed = ref(false)
@@ -42,6 +43,16 @@ const selectedBlocking = computed(() => !!selected.value && !!zoneLayoutProblem(
 const restorable = computed(() => !!selected.value && store.floorPlan?.inputMode !== 'manual'
   && selected.value.sourceAnalysisId === store.floorPlan?.analysisId && canRestoreSourceContour(selected.value))
 const calibrated = computed(() => scene.value.workingCoordinateSystem === 'WORLD_MM')
+// Screen position of the inline length form: midpoint of the picked edge, clamped into the viewport.
+const calibrationInputAnchor = computed(() => {
+  if (!calibrating.value || calibrationPoints.value.length !== 2) return null
+  const [a, b] = calibrationPoints.value
+  const screen = toScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, scene.value.workingCoordinateSystem, camera.value)
+  return {
+    x: Math.max(120, Math.min(screen.x, Math.max(120, viewport.value.width - 120))),
+    y: Math.max(8, Math.min(screen.y, Math.max(8, viewport.value.height - 70))),
+  }
+})
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
 const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
@@ -184,6 +195,13 @@ function applyCalibration(length: number) {
   cancelCalibration()
   fit()
   notify('图纸比例已更新，可直接进入家具排版')
+}
+watch(() => calibrating.value && calibrationPoints.value.length === 2, ready => {
+  if (ready) nextTick(() => calibrationInput.value?.focus())
+})
+function applyCalibrationInput() {
+  if (!Number.isFinite(calibrationLength.value) || calibrationLength.value <= 0) return
+  applyCalibration(Number(calibrationLength.value))
 }
 function applyAutomaticCalibration() {
   cancelCalibration()
@@ -371,7 +389,11 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             @viewport="onViewport" @update-camera="camera = $event" @select-space="selectSpace" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
             @pointer-down="pointerDown" @pointer-move="pointerMove" @pointer-up="pointerUp" />
           <div v-if="!imageReady" class="missing-source-note"><strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink></div>
-          <div v-if="calibrating" class="calibration-canvas-hint">{{ calibrationPoints.length < 2 ? '两点校准：请依次点击已知尺寸边的两个端点' : '已选择参考边，请在右侧输入实际长度并应用' }}<button @click="cancelCalibration">取消</button></div>
+          <div v-if="calibrating && calibrationPoints.length < 2" class="calibration-canvas-hint">两点校准：请依次点击已知尺寸边的两个端点<button @click="cancelCalibration">取消</button></div>
+          <form v-if="calibrationInputAnchor" class="calibration-inline" :style="{ left: calibrationInputAnchor.x + 'px', top: calibrationInputAnchor.y + 'px' }" @submit.prevent="applyCalibrationInput">
+            <label>实际长度<input ref="calibrationInput" v-model.number="calibrationLength" aria-label="校准参考长度（毫米）" type="number" min="1" step="any"><span>mm</span></label>
+            <div class="calibration-inline-actions"><button type="submit" :disabled="!Number.isFinite(calibrationLength) || calibrationLength <= 0">应用校准</button><button type="button" @click="cancelCalibration">取消</button></div>
+          </form>
           <div class="review-legend"><span><i class="outline"></i>空间轮廓</span><span><i class="selected"></i>当前选中</span></div>
           <div class="review-scale" v-if="calibrated && scaleWidth > 20 && scaleWidth < viewport.width / 2" :style="{ width: scaleWidth + 'px' }"><span>0</span><span>2 m</span><i :style="{ width: scaleWidth + 'px' }"></i></div>
           <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button @click="fit">显示全部空间</button></div>
@@ -381,9 +403,9 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       </section>
       <SpatialInspector :inert="!!tracing" :space="selectedSpace" :is-calibrated="calibrated" :pending-count="pendingCount" :issue="selectedIssue" :issue-blocking="selectedBlocking" :needs-review="!!selectedId && reviewSpaceIds.includes(selectedId)" :layout-blocker="store.layoutBlocker" :template-source="store.floorPlan?.inputMode === 'manual'"
         :source-note="selected?.note" :can-restore-source="restorable && !calibrating && !drag"
-        :calibration-active="calibrating" :calibration-point-count="calibrationPoints.length"
+        :calibration-active="calibrating"
         v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
-        @resize="resize" @category="category" @start-calibration="startCalibration" @cancel-calibration="cancelCalibration" @apply-calibration="applyCalibration" @restore-source="restoreSelectedSource">
+        @resize="resize" @category="category" @start-calibration="startCalibration" @restore-source="restoreSelectedSource">
         <template #automatic-calibration><DimensionCalibration :enabled="dimensionCalibrationEnabled" :preview-area="automaticPreviewArea" @reference="selectedDimensionReference = $event" @applied="applyAutomaticCalibration" /></template>
       </SpatialInspector>
     </div>

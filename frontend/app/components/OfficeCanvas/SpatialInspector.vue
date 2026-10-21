@@ -14,14 +14,11 @@ const props = defineProps<{
   sourceNote?: string
   canRestoreSource?: boolean
   calibrationActive: boolean
-  calibrationPointCount: number
 }>()
 const emit = defineEmits<{
   (e: 'resize', width: number, depth: number): void
   (e: 'category', category: string): void
   (e: 'startCalibration'): void
-  (e: 'cancelCalibration'): void
-  (e: 'applyCalibration', length: number): void
   (e: 'restoreSource'): void
 }>()
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
@@ -29,7 +26,7 @@ const showOutline = defineModel<boolean>('showOutline', { default: true })
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const showOriginal = defineModel<boolean>('showOriginal', { default: false })
 const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
-const width = ref<number | null>(null), depth = ref<number | null>(null), length = ref(6000)
+const width = ref<number | null>(null), depth = ref<number | null>(null)
 watch(() => [props.space?.spaceId, props.space?.derived.rectangleDimensions?.widthMm, props.space?.derived.rectangleDimensions?.depthMm], () => {
   width.value = Math.round(props.space?.derived.rectangleDimensions?.widthMm || 0) || null
   depth.value = Math.round(props.space?.derived.rectangleDimensions?.depthMm || 0) || null
@@ -68,11 +65,7 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
       <div class="section-heading"><h4>比例校准</h4><span class="calibration-state" :class="{ calibrated: isCalibrated }">{{ isCalibrated ? '比例已校准' : '待校准' }}</span></div>
       <slot name="automatic-calibration" />
       <button v-if="!calibrationActive" class="calibration-button" @click="emit('startCalibration')">两点校准图纸比例 <span>↗</span></button>
-      <template v-else>
-        <p class="inspector-hint">{{ calibrationPointCount === 0 ? '点击原图上已知尺寸边的起点。' : calibrationPointCount === 1 ? '再点击这条边的终点。' : '输入两点间的实际长度并应用。' }}</p>
-        <label class="calibration-length">参考长度<input v-model.number="length" aria-label="校准参考长度（毫米）" type="number" min="1" step="any"><span>mm</span></label>
-        <div class="calibration-actions"><button :disabled="calibrationPointCount !== 2 || !Number.isFinite(length) || length <= 0" @click="emit('applyCalibration', length)">应用校准</button><button @click="emit('cancelCalibration')">取消</button></div>
-      </template>
+      <p v-else class="inspector-hint">正在两点校准：在图纸上所选两点旁输入实际长度并应用。</p>
     </section>
     <section class="inspector-section layers-section">
       <h4>图层与对照</h4>
