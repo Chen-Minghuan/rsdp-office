@@ -3,6 +3,7 @@ import type { ProjectFile, ZoneObject, ToneKey, ZoneType } from '~/types/office'
 import { drawingFileDescriptor } from '~/utils/drawingUpload'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { createUuid } from '~/utils/uuid'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 
 const store = useOfficeStore()
 const api = useOfficeApi()
@@ -344,7 +345,7 @@ async function recognizeFile(file: ProjectFile) {
 }
 
 function previewImage() {
-  if (recognitionResult.value?.previewUrl) return recognitionResult.value.previewUrl
+  if (recognitionResult.value?.previewUrl) return sameOriginAssetUrl(recognitionResult.value.previewUrl)
   if (!recognitionResult.value?.preview?.pngBase64) return null
   return `data:image/png;base64,${recognitionResult.value.preview.pngBase64}`
 }

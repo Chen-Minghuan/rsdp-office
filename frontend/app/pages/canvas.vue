@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 const store = useOfficeStore()
 const route = useRoute()
 const router = useRouter()
@@ -146,7 +147,7 @@ const subtitle = computed(() => mode.value === 'design'
     <p v-else-if="entryLoading" class="text-sm text-muted">正在准备当前图纸的空间，识别完成后进入编辑。</p>
     <p v-else class="text-sm text-muted">请先识别当前图纸，再进入空间。已有图纸的编辑仍保留。</p>
     <RecognitionProgress v-if="entryLoading || entryResult?.processing" :progress="entryResult?.processing" :pending="entryLoading" />
-    <img v-if="entryResult?.previewUrl" :src="entryResult.previewUrl" alt="当前图纸预览" class="min-h-0 max-h-[60vh] w-full object-contain">
+    <img v-if="entryResult?.previewUrl" :src="sameOriginAssetUrl(entryResult.previewUrl)" alt="当前图纸预览" class="min-h-0 max-h-[60vh] w-full object-contain">
     <div class="flex gap-3">
       <NuxtLink to="/" class="rounded-lg border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
       <button v-if="entryError && targetAnalysisId" class="rounded-lg border border-line px-4 py-2 text-sm" @click="entryRetry++">重试查询当前图纸</button>
