@@ -411,7 +411,7 @@ function clearLayout() {
             </span>
             <AppIcon name="arrowRight" size="3.5" class="flex-none text-[#aa8a6a]" />
           </button>
-          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-2">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。座椅为座席示意，可另行选配。</p>
+          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-2">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
           <div class="grid grid-cols-2 gap-2">
             <button
               v-for="preset in availablePresets"

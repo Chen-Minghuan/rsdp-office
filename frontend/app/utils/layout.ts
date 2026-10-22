@@ -30,6 +30,8 @@ export interface LayoutRect {
   rotation: number
   /** Reflect the glyph within its footprint; used by mirrored L desk diagrams. */
   mirrorX?: boolean
+  /** Second-pass wall-strip fill single; not part of the reference topology cell. */
+  fill?: boolean
 }
 
 function clampInside(rect: LayoutRect, zone: ZoneObject): LayoutRect {

@@ -1,7 +1,7 @@
 import type { FurnitureTemplate } from '~/types/manualCanvas'
 import type { OfficeArrangementPreset, OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
 
-export const OFFICE_ARRANGEMENT_RULE_VERSION = '2026-10-module-selection-v6'
+export const OFFICE_ARRANGEMENT_RULE_VERSION = '2026-10-edge-fill-v7'
 
 export const OFFICE_PRODUCT_STYLES: Array<{ id: OfficeProductStyleId; label: string; description: string }> = [
   { id: 'straight-desk', label: '一字职员台', description: '仅提供素材中的单排、对坐' },

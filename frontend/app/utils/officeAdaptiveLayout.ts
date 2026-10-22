@@ -12,6 +12,47 @@ const EPS = 0.001
 const MAX_MODULES = 2000
 const overlaps = (a: Rect, b: Rect, gap: number) => a.x < b.x + b.w + gap - EPS && b.x < a.x + a.w + gap - EPS && a.y < b.y + b.h + gap - EPS && b.y < a.y + a.h + gap - EPS
 
+/**
+ * Second pass of the two-stage fill: after the reference-topology grid is
+ * placed, put single modules into the leftover wall strips, panel side against
+ * the nearest wall and seat facing the room interior, like reference photos
+ * that mix central groups with edge desks. Fill singles never split a motif
+ * cell and never move or displace main-grid slots; they keep the same wall
+ * clearance, obstacle aisle and module gap as the main grid.
+ */
+export function edgeFillSlots(zone: ZoneObject, w: number, d: number, spacing: OfficeLayoutSpacing, blockers: Rect[], mainSlots: LayoutRect[], limit: number): LayoutRect[] {
+  if (limit <= 0 || !zone.polygon?.length) return []
+  const bounds = canvasZoneBounds(zone)
+  const left = bounds.minX + spacing.wallMm, top = bounds.minY + spacing.wallMm
+  const right = bounds.maxX - spacing.wallMm, bottom = bounds.maxY - spacing.wallMm
+  if (right - left < Math.min(w, d) - EPS || bottom - top < Math.min(w, d) - EPS) return []
+  const taken: Rect[] = [...mainSlots]
+  const placed: LayoutRect[] = []
+  const fits = (slot: LayoutRect) =>
+    layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + spacing.wallMm * 2, h: slot.h + spacing.wallMm * 2 }, zone.polygon!)
+    && !blockers.some(block => rectOverlapsBlocker(slot, block, spacing.aisleMm))
+    && !taken.some(other => overlaps(slot, other, spacing.gapMm))
+  // The seat glyph sits on the local +y side; each wall line uses the rotation
+  // that leaves the seat between the module and the room interior.
+  const lines: Array<{ x0: number; y0: number; fw: number; fh: number; stepX: number; stepY: number; rotation: number }> = [
+    { x0: left, y0: top, fw: w, fh: d, stepX: w + spacing.gapMm, stepY: 0, rotation: 0 },
+    { x0: left, y0: bottom - d, fw: w, fh: d, stepX: w + spacing.gapMm, stepY: 0, rotation: 180 },
+    { x0: left, y0: top, fw: d, fh: w, stepX: 0, stepY: w + spacing.gapMm, rotation: 270 },
+    { x0: right - d, y0: top, fw: d, fh: w, stepX: 0, stepY: w + spacing.gapMm, rotation: 90 },
+  ]
+  for (const line of lines) {
+    for (let x = line.x0, y = line.y0; x + line.fw <= right + EPS && y + line.fh <= bottom + EPS; x += line.stepX, y += line.stepY) {
+      if (placed.length >= limit) return placed
+      const slot: LayoutRect = { x, y, w: line.fw, h: line.fh, rotation: line.rotation, clusterId: `${OFFICE_ARRANGEMENT_RULE_VERSION}:fill:${placed.length}`, fill: true }
+      if (fits(slot)) {
+        placed.push(slot)
+        taken.push(slot)
+      }
+    }
+  }
+  return placed
+}
+
 /** Repeat the smallest intact reference cell; the reference illustration is not a capacity limit. */
 export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, style: OfficeProductStyleId, presetId: OfficeArrangementPresetId, input?: OfficeLayoutSpacing, blockers: Rect[] = [], target = 0): OfficeLayoutPlan {
   const empty = (problem: string): OfficeLayoutPlan => ({ slots: [], rows: 0, columns: 0, rotated: false, problem, presetId, productStyleId: style })
@@ -72,8 +113,20 @@ export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, 
         // A facing pair/T pair/C/cross cell is either kept whole or skipped whole.
         if (valid) slots.push(...cell)
       }
-      if (slots.length) candidates.push({ slots, rows: new Set(slots.map(s => Math.round(s.y * 1000))).size, columns: new Set(slots.map(s => Math.round(s.x * 1000))).size, rotated: turned, problem: null, presetId, productStyleId: style })
+      if (slots.length) {
+        // Second pass: fill the leftover wall strips with single modules.
+        const fillBudget = Math.max(0, Math.min(target ? target - slots.length : MAX_MODULES, MAX_MODULES - slots.length))
+        slots.push(...edgeFillSlots(zone, w, d, spacing, blockers, slots, fillBudget))
+        const mains = slots.filter(slot => !slot.fill)
+        candidates.push({ slots, rows: new Set(mains.map(s => Math.round(s.y * 1000))).size, columns: new Set(mains.map(s => Math.round(s.x * 1000))).size, rotated: turned, problem: null, presetId, productStyleId: style })
+      }
     }
+  }
+  if (!candidates.length && !oversized) {
+    // The intact motif fits nowhere; fall back to wall-side singles instead of
+    // reporting a dead end, so tight rooms still get an editable starter layout.
+    const fills = edgeFillSlots(zone, w, d, spacing, blockers, [], target || MAX_MODULES)
+    if (fills.length) return { slots: fills, rows: new Set(fills.map(s => Math.round(s.y * 1000))).size, columns: new Set(fills.map(s => Math.round(s.x * 1000))).size, rotated: false, problem: null, presetId, productStyleId: style }
   }
   candidates.sort((a, b) => {
     const score = (plan: OfficeLayoutPlan) => target ? Math.min(target, plan.slots.length) * 1000 - Math.max(0, plan.slots.length - target) : plan.slots.length
