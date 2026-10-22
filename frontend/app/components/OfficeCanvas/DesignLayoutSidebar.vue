@@ -393,7 +393,8 @@ function clearLayout() {
             <div class="grid grid-cols-2 gap-2 text-[10px] text-muted">
               <label v-if="!isWorkstation">{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
               <label v-if="isWorkstation">图例组间净距<input v-model.number="spacing.faceGapMm" aria-label="图例组间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
-              <label>离墙距离<input v-model.number="spacing.wallMm" aria-label="离墙距离（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <label>离墙距离（座位侧）<input v-model.number="spacing.wallMm" aria-label="离墙距离（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <p class="text-[10px] text-muted -mt-1">屏风/桌板侧可靠墙；座位朝墙时按组间过道留出入位通道。</p>
               <label v-if="!isWorkstation">同排间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
               <label v-if="isMeetingLayout && (arrangement === 'backToBack' || arrangement === 'faceToFace')">{{ arrangement === 'faceToFace' ? '面对净距' : '背靠中缝' }}<input v-model.number="pairGap" aria-label="对排中缝（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
             </div>

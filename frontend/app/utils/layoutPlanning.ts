@@ -1,6 +1,6 @@
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
-import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture } from './officeAutoLayout'
+import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture, seatSideRect, seatWallClearance, workstationSeatCorner, workstationSeatOverhang } from './officeAutoLayout'
 import { planAdaptiveArrangement } from './officeAdaptiveLayout'
 import { officeFurnitureFootprint, officePlacementProblem } from './officeManualPlacement'
 import { canvasZoneBounds } from './officeCanvasView'
@@ -86,6 +86,16 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
     return layoutRectInsideRing(expanded, zone.polygon!) && !blockers.some(b => rectOverlapsBlocker(footprint, b, Math.max(spacing.gapMm, clearance)))
       && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
   }
+  // Adaptive workstation entries are checked like the planner: the wall
+  // clearance only applies on the seat side; panel sides may touch the wall.
+  const seatOverhang = workstationSeatOverhang(request.productStyleId)
+  const seatCorner = workstationSeatCorner(request.productStyleId)
+  const validAdaptive = (entry: FurnitureObject, peers: FurnitureObject[]) => {
+    const footprint = officeFurnitureFootprint(entry)
+    return layoutRectInsideRing(seatSideRect({ ...footprint, rotation: entry.rotation, mirrorX: entry.mirrorX }, seatWallClearance(spacing, seatOverhang), seatCorner), zone.polygon!)
+      && !blockers.some(b => rectOverlapsBlocker(footprint, b, spacing.aisleMm))
+      && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
+  }
   const item = (id: string, x: number, y: number, width: number, depth: number, rotation: number, seat = false): FurnitureObject => ({
     id, kind: 'furniture', zoneId: zone.id, productId: '', x, y, w: width, h: depth, rotation,
     furnitureTemplateId: seat ? 'chair-meeting' : request.module.id,
@@ -161,7 +171,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
         if (slot.mirrorX) entry.mirrorX = true
         entry.layoutClusterId = slot.clusterId
         if (entry.layoutSettings && plan.presetId) entry.layoutSettings.arrangementPresetId = plan.presetId
-        if (valid(entry, furniture, spacing.wallMm, spacing.aisleMm)) furniture.push(entry)
+        if ((general ? valid(entry, furniture, spacing.wallMm, spacing.aisleMm) : validAdaptive(entry, furniture))) furniture.push(entry)
       }
       // The planner has already skipped complete blocked cells, never individual members.
       if (!general && furniture.length !== plan.slots.length) continue

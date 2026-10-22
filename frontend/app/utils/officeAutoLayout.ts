@@ -57,6 +57,41 @@ export function layoutRectInsideRing(rect: Rect, ring: Array<[number, number]>):
   return true
 }
 
+/**
+ * Area owed on the seat side of a module: the footprint extended towards the
+ * chair only; panel/back sides may touch walls. Straight glyphs seat on one
+ * side; L/U corner glyphs open the seat notch on two adjacent sides and
+ * mirrorX flips them. Chairs need an aisle behind them, so callers pass the
+ * larger of the wall clearance, the aisle and the straight-desk seat overhang.
+ */
+export function seatSideRect(slot: { x: number; y: number; w: number; h: number; rotation?: number; mirrorX?: boolean }, clearance: number, corner = false): Rect {
+  if (!clearance) return slot
+  const side = ((slot.rotation || 0) % 360 + 360) % 360
+  const base = corner ? (slot.mirrorX ? ['S', 'E'] : ['S', 'W']) : ['S']
+  const cw: Record<string, string> = { N: 'E', E: 'S', S: 'W', W: 'N' }
+  const sides = base.map(dir => { let d = dir; for (let i = 0; i < side / 90; i++) d = cw[d]!; return d })
+  return {
+    x: slot.x - (sides.includes('W') ? clearance : 0),
+    y: slot.y - (sides.includes('N') ? clearance : 0),
+    w: slot.w + (sides.includes('W') ? clearance : 0) + (sides.includes('E') ? clearance : 0),
+    h: slot.h + (sides.includes('N') ? clearance : 0) + (sides.includes('S') ? clearance : 0),
+  }
+}
+
+/** Seat-to-wall clearance: wall distance, but at least an aisle to reach the chair, and the straight-desk seat overhang. */
+export function seatWallClearance(spacing: Pick<OfficeLayoutSpacing, 'wallMm' | 'aisleMm'>, seatOverhang: number): number {
+  return Math.max(spacing.wallMm, spacing.aisleMm, seatOverhang)
+}
+
+/** L/U corner glyphs open the seat notch on two adjacent sides. */
+export function workstationSeatCorner(productStyleId: string): boolean {
+  return productStyleId === 'l-desk' || productStyleId === 'l-screen'
+}
+
+/** Straight desk/screen glyphs draw the chair beyond the footprint. */
+export function workstationSeatOverhang(productStyleId: string): number {
+  return productStyleId === 'straight-desk' || productStyleId === 'straight-screen' ? 560 : 0
+}
 function overlaps(a: Rect, b: Rect, gap = 0) {
   return a.x < b.x + b.w + gap - EPS && b.x < a.x + a.w + gap - EPS && a.y < b.y + b.h + gap - EPS && b.y < a.y + a.h + gap - EPS
 }
