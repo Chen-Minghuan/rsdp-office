@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ImportedProduct } from '~/types/imported-products'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 
 const api = useOfficeApi()
 const products = ref<ImportedProduct[]>([])
@@ -251,7 +252,7 @@ onMounted(loadPending)
               <td class="px-2 py-3">
                 <div class="flex items-center gap-3">
                   <div class="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-cream">
-                    <img v-if="product.primaryImageUrl" :src="product.primaryImageUrl" :alt="product.productName || ''" class="h-full w-full object-cover">
+                    <img v-if="product.primaryImageUrl" :src="sameOriginAssetUrl(product.primaryImageUrl)" :alt="product.productName || ''" class="h-full w-full object-cover">
                     <div v-else class="grid h-full w-full place-items-center text-bronze/50"><AppIcon name="cube" size="5" /></div>
                   </div>
                   <div class="min-w-0">

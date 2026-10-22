@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ProductDetail } from '~/types/imported-products'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 
 const route = useRoute()
 const router = useRouter()
@@ -212,7 +213,7 @@ onMounted(async () => {
           </div>
           <div v-if="galleryImages.length" class="mt-3 flex gap-3 overflow-x-auto pb-2" aria-label="选择商品图片">
             <button v-for="image in galleryImages" :key="image.id" type="button" class="relative grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-lg border-2 bg-white transition" :class="selectedImage?.id === image.id ? 'border-bronze' : 'border-line hover:border-bronze/50'" :aria-label="`查看${image.label}`" :aria-pressed="selectedImage?.id === image.id" @click="selectedImageId = image.id">
-              <img :src="image.url" alt="" class="absolute inset-0 h-full w-full object-contain" loading="lazy">
+              <img :src="sameOriginAssetUrl(image.url)" alt="" class="absolute inset-0 h-full w-full object-contain" loading="lazy">
               <span v-if="image.primary" class="absolute bottom-0 left-0 rounded-tr bg-bronze px-1.5 py-0.5 text-[10px] text-white">主图</span>
             </button>
           </div>

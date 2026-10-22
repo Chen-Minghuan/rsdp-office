@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeRouteLeave } from 'vue-router'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import type { ProductImportResult, ProductImportPreview, ProductImportPreviewRow } from '~/types/imported-products'
 
 const api = useOfficeApi()
@@ -486,7 +487,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
         <section v-for="group in groupedRows" :key="group.groupKey" class="overflow-hidden rounded-xl border border-line bg-white">
           <div class="flex items-center bg-bg">
           <button type="button" class="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-cream/60" :aria-expanded="expandedGroups.has(group.groupKey)" @click="toggleGroup(group.groupKey)">
-            <img v-if="group.coverImage" :src="group.coverImage" alt="商品图片预览" class="h-14 w-14 shrink-0 rounded-lg border border-line bg-white object-contain">
+            <img v-if="group.coverImage" :src="sameOriginAssetUrl(group.coverImage)" alt="商品图片预览" class="h-14 w-14 shrink-0 rounded-lg border border-line bg-white object-contain">
             <span v-else class="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-line bg-white text-[11px] text-muted">无图片</span>
             <span class="min-w-0 flex-1">
               <span class="block truncate text-sm font-semibold">{{ group.editRow.fields.productName || '未填写商品名称' }}</span>
@@ -530,7 +531,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
                   <div class="grid grid-cols-2 gap-2">
                     <div v-for="(src, index) in row.imagePreviews || []" :key="index" class="overflow-hidden rounded-lg border bg-white" :class="primaryImageIndex(row) === index ? 'border-bronze' : 'border-line'">
                       <button type="button" class="block w-full" :aria-label="`查看 ${row.fields.externalCode || row.sourceRowIndex} 图片 ${index + 1}`" @click="enlargedImage = src">
-                        <img :src="src" :alt="`${row.fields.externalCode || row.sourceRowIndex} 图片 ${index + 1}`" class="h-24 w-full object-contain">
+                        <img :src="sameOriginAssetUrl(src)" :alt="`${row.fields.externalCode || row.sourceRowIndex} 图片 ${index + 1}`" class="h-24 w-full object-contain">
                       </button>
                       <div class="flex items-center justify-between gap-1 border-t border-line px-2 py-1 text-[11px]">
                         <label class="flex items-center gap-1 text-muted"><input type="checkbox" :checked="isSelectedImage(row, index)" @change="toggleImage(row, index)">使用</label>
@@ -648,7 +649,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
     <div v-if="enlargedImage" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5" role="dialog" aria-modal="true" aria-label="商品图片预览" @click.self="enlargedImage = null">
       <div class="relative max-h-full max-w-3xl rounded-xl bg-white p-3 shadow-xl">
         <button type="button" class="absolute right-3 top-3 rounded-lg bg-white px-3 py-1.5 text-sm shadow" @click="enlargedImage = null">关闭</button>
-        <img :src="enlargedImage" alt="放大的商品图片预览" class="max-h-[80vh] max-w-full object-contain">
+        <img :src="sameOriginAssetUrl(enlargedImage || '')" alt="放大的商品图片预览" class="max-h-[80vh] max-w-full object-contain">
       </div>
     </div>
   </div>

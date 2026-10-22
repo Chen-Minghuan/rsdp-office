@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import { sameOriginAssetUrl } from '~/utils/apiBase'
+
 const props = withDefaults(defineProps<{
   src: string | null | undefined
   alt: string
   size?: 'small' | 'large'
   enableLightbox?: boolean
 }>(), { size: 'large' })
+
+// Stored product image URLs may be absolute and tied to another entry point.
+const normalizedSrc = computed(() => props.src ? sameOriginAssetUrl(props.src) : props.src)
 
 const stage = ref<HTMLDivElement | null>(null)
 const imageLoaded = ref(false)
@@ -109,21 +114,21 @@ const enlargedStyle = computed(() => ({
 
 <template>
   <div ref="stage" class="relative grid h-full w-full place-items-center overflow-hidden bg-white" :class="enableLightbox && src && imageLoaded ? 'cursor-zoom-in' : ''" @pointerenter="showPreview" @pointermove="showPreview" @pointerleave="hovering = false" @click="openLightbox">
-    <img v-if="src" :src="src" :alt="alt" class="absolute inset-0 h-full w-full object-center object-contain" :loading="size === 'small' ? 'lazy' : 'eager'" @load="onImageLoad" @error="imageLoaded = false; hovering = false">
+    <img v-if="src" :src="normalizedSrc" :alt="alt" class="absolute inset-0 h-full w-full object-center object-contain" :loading="size === 'small' ? 'lazy' : 'eager'" @load="onImageLoad" @error="imageLoaded = false; hovering = false">
     <div v-else class="flex flex-col items-center gap-2 text-muted"><AppIcon name="cube" :size="size === 'small' ? '5' : '10'" /><span v-if="size === 'large'" class="text-xs">暂无商品图片</span></div>
   </div>
   <Teleport to="body">
     <div v-if="hovering && src && size === 'small'" class="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden rounded-xl border border-line bg-white p-3 shadow-[0_18px_55px_rgba(35,29,24,0.22)]" :style="listPreviewStyle" aria-hidden="true">
-      <img :src="src" alt="" class="block h-full w-full object-contain">
+      <img :src="normalizedSrc" alt="" class="block h-full w-full object-contain">
     </div>
     <div v-if="hovering && src && size === 'large'" class="pointer-events-none fixed z-[100] overflow-hidden rounded-full border-[3px] border-white bg-white shadow-[0_12px_38px_rgba(35,29,24,0.24)]" :style="lensStyle" aria-hidden="true">
-      <img :src="src" alt="" class="absolute max-w-none" :style="enlargedStyle">
+      <img :src="normalizedSrc" alt="" class="absolute max-w-none" :style="enlargedStyle">
     </div>
     <div v-if="lightboxOpen && src" class="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4 sm:p-8" role="dialog" aria-modal="true" :aria-label="`${alt}完整预览`" @click.self="closeLightbox" @keydown="onKeydown">
       <div class="relative flex max-h-full max-w-full flex-col items-center gap-3">
         <button type="button" class="absolute right-2 top-2 z-10 rounded-full bg-black/60 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-black/80" aria-label="关闭图片预览" @click="closeLightbox">关闭</button>
         <div class="grid max-h-[calc(100dvh-88px)] max-w-[calc(100vw-32px)] place-items-center overflow-hidden rounded-xl bg-white p-3 shadow-2xl sm:max-w-[calc(100vw-64px)]">
-          <img :src="src" :alt="alt" class="block max-h-[calc(100dvh-112px)] max-w-[calc(100vw-56px)] object-contain sm:max-h-[calc(100dvh-128px)] sm:max-w-[calc(100vw-96px)]">
+          <img :src="normalizedSrc" :alt="alt" class="block max-h-[calc(100dvh-112px)] max-w-[calc(100vw-56px)] object-contain sm:max-h-[calc(100dvh-128px)] sm:max-w-[calc(100vw-96px)]">
         </div>
         <p class="max-w-[min(720px,calc(100vw-32px))] truncate text-xs text-white/80">点击空白处或按 Esc 关闭</p>
       </div>
