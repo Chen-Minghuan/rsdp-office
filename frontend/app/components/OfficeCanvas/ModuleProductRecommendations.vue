@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FurnitureObject } from '~/types/office'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import type { ModuleRecommendation, ModuleProductCandidate } from '~/types/moduleRecommendation'
 import { money } from '~/utils/helpers'
 
@@ -117,7 +118,7 @@ async function choose(candidate: ModuleProductCandidate) {
         <p v-if="result.missingDimensions" class="text-[10px] text-muted">{{ result.missingDimensions }} 个在售规格缺少可靠宽深，待核对后参与匹配。</p>
         <article v-for="candidate in candidates" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-xl p-2.5 space-y-1.5">
           <div class="flex gap-2">
-            <img v-if="candidate.product.imageUrl" :src="candidate.product.imageUrl" alt="" class="w-14 h-14 object-contain rounded bg-[#f7f4f0]">
+            <img v-if="candidate.product.imageUrl" :src="sameOriginAssetUrl(candidate.product.imageUrl)" alt="" class="w-14 h-14 object-contain rounded bg-[#f7f4f0]">
             <div class="min-w-0"><div class="text-xs font-bold">{{ candidate.product.name }}</div><div class="text-[10px] text-muted">{{ candidate.product.variant }}</div><div class="text-xs mt-1">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</div></div>
           </div>
           <div class="text-[10px] text-bronze">{{ Math.floor(candidate.fitRatio * 100) }}% 贴合<span v-if="candidate.rotationDeg"> · 需旋转 90°</span> · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</div>

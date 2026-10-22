@@ -24,6 +24,7 @@ try {
   await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1800, height: 1150 } })
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -79,7 +80,7 @@ try {
   })
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
     state.objects = [
       { id: 'Z', kind: 'zone', x: 0, y: 0, w: 6000, h: 4000, name: '推荐测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[0,0],[6000,0],[6000,4000],[0,4000]] },
       ...['A', 'B'].map((id, index) => ({ id, kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '职员桌 ' + id, x: 500 + index * 2000, y: 500, w: 1200, h: 600, rotation: 0, productId: '', layoutConfirmed: true })),

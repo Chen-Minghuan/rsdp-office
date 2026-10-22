@@ -806,7 +806,7 @@ function furnitureProduct(o: FurnitureObject) {
             @pointerdown.stop="onPointerDown"
           >
             <div class="h-[119px] overflow-hidden bg-gradient-to-br from-[#ddd0be] to-[#faf5ed] relative">
-              <img v-if="(o as any).image" :src="(o as any).image" class="w-full h-full object-cover">
+              <img v-if="(o as any).image" :src="sameOriginAssetUrl((o as any).image)" class="w-full h-full object-cover">
               <div v-else class="absolute inset-0 grid place-items-center text-[#927f6d] text-sm">▤<br>办公风格参考</div>
             </div>
             <div class="text-[13px] text-center text-[#6b6056] pt-1 truncate">{{ (o as any).caption || '办公参考图' }}</div>

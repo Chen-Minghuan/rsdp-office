@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { money } from '~/utils/helpers'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
 import type { CartItem, FurnitureObject, Product, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
@@ -59,7 +60,9 @@ const products = computed(() => previewMode.value ? (store.products.length ? sto
 const assetBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
 function assetUrl(url: string | undefined) {
-  if (!url || /^(?:https?:|data:|blob:)/i.test(url)) return url || ''
+  if (!url) return ''
+  if (/^https?:/i.test(url)) return sameOriginAssetUrl(url)
+  if (/^(?:data:|blob:)/i.test(url)) return url
   return url.startsWith('/') ? `${assetBaseUrl}${url}` : url
 }
 
