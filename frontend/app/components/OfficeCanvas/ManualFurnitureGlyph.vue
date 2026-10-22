@@ -43,7 +43,7 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <rect v-if="leftPanel" class="reference-guide" x="0" y="0" :width="panelWidth" :height="d" />
       <g v-if="showSeat" class="layout-seat" fill="none">
         <ellipse :cx="w * 0.39" :cy="d + 290" :rx="Math.min(250, w * 0.21)" ry="220" />
-        <path :d="`M ${w * 0.39 - Math.min(180, w * 0.15)} ${d + 170} Q ${w * 0.39} ${d + 90} ${w * 0.39 + Math.min(180, w * 0.15)} ${d + 170}`" />
+        <path :d="`M ${w * 0.39 - Math.min(250, w * 0.21) * 0.7} ${d + 290 + 220 * 0.45} Q ${w * 0.39} ${d + 290 + 220} ${w * 0.39 + Math.min(250, w * 0.21) * 0.7} ${d + 290 + 220 * 0.45}`" />
       </g>
     </template>
     <template v-else-if="isReferenceLDesk">

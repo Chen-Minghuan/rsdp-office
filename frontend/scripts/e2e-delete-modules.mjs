@@ -37,7 +37,7 @@ try {
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
     draft.objects = [
-      { id: 'DELETE-ROOM', kind: 'zone', x: -10000, y: -6000, w: 6000, h: 4000, name: '删除测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[-10000,-6000],[-4000,-6000],[-4000,-2000],[-10000,-2000]] },
+      { id: 'DELETE-ROOM', kind: 'zone', x: -10000, y: -6000, w: 12000, h: 8000, name: '删除测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[-10000,-6000],[2000,-6000],[2000,2000],[-10000,2000]] },
       { id: 'OTHER-ROOM', kind: 'zone', x: 10000, y: 0, w: 6000, h: 4000, name: '其他空间', zoneType: 'MEETING_ROOM', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[10000,0],[16000,0],[16000,4000],[10000,4000]] },
       ...['DELETE-A','DELETE-B'].map((id,index) => ({ id, kind: 'furniture', zoneId: 'DELETE-ROOM', furnitureTemplateId: 'desk-straight', productId: '', label: id, x: -9400 + index * 2500, y: -5000, w: 1200, h: 600, rotation: 0, layoutConfirmed: true })),
       { id: 'KEEP-OTHER', kind: 'furniture', zoneId: 'OTHER-ROOM', furnitureTemplateId: 'chair-office', productId: '', x: 11000, y: 1000, w: 650, h: 650, rotation: 0, layoutConfirmed: true },
@@ -55,6 +55,7 @@ try {
   const choose = id => page.getByTestId('office-design-canvas').locator('[data-id="' + id + '"]').click()
   await choose('DELETE-A')
   await page.getByRole('button', { name: '删除选中模块', exact: true }).waitFor()
+  await page.getByTestId('layout-plan-preview').waitFor()
   await page.screenshot({ path: outDir + '/01-delete-selected.png', animations: 'disabled' })
   await page.getByRole('button', { name: '删除选中模块', exact: true }).click()
   const removed = await furniture()
@@ -64,6 +65,9 @@ try {
   assert.equal(await page.getByTestId('current-furniture-count').innerText(), '1 件')
   assert.equal(await page.getByRole('button', { name: '删除选中模块', exact: true }).count(), 0)
   await page.getByRole('status').filter({ hasText: '已删除模块' }).waitFor()
+  assert.equal(await page.getByTestId('layout-plan-preview').count(), 0, '删除后暂停待应用预览，画布只显示实际家具')
+  await page.getByLabel('显示排版预览').check()
+  await page.getByTestId('layout-plan-preview').waitFor()
   await page.getByRole('button', { name: '确认当前排版', exact: true }).waitFor()
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await furniture(), initial.objects.filter(item => item.kind === 'furniture'))
@@ -111,6 +115,13 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.equal((await furniture()).filter(item => item.zoneId === 'DELETE-ROOM').length, 1)
   assert.deepEqual((await state()).objects.filter(item => item.kind === 'zone'), initial.objects.filter(item => item.kind === 'zone'))
+  await page.getByLabel('显示排版预览').check()
+  await page.getByTestId('layout-plan-preview').waitFor()
+  await page.getByRole('button', { name: '清空排版', exact: true }).click()
+  assert.equal((await furniture()).filter(item => item.zoneId === 'DELETE-ROOM').length, 0, '清空排版移除当前空间家具')
+  assert.equal(await page.getByTestId('layout-plan-preview').count(), 0, '清空后暂停待应用预览，画布只显示实际家具')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await furniture()).filter(item => item.zoneId === 'DELETE-ROOM').length, 1)
   assert.deepEqual(errors, [])
   console.log('删除模块 UI 通过：选中按钮/Delete/Backspace、当前空间确认失效、其他空间/目录保留、输入和弹窗防误删、撤销/刷新/最后一件及目录删除/独立撤销。全部 API 模拟。')
 } catch (failure) {
