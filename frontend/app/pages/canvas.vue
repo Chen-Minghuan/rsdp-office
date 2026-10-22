@@ -14,6 +14,7 @@ const showRenderPreview = ref(false)
 const overviewCollapsed = ref(false)
 const viewRotation = ref(0)
 const showDimensions = ref(true)
+const snapEnabled = ref(true)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
 
 const mode = computed<'overview' | 'design'>(() => store.canvasMode)
@@ -180,6 +181,7 @@ const subtitle = computed(() => mode.value === 'design'
         <OfficeCanvasToolbar
           v-model:tool="tool"
           v-model:show-dimensions="showDimensions"
+          v-model:snap-enabled="snapEnabled"
           :view-rotation="viewRotation"
           :mode="mode"
           @undo="store.undo"
@@ -189,7 +191,7 @@ const subtitle = computed(() => mode.value === 'design'
           @render="showRenderPreview = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" :show-dimensions="showDimensions" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" :show-dimensions="showDimensions" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">

@@ -64,12 +64,14 @@ try {
   await page.getByRole('spinbutton',{name:'模块宽度（毫米）',exact:true}).fill('1600')
   assert.equal(Number((await page.getByTestId('module-capacity').innerText()).replace(/[^0-9]/g,'')),30)
   assert.deepEqual((await state()).objects,original,'parameter preview does not overwrite the 36-place layout')
+  assert.equal(await page.getByTestId('office-design-canvas').locator('.board-element[data-id]').filter({ has: page.locator('[data-furniture-template]') }).count(), 0, '预览新方案时隐藏将被替换的自动组，不重叠')
   await page.getByTestId('apply-layout').click()
   assert.equal((await state()).objects.filter(item=>item.layoutGroupId==='auto:OPEN-ROOM').length,30)
+  assert.equal(await page.getByTestId('office-design-canvas').locator('.board-element[data-id]').filter({ has: page.locator('[data-furniture-template]') }).count(), 30, '应用后实际家具正常显示')
   await page.getByRole('button',{name:'撤销',exact:true}).click()
   assert.deepEqual((await state()).objects,original)
   assert.deepEqual(errors,[])
-  console.log('PASS: screenshot-sized room 36 desks, direction comparison, reload, width change to 30, preview isolation and one-step undo')
+  console.log('PASS: screenshot-sized room 36 desks, direction comparison, reload, width change to 30, preview isolation, replaced-group hiding and one-step undo')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

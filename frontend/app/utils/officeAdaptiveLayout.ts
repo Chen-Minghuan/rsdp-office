@@ -1,7 +1,7 @@
 import type { ZoneObject } from '~/types/office'
 import type { LayoutRect } from '~/utils/layout'
 import type { OfficeLayoutPlan, OfficeLayoutSpacing } from './officeAutoLayout'
-import { layoutRectInsideRing, OFFICE_LAYOUT_SPACING } from './officeAutoLayout'
+import { layoutRectInsideRing, OFFICE_LAYOUT_SPACING, seatSideRect, seatWallClearance, workstationSeatCorner, workstationSeatOverhang } from './officeAutoLayout'
 import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
 import { officeArrangementPreset, OFFICE_ARRANGEMENT_RULE_VERSION } from './officeArrangementPresets'
 import { canvasZoneBounds } from './officeCanvasView'
@@ -10,28 +10,35 @@ import { rectOverlapsBlocker } from './layoutConstraints'
 type Rect = { x: number; y: number; w: number; h: number }
 const EPS = 0.001
 const MAX_MODULES = 2000
-const overlaps = (a: Rect, b: Rect, gap: number) => a.x < b.x + b.w + gap - EPS && b.x < a.x + a.w + gap - EPS && a.y < b.y + b.h + gap - EPS && b.y < a.y + a.h + gap - EPS
+const overlaps = (a: Rect, b: Rect, gap = 0) => a.x < b.x + b.w + gap - EPS && b.x < a.x + a.w + gap - EPS && a.y < b.y + b.h + gap - EPS && b.y < a.y + a.h + gap - EPS
 
 /**
  * Second pass of the two-stage fill: after the reference-topology grid is
  * placed, put single modules into the leftover wall strips, panel side against
  * the nearest wall and seat facing the room interior, like reference photos
  * that mix central groups with edge desks. Fill singles never split a motif
- * cell and never move or displace main-grid slots; they keep the same wall
- * clearance, obstacle aisle and module gap as the main grid.
+ * cell and never move or displace main-grid slots. A fill is only kept when
+ * the strip also fits the chair and the group gap in front of the seat;
+ * leftover too shallow for that stays empty instead of creating a dead sliver.
  */
-export function edgeFillSlots(zone: ZoneObject, w: number, d: number, spacing: OfficeLayoutSpacing, blockers: Rect[], mainSlots: LayoutRect[], limit: number): LayoutRect[] {
+export function edgeFillSlots(zone: ZoneObject, w: number, d: number, spacing: OfficeLayoutSpacing, blockers: Rect[], mainSlots: LayoutRect[], limit: number, seatOverhang = 0, faceGapMm = 0, seatCorner = false): LayoutRect[] {
   if (limit <= 0 || !zone.polygon?.length) return []
   const bounds = canvasZoneBounds(zone)
-  const left = bounds.minX + spacing.wallMm, top = bounds.minY + spacing.wallMm
-  const right = bounds.maxX - spacing.wallMm, bottom = bounds.maxY - spacing.wallMm
+  // Panel sides may touch the wall; only the seat side keeps the wall clearance.
+  const left = bounds.minX, top = bounds.minY
+  const right = bounds.maxX, bottom = bounds.maxY
   if (right - left < Math.min(w, d) - EPS || bottom - top < Math.min(w, d) - EPS) return []
-  const taken: Rect[] = [...mainSlots]
+  const taken: LayoutRect[] = [...mainSlots]
   const placed: LayoutRect[] = []
+  const frontClearance = Math.max(seatOverhang, faceGapMm)
+  const wallClearance = seatWallClearance(spacing, seatOverhang)
   const fits = (slot: LayoutRect) =>
-    layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + spacing.wallMm * 2, h: slot.h + spacing.wallMm * 2 }, zone.polygon!)
+    layoutRectInsideRing(seatSideRect(slot, wallClearance, seatCorner), zone.polygon!)
     && !blockers.some(block => rectOverlapsBlocker(slot, block, spacing.aisleMm))
     && !taken.some(other => overlaps(slot, other, spacing.gapMm))
+    && !taken.some(other => overlaps(seatSideRect(slot, frontClearance, seatCorner), other)
+      || overlaps(slot, seatSideRect(other, seatOverhang, seatCorner))
+      || overlaps(seatSideRect(slot, seatOverhang, seatCorner), seatSideRect(other, seatOverhang, seatCorner)))
   // The seat glyph sits on the local +y side; each wall line uses the rotation
   // that leaves the seat between the module and the room interior.
   const lines: Array<{ x0: number; y0: number; fw: number; fh: number; stepX: number; stepY: number; rotation: number }> = [
@@ -62,7 +69,8 @@ export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, 
   const gap = spacing.faceGapMm ?? preset.defaults.faceGapMm ?? 900
   if (zone.reviewUnit !== 'mm' || !zone.polygon?.length || ![w, d, spacing.wallMm, spacing.aisleMm, gap, target].every(v => Number.isFinite(v) && v >= 0) || w < 10 || d < 10 || !Number.isInteger(target)) return empty('请检查空间、毫米尺寸和间距')
   const bounds = canvasZoneBounds(zone)
-  const spanX = bounds.maxX - bounds.minX - spacing.wallMm * 2, spanY = bounds.maxY - bounds.minY - spacing.wallMm * 2
+  // Only the seat side owes the wall any clearance; panel sides may touch it.
+  const spanX = bounds.maxX - bounds.minX, spanY = bounds.maxY - bounds.minY
   const motif: LayoutRect[] = []
   const add = (x: number, y: number, rotation = 0, mirrorX = false) => motif.push({ x, y, w, h: d, rotation, ...(mirrorX ? { mirrorX: true } : {}) })
   let cellW = w, cellH = d, gapX = 0, gapY = gap
@@ -83,6 +91,10 @@ export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, 
     add(0, 0)
   }
   const fit = (span: number, size: number, spacing: number) => Math.max(0, Math.floor((span + spacing + EPS) / (size + spacing)))
+  // Only straight desk/screen glyphs draw the seat outside the footprint.
+  const seatOverhang = workstationSeatOverhang(style)
+  const seatCorner = workstationSeatCorner(style)
+  const seatWall = seatWallClearance(spacing, seatOverhang)
   const candidates: OfficeLayoutPlan[] = []
   let oversized = false
   for (const turned of [false, true]) {
@@ -103,20 +115,23 @@ export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, 
         const cell = motif.map(part => {
           const x = ox + col * (cellW + gapX) + part.x, y = oy + row * (cellH + gapY) + part.y
           return { ...part, clusterId,
-            x: bounds.minX + spacing.wallMm + (turned ? spanX - y - part.h : x),
-            y: bounds.minY + spacing.wallMm + (turned ? x : y),
+            x: bounds.minX + (turned ? spanX - y - part.h : x),
+            y: bounds.minY + (turned ? x : y),
             w: turned ? part.h : part.w, h: turned ? part.w : part.h,
             rotation: (part.rotation + (turned ? 90 : 0)) % 360,
           }
         })
-        const valid = cell.every(slot => layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + spacing.wallMm * 2, h: slot.h + spacing.wallMm * 2 }, zone.polygon!) && !blockers.some(block => rectOverlapsBlocker(slot, block, spacing.aisleMm)))
+        // The seat illustration must stay inside the room as well: desks whose
+        // chair would cross a wall are dropped together with their cell.
+        const valid = cell.every(slot => layoutRectInsideRing(seatSideRect(slot, seatWall, seatCorner), zone.polygon!)
+          && !blockers.some(block => rectOverlapsBlocker(slot, block, spacing.aisleMm)))
         // A facing pair/T pair/C/cross cell is either kept whole or skipped whole.
         if (valid) slots.push(...cell)
       }
       if (slots.length) {
         // Second pass: fill the leftover wall strips with single modules.
         const fillBudget = Math.max(0, Math.min(target ? target - slots.length : MAX_MODULES, MAX_MODULES - slots.length))
-        slots.push(...edgeFillSlots(zone, w, d, spacing, blockers, slots, fillBudget))
+        slots.push(...edgeFillSlots(zone, w, d, spacing, blockers, slots, fillBudget, seatOverhang, gap, seatCorner))
         const mains = slots.filter(slot => !slot.fill)
         candidates.push({ slots, rows: new Set(mains.map(s => Math.round(s.y * 1000))).size, columns: new Set(mains.map(s => Math.round(s.x * 1000))).size, rotated: turned, problem: null, presetId, productStyleId: style })
       }
@@ -125,12 +140,15 @@ export function planAdaptiveArrangement(zone: ZoneObject, w: number, d: number, 
   if (!candidates.length && !oversized) {
     // The intact motif fits nowhere; fall back to wall-side singles instead of
     // reporting a dead end, so tight rooms still get an editable starter layout.
-    const fills = edgeFillSlots(zone, w, d, spacing, blockers, [], target || MAX_MODULES)
+    const fills = edgeFillSlots(zone, w, d, spacing, blockers, [], target || MAX_MODULES, seatOverhang, gap, seatCorner)
     if (fills.length) return { slots: fills, rows: new Set(fills.map(s => Math.round(s.y * 1000))).size, columns: new Set(fills.map(s => Math.round(s.x * 1000))).size, rotated: false, problem: null, presetId, productStyleId: style }
   }
+  // On equal totals prefer the candidate whose main grid is more complete;
+  // fills use leftovers, they never substitute for the reference grid.
+  const mainCount = (plan: OfficeLayoutPlan) => plan.slots.filter(slot => !slot.fill).length
   candidates.sort((a, b) => {
     const score = (plan: OfficeLayoutPlan) => target ? Math.min(target, plan.slots.length) * 1000 - Math.max(0, plan.slots.length - target) : plan.slots.length
-    return score(b) - score(a)
+    return score(b) - score(a) || mainCount(b) - mainCount(a)
   })
   return candidates[0] || empty(oversized ? '预计模块超过 2000 件，请增大尺寸或缩小排版范围' : '当前空间、保留家具和预留区域无法容纳此排布单元，请调整尺寸或间距')
 }

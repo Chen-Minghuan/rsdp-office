@@ -1,7 +1,8 @@
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { OfficeModuleTemplate } from '~/types/officeModule'
 import type { OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
-import { layoutRectInsideRing } from '~/utils/officeAutoLayout'
+import { layoutRectInsideRing, seatSideRect } from '~/utils/officeAutoLayout'
+import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import { zoneLayoutExclusions } from './spatial/obstacles'
 import { rectOverlapsBlocker } from './layoutConstraints'
@@ -37,8 +38,17 @@ export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObj
   if (![candidate.x, candidate.y, candidate.w, candidate.h, candidate.rotation, spacing.wallMm, spacing.gapMm].every(Number.isFinite)
     || candidate.w < 10 || candidate.h < 10 || spacing.wallMm < 0 || spacing.gapMm < 0) return '家具尺寸或间距无效'
   const footprint = officeFurnitureFootprint(candidate)
-  if (!layoutRectInsideRing({ x: footprint.x - spacing.wallMm, y: footprint.y - spacing.wallMm,
-    w: footprint.w + spacing.wallMm * 2, h: footprint.h + spacing.wallMm * 2 }, zone.polygon || [])) return '此位置超出空间或离墙距离不足'
+  // Chairs (meeting seats) keep the clearance on all sides; desks and other
+  // modules only owe the wall clearance on the seat side — panel sides may
+  // touch the wall.
+  const kind = candidate.moduleSnapshot?.kind || furnitureById.get(candidate.furnitureTemplateId || '')?.kind
+  const corner = !!kind && ['l-desk', 'rounded-l-desk', 'u-desk'].includes(kind)
+  // Manual placement and confirmation only owe the configured wall distance on the seat side; the stricter seat aisle is enforced by the auto planner.
+  const seatWall = Math.max(spacing.wallMm, kind === 'desk' ? 560 : 0)
+  const wallChecked = candidate.layoutRole === 'seat'
+    ? { x: footprint.x - spacing.wallMm, y: footprint.y - spacing.wallMm, w: footprint.w + spacing.wallMm * 2, h: footprint.h + spacing.wallMm * 2 }
+    : seatSideRect({ ...footprint, rotation: candidate.rotation, mirrorX: candidate.mirrorX }, seatWall, corner)
+  if (!layoutRectInsideRing(wallChecked, zone.polygon || [])) return '此位置超出空间或离墙距离不足'
   for (const item of existing) {
     if (item.zoneId !== zone.id) continue
     const other = officeFurnitureFootprint(item), gap = spacing.gapMm, eps = 0.001
