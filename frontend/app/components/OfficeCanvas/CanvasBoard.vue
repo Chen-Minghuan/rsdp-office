@@ -6,6 +6,7 @@ import type { OfficeObject, ZoneObject, FurnitureObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
 import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
+import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld } from '~/utils/officeCanvasView'
@@ -21,6 +22,7 @@ const tool = defineModel<string>('tool', { default: 'select' })
 const selectedId = defineModel<string | null>('selectedId')
 const showSubmit = defineModel<boolean>('showSubmit')
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
+const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 
 const DEFAULT_W = 1540
 const DEFAULT_H = 960
@@ -102,8 +104,18 @@ const placementMessage = ref('')
 const placing = computed(() => mode.value === 'design' && store.furniturePlacement?.zoneId === store.designZoneId && !!store.furniturePlacement)
 const placementPreview = computed(() => placing.value && placementPointer.value
   ? manualOfficeFurniture(store.furniturePlacement!, placementPointer.value.x, placementPointer.value.y) : null)
+// Manual arranging snaps to walls and other modules within the tolerance.
+const placementSnap = computed(() => {
+  if (!placementPreview.value || !designZone.value || !snapEnabled.value) return { item: placementPreview.value, guides: { x: null as number | null, y: null as number | null } }
+  const item = placementPreview.value
+  const fp = officeFurnitureFootprint(item)
+  const snapped = snapFurnitureEdges(fp, designZone.value, furniture.value.map(officeFurnitureFootprint), FURNITURE_SNAP_TOLERANCE_MM)
+  return { item: { ...item, x: item.x + snapped.x - fp.x, y: item.y + snapped.y - fp.y }, guides: { x: snapped.guideX, y: snapped.guideY } }
+})
+const placementShown = computed(() => placementSnap.value.item)
+const activeSnapGuides = computed(() => placing.value ? placementSnap.value.guides : dragSnapGuides.value)
 const placementProblem = computed(() => placementPreview.value && designZone.value
-  ? officePlacementProblem(designZone.value, placementPreview.value, furniture.value, store.furniturePlacement!.spacing) : null)
+  ? officePlacementProblem(designZone.value, placementShown.value!, furniture.value, store.furniturePlacement!.spacing) : null)
 watch(() => store.furniturePlacement, draft => {
   placementPointer.value = null
   placementMessage.value = ''
@@ -230,6 +242,7 @@ const selectedFurniture = computed(() => furniture.value.find(item => item.id ==
 const selectedFurnitureIds = ref<string[]>([])
 const selectedFurnitureItems = computed(() => furniture.value.filter(item => selectedFurnitureIds.value.includes(item.id)))
 const moveProblem = ref('')
+const dragSnapGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
 watch(selectedId, id => {
   if (id && furniture.value.some(item => item.id === id) && !selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
 })
@@ -284,7 +297,8 @@ function onPointerDown(e: PointerEvent) {
   if (placing.value) {
     e.preventDefault()
     placementPointer.value = p
-    const problem = store.placeFurnitureAt(p.x, p.y)
+    const placed = placementSnap.value.item
+    const problem = store.placeFurnitureAt(placed ? placed.x + placed.w / 2 : p.x, placed ? placed.y + placed.h / 2 : p.y)
     placementMessage.value = problem || `已添加 ${store.furniturePlacement?.template.name || '家具'}，可继续放置`
     return
   }
@@ -378,6 +392,16 @@ function onPointerMove(e: PointerEvent) {
     d.dx = p.x - (d.cx || 0)
     d.dy = p.y - (d.cy || 0)
     const ids = new Set(d.ids)
+    if (snapEnabled.value) {
+      const anchor = furniture.value.find(item => item.id === d.ids![0])
+      if (anchor) {
+        const fp = officeFurnitureFootprint(anchor)
+        const snapped = snapFurnitureEdges({ x: fp.x + d.dx, y: fp.y + d.dy, w: fp.w, h: fp.h }, designZone.value, furniture.value.filter(item => !ids.has(item.id)).map(officeFurnitureFootprint), FURNITURE_SNAP_TOLERANCE_MM)
+        d.dx = snapped.x - fp.x
+        d.dy = snapped.y - fp.y
+        dragSnapGuides.value = { x: snapped.guideX, y: snapped.guideY }
+      }
+    } else dragSnapGuides.value = { x: null, y: null }
     const candidates = furniture.value.filter(item => ids.has(item.id)).map(item => ({ ...item, x: item.x + d.dx!, y: item.y + d.dy! }))
     moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, furniture.value) || ''
   } else if (d.mode === 'marquee') {
@@ -415,6 +439,7 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  dragSnapGuides.value = { x: null, y: null }
   if (!drag.value || !drawPreview.value) {
     drag.value = null
     return
@@ -511,6 +536,7 @@ function onKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() === 'r') { e.preventDefault(); store.rotateFurniturePlacement() }
     return
   }
+  if (e.key.toLowerCase() === 'r' && mode.value === 'design' && selectedFurnitureIds.value.length) { e.preventDefault(); rotateSelection(); return }
   if (['Delete', 'Backspace'].includes(e.key) && (selectedId.value || selectedFurnitureIds.value.length)) {
     e.preventDefault()
     deleteSelection()
@@ -811,9 +837,13 @@ function furnitureProduct(o: FurnitureObject) {
 
       <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && props.showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />
 
-      <div v-if="placementPreview" data-testid="furniture-placement-preview" class="absolute pointer-events-none opacity-60"
-        :data-valid="!placementProblem" :style="{ ...furnitureStyle(placementPreview), outline: `${2 / store.zoom}px dashed ${placementProblem ? '#c45c4c' : '#306fcb'}` }">
-        <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(placementPreview)!" :width-mm="placementPreview.w" :depth-mm="placementPreview.h" :stroke-scale="1 / store.zoom" />
+      <div v-if="placementShown" data-testid="furniture-placement-preview" class="absolute pointer-events-none opacity-60"
+        :data-valid="!placementProblem" :style="{ ...furnitureStyle(placementShown), outline: `${2 / store.zoom}px dashed ${placementProblem ? '#c45c4c' : '#306fcb'}` }">
+        <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(placementShown)!" :width-mm="placementShown.w" :depth-mm="placementShown.h" :stroke-scale="1 / store.zoom" />
+      <template v-if="mode === 'design'">
+        <div v-if="activeSnapGuides.x !== null" data-testid="snap-guide-x" class="absolute pointer-events-none" :style="{ left: activeSnapGuides.x + 'px', top: worldBounds.minY + 'px', height: (worldBounds.maxY - worldBounds.minY) + 'px', width: '0px', borderLeft: `${1.5 / store.zoom}px dashed #306fcb`, opacity: 0.7 }" />
+        <div v-if="activeSnapGuides.y !== null" data-testid="snap-guide-y" class="absolute pointer-events-none" :style="{ top: activeSnapGuides.y + 'px', left: worldBounds.minX + 'px', width: (worldBounds.maxX - worldBounds.minX) + 'px', height: '0px', borderTop: `${1.5 / store.zoom}px dashed #306fcb`, opacity: 0.7 }" />
+      </template>
       </div>
       <!-- Draw preview -->
       <div
@@ -837,3 +867,4 @@ function furnitureProduct(o: FurnitureObject) {
     </div>
   </div>
 </template>
+

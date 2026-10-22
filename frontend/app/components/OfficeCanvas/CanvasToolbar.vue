@@ -2,6 +2,7 @@
 const store = useOfficeStore()
 const props = defineProps<{ viewRotation?: number }>()
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
+const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 const tool = defineModel<string>('tool', { default: 'select' })
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
 
@@ -64,6 +65,7 @@ watch(tools, () => {
     <div class="flex gap-1 items-center text-sm">
       <template v-if="mode === 'design'">
         <button class="px-2 py-1.5 rounded-lg text-[11px] border border-line" :aria-pressed="showDimensions" aria-label="显示参考尺寸" @click="showDimensions = !showDimensions">尺寸</button>
+        <button class="px-2 py-1.5 rounded-lg text-[11px] border border-line" :aria-pressed="snapEnabled" aria-label="家具吸附" title="拖动/放置家具时吸附到墙面和其他模块（50mm）" @click="snapEnabled = !snapEnabled">吸附</button>
         <button class="px-2 py-1.5 rounded-lg text-[11px] border border-line" aria-label="旋转场景视图" title="顺时针旋转视图 90°，不改变排版" @click="emit('rotate', 90)">↻ {{ props.viewRotation || 0 }}°</button>
         <button v-if="props.viewRotation" class="px-2 py-1.5 rounded-lg text-[11px] border border-line" aria-label="复位场景视图" @click="emit('rotate', -props.viewRotation)">复位</button>
       </template>

@@ -91,6 +91,23 @@ try {
   assert.notEqual(persistedMove.find(f => f.id === 'A').x, initial.find(f => f.id === 'A').x)
   await page.reload({ waitUntil: 'networkidle' })
   assert.deepEqual(await items(), persistedMove, '整组移动刷新后保持')
+  // Manual arranging snaps to walls and other modules within 50mm; the toolbar toggle disables it.
+  const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
+  const beforeSnap = await items()
+  const bRight = beforeSnap.find(f => f.id === 'B').x + beforeSnap.find(f => f.id === 'B').w
+  await dragBy(item('C'), (bRight + 30 - 4000) * zoom, 0)
+  assert.ok(Math.abs((await items()).find(f => f.id === 'C').x - bRight) < 0.01, '靠近其他模块 30mm 吸附为贴合')
+  await dragBy(item('C'), 0, (30 - 1000) * zoom)
+  assert.ok(Math.abs((await items()).find(f => f.id === 'C').y) < 0.01, '靠近墙面 30mm 吸附为贴墙')
+  await page.getByRole('button', { name: '家具吸附', exact: true }).click()
+  await dragBy(item('C'), 30 * zoom, 40 * zoom)
+  const freeC = (await items()).find(f => f.id === 'C')
+  assert.ok(Math.abs(freeC.x - (bRight + 30)) < 1 && Math.abs(freeC.y - 40) < 1, '关闭吸附后按原始位移移动')
+  await page.getByRole('button', { name: '家具吸附', exact: true }).click()
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.deepEqual(await items(), beforeSnap, '吸附移动每次各产生一次撤销记录')
   assert.deepEqual(errors, [])
   console.log('家具多选 UI 通过：Shift/Ctrl 多选、框选、整组移动、碰撞/越界拒绝、一次撤销、刷新、批量删除与其他空间隔离；API 模拟。')
 } finally {
