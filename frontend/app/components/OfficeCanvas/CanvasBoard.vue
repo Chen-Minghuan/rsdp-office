@@ -99,6 +99,15 @@ const dimensionFurniture = computed(() => {
     ? { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) } : item)
 })
 
+// While a pending proposal preview is shown, hide the auto-group pieces it will
+// replace: the canvas shows the post-apply state instead of stacking the new
+// plan on top of the old one. Nothing is deleted until the user applies.
+const displayedFurniture = computed(() => {
+  const pending = activePreview.value
+  if (drag.value?.mode === 'furniture' || !pending?.furniture.length) return furniture.value
+  return furniture.value.filter(item => !pending.replaceIds.includes(item.id))
+})
+
 const placementPointer = ref<{ x: number; y: number } | null>(null)
 const placementMessage = ref('')
 const placing = computed(() => mode.value === 'design' && store.furniturePlacement?.zoneId === store.designZoneId && !!store.furniturePlacement)
@@ -815,7 +824,7 @@ function furnitureProduct(o: FurnitureObject) {
 
         <!-- Furniture -->
         <div
-          v-for="f in furniture"
+          v-for="f in displayedFurniture"
           :key="f.id"
           :data-id="f.id"
           class="board-element pointer-events-auto absolute cursor-move select-none"
