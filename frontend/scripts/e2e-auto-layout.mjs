@@ -63,7 +63,7 @@ try {
   await page.getByTestId('apply-layout').click()
   let furniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'STRICT-ROOM')
   assert.equal(furniture.length, initialCapacity)
-  assert.ok(furniture.every(item => item.layoutSettings.arrangementPresetId === 'straight-desk-row' && item.layoutSettings.arrangementRuleVersion === '2026-10-module-selection-v6'))
+  assert.ok(furniture.every(item => item.layoutSettings.arrangementPresetId === 'straight-desk-row' && item.layoutSettings.arrangementRuleVersion === '2026-10-edge-fill-v7'))
 
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   await page.getByRole('button', { name: '一字对坐', exact: true }).click()

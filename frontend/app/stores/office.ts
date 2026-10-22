@@ -75,6 +75,8 @@ interface OfficeState {
   spaceTemplate: SpaceTemplate | null
   customModules: CustomOfficeModule[]
   furniturePlacement: OfficeFurniturePlacement | null
+  /** Session-only signal: the user manually removed furniture in a zone; the design sidebar pauses the proposal preview so deletions are visibly real. */
+  lastManualFurnitureRemoval: { zoneId: string; at: number } | null
   syncState: 'idle' | 'saving' | 'saved' | 'error'
   syncError: string | null
 }
@@ -106,6 +108,7 @@ function defaultState(): OfficeState {
     spaceTemplate: null,
     customModules: [],
     furniturePlacement: null,
+    lastManualFurnitureRemoval: null,
     syncState: 'idle',
     syncError: null,
   }
@@ -273,7 +276,7 @@ export const useOfficeStore = defineStore('office', {
 
     saveLocal() {
       if (typeof window === 'undefined') return
-      const { furniturePlacement, syncState, syncError, ...persisted } = this.$state
+      const { furniturePlacement, syncState, syncError, lastManualFurnitureRemoval, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     },
@@ -409,6 +412,7 @@ export const useOfficeStore = defineStore('office', {
       this.objectUpdate(() => {
         this.objects = this.objects.filter(object => object.id !== id)
         if (target.kind === 'furniture') {
+          this.lastManualFurnitureRemoval = { zoneId: target.zoneId, at: Date.now() }
           this.furnitureForZone(target.zoneId).forEach(item => { item.layoutConfirmed = false })
           this.submitted = null
         }
@@ -442,6 +446,7 @@ export const useOfficeStore = defineStore('office', {
       const items = this.furnitureForZone(zoneId).filter(item => selected.has(item.id))
       if (!items.length || items.length !== selected.size) return false
       this.objectUpdate(() => {
+      this.lastManualFurnitureRemoval = { zoneId, at: Date.now() }
         this.objects = this.objects.filter(object => !selected.has(object.id))
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null
@@ -677,6 +682,8 @@ export const useOfficeStore = defineStore('office', {
     },
 
     unconfirmLayout(zoneId: string) {
+      // Skip the undo snapshot when nothing would change; otherwise clearing a layout needs two undos (the second entry is a redundant post-clear state).
+      if (!this.objects.some(o => o.kind === 'furniture' && o.zoneId === zoneId && (o as FurnitureObject).layoutConfirmed)) return
       this.objectUpdate(() => {
         for (const o of this.objects) {
           if (o.kind === 'furniture' && o.zoneId === zoneId) {
@@ -1050,6 +1057,7 @@ export const useOfficeStore = defineStore('office', {
 
     clearFurniture(zoneId: string) {
       this.cancelFurniturePlacement()
+      if (this.objects.some(o => o.kind === 'furniture' && o.zoneId === zoneId)) this.lastManualFurnitureRemoval = { zoneId, at: Date.now() }
       this.objectUpdate(() => {
         this.objects = this.objects.filter((o) => !(o.kind === 'furniture' && o.zoneId === zoneId))
       })

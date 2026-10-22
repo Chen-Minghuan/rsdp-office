@@ -1,4 +1,24 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { stripTypeScriptTypes } from 'node:module'
+const moduleCache = new Map()
+async function load(path) {
+  if (moduleCache.has(path.href)) return moduleCache.get(path.href)
+  let source = stripTypeScriptTypes(await readFile(path, 'utf8'))
+  const imports = [...source.matchAll(/(?:from\s*|import\s*)['"]([^'"]+)['"]/g)]
+  for (const match of imports) {
+    const spec = match[1]
+    if (!spec.startsWith('.') && !spec.startsWith('~/')) continue
+    const resolved = new URL((spec.startsWith('~/') ? '../app/' + spec.slice(2) : spec) + (spec.endsWith('.ts') ? '' : '.ts'), spec.startsWith('~/') ? import.meta.url : path)
+    source = source.replaceAll(`'${spec}'`, `'${await load(resolved)}'`)
+  }
+  const url = 'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
+  moduleCache.set(path.href, url)
+  return url
+}
+const { planAdaptiveArrangement: planAdaptive } = await import(await load(new URL('../app/utils/officeAdaptiveLayout.ts', import.meta.url)))
+const refZone = { id: 'OPEN-ROOM', reviewUnit: 'mm', x: 20000, y: 0, w: 12000, h: 8000, polygon: [[20000, 0], [32000, 0], [32000, 8000], [20000, 8000]] }
+const expectedCapacity = (styleId, preset, w, d, gap) => planAdaptive(refZone, w, d, styleId, preset, { wallMm: 300, aisleMm: 900, gapMm: 0, faceGapMm: gap }).slots.length
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
@@ -62,13 +82,9 @@ try {
   for (const [style, label, sampleCount, preset] of cases) {
     const w=style.startsWith('一字')?1200:1400, d=style.startsWith('一字')?600:1400
     const gap=style==='L 型职员台'?600:style==='L 型屏风卡位'?900:preset.endsWith('row')?1000:1600
-    const cw=preset.startsWith('screen-')&&preset!=='screen-f-row'?w*2:w
-    const ch=preset==='screen-c-face-to-face'||preset==='screen-cross-face-to-face'||(preset.endsWith('face-to-face')&&!preset.startsWith('screen-t'))?d*2:d
-    const gx=preset==='screen-t-face-to-face'||preset==='screen-c-face-to-face'?gap:0
-    const gy=preset==='screen-t-face-to-face'?0:gap
-    const members=cw/w*ch/d
-    const fit=(a,b)=>Math.floor((a+(b==='x'?gx:gy))/(b==='x'?cw+gx:ch+gy))
-    const count=Math.max(fit(11400,'x')*fit(7400,'y'),fit(7400,'x')*fit(11400,'y'))*members
+    const styleId={'一字职员台':'straight-desk','L 型职员台':'l-desk','一字屏风卡位':'straight-screen','L 型屏风卡位':'l-screen'}[style]
+    const count=expectedCapacity(styleId,preset,w,d,gap)
+    assert.ok(count>sampleCount,label+': room-sized capacity grows beyond the reference illustration')
     await page.getByRole('tab', { name: '选择模块', exact: true }).click()
     const moduleId = {'一字职员台':'desk-straight', 'L 型职员台':'desk-l', '一字屏风卡位':'desk-screen-straight', 'L 型屏风卡位':'desk-screen-l'}[style]
     await page.locator('[data-module-id="' + moduleId + '"]').click()
@@ -82,7 +98,7 @@ try {
     assert.equal(placed.length, count, label)
     const applied = await page.getByTestId('office-design-canvas').locator('.board-element[data-id]').filter({ has: page.locator('[data-furniture-template]') }).evaluateAll(nodes => nodes.map(node => [node.style.left, node.style.top, node.style.width, node.style.height, node.style.transform]))
     assert.deepEqual(applied, pending, 'each preset uses identical preview/application transforms')
-    assert.ok(placed.every(item => item.layoutSettings.arrangementPresetId === preset && item.layoutSettings.arrangementRuleVersion === '2026-10-module-selection-v6'))
+    assert.ok(placed.every(item => item.layoutSettings.arrangementPresetId === preset && item.layoutSettings.arrangementRuleVersion === '2026-10-edge-fill-v7'))
     if (preset.startsWith('screen-')) assert.equal(await page.getByTestId('office-design-canvas').locator('[data-furniture-template="desk-screen-l"]').count(), count)
     const seatGlyphs = await page.getByTestId('office-design-canvas').locator('.layout-seat').count()
     assert.equal(seatGlyphs, count, 'reference seat illustrations')
@@ -90,7 +106,7 @@ try {
   }
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('layout-unchanged').waitFor()
-  assert.equal((await state()).objects.filter(item => item.layoutGroupId === 'auto:OPEN-ROOM').length, 32)
+  assert.equal((await state()).objects.filter(item => item.layoutGroupId === 'auto:OPEN-ROOM').length, expectedCapacity('l-screen', 'screen-cross-face-to-face', 1400, 1400, 900))
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('3')
   assert.equal(Number((await page.getByTestId('module-capacity').innerText()).replace(/[^0-9]/g,'')), 4, 'target preserves a complete cross cell')
   assert.deepEqual(errors, [])

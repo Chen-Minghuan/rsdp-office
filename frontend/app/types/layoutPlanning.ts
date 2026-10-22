@@ -31,6 +31,8 @@ export interface LayoutProposal {
   seats: number
   shortfall: number
   label: string
+  /** Second-pass wall-strip fill singles included in the proposal. */
+  fillCount?: number
   problem: string | null
   warnings: string[]
   sourceKey: string

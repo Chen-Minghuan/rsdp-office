@@ -100,7 +100,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   const retainedSeats = general ? retained.filter(entry => entry.furnitureTemplateId === request.module.id).length : furnitureSeatCount(retained, meeting)
   const neededSeats = Math.max(0, prefs.targetSeats - retainedSeats)
   if (!meeting && prefs.targetSeats > 0 && neededSeats === 0) return { ...result, seats: retainedSeats, shortfall: 0, problem: '保留家具已满足目标，无需自动添加；可调整目标或逐件编辑' }
-  const candidates: Array<{ furniture: FurnitureObject[]; seats: number; label: string; rows?: number; columns?: number; rotated?: boolean }> = []
+  const candidates: Array<{ furniture: FurnitureObject[]; seats: number; label: string; rows?: number; columns?: number; rotated?: boolean; fillCount?: number }> = []
   if (meeting) {
     const round = ['round-table', 'oval-table'].includes(request.module.kind)
     // Resize only explicitly, preserving round/oval proportions and the entered depth.
@@ -154,6 +154,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)]
     for (const plan of plans) {
       const furniture: FurnitureObject[] = []
+      const fillCount = general ? 0 : plan.slots.filter(slot => slot.fill).length
       for (const slot of plan.slots) {
         const entry = item(`plan-desk-${furniture.length}`, slot.x + (slot.w - w) / 2, slot.y + (slot.h - d) / 2, w, d, slot.rotation)
         if (general && prefs.targetSeats > 0 && furniture.length >= neededSeats) break
@@ -164,7 +165,12 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       }
       // The planner has already skipped complete blocked cells, never individual members.
       if (!general && furniture.length !== plan.slots.length) continue
-      if (furniture.length) candidates.push({ furniture, seats: furniture.length + retainedSeats, label: `按场地排布 · ${plan.rotated ? '纵向' : '横向'}`, rows: general ? new Set(furniture.map(entry => Math.round(entry.y))).size : plan.rows, columns: general ? new Set(furniture.map(entry => Math.round(entry.x))).size : plan.columns, rotated: plan.rotated })
+      // Edge fills extend the reference grid without changing its topology; a
+      // fill-only result means the intact motif fits nowhere in this room.
+      const edgeLabel = !general && plan.slots.length && fillCount === plan.slots.length
+        ? `沿墙单件补位 · ${fillCount} 件（完整排布单元无法容纳）`
+        : `按场地排布 · ${plan.rotated ? '纵向' : '横向'}${fillCount ? ` · 边缘补位 ${fillCount} 件` : ''}`
+      if (furniture.length) candidates.push({ furniture, seats: furniture.length + retainedSeats, label: edgeLabel, fillCount, rows: general ? new Set(furniture.map(entry => Math.round(entry.y))).size : plan.rows, columns: general ? new Set(furniture.map(entry => Math.round(entry.x))).size : plan.columns, rotated: plan.rotated })
       if (plan.problem && !candidates.length) result.problem = general ? plan.problem.replace('会议桌', '家具') : plan.problem
     }
   }
@@ -175,7 +181,8 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   })
   const best = candidates[0]
   if (!best) return { ...result, problem: result.problem || '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }
-  return { ...result, ...best, shortfall: Math.max(0, prefs.targetSeats - best.seats), problem: null }
+  const fillWarning = best.fillCount ? `主排布之外的边缘余量已用单件补位 ${best.fillCount} 件，座位朝房间内侧；请核对补位位置与现场通道` : null
+  return { ...result, ...best, shortfall: Math.max(0, prefs.targetSeats - best.seats), problem: null, warnings: fillWarning ? [...result.warnings, fillWarning] : result.warnings }
 }
 
 export function proposalDifference(current: FurnitureObject[], proposal: LayoutProposal) {
