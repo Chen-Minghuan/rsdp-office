@@ -108,6 +108,7 @@
 .property-row { display:flex; align-items:center; justify-content:space-between; gap:6px; color:#969e90; margin:14px 0; font-size:11px; }
 .property-row strong { font-size:11px; color:#565f52; font-weight:600; text-align:right; }
 .property-row select { border:0; background:transparent; color:#565f52; text-align:right; max-width:155px; outline-offset:1px; font-weight:600; }
+.property-row input { border:0; background:transparent; color:#565f52; text-align:right; max-width:155px; outline-offset:1px; font-weight:600; border-bottom:1px dashed #d8d2c4; }
 .inspector-section { border-top:1px solid #e9e8df; padding:19px 0 4px; margin-top:18px; }
 .dimension-inputs { display:flex; gap:10px; margin-top:17px; }
 .dimension-inputs>label { flex:1; min-width:0; font-size:11px; color:#939b8c; }
@@ -125,6 +126,11 @@
 .geometry-issue { margin:10px 0; color:#b68a50; font-size:10px; line-height:1.6; }
 .review-room-item { display:flex; align-items:center; gap:4px; margin-bottom:2px; }
 .review-room-item .review-room-card { flex:1; min-width:0; margin-bottom:0; }
+.review-room-rename { flex:none; padding:5px 7px; border:1px solid #dfe4ea; border-radius:5px; color:#7a8ba0; background:transparent; font-size:10px; }
+.review-room-rename:hover:not(:disabled) { color:#4b6b8c; background:#eef4fa; border-color:#b9cadd; }
+.review-room-rename:disabled { opacity:.4; cursor:not-allowed; }
+.review-room-rename-form { flex:1; min-width:0; }
+.review-room-rename-form input { width:100%; padding:10px; border:1px solid #a7c5e5; border-radius:8px; font-size:12px; font-weight:650; color:#3f4a42; outline:none; }
 .review-room-delete { flex:none; padding:5px 7px; border:1px solid #eadfdf; border-radius:5px; color:#b98a8a; background:transparent; font-size:10px; }
 .review-room-delete:hover:not(:disabled) { color:#ae6262; background:#fff0f0; border-color:#dca7a7; }
 .review-room-delete:disabled { opacity:.4; cursor:not-allowed; }
@@ -243,4 +249,12 @@
 .contour-edit-bar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 16px; background:#f0f6fc; color:#456783; font-size:11px; border-bottom:1px solid #dce7f0; }
 .contour-edit-bar span { flex:1; min-width:160px; }
 .contour-edit-bar button { padding:5px 8px; background:white; border:1px solid #b7cde0; border-radius:5px; }
+.contour-edit-bar .sketch-shapes { flex:0 0 auto; min-width:0; display:flex; gap:4px; }
+.contour-edit-bar .sketch-shapes button.active { color:#2f5b7c; border-color:#7ea9cc; background:#dcebf7; font-weight:600; }
 .contour-edit-bar button:disabled { opacity:0.45; cursor:default; }
+.label-inline { min-width:190px; }
+.label-inline select { border:1px solid #dedfd3; padding:4px; border-radius:5px; background:#fff; font-size:11px; color:#5c6558; }
+.space-label-editable { cursor:pointer; }
+.space-label-editable:hover rect { stroke:#4b8bc6; stroke-width:1.2; }
+.contour-edit-bar .sketch-angle { flex:0 0 auto; min-width:0; display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.contour-edit-bar .sketch-angle input { width:60px; border:1px solid #b7cde0; border-radius:5px; padding:4px 5px; background:#fff; }

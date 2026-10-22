@@ -387,6 +387,28 @@ export const useOfficeStore = defineStore('office', {
       this.objectUpdate(() => this.objects.push(o))
     },
 
+    /** 空间总览手动画区。空白画布（无图纸）直接按毫米建空间；未校准底图上以源单位记录，随两点校准统一换算。 */
+    addDrawnZone(polygon: Array<[number, number]>, asMm: boolean) {
+      const bounds = polygonBoundsMm(polygon)
+      if (!bounds || ringProblem(polygon)) return null
+      const count = this.zones.length
+      const tone = (['blue', 'green', 'pink', 'yellow', 'purple'] as const)[count % 5]
+      const zone: ZoneObject = {
+        id: uid('zone'), kind: 'zone',
+        x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY,
+        name: `手动空间 ${count + 1}`, zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone,
+        polygon, sourcePolygon: polygon.map(([x, y]) => [x, y] as [number, number]),
+        reviewUnit: asMm ? 'mm' : 'source', mmPerSourceUnit: 1,
+        pixelToMeter: asMm ? 0.001 : undefined,
+        actualWidthMm: asMm ? bounds.maxX - bounds.minX : undefined,
+        actualDepthMm: asMm ? bounds.maxY - bounds.minY : undefined,
+        source: 'user_annotation', geometrySource: 'manual_geometry', evidenceKind: 'MANUAL',
+        sourceYAxis: 'down', confirmed: false,
+      }
+      this.addObject(zone)
+      return zone
+    },
+
     updateObject(id: string, patch: Partial<OfficeObject>) {
       const idx = this.objects.findIndex((o) => o.id === id)
       if (idx === -1) return

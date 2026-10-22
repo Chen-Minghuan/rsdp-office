@@ -398,8 +398,124 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
   assert.deepEqual(profileRequests, [], '不调用已删除的项目资料接口')
+
+  // 空白画布（无图纸）手动画区：形状模块拖出毫米空间
+  await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    state.floorPlan = null
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('button', { name: '开始画空间', exact: true }).click()
+  const sketchRect = async (left, top, right, bottom) => {
+    const box = await page.locator('.space-review svg').first().boundingBox()
+    const pts = [[left, top], [right, top], [right, bottom], [left, bottom]]
+    for (const [fx, fy] of pts) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
+    return pts.map(([fx, fy]) => [box.x + box.width * fx, box.y + box.height * fy])
+  }
+  const sketchDragBox = async (left, top, right, bottom) => {
+    const box = await page.locator('.space-review svg').first().boundingBox()
+    await page.mouse.move(box.x + box.width * left, box.y + box.height * top)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * right, box.y + box.height * bottom, { steps: 5 })
+    await page.mouse.up()
+  }
+  // 默认矩形模块：拖出生成
+  await sketchDragBox(0.3, 0.25, 0.55, 0.5)
+  let drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+  assert.equal(drawn.length, 1, '矩形模块拖出后保存为一个手动空间')
+  assert.equal(drawn[0].polygon.length, 4, '矩形模块生成四顶点轮廓')
+  assert.equal(drawn[0].reviewUnit, 'mm', '空白画布画区直接为毫米单位')
+  assert.equal(drawn[0].evidenceKind, 'MANUAL', '手画空间标记人工来源')
+  assert.ok(drawn[0].actualWidthMm % 100 === 0 && drawn[0].actualWidthMm > 1000, '毫米场景画区取整到 100mm')
+  await page.getByLabel('空间名称').fill('手画开放办公区')
+  await page.locator('.selected-title h3').click()
+  await page.getByText('手画开放办公区', { exact: true }).first().waitFor()
+  // L 形模块：拖包围盒生成六顶点轮廓
+  await page.getByRole('button', { name: '画新空间', exact: true }).click()
+  await page.locator('[data-testid="sketch-shape-L"]').click()
+  await sketchDragBox(0.62, 0.55, 0.8, 0.75)
+  drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+  assert.equal(drawn.length, 2, 'L 形模块保存第二个空间')
+  assert.equal(drawn[1].polygon.length, 6, 'L 形模块生成六顶点轮廓')
+  // 旋转模块：90° 旋转后拖出的矩形宽深互换（用同相机的未旋转 L 形推导像素比例，容差含 100mm 取整）
+  await page.getByRole('button', { name: '画新空间', exact: true }).click()
+  await page.getByLabel('画区旋转角度（度）').fill('90')
+  {
+    const box = await page.locator('.space-review svg').first().boundingBox()
+    await sketchDragBox(0.62, 0.1, 0.8, 0.3)
+    drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+    assert.equal(drawn.length, 3, '旋转矩形保存为第三个空间')
+    const l2 = drawn[1].polygon.map(p => p[0])
+    const w2 = Math.max(...l2) - Math.min(...l2)
+    const pxPerMm = (0.18 * box.width) / w2
+    const expW = (0.3 - 0.1) * box.height / pxPerMm
+    const expH = (0.8 - 0.62) * box.width / pxPerMm
+    assert.ok(Math.abs(drawn[2].actualWidthMm - expW) <= 51 && Math.abs(drawn[2].actualDepthMm - expH) <= 51,
+      '旋转 90° 后宽深互换：' + drawn[2].actualWidthMm + 'x' + drawn[2].actualDepthMm + ' ≈ ' + Math.round(expW) + 'x' + Math.round(expH))
+  }
+  // 逐点描：毫米场景逐顶点核对存盘几何与点击位置（Y 不翻转）
+  await page.getByRole('button', { name: '画新空间', exact: true }).click()
+  await page.locator('[data-testid="sketch-shape-poly"]').click()
+  const lFractions = [[0.1, 0.55], [0.25, 0.55], [0.25, 0.65], [0.2, 0.65], [0.2, 0.75], [0.1, 0.75]]
+  {
+    const box = await page.locator('.space-review svg').first().boundingBox()
+    for (const [fx, fy] of lFractions) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
+  }
+  await page.locator('[data-testid="sketch-save"]').click()
+  drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+  assert.equal(drawn.length, 4, '逐点描保存第四个空间')
+  const ring = drawn[3].polygon
+  assert.equal(ring.length, 6, '逐点描 L 形保留全部顶点')
+  const xs = ring.map(p => p[0]), ys = ring.map(p => p[1])
+  const rx = Math.max(...xs) - Math.min(...xs), ry = Math.max(...ys) - Math.min(...ys)
+  const fxSpan = 0.25 - 0.1, fySpan = 0.75 - 0.55
+  ring.forEach(([px, py], i) => {
+    const expectX = Math.min(...xs) + (lFractions[i][0] - 0.1) / fxSpan * rx
+    const expectY = Math.min(...ys) + (lFractions[i][1] - 0.55) / fySpan * ry
+    assert.ok(Math.abs(px - expectX) < rx * 0.03 && Math.abs(py - expectY) < ry * 0.03, '顶点 ' + i + ' 与点击位置一致（坐标未翻转）')
+  })
+  assert.ok(await advance().isEnabled(), '手画毫米空间可直接进入家具排版')
+  // Esc 取消不留下空间
+  await page.getByRole('button', { name: '画新空间', exact: true }).click()
+  await sketchRect(0.1, 0.1, 0.2, 0.2)
+  await page.keyboard.press('Escape')
+  await page.mouse.click(20, 20)
+  drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+  assert.equal(drawn.length, 4, 'Esc 取消画区不产生空间')
+  // 空间列表直接改名
+  await page.getByRole('button', { name: '重命名空间 手画开放办公区', exact: true }).click()
+  const renameInput = page.getByRole('textbox', { name: '重命名空间 手画开放办公区', exact: true })
+  await renameInput.fill('开放办公区 A')
+  await renameInput.press('Enter')
+  await page.getByText('开放办公区 A', { exact: true }).first().waitFor()
+  assert.ok((await stored()).objects.some(object => object.kind === 'zone' && object.name === '开放办公区 A'), '列表改名已保存')
+  // 家具排版侧栏同样可改名
+  await advance().click()
+  await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+  await page.getByRole('button', { name: '手动空间 4', exact: true }).click()
+  await page.getByLabel('排版空间名称').fill('设计侧改名区')
+  await page.getByLabel('排版空间名称').press('Enter')
+  assert.ok((await stored()).objects.some(object => object.kind === 'zone' && object.name === '设计侧改名区'), '排版侧栏改名已保存')
+  await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
+  await page.getByText('设计侧改名区', { exact: true }).first().waitFor()
+  // 画布上点选中空间的名称标签：就地改名称/用途/矩形尺寸
+  await page.getByRole('button', { name: '选择空间 开放办公区 A', exact: true }).click()
+  await page.locator('.space-label-editable').click()
+  const inline = page.locator('[data-testid="label-inline"]')
+  await inline.waitFor()
+  await inline.getByLabel('画布空间名称').fill('画布改名区')
+  await inline.getByLabel('画布空间用途').selectOption('MEETING_ROOM')
+  await inline.getByLabel('画布空间宽度（毫米）').fill('5200')
+  await inline.getByRole('button', { name: '保存', exact: true }).click()
+  const edited = (await stored()).objects.find(object => object.kind === 'zone' && object.name === '画布改名区')
+  assert.ok(edited, '画布标签改名已保存')
+  assert.equal(edited.zoneType, 'MEETING_ROOM', '画布标签改用途已保存')
+  assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
   assert.deepEqual(errors, [])
-  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护。使用模拟 API。')
+  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消）。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

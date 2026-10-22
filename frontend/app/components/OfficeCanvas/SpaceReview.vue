@@ -11,7 +11,9 @@ import type { ZoneObject } from '~/types/office'
 import { transformContour } from '~/utils/spatial/contourTransform'
 import type { ContourOperation, ContourPoint } from '~/utils/spatial/contourTransform'
 import { canRestoreSourceContour, sourceContour } from '~/utils/spatial/designCorrections'
-import { polygonBounds } from '~/utils/spatial/geometry'
+import { polygonBounds, polygonCentroid, sketchShapePolygon } from '~/utils/spatial/geometry'
+import { ZONE_TYPES } from '~/utils/sample'
+import type { SketchShapeKind } from '~/utils/spatial/geometry'
 import { doorClearanceObstacle, moveObstacle, obstacleLabel, rectangleObstacle, reshapeObstacle, snapObstacleToZone } from '~/utils/spatial/obstacles'
 import type { SpatialObstacle, SpatialObstacleKind } from '~/types/spatial'
 
@@ -37,6 +39,14 @@ const cameraTouched = ref(false)
 const shiftPressed = ref(false)
 const message = ref('')
 const tracing = ref<{ zoneId: string; points: Array<{ x: number; y: number }> } | null>(null)
+const sketching = ref<{ points: Array<{ x: number; y: number }> } | null>(null)
+const renamingId = ref<string | null>(null), renameDraft = ref('')
+const labelEditing = ref(false)
+const labelName = ref(''), labelCategory = ref<ZoneObject['zoneType']>('OPEN_OFFICE')
+const labelWidth = ref<number | null>(null), labelDepth = ref<number | null>(null)
+const sketchShape = ref<SketchShapeKind | 'poly'>('rect')
+const sketchAngle = ref(0)
+const sketchDrag = ref<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
 const showTemplate = ref(false)
 let messageTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -50,6 +60,23 @@ const sceneForView = computed(() => {
 })
 const selectedObstacle = computed(() => obstacleManipulation.value?.obstacleId === selectedObstacleId.value ? obstacleManipulation.value.current : selected.value?.obstacles?.find(obstacle => obstacle.obstacleId === selectedObstacleId.value) || null)
 const selectedObstacleBounds = computed(() => selectedObstacle.value ? polygonBounds(selectedObstacle.value.geometry) : null)
+/** 端点先取整再旋转，保持模块形状的直角；角度在屏幕上顺时针为正（毫米场景 Y 向上，符号取反）。 */
+function sketchSnap(v: number) {
+  return (calibrated.value || !store.floorPlan) ? Math.round(v / 100) * 100 : Math.round(v * 100) / 100
+}
+function sketchShapeRing(start: { x: number; y: number }, current: { x: number; y: number }) {
+  const sceneAngle = calibrated.value ? -sketchAngle.value : sketchAngle.value
+  return sketchShapePolygon(sketchShape.value as SketchShapeKind,
+    { x: sketchSnap(start.x), y: sketchSnap(start.y) },
+    { x: sketchSnap(current.x), y: sketchSnap(current.y) }, sceneAngle)
+}
+const sketchPreview = computed(() => {
+  if (sketchDrag.value) {
+    const ring = sketchShapeRing(sketchDrag.value.start, sketchDrag.value.current)
+    return ring ? ring.map(([x, y]) => ({ x, y })) : sketching.value?.points
+  }
+  return sketching.value?.points
+})
 const draftObstaclePreview = computed(() => {
   if (!obstacleDraft.value) return null
   const obstacle = rectangleObstacle(obstacleDraft.value.spaceId, obstacleDraft.value.kind, obstacleDraft.value.start, obstacleDraft.value.current, 'DRAFT')
@@ -76,6 +103,16 @@ const calibrationInputAnchor = computed(() => {
     y: Math.max(8, Math.min(screen.y, Math.max(8, viewport.value.height - 70))),
   }
 })
+const labelEditAnchor = computed(() => {
+  if (!labelEditing.value || !selectedSpace.value) return null
+  const center = polygonCentroid(selectedSpace.value.designGeometry)
+  if (!center) return null
+  const screen = toScreen(center, scene.value.workingCoordinateSystem, camera.value)
+  return {
+    x: Math.max(140, Math.min(screen.x, Math.max(140, viewport.value.width - 140))),
+    y: Math.max(8, Math.min(screen.y, Math.max(8, viewport.value.height - 170))),
+  }
+})
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
 const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
@@ -91,6 +128,8 @@ const scaleWidth = computed(() => 2000 * camera.value.zoom)
 const zoomPercent = computed(() => Math.round(camera.value.zoom / fittedZoom.value * 100))
 const saveLabel = computed(() => store.syncState === 'saving' ? '保存中…' : store.syncState === 'error' ? '保存失败' : '✓ 本地草稿已保存')
 
+watch(tool, () => { labelEditing.value = false })
+watch(selectedId, () => { labelEditing.value = false })
 watch(() => store.zones.map(zone => zone.id).join(','), () => {
   if (!store.zones.some(zone => zone.id === selectedId.value)) selectedId.value = store.zones[0]?.id || null
 }, { immediate: true })
@@ -117,13 +156,15 @@ function fit() {
   if (!viewport.value.width || !viewport.value.height) return
   const selectedBounds = focusedZoneId.value && selectedSpace.value ? polygonBounds(selectedSpace.value.designGeometry) : null
   const padding = selectedBounds ? Math.max(600, Math.max(selectedBounds.maxX - selectedBounds.minX, selectedBounds.maxY - selectedBounds.minY) * 0.12) : 0
-  const bounds = selectedBounds ? { minX: selectedBounds.minX - padding, minY: selectedBounds.minY - padding, maxX: selectedBounds.maxX + padding, maxY: selectedBounds.maxY + padding } : reviewSceneBounds(scene.value)
+  const blankManual = !store.floorPlan && !store.zones.length
+  const bounds = selectedBounds ? { minX: selectedBounds.minX - padding, minY: selectedBounds.minY - padding, maxX: selectedBounds.maxX + padding, maxY: selectedBounds.maxY + padding } : blankManual ? { minX: 0, minY: 0, maxX: 12000, maxY: 8000 } : reviewSceneBounds(scene.value)
   camera.value = fitCameraToBoundsBySystem(bounds, viewport.value.width, viewport.value.height, scene.value.workingCoordinateSystem, viewport.value.width > 800 ? 72 : 50)
   fittedZoom.value = camera.value.zoom
   cameraTouched.value = false
 }
 function onCameraUpdate(value: CameraTransform) {
   cameraTouched.value = true
+  labelEditing.value = false
   camera.value = value
 }
 function onViewport(size: { width: number; height: number }) {
@@ -137,6 +178,7 @@ function onViewport(size: { width: number; height: number }) {
 }
 function zoom(factor: number) {
   if (drag.value) return
+  labelEditing.value = false
   cameraTouched.value = true
   const center = { x: viewport.value.width / 2, y: viewport.value.height / 2 }
   const next = Math.max(0.00001, Math.min(20, camera.value.zoom * factor))
@@ -310,12 +352,17 @@ function applyCalibrationInput() {
 }
 
 function pointerDown(point: { x: number; y: number }) {
+  labelEditing.value = false
   if (tool.value.startsWith('obstacle-') && selected.value && calibrated.value) {
     obstacleDraft.value = { spaceId: selected.value.id, kind: tool.value.slice(9) as SpatialObstacleKind, start: point, current: point }
     return
   }
-  if (tracing.value) {
-    const points = tracing.value.points, previous = points.at(-1)
+  if (sketching.value && sketchShape.value !== 'poly') {
+    sketchDrag.value = { start: point, current: point }
+    return
+  }
+  if (tracing.value || sketching.value) {
+    const points = (tracing.value || sketching.value)!.points, previous = points.at(-1)
     if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) * camera.value.zoom > 3) points.push(point)
     return
   }
@@ -346,6 +393,88 @@ function applyTrace() {
   cancelTrace()
   notify('已保存沿墙轮廓，尺寸和面积同步更新；可撤销')
 }
+function startSketch() {
+  message.value = ''
+  cancelCalibration()
+  cancelTrace()
+  drag.value = null
+  tool.value = 'draw-space'
+  sketching.value = { points: [] }
+}
+function cancelSketch() {
+  sketching.value = null
+  sketchDrag.value = null
+  if (tool.value === 'draw-space') tool.value = 'select'
+}
+/** 形状模块/逐点描共用的落库：毫米场景自动取整到 100mm，源单位保留两位小数。 */
+function saveSketchRing(raw: Array<[number, number]>, snapMm: boolean) {
+  const asMm = calibrated.value || !store.floorPlan
+  const snap = (v: number) => asMm && snapMm ? Math.round(v / 100) * 100 : Math.round(v * 100) / 100
+  let ring = raw.map(([px, py]): [number, number] => [snap(px), snap(calibrated.value ? -py : py)])
+  ring = ring.filter((point, index) => index === 0 || Math.hypot(point[0] - ring[index - 1][0], point[1] - ring[index - 1][1]) > 0.01)
+  if (ring.length > 3 && Math.hypot(ring[0][0] - ring.at(-1)![0], ring[0][1] - ring.at(-1)![1]) < 0.01) ring.pop()
+  const problem = ringProblem(ring)
+  if (problem) { notify(problem + '，请调整后再保存'); return }
+  const zone = store.addDrawnZone(ring, asMm)
+  if (!zone) { notify('空间未保存，请重新绘制'); return }
+  cancelSketch()
+  selectedId.value = zone.id
+  if (store.zones.length === 1) nextTick(fit)
+  notify(asMm ? `已创建「${zone.name}」（毫米），可在右侧改名、编辑轮廓与尺寸；可撤销` : `已按底图源单位创建「${zone.name}」，两点校准后获得毫米尺寸；可撤销`)
+}
+function applySketch() {
+  const draft = sketching.value
+  if (!draft) return
+  const points = draft.points
+  if (points.length > 3 && Math.hypot(points[0].x - points.at(-1)!.x, points[0].y - points.at(-1)!.y) * camera.value.zoom < 8) points.pop()
+  saveSketchRing(points.map((point): [number, number] => [point.x, point.y]), false)
+}
+function renameSpace(name: string) {
+  const zone = selected.value, trimmed = name.trim()
+  if (!zone || !trimmed || trimmed === zone.name) return
+  store.updateObject(zone.id, { name: trimmed } as Partial<ZoneObject>)
+  notify(`已重命名为「${trimmed}」`)
+}
+function startRoomRename(zone: ZoneObject) {
+  renamingId.value = zone.id
+  renameDraft.value = zone.name
+  nextTick(() => (document.querySelector('.review-room-rename-form input') as HTMLInputElement | null)?.focus())
+}
+function commitRoomRename(zoneId: string) {
+  if (renamingId.value !== zoneId) return
+  renamingId.value = null
+  const zone = store.zones.find(item => item.id === zoneId), trimmed = renameDraft.value.trim()
+  if (!zone || !trimmed || trimmed === zone.name) return
+  store.updateObject(zone.id, { name: trimmed } as Partial<ZoneObject>)
+  notify(`已重命名为「${trimmed}」`)
+}
+/** 点画布上选中空间的名称标签：就地改名称、用途与矩形尺寸。 */
+function onSpaceLabel(zoneId: string) {
+  if (tool.value !== 'select' || tracing.value || sketching.value || calibrating.value || drag.value) return
+  const zone = store.zones.find(item => item.id === zoneId)
+  if (!zone) return
+  selectedId.value = zoneId
+  labelName.value = zone.name
+  labelCategory.value = zone.zoneType
+  const metrics = zoneMeasurements(zone)
+  labelWidth.value = metrics.width != null ? Math.round(metrics.width) : null
+  labelDepth.value = metrics.depth != null ? Math.round(metrics.depth) : null
+  labelEditing.value = true
+}
+function applyLabelEdit() {
+  const zone = selected.value
+  if (!zone) { labelEditing.value = false; return }
+  const name = labelName.value.trim()
+  if (name && name !== zone.name) store.updateObject(zone.id, { name } as Partial<ZoneObject>)
+  if (labelCategory.value !== zone.zoneType) store.updateObject(zone.id, { zoneType: labelCategory.value } as Partial<ZoneObject>)
+  const metrics = zoneMeasurements(zone)
+  if (selectedSpace.value?.rectangleFrame && calibrated.value && labelWidth.value && labelDepth.value && labelWidth.value > 0 && labelDepth.value > 0
+    && (Math.round(metrics.width || 0) !== labelWidth.value || Math.round(metrics.depth || 0) !== labelDepth.value)) {
+    store.resizeZoneByMm(zone.id, labelWidth.value, labelDepth.value)
+  }
+  labelEditing.value = false
+  notify('空间属性已更新，尺寸与面积同步联动')
+}
 function insertVertex(zoneId: string, index: number) {
   const zone = store.zones.find(item => item.id === zoneId)
   if (!zone?.polygon || tracing.value || calibrating.value) return
@@ -357,11 +486,13 @@ function insertVertex(zoneId: string, index: number) {
 function traceKey(event: KeyboardEvent) {
   shiftPressed.value = event.shiftKey
   if (event.key === 'Escape' && tracing.value) { event.preventDefault(); cancelTrace() }
+  if (event.key === 'Escape' && sketching.value) { event.preventDefault(); cancelSketch() }
+  if (event.key === 'Escape' && labelEditing.value) { event.preventDefault(); labelEditing.value = false }
   if (event.key === 'Escape' && drag.value) { event.preventDefault(); drag.value = null; notify('已取消本次轮廓调整') }
   if (event.key === 'Escape' && obstacleDraft.value) { event.preventDefault(); obstacleDraft.value = null }
   if (event.key === 'Escape' && obstacleManipulation.value) { event.preventDefault(); obstacleManipulation.value = null; notify('已取消本次约束调整') }
   else if (event.key === 'Escape' && tool.value.startsWith('obstacle-')) { event.preventDefault(); tool.value = 'select' }
-  if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat && !tracing.value && !calibrating.value && !drag.value && !obstacleManipulation.value && selectedId.value) {
+  if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat && !tracing.value && !sketching.value && !calibrating.value && !drag.value && !obstacleManipulation.value && selectedId.value) {
     const target = event.target as HTMLElement | null
     if (target?.closest('input, textarea, select, [contenteditable]')) return
     event.preventDefault()
@@ -370,9 +501,9 @@ function traceKey(event: KeyboardEvent) {
   }
 }
 function keyUp(event: KeyboardEvent) { shiftPressed.value = event.shiftKey }
-function cancelInteraction() { drag.value = null; obstacleDraft.value = null; obstacleManipulation.value = null; shiftPressed.value = false }
+function cancelInteraction() { drag.value = null; obstacleDraft.value = null; obstacleManipulation.value = null; sketchDrag.value = null; labelEditing.value = false; shiftPressed.value = false }
 function startTransform(zoneId: string, operation: ContourOperation, point: ContourPoint) {
-  if (calibrating.value || tracing.value) return
+  if (calibrating.value || tracing.value || sketching.value) return
   const zone = store.zones.find(item => item.id === zoneId)
   if (!zone?.polygon) return
   const polygon = zone.polygon.map(([x, y]): [number, number] => [x, y])
@@ -386,6 +517,7 @@ function selectVertex(zoneId: string, vertexId: string) {
   if (index >= 0) drag.value = { zoneId, index, polygon: zone.polygon.map(([x, y]) => [x, y]) }
 }
 function pointerMove(point: { x: number; y: number }) {
+  if (sketchDrag.value) { sketchDrag.value.current = point; return }
   if (obstacleDraft.value) { obstacleDraft.value.current = point; return }
   if (obstacleManipulation.value) {
     const draft = obstacleManipulation.value
@@ -406,6 +538,15 @@ function pointerMove(point: { x: number; y: number }) {
   } else draft.polygon[draft.index] = [current.x, current.y]
 }
 function pointerUp() {
+  if (sketchDrag.value) {
+    const draft = sketchDrag.value
+    sketchDrag.value = null
+    const ring = sketchShapeRing(draft.start, draft.current)
+    const tooSmall = Math.abs(draft.current.x - draft.start.x) * camera.value.zoom < 6 || Math.abs(draft.current.y - draft.start.y) * camera.value.zoom < 6
+    if (!ring || tooSmall) { notify('请拖出清晰的空间范围'); return }
+    saveSketchRing(ring, false)
+    return
+  }
   if (obstacleDraft.value) {
     const draft = obstacleDraft.value
     const raw = rectangleObstacle(draft.spaceId, draft.kind, draft.start, draft.current)
@@ -441,7 +582,7 @@ function pointerUp() {
   drag.value = null
 }
 function advance() {
-  if (tracing.value || obstacleDraft.value || obstacleManipulation.value) return
+  if (tracing.value || sketching.value || obstacleDraft.value || obstacleManipulation.value) return
   if (!store.canEnterLayout || store.floorPlanLoading || store.floorPlanError) return
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
   if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id } })
@@ -484,14 +625,21 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         <div class="review-room-list">
           <div class="section-heading"><h4>识别空间</h4><small>{{ zones.length }} 个</small></div>
           <div v-for="zone in displayedZones" :key="zone.id" class="review-room-item" :class="{ selected: zone.id === selectedId }">
-            <button class="review-room-card" :class="{ selected: zone.id === selectedId }" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)">
+            <form v-if="renamingId === zone.id" class="review-room-rename-form" @submit.prevent="commitRoomRename(zone.id)">
+              <input v-model="renameDraft" :aria-label="'重命名空间 ' + zone.name" maxlength="40" @blur="commitRoomRename(zone.id)" @keydown.esc.prevent="renamingId = null">
+            </form>
+            <button v-else class="review-room-card" :class="{ selected: zone.id === selectedId }" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)">
               <div><strong>{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
               <div><small>{{ dimensions(zone) }}</small><small>{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
             </button>
+            <button class="review-room-rename" type="button" :disabled="!!tracing || calibrating || !!sketching" :aria-label="'重命名空间 ' + zone.name" title="重命名空间" @click="startRoomRename(zone)">改名</button>
             <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" title="删除空间（选中后也可按 Delete 键）" @click="deleteSpace(zone.id)">删除</button>
           </div>
           <button v-if="zones.length > 6" class="show-more-rooms" @click="showAllSpaces = !showAllSpaces">{{ showAllSpaces ? '收起空间列表 ↑' : '查看其余 ' + (zones.length - 6) + ' 个空间 ↓' }}</button>
-          <p v-if="!zones.length" class="inspector-hint">暂无可核对空间，请先上传并识别图纸。</p>
+          <template v-if="!zones.length">
+            <p class="inspector-hint">暂无空间：上传图纸识别，或直接手动画区。</p>
+            <button class="review-example-button" type="button" data-testid="sketch-start" @click="startSketch">手动画新空间</button>
+          </template>
         </div>
         <div class="review-project-note"><p>✓ 底图与轮廓共用同一坐标变换</p><p>✓ 原始识别与编辑副本分别保留</p></div>
         <button class="review-example-button" :disabled="!!tracing" @click="loadExample">加载工装示例（可撤销）</button>
@@ -499,10 +647,11 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       <section class="review-canvas-panel review-panel">
         <div v-if="store.spaceTemplate" class="template-layout-link"><span>{{ store.spaceTemplate.name }} · {{ store.spaceTemplateCurrent ? store.spaceTemplate.storage === 'SAVED' ? '模板已保存' : '本地模板' : '空间已修改，模板需更新' }}</span><button @click="showTemplate = true">查看模板</button></div>
         <div class="review-toolbar">
-          <div class="review-tools" :inert="!!tracing">
+          <div class="review-tools" :inert="!!tracing || !!sketching">
             <button :class="{ active: tool === 'select' }" @click="tool = 'select'">选择 / 缩放</button>
             <button :class="{ active: tool === 'pan' }" @click="tool = 'pan'">拖动画布</button><i></i>
             <button :class="{ active: tool === 'edit' }" @click="tool = 'edit'">编辑轮廓</button>
+            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" title="在画布上逐点画出新的空间轮廓" @click="startSketch">画新空间</button>
             <button :class="{ active: calibrating }" @click="startCalibration">两点校准</button>
             <button :disabled="!store.undoStack.length" @click="store.undo()">撤销</button>
           </div>
@@ -531,6 +680,22 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           <span>拖动内部移动；拉边调整宽深，拉角缩放。滚轮缩放视图，中键平移。</span>
           <label><input v-model="keepAspect" type="checkbox"> 锁定比例（角点 / Shift）</label>
         </div>
+        <div v-if="sketching" class="contour-edit-bar" data-testid="sketch-bar">
+          <span class="sketch-shapes" role="group" aria-label="空间形状模块">
+            <button :class="{ active: sketchShape === 'rect' }" data-testid="sketch-shape-rect" @click="sketchShape = 'rect'">矩形</button>
+            <button :class="{ active: sketchShape === 'L' }" data-testid="sketch-shape-L" @click="sketchShape = 'L'">L 形</button>
+            <button :class="{ active: sketchShape === 'U' }" data-testid="sketch-shape-U" @click="sketchShape = 'U'">U 形</button>
+            <button :class="{ active: sketchShape === 'poly' }" data-testid="sketch-shape-poly" @click="sketchShape = 'poly'">逐点描</button>
+          </span>
+          <label v-if="sketchShape !== 'poly'" class="sketch-angle">旋转<input v-model.number="sketchAngle" type="number" min="-180" max="180" step="5" aria-label="画区旋转角度（度）"><span>°</span></label>
+          <span v-else>沿墙依次点击转角，已选 {{ sketching.points.length }} 点{{ store.floorPlan ? '' : '（空白画布，单位毫米）' }}</span>
+          <span v-if="sketchShape !== 'poly'">在画布上拖出空间范围，松开即生成{{ sketchShape === 'rect' ? '矩形' : sketchShape === 'L' ? 'L 形' : 'U 形' }}轮廓{{ sketchAngle ? '（顺时针 ' + sketchAngle + '°）' : '' }}{{ calibrated || !store.floorPlan ? '，自动取整 100mm' : '' }}，生成后可用「编辑轮廓」微调</span>
+          <template v-if="sketchShape === 'poly'">
+            <button :disabled="!sketching.points.length" @click="sketching.points.pop()">退回一点</button>
+            <button :disabled="sketching.points.length < 3" data-testid="sketch-save" @click="applySketch">保存空间</button>
+          </template>
+          <button @click="cancelSketch">取消</button>
+        </div>
         <div v-if="tool === 'edit' || tracing" class="contour-edit-bar">
           <template v-if="tracing">
             <span>正在重描「{{ selected?.name }}」：沿墙内侧依次点击转角，已选 {{ tracing.points.length }} 点</span>
@@ -547,16 +712,35 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           <div class="review-alignment-status"><b :class="{ unknown: !calibrated }"></b><span>{{ calibrated ? '比例已校准' : '实际尺寸待校准' }}</span><i></i><span>{{ imageReady ? '底图与轮廓共用坐标' : '底图定位待补充' }}</span></div>
           <span v-if="isExample" class="example-label">界面示例 · 演示几何</span>
           <SpatialCanvas :scene="sceneForView" :camera="camera" :selected-space-id="selectedId" :selected-obstacle-id="selectedObstacleId" :obstacle-draft="draftObstacleGeometry" :obstacle-draft-kind="obstacleDraft?.kind" :tool="tool" :interaction-active="!!drag || !!obstacleManipulation"
-            :pointer-in-source-coordinates="calibrating || !!tracing" :calibration-points="calibrationPoints" :trace-points="tracing?.points"
+            :pointer-in-source-coordinates="calibrating || !!tracing || !!sketching" :calibration-points="calibrationPoints" :trace-points="tracing?.points || sketchPreview"
             :fallback-image-url="imageUrl" :show-underlay="showUnderlay || comparingOriginal" :show-outline="showOutline && !comparingOriginal"
             :show-dimensions="showDimensions" :underlay-opacity="underlayOpacity" :original-geometries="comparingOriginal ? [] : originalGeometries"
-            @viewport="onViewport" @update-camera="onCameraUpdate" @select-space="selectSpace" @select-obstacle="selectObstacle" @obstacle-transform-start="startObstacleTransform" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
+            @viewport="onViewport" @update-camera="onCameraUpdate" @select-space="selectSpace" @space-label="onSpaceLabel" @select-obstacle="selectObstacle" @obstacle-transform-start="startObstacleTransform" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
             @pointer-down="pointerDown" @pointer-move="pointerMove" @pointer-up="pointerUp" />
-          <div v-if="!imageReady" class="missing-source-note"><strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink></div>
+          <div v-if="!imageReady && !sketching && (store.floorPlan || !zones.length)" class="missing-source-note">
+            <template v-if="!store.floorPlan">
+              <strong>空白手动画布</strong>
+              <p>无需图纸：点击「画新空间」逐点描出房间轮廓，单位为毫米；也可以返回上传图纸识别。</p>
+              <button type="button" data-testid="sketch-start-overlay" @click="startSketch">开始画空间</button>
+              <NuxtLink to="/">返回图纸识别 →</NuxtLink>
+            </template>
+            <template v-else>
+              <strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink>
+            </template>
+          </div>
           <div v-if="calibrating && calibrationPoints.length < 2" class="calibration-canvas-hint">两点校准：请依次点击已知尺寸边的两个端点<button @click="cancelCalibration">取消</button></div>
           <form v-if="calibrationInputAnchor" class="calibration-inline" :style="{ left: calibrationInputAnchor.x + 'px', top: calibrationInputAnchor.y + 'px' }" @submit.prevent="applyCalibrationInput">
             <label>实际长度<input ref="calibrationInput" v-model.number="calibrationLength" aria-label="校准参考长度（毫米）" type="number" min="1" step="any"><span>mm</span></label>
             <div class="calibration-inline-actions"><button type="submit" :disabled="!Number.isFinite(calibrationLength) || calibrationLength <= 0">应用校准</button><button type="button" @click="cancelCalibration">取消</button></div>
+          </form>
+          <form v-if="labelEditAnchor" class="calibration-inline label-inline" :style="{ left: labelEditAnchor.x + 'px', top: labelEditAnchor.y + 'px' }" data-testid="label-inline" @submit.prevent="applyLabelEdit">
+            <label>名称<input v-model="labelName" aria-label="画布空间名称" maxlength="40"></label>
+            <label>用途<select v-model="labelCategory" aria-label="画布空间用途"><option v-for="[value, text] in ZONE_TYPES" :key="value" :value="value">{{ text }}</option></select></label>
+            <template v-if="selectedSpace?.rectangleFrame && calibrated">
+              <label>宽度<input v-model.number="labelWidth" aria-label="画布空间宽度（毫米）" type="number" min="1" step="any"><span>mm</span></label>
+              <label>进深<input v-model.number="labelDepth" aria-label="画布空间进深（毫米）" type="number" min="1" step="any"><span>mm</span></label>
+            </template>
+            <div class="calibration-inline-actions"><button type="submit" :disabled="!labelName.trim()">保存</button><button type="button" @click="labelEditing = false">取消</button></div>
           </form>
           <div class="review-legend"><span><i class="outline"></i>空间轮廓</span><span><i class="selected"></i>当前选中</span><span v-if="scene.obstacles.length"><i class="obstacle"></i>固定障碍</span><span v-if="scene.obstacles.some(item => item.kind === 'DOOR_CLEARANCE')"><i class="door"></i>门洞净空</span></div>
           <div class="review-scale" v-if="calibrated && scaleWidth > 20 && scaleWidth < viewport.width / 2" :style="{ width: scaleWidth + 'px' }"><span>0</span><span>2 m</span><i :style="{ width: scaleWidth + 'px' }"></i></div>
@@ -569,7 +753,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         :source-note="selected?.note" :can-restore-source="restorable && !calibrating && !drag"
         :calibration-active="calibrating"
         v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
-        @resize="resize" @category="category" @start-calibration="startCalibration" @restore-source="restoreSelectedSource">
+        @resize="resize" @category="category" @rename="renameSpace" @start-calibration="startCalibration" @restore-source="restoreSelectedSource">
       </SpatialInspector>
     </div>
     <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />

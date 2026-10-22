@@ -9,6 +9,7 @@ await mkdir(outDir, { recursive: true })
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
 if (process.env.MOCK_API === '1') {
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', route => {
     const url = new URL(route.request().url())
     return route.fulfill({

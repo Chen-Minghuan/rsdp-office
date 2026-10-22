@@ -161,13 +161,6 @@ const subtitle = computed(() => mode.value === 'design'
         <p class="text-xs text-muted">{{ subtitle }}</p>
       </div>
       <div class="flex items-center gap-2">
-        <NuxtLink
-          to="/manual-canvas"
-          class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]"
-        >
-          <AppIcon name="zone" size="3.5" />
-          <span>手动布局</span>
-        </NuxtLink>
         <button v-if="mode === 'design'" class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" @click="store.setCanvasMode('overview')">
           <AppIcon name="arrowLeft" size="3.5" />
           <span>返回空间总览</span>

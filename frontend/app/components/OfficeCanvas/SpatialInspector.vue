@@ -18,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'resize', width: number, depth: number): void
   (e: 'category', category: string): void
+  (e: 'rename', name: string): void
   (e: 'startCalibration'): void
   (e: 'restoreSource'): void
 }>()
@@ -27,6 +28,8 @@ const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const showOriginal = defineModel<boolean>('showOriginal', { default: false })
 const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
 const width = ref<number | null>(null), depth = ref<number | null>(null)
+const nameDraft = ref('')
+watch(() => [props.space?.spaceId, props.space?.name], () => { nameDraft.value = props.space?.name ?? '' }, { immediate: true })
 watch(() => [props.space?.spaceId, props.space?.derived.rectangleDimensions?.widthMm, props.space?.derived.rectangleDimensions?.depthMm], () => {
   width.value = Math.round(props.space?.derived.rectangleDimensions?.widthMm || 0) || null
   depth.value = Math.round(props.space?.derived.rectangleDimensions?.depthMm || 0) || null
@@ -41,6 +44,7 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
     <template v-if="space">
       <div class="selected-title"><h3>{{ space.name }}</h3><span class="review-badge" :class="needsReview ? 'pending' : 'verified'">{{ needsReview ? '需复核' : '可用' }}</span></div>
       <p class="room-id">空间 ID · {{ space.spaceId }}</p>
+      <div class="property-row"><span>空间名称</span><input v-model="nameDraft" aria-label="空间名称" maxlength="40" @change="emit('rename', nameDraft)"></div>
       <div class="property-row"><span>空间用途</span><select :value="space.category" aria-label="空间用途" @change="emit('category', ($event.target as HTMLSelectElement).value)"><option v-for="[value, label] in ZONE_TYPES" :key="value" :value="value">{{ label }}</option></select></div>
       <div class="property-row"><span>几何来源</span><strong>{{ sourceLabel }}</strong></div>
       <p v-if="sourceNote" class="inspector-hint" role="status">{{ sourceNote }}</p>

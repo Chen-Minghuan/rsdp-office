@@ -3,7 +3,7 @@ import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFurniture'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
-import type { FurnitureObject } from '~/types/office'
+import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
@@ -30,6 +30,20 @@ const layoutPanelSteps: Array<{ id: LayoutPanelStep; label: string; shortLabel: 
 ]
 
 const zone = computed(() => store.zones.find((z) => z.id === store.designZoneId) || null)
+const editingZoneName = ref(false), zoneNameDraft = ref('')
+const zoneNameInput = ref<HTMLInputElement | null>(null)
+function startZoneNameEdit() {
+  if (!zone.value) return
+  zoneNameDraft.value = zone.value.name
+  editingZoneName.value = true
+  nextTick(() => zoneNameInput.value?.focus())
+}
+function commitZoneName() {
+  if (!editingZoneName.value) return
+  editingZoneName.value = false
+  const trimmed = zoneNameDraft.value.trim()
+  if (zone.value && trimmed && trimmed !== zone.value.name) store.updateObject(zone.value.id, { name: trimmed } as Partial<ZoneObject>)
+}
 const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
 
 const builtInModules = furnitureCatalogTemplates
@@ -268,8 +282,12 @@ function clearLayout() {
           <AppIcon name="cube" size="4" />
           <span>家具选择与排版</span>
         </div>
-        <p class="text-[10px] text-muted mt-1 pr-6 truncate">
-          {{ zone ? zone.name : '未选择空间' }}
+        <p class="text-[10px] text-muted mt-1 pr-6 truncate" @click.stop>
+          <input v-if="editingZoneName && zone" ref="zoneNameInput" v-model="zoneNameDraft" aria-label="排版空间名称" maxlength="40"
+            class="w-full rounded border border-line bg-white px-1.5 py-0.5 text-[10px] font-normal text-[#4f493f]"
+            @keydown.enter.prevent="commitZoneName" @keydown.esc.prevent="editingZoneName = false" @blur="commitZoneName">
+          <button v-else-if="zone" type="button" class="underline decoration-dotted underline-offset-2 hover:text-bronze-dark" title="点击重命名空间" @click="startZoneNameEdit">{{ zone.name }}</button>
+          <template v-else>未选择空间</template>
         </p>
         <div v-if="zone" class="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-[#f2ede7] p-1" role="tablist" aria-label="排版步骤">
           <button

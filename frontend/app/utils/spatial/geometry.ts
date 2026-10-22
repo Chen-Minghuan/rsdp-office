@@ -236,3 +236,25 @@ function normAngle(rad: number): number {
   if (rad <= -Math.PI / 2) rad += Math.PI
   return rad
 }
+
+/** 手动画区的形状模块：拖出包围盒，一次生成对应轮廓多边形（逐顶点，不重复首尾点）。 */
+export type SketchShapeKind = 'rect' | 'L' | 'U'
+
+export function sketchShapePolygon(shape: SketchShapeKind, a: { x: number; y: number }, b: { x: number; y: number }, angleDeg = 0): Array<[number, number]> | null {
+  const minX = Math.min(a.x, b.x), maxX = Math.max(a.x, b.x)
+  const minY = Math.min(a.y, b.y), maxY = Math.max(a.y, b.y)
+  if (!(maxX > minX && maxY > minY)) return null
+  let ring: Array<[number, number]>
+  const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2
+  if (shape === 'rect') ring = [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]]
+  else if (shape === 'L') ring = [[minX, minY], [maxX, minY], [maxX, midY], [midX, midY], [midX, maxY], [minX, maxY]]
+  else {
+    const x1 = minX + (maxX - minX) * 0.25, x2 = minX + (maxX - minX) * 0.75
+    ring = [[minX, minY], [x1, minY], [x1, midY], [x2, midY], [x2, minY], [maxX, minY], [maxX, maxY], [minX, maxY]]
+  }
+  if (!angleDeg) return ring
+  // 绕包围盒中心旋转；角度在当前场景坐标系中应用，调用方负责按坐标系调整符号。
+  const rad = angleDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad)
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+  return ring.map(([x, y]): [number, number] => [cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos])
+}

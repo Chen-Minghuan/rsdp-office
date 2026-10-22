@@ -30,6 +30,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'selectSpace', id: string): void
+  (e: 'spaceLabel', spaceId: string): void
   (e: 'selectObstacle', id: string | null): void
   (e: 'obstacleTransformStart', id: string, handle: string, point: { x: number; y: number }): void
   (e: 'selectVertex', spaceId: string, vertexId: string): void
@@ -210,6 +211,10 @@ function labelVisible(space: SpatialSpace) {
   const bounds = polygonBounds(space.designGeometry)
   return bounds && (bounds.maxX - bounds.minX) * props.camera.zoom > 48 && (bounds.maxY - bounds.minY) * props.camera.zoom > 35
 }
+/** 选中空间的名称标签可点击：打开名称/用途/尺寸快捷编辑。 */
+function labelClickable(space: SpatialSpace) {
+  return space.spaceId === props.selectedSpaceId && props.tool === 'select' && !props.pointerInSourceCoordinates && !props.interactionActive
+}
 onMounted(() => {
   observer = new ResizeObserver(entries => {
     const rect = entries[0]?.contentRect
@@ -239,7 +244,9 @@ onBeforeUnmount(() => observer?.disconnect())
             :stroke-width="selectedSpaceId === space.spaceId ? 2 : 1.25"
             :stroke-dasharray="selectedSpaceId === space.spaceId ? undefined : '5 4'"
             :class="tool === 'select' ? 'cursor-move hover:fill-opacity-20' : 'cursor-pointer hover:fill-opacity-20'" />
-          <g v-if="labelPosition(space) && labelVisible(space)" class="pointer-events-none" :transform="'translate(' + labelPosition(space)!.x + ',' + labelPosition(space)!.y + ')'">
+          <g v-if="labelPosition(space) && labelVisible(space)" :class="labelClickable(space) ? 'space-label-editable' : 'pointer-events-none'" :transform="'translate(' + labelPosition(space)!.x + ',' + labelPosition(space)!.y + ')'"
+            @pointerdown="labelClickable(space) && $event.stopPropagation()" @click.stop="labelClickable(space) && emit('spaceLabel', space.spaceId)">
+            <title v-if="labelClickable(space)">点击修改名称与属性</title>
             <rect x="-52" y="-15" width="104" height="40" rx="4" fill="#fff" fill-opacity="0.55" />
             <text text-anchor="middle" fill="#424e47" font-size="12" font-weight="600">{{ space.name }}</text>
             <text y="18" text-anchor="middle" fill="#7c8579" font-size="10">{{ space.derived.areaM2 != null ? space.derived.areaM2.toFixed(1) + ' m²' : '尺寸待校准' }}</text>
