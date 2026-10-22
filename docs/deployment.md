@@ -73,6 +73,8 @@ bash scripts/deploy.sh deploy
 
 默认配置路径为 `/opt/rsdp-office/.env`。脚本不会 `source` 配置或打印其内容，也不会输出完整的 `docker compose config`。
 
+2026-10-22 GitHub 访问修复：Jenkins 构建多次在拉取阶段失败（GnuTLS 中断 / 连接超时），定位为服务器直连 github.com 不稳定。root 的 git 此前已配置 `url."https://ghfast.top/https://github.com/".insteadOf` 镜像改写，因此手工验证一直正常而 Jenkins（jenkins 用户、无此配置）失败。已为 jenkins 用户写入同样的 insteadOf 规则（`/var/lib/jenkins/.gitconfig`），以 jenkins 用户实测 `ls-remote` 经镜像 2.5 秒成功。Jenkins 任务配置不变（insteadOf 透明改写，仅用于公共仓库只读拉取）；ghfast.top 为第三方公共加速服务，如日后失效或直连恢复，删除该规则即可。
+
 本轮服务器直连 Docker Hub 超时，已从本机拉取官方 amd64 镜像并经 SSH 导入服务器缓存。缓存可供当前节点构建使用；换节点或清理基础镜像后，需要恢复官方仓库连通性或重新导入官方镜像。本轮未更改服务器全局镜像源、DNS 和代理。
 
 2026-10-20 的实际执行记录和未验证项见 [DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md)。流水线语法参考 [Jenkins 官方文档](https://www.jenkins.io/doc/book/pipeline/syntax/)，启动等待使用 [Compose `up --wait`](https://docs.docker.com/reference/cli/docker/compose/up/)。
