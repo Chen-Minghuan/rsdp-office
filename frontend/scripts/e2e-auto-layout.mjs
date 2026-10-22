@@ -31,6 +31,7 @@ try {
     rooms: [{ roomId: 'STRICT-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0,0],[16000,0],[16000,10000],[0,10000]] }],
   }
   let floorPlanRequests = 0
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', route => {
     const path = new URL(route.request().url()).pathname
     const data = path.endsWith('/floor-plan/STRICT-TEST') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []

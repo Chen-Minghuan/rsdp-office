@@ -4,8 +4,10 @@ import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFu
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
-import type { LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
+import { DEFAULT_CHANNEL_WIDTH_MM } from '~/utils/layoutChannels'
+import { uid } from '~/utils/helpers'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
@@ -159,8 +161,26 @@ const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, 
   ? `${unitW.value},${unitD.value}` : '')
 
 const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
+// 通道直接读写 zone.layoutPreferences（画布拖动也写同一份），不走面板本地副本，避免双写分叉。
+const channels = computed<LayoutChannel[]>(() => zone.value?.layoutPreferences?.channels || [])
+function saveChannels(next: LayoutChannel[]) {
+  if (!zone.value) return
+  store.updateZoneChannels(zone.value.id, next)
+}
+function addChannel(orientation: LayoutChannel['orientation']) {
+  if (!zone.value) return
+  const bounds = canvasZoneBounds(zone.value)
+  const center = orientation === 'vertical' ? (bounds.minX + bounds.maxX) / 2 : (bounds.minY + bounds.maxY) / 2
+  saveChannels([...channels.value, { id: uid('ch'), orientation, offsetMm: Math.round(center - DEFAULT_CHANNEL_WIDTH_MM / 2), widthMm: DEFAULT_CHANNEL_WIDTH_MM }])
+}
+function updateChannel(id: string, patch: Partial<LayoutChannel>) {
+  saveChannels(channels.value.map(channel => channel.id === id ? { ...channel, ...patch } : channel))
+}
+function removeChannel(id: string) {
+  saveChannels(channels.value.filter(channel => channel.id !== id))
+}
 const buildingConstraints = computed(() => zone.value ? zoneLayoutExclusions(zone.value, false) : [])
-const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
+const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(channels.value)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
 const proposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
 const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
 const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
@@ -378,6 +398,25 @@ function clearLayout() {
               <div class="grid grid-cols-2 gap-1 mt-1"><label v-for="key in (['x', 'y', 'w', 'h'] as const)" :key="key">{{ { x: '距左', y: '距上', w: '宽', h: '深' }[key] }} mm<input :value="area[key] - (key === 'x' ? zoneBounds.minX : key === 'y' ? zoneBounds.minY : 0)" @input="area[key] = Number(($event.target as HTMLInputElement).value) + (key === 'x' ? zoneBounds.minX : key === 'y' ? zoneBounds.minY : 0)" :aria-label="'预留区域 ' + key" type="number" :min="key === 'w' || key === 'h' ? 1 : undefined" class="w-full border border-line px-1"></label></div>
               <button class="mt-1 text-bronze underline" @click="preferences.exclusions = preferences.exclusions.filter(item => item.id !== area.id)">移除预留区域</button>
             </div><button class="mt-2 text-bronze underline" @click="addExclusion">添加入口或禁放区</button>
+          </details>
+          <details data-testid="channel-panel"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
+            <p class="mt-2 text-[10px] text-muted">通道是排版约束：自动排版绕开通道、确认时家具不得压占；位置可直接在画布上拖动。两侧净距会在宽度之外再留出空档。宽度数值为当前策略，非规范要求。</p>
+            <div v-for="channel in channels" :key="channel.id" class="mt-2 rounded border border-line p-2" :data-testid="'channel-' + channel.orientation">
+              <div class="flex items-center justify-between text-[10px] font-semibold text-[#5b5751]">
+                <span>{{ channel.orientation === 'vertical' ? '纵向通道' : '横向通道' }}</span>
+                <button class="font-normal text-bronze underline" :aria-label="'移除' + (channel.orientation === 'vertical' ? '纵向' : '横向') + '通道'" @click="removeChannel(channel.id)">移除</button>
+              </div>
+              <div class="grid grid-cols-2 gap-1 mt-1">
+                <label>宽度 mm<input :value="channel.widthMm" type="number" min="1" step="100" aria-label="通道宽度（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { widthMm: Math.max(1, Number(($event.target as HTMLInputElement).value) || channel.widthMm) })"></label>
+                <label>{{ channel.orientation === 'vertical' ? '距左' : '距上' }} mm<input :value="Math.round(channel.offsetMm - (channel.orientation === 'vertical' ? zoneBounds.minX : zoneBounds.minY))" type="number" step="100" aria-label="通道位置（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { offsetMm: Number(($event.target as HTMLInputElement).value) + (channel.orientation === 'vertical' ? zoneBounds.minX : zoneBounds.minY) })"></label>
+              </div>
+              <label class="mt-1 block">两侧净距 mm<input :value="channel.clearanceMm || 0" type="number" min="0" step="50" aria-label="通道两侧净距（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { clearanceMm: Math.max(0, Number(($event.target as HTMLInputElement).value) || 0) })"></label>
+              <label v-if="channel.orientation === 'vertical'" class="mt-1 block"><input :checked="!!channel.fromSecondRow" type="checkbox" aria-label="仅从二排起" @change="updateChannel(channel.id, { fromSecondRow: ($event.target as HTMLInputElement).checked })"> 仅从二排起（首排桌列不断开）</label>
+            </div>
+            <div class="mt-2 flex gap-3">
+              <button class="text-bronze underline" data-testid="add-channel-vertical" @click="addChannel('vertical')">添加纵向通道</button>
+              <button class="text-bronze underline" data-testid="add-channel-horizontal" @click="addChannel('horizontal')">添加横向通道</button>
+            </div>
           </details>
         </div>
 

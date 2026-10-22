@@ -52,4 +52,6 @@ export interface OfficeLayoutSettingsMeta {
   arrangementPresetId?: OfficeArrangementPresetId
   arrangementRuleVersion?: string
   layoutContext?: 'workstation' | 'meeting' | 'other'
+  /** 首排（对组模式的首个对组）相对空间包围盒顶部的毫米深度；仅「仅从二排起」通道存在时由规划器给出，确认校验用它豁免首排。 */
+  firstBlockDepthMm?: number
 }

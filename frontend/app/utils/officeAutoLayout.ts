@@ -2,6 +2,8 @@ import type { ZoneObject } from '~/types/office'
 import type { Arrangement, LayoutRect } from '~/utils/layout'
 import { polygonBoundsMm } from '~/utils/floorPlan'
 import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
+import type { LayoutChannel } from '~/types/layoutPlanning'
+import { axisSegments, channelRects } from '~/utils/layoutChannels'
 
 export type OfficeLayoutMode = Arrangement | 'auto' | 'faceToFace' | 'staggered' | 'centerAisle'
 /** 间距字段按几何语义拆开；旧 gapMm/pairMm 保留兼容读取。 */
@@ -20,7 +22,7 @@ export interface OfficeLayoutSpacing {
   staggerOffsetMm?: number
 }
 export const OFFICE_LAYOUT_SPACING: OfficeLayoutSpacing = { wallMm: 300, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
-export interface OfficeLayoutPlan { slots: LayoutRect[]; rows: number; columns: number; rotated: boolean; problem: string | null; presetId?: OfficeArrangementPresetId; productStyleId?: OfficeProductStyleId }
+export interface OfficeLayoutPlan { slots: LayoutRect[]; rows: number; columns: number; rotated: boolean; problem: string | null; presetId?: OfficeArrangementPresetId; productStyleId?: OfficeProductStyleId; firstBlockDepthMm?: number }
 const EPS = 0.0001 // millimetres; boundary arithmetic only
 const MAX_CELLS = 2000
 type Rect = { x: number; y: number; w: number; h: number }
@@ -61,7 +63,7 @@ function overlaps(a: Rect, b: Rect, gap = 0) {
   return a.x < b.x + b.w + gap - EPS && b.x < a.x + a.w + gap - EPS && a.y < b.y + b.h + gap - EPS && b.y < a.y + a.h + gap - EPS
 }
 
-export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: number, mode: OfficeLayoutMode, spacing: OfficeLayoutSpacing = OFFICE_LAYOUT_SPACING): OfficeLayoutPlan {
+export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: number, mode: OfficeLayoutMode, spacing: OfficeLayoutSpacing = OFFICE_LAYOUT_SPACING, channels: LayoutChannel[] = []): OfficeLayoutPlan {
   const empty = (problem: string | null): OfficeLayoutPlan => ({ slots: [], rows: 0, columns: 0, rotated: false, problem })
   if (zone.reviewUnit !== 'mm' || ![widthMm, depthMm].every(value => Number.isFinite(value) && value >= 10)) return empty('请填写有效的家具毫米尺寸')
   const pairGap = mode === 'faceToFace' ? spacing.faceGapMm ?? spacing.pairMm ?? 900 : spacing.backGapMm ?? spacing.pairMm ?? 0
@@ -71,13 +73,15 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
   const spanX = bounds.maxX - bounds.minX, spanY = bounds.maxY - bounds.minY
   const fit = (length: number, item: number, gap: number) => Math.max(0, Math.floor((length + gap + EPS) / (item + gap)))
   const valid = (slot: LayoutRect) => layoutRectInsideRing({ x: slot.x - spacing.wallMm, y: slot.y - spacing.wallMm, w: slot.w + 2 * spacing.wallMm, h: slot.h + 2 * spacing.wallMm }, zone.polygon!)
+  // 沿边与中央通道模式没有排/列网格，通道作为硬阻挡：落子重叠即跳过，不切断网格。
+  const channelBlockers = channelRects(zone, channels)
 
   if (mode === 'perimeter') {
     const nx = fit(spanX - 2 * spacing.wallMm, widthMm, spacing.gapMm)
     const ny = fit(spanY - 2 * spacing.wallMm, widthMm, spacing.gapMm)
     if (2 * (nx + ny) > MAX_CELLS) return empty('预计数量过多，请增大家具尺寸或间距')
     const slots: LayoutRect[] = []
-    const add = (slot: LayoutRect) => { if (valid(slot) && !slots.some(other => overlaps(slot, other, spacing.gapMm))) slots.push(slot) }
+    const add = (slot: LayoutRect) => { if (valid(slot) && !slots.some(other => overlaps(slot, other, spacing.gapMm)) && !channelBlockers.some(blocker => overlaps(slot, blocker))) slots.push(slot) }
     let topPlaced = false, bottomPlaced = false
     for (let i = 0; i < nx; i++) {
       const x = bounds.minX + (spanX - nx * widthMm - (nx - 1) * spacing.gapMm) / 2 + i * (widthMm + spacing.gapMm)
@@ -125,12 +129,85 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
           const slot = rotated
             ? { x: bounds.maxX - y - widthMm, y: bounds.minY + x, w: widthMm, h: depthMm, rotation: bank === 0 ? 180 : 0 }
             : { x: bounds.minX + x, y: bounds.minY + y, w: depthMm, h: widthMm, rotation: bank === 0 ? 90 : 270 }
-          if (valid(slot)) { slots.push(slot); rows.add(bank * bankRows + row); columns.add(col) }
+          if (valid(slot) && !channelBlockers.some(blocker => overlaps(slot, blocker))) { slots.push(slot); rows.add(bank * bankRows + row); columns.add(col) }
         }
         if (slots.length > best.slots.length) best = { slots, rows: rows.size, columns: columns.size, rotated, problem: null }
       }
     }
     return best.slots.length ? best : empty(exceeded ? '预计数量过多，请增大家具尺寸或间距' : '当前家具尺寸和间距无法放入此空间')
+  }
+
+  // 有通道时走分段排版：纵向通道切列轴、横向通道切排轴，每段独立拟合并居中；
+  // 「仅从二排起」的纵向通道不切断首排（对组模式的首个对组）。无通道时保持原整体拟合逻辑不变。
+  if (channels.length) {
+    const pairedChannelMode = mode === 'backToBack' || mode === 'faceToFace'
+    const channelBlockH = pairedChannelMode ? depthMm * 2 + pairGap : depthMm
+    const grid = (rotated: boolean): OfficeLayoutPlan => {
+      const localW = rotated ? spanY : spanX, localH = rotated ? spanX : spanY
+      // 通道换算到局部坐标：旋转 90° 时世界 X 映射到局部排轴（方向反转），世界 Y 映射到局部列轴。
+      // 「仅从二排起」只对未旋转的纵向通道生效；旋转后它切断的是排轴，按普通通道处理。
+      const colCuts: Array<{ offsetMm: number; widthMm: number; clearanceMm?: number; fromSecondRow?: boolean }> = []
+      const rowCuts: Array<{ offsetMm: number; widthMm: number; clearanceMm?: number }> = []
+      for (const channel of channels) {
+        if (channel.orientation === 'vertical') {
+          if (rotated) rowCuts.push({ offsetMm: bounds.maxX - channel.offsetMm - channel.widthMm, widthMm: channel.widthMm, clearanceMm: channel.clearanceMm })
+          else colCuts.push({ offsetMm: channel.offsetMm - bounds.minX, widthMm: channel.widthMm, clearanceMm: channel.clearanceMm, fromSecondRow: channel.fromSecondRow })
+        } else if (rotated) colCuts.push({ offsetMm: channel.offsetMm - bounds.minY, widthMm: channel.widthMm, clearanceMm: channel.clearanceMm })
+        else rowCuts.push({ offsetMm: channel.offsetMm - bounds.minY, widthMm: channel.widthMm, clearanceMm: channel.clearanceMm })
+      }
+      const steadyColCuts = colCuts.filter(cut => !cut.fromSecondRow)
+      const deferredColCuts = colCuts.filter(cut => cut.fromSecondRow)
+      const fullRow = [{ start: spacing.wallMm, length: localH - 2 * spacing.wallMm }]
+      const fullCol = [{ start: spacing.wallMm, length: localW - 2 * spacing.wallMm }]
+      const rowSegments = rowCuts.length ? axisSegments(0, localH, spacing.wallMm, rowCuts, channelBlockH) : fullRow
+      const steadyColSegments = steadyColCuts.length ? axisSegments(0, localW, spacing.wallMm, steadyColCuts) : fullCol
+      const deferredColSegments = deferredColCuts.length ? axisSegments(0, localW, spacing.wallMm, [...steadyColCuts, ...deferredColCuts]) : steadyColSegments
+      if (!rowSegments.length || !steadyColSegments.length || !deferredColSegments.length) return empty('通道占满可用空间，请调整通道位置或宽度')
+      const totalBlocks = rowSegments.reduce((sum, segment) => sum + fit(segment.length, channelBlockH, spacing.aisleMm), 0)
+      const maxFitCols = Math.max(...steadyColSegments.map(segment => fit(segment.length, widthMm, spacing.gapMm)))
+      if (totalBlocks * maxFitCols * (pairedChannelMode ? 2 : 1) > MAX_CELLS) return empty('预计数量过多，请增大家具尺寸或间距')
+      const slots: LayoutRect[] = [], rows = new Set<number>()
+      let globalRow = 0, maxRowCols = 0, firstBlockDepthMm: number | undefined, firstBlockEmitted = false
+      rowSegments.forEach((rowSegment, segmentIndex) => {
+        let blocks = fit(rowSegment.length, channelBlockH, spacing.aisleMm)
+        if (mode === 'row') blocks = segmentIndex === 0 ? Math.min(1, blocks) : 0
+        if (!blocks) return
+        const usedH = blocks * channelBlockH + (blocks - 1) * spacing.aisleMm
+        const y0 = rowSegment.start + (rowSegment.length - usedH) / 2
+        for (let block = 0; block < blocks; block++) {
+          const isFirstBlock = !firstBlockEmitted
+          firstBlockEmitted = true
+          // 首个对组的局部排轴终点即世界坐标下相对包围盒顶部的深度（fromSecondRow 仅未旋转时生效）。
+          if (isFirstBlock && deferredColCuts.length && !rotated) firstBlockDepthMm = y0 + block * (channelBlockH + spacing.aisleMm) + channelBlockH
+          const colSegments = isFirstBlock ? steadyColSegments : deferredColSegments
+          for (let sub = 0; sub < (pairedChannelMode ? 2 : 1); sub++) {
+            const y = y0 + block * (channelBlockH + spacing.aisleMm) + sub * (depthMm + pairGap)
+            const rotationRow = pairedChannelMode ? sub : globalRow
+            let rowCols = 0
+            for (const colSegment of colSegments) {
+              const cols = fit(colSegment.length, widthMm, spacing.gapMm)
+              if (!cols) continue
+              const usedW = cols * widthMm + (cols - 1) * spacing.gapMm
+              const x0 = colSegment.start + (colSegment.length - usedW) / 2
+              for (let col = 0; col < cols; col++) {
+                const x = x0 + col * (widthMm + spacing.gapMm)
+                  + (mode === 'staggered' && globalRow % 2 === 1 && cols > 1 ? (widthMm + spacing.gapMm) / 2 : 0)
+                const slot = rotated
+                  ? { x: bounds.maxX - y - depthMm, y: bounds.minY + x, w: depthMm, h: widthMm, rotation: 90 }
+                  : { x: bounds.minX + x, y: bounds.minY + y, w: widthMm, h: depthMm, rotation: ((mode === 'faceToFace' && rotationRow % 2 === 0) || (mode === 'backToBack' && rotationRow % 2 === 1)) ? 180 : 0 }
+                if (valid(slot)) { slots.push(slot); rows.add(globalRow); rowCols++ }
+              }
+            }
+            maxRowCols = Math.max(maxRowCols, rowCols)
+            globalRow++
+          }
+        }
+      })
+      if (!slots.length) return empty('当前家具尺寸、间距和通道无法放入此空间')
+      return { slots, rows: rows.size, columns: maxRowCols, rotated, problem: null, firstBlockDepthMm }
+    }
+    const channelCandidates = (mode === 'auto' ? [false, true] : [false]).map(rotated => grid(rotated))
+    return channelCandidates.reduce((best, candidate) => candidate.slots.length > best.slots.length ? candidate : best, empty(null))
   }
 
   let best = empty(null), exceeded = false

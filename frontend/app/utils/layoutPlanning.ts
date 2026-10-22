@@ -7,9 +7,10 @@ import { canvasZoneBounds } from './officeCanvasView'
 import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
 import { zoneLayoutExclusions } from './spatial/obstacles'
 import { rectOverlapsBlocker } from './layoutConstraints'
+import { channelRects, validateChannels } from './layoutChannels'
 
 export function defaultLayoutPreferences(): LayoutPreferences {
-  return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, exclusions: [] }
+  return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, exclusions: [], channels: [] }
 }
 
 export function layoutSourceKey(zone: ZoneObject, existing: FurnitureObject[]) {
@@ -51,11 +52,16 @@ export function chairActivityRect(item: FurnitureObject, clearance: number): Rec
 
 export function confirmedLayoutProblem(zone: ZoneObject, furniture: FurnitureObject[]) {
   const exclusions = zoneLayoutExclusions(zone)
+  // 通道是全空间约束：「仅从二排起」的通道用已保存排版的首排深度豁免首排，没有该记录时按全深校验。
+  const savedChannels = zone.layoutPreferences?.channels || []
+  const firstBlockDepthMm = furniture.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
+  const channelBlockers = savedChannels.length ? channelRects(zone, savedChannels, firstBlockDepthMm) : []
   for (const item of furniture) {
     const others = furniture.filter(other => other.id !== item.id)
     const saved = item.layoutGroupId ? item.layoutSettings?.spacing : undefined
     const problem = officePlacementProblem(zone, item, others, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
     if (problem) return problem
+    if (channelBlockers.some(rect => rectOverlapsBlocker(officeFurnitureFootprint(item), rect))) return '家具压占通道，请调整家具或通道位置'
     const activity = chairActivityRect(item, zone.layoutPreferences?.seatClearanceMm || 0)
     if (activity && (!layoutRectInsideRing(activity, zone.polygon || []) || others.some(other => overlap(activity, officeFurnitureFootprint(other))) || exclusions.some(area => rectOverlapsBlocker(activity, area)))) return '椅子活动区被占用，请调整位置或拉椅预留'
   }
@@ -66,10 +72,14 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   // Preserve the reference topology while adapting its repeat count to the room.
   if (request.module.category === '职员桌') request = { ...request, spacing: { ...request.spacing, gapMm: 0 } }
   const prefs = request.preferences
+  const meeting = request.module.category === '会议与洽谈'
+  const general = request.productStyleId === 'general'
+  const channels = prefs.channels || []
   const exclusions = zoneLayoutExclusions({ ...zone, layoutPreferences: prefs })
   const replaceIds = replaceableLayoutIds(zone, existing, request)
   const retained = existing.filter(item => item.zoneId === zone.id && !replaceIds.includes(item.id))
   const result: LayoutProposal = { furniture: [], replaceIds, retainedIds: retained.map(item => item.id), seats: 0, shortfall: prefs.targetSeats, label: '', problem: null, warnings: [exclusions.length ? '已按已记录的柱、门洞净空和禁放区避障；请复核现场通道' : '门窗、柱及真实通道尚未自动核验；请在空间核对中补充'], sourceKey: layoutSourceKey(zone, existing) }
+  if (channels.length && !general) result.warnings.push('「仅从二排起」仅对课桌式网格排布生效；当前排布按全深避让通道')
   const problem = automaticModuleProblem(zone, request)
   if (problem) return { ...result, problem }
   const { widthMm: w, depthMm: d, spacing } = request
@@ -78,8 +88,13 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
     || !Number.isInteger(prefs.targetSeats) || prefs.targetSeats > 500 || exclusions.some(r => ![r.x, r.y, r.w, r.h].every(Number.isFinite) || r.w <= 0 || r.h <= 0)) {
     return { ...result, problem: '请检查毫米尺寸、非负间距、目标人数或数量（0—500 整数）及禁放区尺寸' }
   }
+  const channelProblem = channels.length ? validateChannels(zone, channels) : null
+  if (channelProblem) return { ...result, problem: channelProblem }
   const bounds = canvasZoneBounds(zone)
-  const blockers = [...retained.map(officeFurnitureFootprint), ...exclusions]
+  // 课桌式网格由 planOfficeFurniture 原生切段排版，通道不进 blockers（否则首排豁免和贴边落子会被间距规则误杀）；
+  // 会议/职员桌等排布把通道作为硬阻挡并入既有避障。
+  const channelBlockers = general ? [] : channelRects(zone, channels)
+  const blockers = [...retained.map(officeFurnitureFootprint), ...exclusions, ...channelBlockers]
   const valid = (item: FurnitureObject, peers: FurnitureObject[], wall = spacing.wallMm, clearance = 0) => {
     const footprint = officeFurnitureFootprint(item)
     const expanded = { x: footprint.x - wall, y: footprint.y - wall, w: footprint.w + wall * 2, h: footprint.h + wall * 2 }
@@ -95,8 +110,6 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
     layoutSettings: { mode: 'auto', spacing: { ...spacing }, productStyleId: request.productStyleId, arrangementPresetId: request.presetId,
       arrangementRuleVersion: OFFICE_ARRANGEMENT_RULE_VERSION, layoutContext: request.module.category === '会议与洽谈' ? 'meeting' : request.module.category === '职员桌' ? 'workstation' : 'other' },
   })
-  const meeting = request.module.category === '会议与洽谈'
-  const general = request.productStyleId === 'general'
   const retainedSeats = general ? retained.filter(entry => entry.furnitureTemplateId === request.module.id).length : furnitureSeatCount(retained, meeting)
   const neededSeats = Math.max(0, prefs.targetSeats - retainedSeats)
   if (!meeting && prefs.targetSeats > 0 && neededSeats === 0) return { ...result, seats: retainedSeats, shortfall: 0, problem: '保留家具已满足目标，无需自动添加；可调整目标或逐件编辑' }
@@ -150,7 +163,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
     }
   } else {
     const plans = [general
-      ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing)
+      ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing, channels)
       : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)]
     for (const plan of plans) {
       const furniture: FurnitureObject[] = []
@@ -161,6 +174,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
         if (slot.mirrorX) entry.mirrorX = true
         entry.layoutClusterId = slot.clusterId
         if (entry.layoutSettings && plan.presetId) entry.layoutSettings.arrangementPresetId = plan.presetId
+        if (entry.layoutSettings && plan.firstBlockDepthMm) entry.layoutSettings.firstBlockDepthMm = plan.firstBlockDepthMm
         if (valid(entry, furniture, spacing.wallMm, spacing.aisleMm)) furniture.push(entry)
       }
       // The planner has already skipped complete blocked cells, never individual members.

@@ -10,7 +10,9 @@ import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/off
 import { chairActivityRect } from '~/utils/layoutPlanning'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
-import type { LayoutExclusion } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutExclusion } from '~/types/layoutPlanning'
+import type { LayoutBlocker } from '~/utils/layoutConstraints'
+import { channelRects, channelOffsetRange } from '~/utils/layoutChannels'
 
 
 const store = useOfficeStore()
@@ -82,6 +84,26 @@ const visibleZones = computed(() => visibleObjects.value.filter((o) => o.kind ==
 const arrows = computed(() => visibleObjects.value.filter((o) => o.kind === 'arrow'))
 const designZone = computed(() => zones.value.find((z) => z.id === store.designZoneId) || null)
 const designObstacles = computed(() => designZone.value ? zoneLayoutExclusions(designZone.value, false) : [])
+/** 通道条带：渲染和拖动都用全深矩形；「仅从二排起」的实际断开位置由排版预览体现。 */
+const designChannels = computed(() => {
+  const zone = designZone.value
+  if (!zone) return [] as Array<{ channel: LayoutChannel; rect: LayoutBlocker }>
+  return (zone.layoutPreferences?.channels || [])
+    .map(channel => ({ channel, rect: channelRects(zone, [channel])[0] }))
+    .filter((entry): entry is { channel: LayoutChannel; rect: LayoutBlocker } => !!entry.rect)
+})
+function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
+  const delta = drag.value?.mode === 'channel' && drag.value.channelId === entry.channel.id ? drag.value.dx || 0 : 0
+  const vertical = entry.channel.orientation === 'vertical'
+  return {
+    left: entry.rect.x + (vertical ? delta : 0) + 'px',
+    top: entry.rect.y + (vertical ? 0 : delta) + 'px',
+    width: entry.rect.w + 'px',
+    height: entry.rect.h + 'px',
+    background: 'repeating-linear-gradient(45deg, rgba(48,111,203,0.10) 0 12px, rgba(48,111,203,0.02) 12px 24px)',
+    border: `${1.5 / store.zoom}px dashed #306fcb`,
+  }
+}
 function obstaclePoints(area: LayoutExclusion) {
   const polygon = area.polygon || [[area.x, area.y], [area.x + area.w, area.y], [area.x + area.w, area.y + area.h], [area.x, area.y + area.h]]
   return polygon.map(([x, y]) => `${x - area.x},${y - area.y}`).join(' ')
@@ -207,7 +229,7 @@ function rotateView(degrees: number) {
 }
 
 interface DragState {
-  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow'
+  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow' | 'channel'
   cx?: number
   cy?: number
   px?: number
@@ -223,6 +245,8 @@ interface DragState {
   ids?: string[]
   dx?: number
   dy?: number
+  channelId?: string
+  orientation?: 'vertical' | 'horizontal'
 }
 
 const drag = ref<DragState | null>(null)
@@ -267,6 +291,14 @@ function onWheel(e: WheelEvent) {
   e.preventDefault()
   store.zoom = Math.max(0.00001, Math.min(2.3, store.zoom * (e.deltaY < 0 ? 1.09 : 1 / 1.09)))
   placeBoard()
+}
+
+function onChannelPointerDown(channel: LayoutChannel, e: PointerEvent) {
+  if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || placing.value || !canvasWindow.value) return
+  const p = point(e)
+  drag.value = { mode: 'channel', channelId: channel.id, orientation: channel.orientation, cx: p.x, cy: p.y, ox: channel.offsetMm, dx: 0 }
+  canvasWindow.value.setPointerCapture(e.pointerId)
+  e.preventDefault()
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -380,6 +412,14 @@ function onPointerMove(e: PointerEvent) {
     const ids = new Set(d.ids)
     const candidates = furniture.value.filter(item => ids.has(item.id)).map(item => ({ ...item, x: item.x + d.dx!, y: item.y + d.dy! }))
     moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, furniture.value) || ''
+  } else if (d.mode === 'channel' && d.channelId) {
+    const p = point(e)
+    let dx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
+    // 预览即钳制：通道（含净距）不允许拖出空间包围盒，松手提交同一值。
+    const channel = (designZone.value?.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
+    const range = channel && designZone.value ? channelOffsetRange(designZone.value, channel) : null
+    if (range) dx = Math.min(Math.max(dx, range.lo - (d.ox || 0)), range.hi - (d.ox || 0))
+    d.dx = dx
   } else if (d.mode === 'marquee') {
     const p = point(e)
     d.lastX = p.x
@@ -463,6 +503,13 @@ function onPointerUp(e: PointerEvent) {
   } else if (d.mode === 'furniture' && d.ids?.length && store.designZoneId) {
     const dx = d.dx || 0, dy = d.dy || 0
     if (dx || dy) moveProblem.value = store.moveFurnitureGroup(d.ids, store.designZoneId, dx, dy) || ''
+  } else if (d.mode === 'channel' && d.channelId && store.designZoneId) {
+    // 拖动只改垂直轴向位置；松手一次性提交，走 store 的失效与撤销路径。
+    if (d.dx) {
+      const offsetMm = Math.round((d.ox || 0) + d.dx)
+      const channels = (designZone.value?.layoutPreferences?.channels || []).map(channel => channel.id === d.channelId ? { ...channel, offsetMm } : channel)
+      store.updateZoneChannels(store.designZoneId, channels)
+    }
   } else if (d.mode === 'arrow') {
     const p = point(e)
     if (Math.abs(p.x - (d.x || 0)) + Math.abs(p.y - (d.y || 0)) > 30) {
@@ -774,6 +821,21 @@ function furnitureProduct(o: FurnitureObject) {
               <polygon :points="obstaclePoints(area)" :fill="area.label === '门洞净空' ? '#2586a022' : '#b44f4522'" :stroke="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :stroke-width="2 / store.zoom" stroke-dasharray="6 3" />
               <text x="4" y="14" :fill="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :font-size="11 / store.zoom" font-weight="600">{{ area.label }}</text>
             </svg>
+          </div>
+        </div>
+
+        <div v-if="mode === 'design' && designChannels.length" class="absolute inset-0 pointer-events-none" data-testid="layout-channels">
+          <div
+            v-for="entry in designChannels"
+            :key="entry.channel.id"
+            :data-channel-id="entry.channel.id"
+            class="pointer-events-auto absolute select-none"
+            :class="entry.channel.orientation === 'vertical' ? 'cursor-ew-resize' : 'cursor-ns-resize'"
+            :title="`通道 ${entry.channel.widthMm} mm${entry.channel.clearanceMm ? ` + 两侧净距 ${entry.channel.clearanceMm} mm` : ''}${entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 仅从二排起' : ''} · 拖动调整位置，宽度与净距在排版面板编辑`"
+            :style="channelStyle(entry)"
+            @pointerdown.stop="onChannelPointerDown(entry.channel, $event)"
+          >
+            <span class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-semibold pointer-events-none" :style="{ top: 4 / store.zoom + 'px', fontSize: 11 / store.zoom + 'px', color: '#306fcb' }">通道 {{ entry.channel.widthMm }}{{ entry.channel.clearanceMm ? `+2×${entry.channel.clearanceMm}` : '' }}{{ entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 二排起' : '' }}</span>
           </div>
         </div>
 

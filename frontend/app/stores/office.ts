@@ -40,10 +40,11 @@ import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFrom
 import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
-import type { LayoutRequest } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutRequest } from '~/types/layoutPlanning'
 import type { SpatialObstacle } from '~/types/spatial'
 import { migrateLegacyDoorClearances } from '~/utils/spatial/obstacles'
 import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem } from '~/utils/layoutPlanning'
+import { clampChannelsToZone } from '~/utils/layoutChannels'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 // Read existing drafts once so the workspace rename preserves browser data.
@@ -1083,6 +1084,19 @@ export const useOfficeStore = defineStore('office', {
       this.objectUpdate(() => {
         this.objects = this.objects.filter((o) => !(o.kind === 'furniture' && o.zoneId === zoneId))
       })
+    },
+
+    updateZoneChannels(zoneId: string, channels: LayoutChannel[]) {
+      const zone = this.zones.find(zone => zone.id === zoneId)
+      if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
+      // 通道（含净距）钳制在空间包围盒内，不允许拖出或输入到空间外。
+      const clamped = clampChannelsToZone(zone, channels)
+      this.objectUpdate(() => {
+        zone.layoutPreferences = { ...zone.layoutPreferences, channels: JSON.parse(JSON.stringify(clamped)) }
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+      })
+      return true
     },
 
     applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string) {
