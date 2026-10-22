@@ -15,7 +15,8 @@ import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProduc
 
 const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: LayoutPreferences['exclusions'] } | null] }>()
 const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
-const showPreview = ref(true)
+// Off by default: entering a space shows only actually placed furniture. Selecting a module/preset or the checkbox enables the proposal preview.
+const showPreview = ref(false)
 const store = useOfficeStore()
 const templateRouter = useRouter()
 const collapsed = ref(false)
@@ -165,7 +166,7 @@ onUnmounted(() => emit('preview', null))
 // A manual delete/clear is an intentional removal: pause the proposal preview
 // so the canvas shows only what is actually placed, instead of immediately
 // re-drawing the removed modules as dimmed ghosts. Re-enable via the checkbox.
-watch(() => store.lastManualFurnitureRemoval, mark => { if (mark && mark.zoneId === zone.value?.id) showPreview.value = false })
+watch(() => store.lastManualFurnitureEdit, mark => { if (mark && mark.zoneId === zone.value?.id) showPreview.value = false })
 function addExclusion() {
   if (!zone.value) return
   const bounds = canvasZoneBounds(zone.value)
@@ -173,11 +174,13 @@ function addExclusion() {
 }
 
 function selectModule(template: OfficeModuleTemplate) {
+  showPreview.value = true
   store.cancelFurniturePlacement()
   selectedModule.value = template
 }
 
 function selectPreset(id: OfficeArrangementPresetId) {
+  showPreview.value = true
   const preset = officeArrangementPreset(id)
   if (!preset || !preset.styleIds.includes(productStyle.value)) return
   presetId.value = id
@@ -249,6 +252,7 @@ function unconfirmLayout() {
 function clearLayout() {
   if (!zone.value) return
   store.clearFurniture(zone.value.id)
+  showPreview.value = false
   store.unconfirmLayout(zone.value.id)
 }
 
@@ -351,7 +355,7 @@ function clearLayout() {
           </template>
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
-          <p v-if="!showPreview" class="text-[10px] text-muted mt-1">预览已关闭：删除或清空后画布只显示实际已放置的家具；重新勾选可查看当前方案预览。</p>
+          <p v-if="!showPreview" class="text-[10px] text-muted mt-1">预览已关闭：画布只显示实际已放置的家具；选择模块/排布或勾选后查看方案预览，删除或清空排版会自动关闭预览。</p>
           <details><summary class="cursor-pointer">入口与禁放区 · {{ preferences.exclusions.length }}</summary>
             <p v-if="buildingConstraints.length" class="mt-2 rounded bg-[#f9eeeb] p-2 text-[10px] text-[#a24f45]">空间核对已标注 {{ buildingConstraints.length }} 处建筑约束，会自动参与避障；请返回空间核对修改。</p>
             <p class="mt-2 text-[10px] text-muted">从空间左上角起量，单位 mm；红框区域不可摆放。</p>

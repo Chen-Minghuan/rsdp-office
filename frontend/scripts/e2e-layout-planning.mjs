@@ -49,6 +49,7 @@ try {
   await catalog.waitFor()
   assert.equal(await catalog.locator('[data-module-id="table-conference-rect"]').getAttribute('aria-pressed'), 'true')
   const snapshot = await state()
+  await catalog.locator('[data-module-id="table-conference-rect"]').click() // preview appears after an explicit module choice
   assert.ok(await page.locator('[data-preview-id]').count() > 1)
   assert.deepEqual((await state()).objects, snapshot.objects, 'preview never writes objects')
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('8')

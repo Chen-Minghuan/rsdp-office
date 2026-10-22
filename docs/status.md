@@ -4,13 +4,31 @@
 2026-10-22 LAYOUT-020 边缘补位：针对"空间排不下时不会像参考方案灵活调整"的反馈，自适应排版改为两阶段填充——主参考单元网格不变，边缘余量沿墙单件补位（座位朝内），完整单元放不下时降级为沿墙补位起步方案；规则版本 `2026-10-edge-fill-v7`，旧布局需显式重新应用。构建、自适应/规划等六组纯函数测试、参考图例/自适应/自动排版/规划/模块选择/流程 UI mock 通过，已人工核查补位截图，见[任务记录](tasks/LAYOUT-020-edge-fill-layout.md)。
 
 2026-10-22 排版细节修正：直线桌/一字屏风卡位座席线稿靠背改为远离桌子一侧；修复删除选中模块/清空排版后画布仍以半透明虚框显示待应用预览的问题——手动删除/清空会暂停当前空间的待应用预览（可重新勾选恢复），并修复清空排版需两次撤销的冗余快照。构建与十二组 UI mock/纯函数回归通过，见[任务记录](tasks/LAYOUT-020-edge-fill-layout.md)补记。
+
+2026-10-22 待应用预览追修：进入单空间设计不再自动显示预览（选择模块/排布或勾选才出现），删除/清空/移动/逐件添加即暂停当前空间预览（可重新勾选恢复），切换模块预览时隐藏将被替换的自动组避免重叠的预览机制沿用同一入口。构建与全部排版相关 UI mock/纯函数/冒烟回归通过，见[任务记录](tasks/LAYOUT-020-edge-fill-layout.md)补记三、四。
+
+2026-10-22 预览幽灵修复：应用方案后手动移动家具，原位置不再留下待应用预览虚框——手动编辑标记（lastManualFurnitureEdit）扩展到单件/整组移动与逐件添加，触发即暂停当前空间预览，可重新勾选。构建与全部排版回归通过，见[任务记录](tasks/LAYOUT-020-edge-fill-layout.md)补记四。
+
+
+
+
+
+
 2026-10-21 HTTPS 入口启用：用户提供的阿里云 DV 证书（覆盖 rooom.vip/www.rooom.vip，至 2027-01-16）已部署到 443；原静态站保留，`https://rooom.vip/office/` 代理应用，Cookie 恢复 Secure，真实 DNS 全流程复测通过。HTTP 80/8081 入口按用户要求保留，未做 80→443 跳转；证书到期需手动续换。
+
+
 
 2026-10-21 域名 DNS 切换完成：`rooom.vip` 旧 A 记录 `120.77.15.115` 已删除（此前双 A 轮询导致旧服务器 301 跳 `https://www.rooom.vip`，静态资源跨源失败）。权威与主流递归实测只剩本实例，`http://rooom.vip/office/` 真实 DNS 全流程复测通过；`www` 仍指旧服务器按需处理，个别递归 TTL 残留为过渡现象。
 
+
+
 2026-10-21 测试产物清理：按用户要求 e2e 脚本不再生成截图（space-review/space-template/dimension-calibration/workflows/render-preview/drawing-entry 及两个公网复测脚本），`output/` 与 `frontend/screenshots/` 已删除并加入 .gitignore。顺带修复三个被合并变更遗留下来的 UI 回归：space-review/dimension-calibration/workflows 补 auth mock，workflows 适配商品页 20 条分页、详情改路由页、导入改预览/校验/确认三段接口；import.vue 结果到达后清除离开守卫残留提示。build、drawing-entry、templates、render-preview、dimensions、space-review、workflows 及两个公网复测全部通过。
 
+
+
 2026-10-21 Jenkins 改造按用户决定从简：曾完成 CI/CD 双任务拆分方案（本地验证后已还原），最终保留现有单一 `rsdp-office` 任务与 `DEPLOY=false` 默认只构建、手动勾选才发布的流程，Jenkinsfile 与 deploy.sh 均不改动；仅补 `deploy/.env.example` 子路径端口示例。现有流程已满足：SCM 轮询自动测试构建、测试失败不进入部署、部署仅限当前 origin/main、健康检查失败即任务失败。
+
+
 
 2026-10-20 域名子路径入口：[DEPLOY-004](tasks/DEPLOY-004-domain-subpath.md) 已实现 `http://rooom.vip/office/`。新增 `frontend-office` 双基座容器与 80 站点 `/office/` 代理，IP 8081 与原站点不受影响；识别绝对资源地址跨入口 401 由前端同源化修复，新识别经 `X-Forwarded-Prefix` 落子路径。强制解析公网复测（登录/文件选择/云端画布/底图/退出）与 8081 回归通过；DNS 旧 A 记录 `120.77.15.115` 待用户删除后域名正式生效。
 

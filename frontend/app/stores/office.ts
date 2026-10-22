@@ -75,8 +75,8 @@ interface OfficeState {
   spaceTemplate: SpaceTemplate | null
   customModules: CustomOfficeModule[]
   furniturePlacement: OfficeFurniturePlacement | null
-  /** Session-only signal: the user manually removed furniture in a zone; the design sidebar pauses the proposal preview so deletions are visibly real. */
-  lastManualFurnitureRemoval: { zoneId: string; at: number } | null
+  /** Session-only signal: the user manually edited furniture in a zone (delete/clear/move/place); the design sidebar pauses the proposal preview so the canvas shows only what is actually placed. */
+  lastManualFurnitureEdit: { zoneId: string; at: number } | null
   syncState: 'idle' | 'saving' | 'saved' | 'error'
   syncError: string | null
 }
@@ -108,7 +108,7 @@ function defaultState(): OfficeState {
     spaceTemplate: null,
     customModules: [],
     furniturePlacement: null,
-    lastManualFurnitureRemoval: null,
+    lastManualFurnitureEdit: null,
     syncState: 'idle',
     syncError: null,
   }
@@ -276,7 +276,7 @@ export const useOfficeStore = defineStore('office', {
 
     saveLocal() {
       if (typeof window === 'undefined') return
-      const { furniturePlacement, syncState, syncError, lastManualFurnitureRemoval, ...persisted } = this.$state
+      const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     },
@@ -412,7 +412,7 @@ export const useOfficeStore = defineStore('office', {
       this.objectUpdate(() => {
         this.objects = this.objects.filter(object => object.id !== id)
         if (target.kind === 'furniture') {
-          this.lastManualFurnitureRemoval = { zoneId: target.zoneId, at: Date.now() }
+          this.lastManualFurnitureEdit = { zoneId: target.zoneId, at: Date.now() }
           this.furnitureForZone(target.zoneId).forEach(item => { item.layoutConfirmed = false })
           this.submitted = null
         }
@@ -446,7 +446,7 @@ export const useOfficeStore = defineStore('office', {
       const items = this.furnitureForZone(zoneId).filter(item => selected.has(item.id))
       if (!items.length || items.length !== selected.size) return false
       this.objectUpdate(() => {
-      this.lastManualFurnitureRemoval = { zoneId, at: Date.now() }
+      this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
         this.objects = this.objects.filter(object => !selected.has(object.id))
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null
@@ -464,6 +464,7 @@ export const useOfficeStore = defineStore('office', {
       const candidates = items.map(item => ({ ...item, x: item.x + dx, y: item.y + dy }))
       const problem = officeFurnitureMoveProblem(zone, candidates, current)
       if (problem) return problem
+      this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
       this.objectUpdate(() => {
         items.forEach(item => { item.x += dx; item.y += dy })
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
@@ -479,6 +480,7 @@ export const useOfficeStore = defineStore('office', {
         this.updateZonePolygon(id, o.polygon.map(([px, py]) => [px + x - o.x, py + y - o.y]))
         return
       }
+      if (o.kind === 'furniture') this.lastManualFurnitureEdit = { zoneId: o.zoneId, at: Date.now() }
       o.x = x
       o.y = y
       this.canvasRevision++
@@ -1049,6 +1051,7 @@ export const useOfficeStore = defineStore('office', {
       item.templateSpaceId = zone.id
       this.objectUpdate(() => {
         this.furnitureForZone(zone.id).forEach(furniture => { furniture.layoutConfirmed = false })
+      this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
         this.submitted = null
         this.objects.push(item)
       })
@@ -1057,7 +1060,7 @@ export const useOfficeStore = defineStore('office', {
 
     clearFurniture(zoneId: string) {
       this.cancelFurniturePlacement()
-      if (this.objects.some(o => o.kind === 'furniture' && o.zoneId === zoneId)) this.lastManualFurnitureRemoval = { zoneId, at: Date.now() }
+      if (this.objects.some(o => o.kind === 'furniture' && o.zoneId === zoneId)) this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
       this.objectUpdate(() => {
         this.objects = this.objects.filter((o) => !(o.kind === 'furniture' && o.zoneId === zoneId))
       })
