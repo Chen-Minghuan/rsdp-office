@@ -42,7 +42,7 @@ try {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
     const zone = (id, x) => ({ id, kind: 'zone', x, y: 0, w: 6000, h: 4000, name: id, zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[x,0],[x+6000,0],[x+6000,4000],[x,4000]] })
     const furniture = (id, zoneId, x, y) => ({ id, kind: 'furniture', zoneId, furnitureTemplateId: 'desk-straight', productId: '', label: id, x, y, w: 800, h: 500, rotation: 0, layoutConfirmed: true })
-    draft.objects = [zone('ROOM', 0), zone('OTHER', 10000), furniture('A', 'ROOM', 500, 1000), furniture('B', 'ROOM', 2000, 1000), furniture('C', 'ROOM', 4000, 1000), furniture('D', 'OTHER', 11000, 1000)]
+    draft.objects = [zone('ROOM', 0), zone('OTHER', 10000), furniture('A', 'ROOM', 500, 1000), furniture('B', 'ROOM', 2000, 1000), furniture('C', 'ROOM', 4000, 1000), furniture('D', 'OTHER', 11000, 1000), furniture('E', 'ROOM', 5200, 1000)]
     draft.floorPlan = null
     draft.spaceTemplate = null
     draft.canvasMode = 'overview'
@@ -81,7 +81,7 @@ try {
   await item('A').click()
   await item('B').click({ modifiers: ['Control'] })
   await page.keyboard.press('Delete')
-  assert.equal((await items()).filter(f => f.zoneId === 'ROOM').length, 1)
+  assert.deepEqual((await items()).filter(f => f.zoneId === 'ROOM').map(f => f.id).sort(), ['C', 'E'])
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await items(), initial, '批量删除也只产生一次撤销记录')
   await item('A').click()
@@ -91,6 +91,28 @@ try {
   assert.notEqual(persistedMove.find(f => f.id === 'A').x, initial.find(f => f.id === 'A').x)
   await page.reload({ waitUntil: 'networkidle' })
   assert.deepEqual(await items(), persistedMove, '整组移动刷新后保持')
+  // Rotate and mirror operate on the selection: applied, undoable, rejected when invalid, reload-persistent.
+  await item('C').click()
+  await page.getByTestId('rotate-selection').click()
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 90)
+  assert.equal((await items()).find(f => f.id === 'C').layoutConfirmed, false)
+  await page.getByTestId('mirror-selection').click()
+  assert.equal((await items()).find(f => f.id === 'C').mirrorX, true)
+  await page.keyboard.press('r')
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 180)
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 90)
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await items()).find(f => f.id === 'C').mirrorX, undefined)
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 0)
+  await item('E').click()
+  await page.keyboard.press('r')
+  await page.keyboard.press('r')
+  await page.keyboard.press('r')
+  assert.equal((await items()).find(f => f.id === 'E').rotation, 180, '座位区越界的旋转被拒绝且不写入')
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal((await items()).find(f => f.id === 'E').rotation, 180)
   // Manual arranging snaps to walls and other modules within 50mm; the toolbar toggle disables it.
   const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
   const beforeSnap = await items()
@@ -109,7 +131,7 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await items(), beforeSnap, '吸附移动每次各产生一次撤销记录')
   assert.deepEqual(errors, [])
-  console.log('家具多选 UI 通过：Shift/Ctrl 多选、框选、整组移动、碰撞/越界拒绝、一次撤销、刷新、批量删除与其他空间隔离；API 模拟。')
+  console.log('家具多选 UI 通过：Shift/Ctrl 多选、框选、整组移动、旋转 90°/水平镜像（含拒绝与撤销）、碰撞/越界拒绝、一次撤销、刷新、批量删除与其他空间隔离；API 模拟。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

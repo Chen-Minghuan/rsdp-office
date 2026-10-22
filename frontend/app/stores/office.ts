@@ -473,6 +473,38 @@ export const useOfficeStore = defineStore('office', {
       return null
     },
 
+    rotateFurnitureGroup(ids: string[], zoneId: string): string | null {
+      const zone = this.zones.find(item => item.id === zoneId)
+      const selected = new Set(ids)
+      const current = this.furnitureForZone(zoneId)
+      const items = current.filter(item => selected.has(item.id))
+      if (!zone || !items.length || items.length !== selected.size) return '所选家具无效'
+      // Rotation swaps the footprint of non-square modules; revalidate bounds and overlaps.
+      const candidates = items.map(item => ({ ...item, rotation: ((item.rotation + 90) % 360 + 360) % 360 }))
+      const problem = officeFurnitureMoveProblem(zone, candidates, current)
+      if (problem) return problem
+      this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
+      this.objectUpdate(() => {
+        items.forEach(item => { item.rotation = ((item.rotation + 90) % 360 + 360) % 360 })
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+      })
+      return null
+    },
+
+    mirrorFurnitureGroup(ids: string[], zoneId: string): string | null {
+      const selected = new Set(ids)
+      const items = this.furnitureForZone(zoneId).filter(item => selected.has(item.id))
+      if (!items.length || items.length !== selected.size) return '所选家具无效'
+      // Mirroring keeps the footprint; only the glyph and the seat-corner sides flip.
+      this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
+      this.objectUpdate(() => {
+        items.forEach(item => { item.mirrorX = !item.mirrorX })
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+      })
+      return null
+    },
     moveObject(id: string, x: number, y: number) {
       const o = this.objects.find((o) => o.id === id)
       if (!o) return

@@ -268,6 +268,16 @@ function deleteSelection() {
   }
 }
 
+function rotateSelection() {
+  if (mode.value !== 'design' || !store.designZoneId || !selectedFurnitureIds.value.length) return
+  moveProblem.value = store.rotateFurnitureGroup(selectedFurnitureIds.value, store.designZoneId) || ''
+}
+
+function mirrorSelection() {
+  if (mode.value !== 'design' || !store.designZoneId || !selectedFurnitureIds.value.length) return
+  moveProblem.value = store.mirrorFurnitureGroup(selectedFurnitureIds.value, store.designZoneId) || ''
+}
+
 function chooseTool(t: string) {
   if (mode.value === 'design' && ['zone', 'arrow'].includes(t)) return
   tool.value = t
@@ -855,6 +865,8 @@ function furnitureProduct(o: FurnitureObject) {
 
     <div v-if="selectedFurnitureItems.length && !placing" class="absolute right-4 top-4 z-10 max-w-[60%] flex items-center gap-2 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-sm" @pointerdown.stop>
       <span class="text-xs truncate">{{ selectedFurnitureItems.length === 1 ? (selectedFurniture?.label || '已选家具模块') : `已选 ${selectedFurnitureItems.length} 件模块` }}</span>
+      <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="旋转 90°（R）" data-testid="rotate-selection" @click.stop="rotateSelection">旋转 90°</button>
+      <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="水平镜像" data-testid="mirror-selection" @click.stop="mirrorSelection">水平镜像</button>
       <button class="flex-none rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="Delete / Backspace" @click.stop="deleteSelection">删除选中模块</button>
     </div>
     <div v-if="mode === 'design' && designZone" class="absolute left-4 top-4 rounded-lg border border-line bg-white/90 px-3 py-2 text-xs text-[#56636e] pointer-events-none">{{ designZone.name }}</div>
@@ -867,4 +879,3 @@ function furnitureProduct(o: FurnitureObject) {
     </div>
   </div>
 </template>
-
