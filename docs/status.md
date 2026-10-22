@@ -1,5 +1,19 @@
 # 开发进度与下一步
 
+2026-10-22 画区旋转：按用户要求，形状模块（矩形/L 形/U 形）新增旋转角度输入——拖出包围盒后绕中心按角度旋转，预览实时跟随；端点先取整到 100mm 再旋转以保持直角，角度在屏幕上顺时针为正（毫米场景 Y 向上自动取反）。逐点描不受影响。e2e:space-review 增补 90° 旋转宽深互换断言（用同相机未旋转 L 形推导像素比例，含取整容差）并通过；smoke、drawing-entry 复跑通过。
+
+2026-10-22 画布名称标签快捷编辑：按用户要求，空间总览中选中空间的名称标签可直接点击，弹出就地编辑（名称/用途/矩形空间的宽与进深），保存走 `updateObject`/`resizeZoneByMm` 既有校验与联动；相机平移缩放、切换工具、切换选中、Esc、点击画布均自动关闭编辑器。仅选中且选择工具下的标签可点（`SpatialCanvas` 新增 spaceLabel 事件并阻止冒泡，避免误触发拖动），其余标签保持只读不挡交互。e2e:space-review 增补标签编辑断言（改名/改用途/改宽度联动轮廓）并通过；smoke、drawing-entry 复跑通过。
+
+2026-10-22 空间改名全覆盖：按用户要求，所有空间在任意环节均可重命名——空间总览右侧属性面板（受控草稿输入）、总览左侧空间列表（卡片「改名」按钮行内编辑，Enter/失焦保存、Esc 取消）、家具排版侧栏（当前空间名点击即改）。改名只更新名称，不触发轮廓/确认失效。e2e:space-review 增补三处改名断言并通过；smoke、drawing-entry 复跑通过。
+
+2026-10-22 画区形状模块追加：按用户反馈，「画新空间」不再只能逐点描——工具条提供矩形/L 形/U 形模块，拖出包围盒一次生成轮廓（毫米场景自动取整 100mm），逐点描保留给沿墙精描；生成后可编辑轮廓微调。`sketchShapePolygon` 纯函数落在 `utils/spatial/geometry.ts`；修复联调发现的拖框坐标类型错误（元组误作对象）。e2e:space-review 增补模块拖拽/逐点描/取整断言并通过；smoke、drawing-entry 复跑通过。
+
+2026-10-22 空间设计内联手动画区：按用户要求把手动布局并入空间设计——`SpaceReview` 新增「画新空间」工具（形状模块拖拽/逐点描、校验、可撤销），无图纸空白画布直接毫米建空间（默认 12m×8m 视野）、未校准底图按源单位记录随校准换算、已校准场景按世界毫米存储（Y 轴约定与描边一致）；空状态与缺底图遮罩改为画区入口；设计页头部跳转独立沙盒页的「手动布局」链接已移除（`/manual-canvas` 页面与侧边栏入口保留）。store 新增 `addDrawnZone`，来源标记 MANUAL/user_annotation/manual_geometry。验证：`pnpm build`、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke`（补 `/api/auth/me` mock 后通过）、`pnpm e2e:drawing-entry` 通过；`pnpm e2e:workflows` 商品页超时经 stash 基线复测为既有环境问题，与本次改动无关。
+
+2026-10-22 本地登录 401 追修：用户反馈登录成功却被弹回 /login、`/api/auth/me` 恒 401。定位为 IDEA 直接启动的后端不带启动脚本中的 `RSDP_AUTH_ENABLED` 等环境变量，`rsdp.auth.enabled` 回落 false，`checkSession` 直接返回匿名（登录接口不校验该开关，故出现"登录写库成功但 me 永远 401"）。已将 `RSDP_AUTH_ENABLED/SECRET/BOOTSTRAP_*` 补入根目录 `.env`（spring.config.import 自动读取，与启动方式解耦），并用无环境变量的临时实例实测：无 Cookie 401、带会话 Cookie 200。
+
+2026-10-22 本地识别配置追修与预览图修复：用户本地图片/PDF 识别报"请求或模型地址无效"（百炼 HTTP 404），实测根目录 `.env` 密钥对 `qwen3-vl-max` 返回 404 `model_not_found`、`qwen3-vl-plus` 最小对话探测 200；`.env` 的 `RSDP_VISION_MODEL` 已改为 `qwen3-vl-plus` 并重启本地后端，用户图纸的业务级重新识别待用户重试，不据此扩大识别精度验收。同会话修复上传页/画布入口预览图裂图：库存绝对 `previewUrl` 跨入口不可达，改经 `sameOriginAssetUrl` 同源化（已随 `327233c` 提交）。
+
 2026-10-22 Jenkins 拉取失败修复：连续构建在 git fetch 阶段失败（服务器直连 GitHub 不稳定；root 早有 ghfast.top 镜像改写而 jenkins 用户没有）。已为 jenkins 用户配置同样规则并实测通过；另完成商品/预览图片 HTTPS 混合内容修复（`abb309e`）与图纸预览修复（`327233c`），待 DEPLOY 发布上线。
 
 2026-10-21 HTTPS 入口启用：用户提供的阿里云 DV 证书（覆盖 rooom.vip/www.rooom.vip，至 2027-01-16）已部署到 443；原静态站保留，`https://rooom.vip/office/` 代理应用，Cookie 恢复 Secure，真实 DNS 全流程复测通过。HTTP 80/8081 入口按用户要求保留，未做 80→443 跳转；证书到期需手动续换。

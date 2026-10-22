@@ -23,7 +23,7 @@ DASHSCOPE_API_KEY=填写你自己的百炼API密钥
 | `RSDP_VISION_REFINE_ROOM_CONTOURS` | 默认 `true`；并行独立房名定位及保守墙线核查；设 `false` 关闭独立请求/混合候选墙线核查，保留主请求初始轮廓；labels-only 仍尝试墙网补救 |
 | `RSDP_VISION_URL` | 已有独立识别服务地址；非空时优先调用此服务，直连百炼时保持为空 |
 
-百炼 API Key 与调用地域应对应。模型可用性按账号开通范围为准：2026-10-20 公网服务器密钥请求 `qwen3-vl-max` 返回 404 `model_not_found`（未开通），已改用 `qwen3-vl-plus`（探测 200）；本地密钥可正常使用 `qwen3-vl-max`。两地配置因此不同，不属于代码差异。官方当前推荐业务空间域名，例如北京
+百炼 API Key 与调用地域应对应。模型可用性按账号开通范围为准：2026-10-20 公网服务器密钥请求 `qwen3-vl-max` 返回 404 `model_not_found`（未开通），已改用 `qwen3-vl-plus`（探测 200）。2026-10-22 复查：本地 `.env` 密钥对 `qwen3-vl-max` 同样返回 404 `model_not_found`（账号开通范围已变化），本地 `RSDP_VISION_MODEL` 已同步改为 `qwen3-vl-plus`（同密钥同地址最小对话探测 200），当前本地与公网均使用 plus。官方当前推荐业务空间域名，例如北京
 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；旧北京域名仍可使用。
 
 墙线核查直接使用 Java 栅格结构线规则，不需要额外分割服务、模型文件或分块推理配置。
