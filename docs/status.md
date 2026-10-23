@@ -2,6 +2,8 @@
 
 2026-10-22 LAYOUT-022/023 通道第一期：服务端核验与宽度阈值提示。后端 `OfficeLayoutValidationPolicy.requireConfirmedValid`（saveCanvas 与复核链路既有挂点）新增通道禁放带校验——语义对齐前端 `channelRects`（宽度+2×净距、包围盒裁剪、「仅从二排起」按 firstBlockDepthMm 豁免首排），已确认家具旋转占地压占即拒绝；前端通道宽度低于 900mm 给策略提示（非规范强制，不拦截）。`mvn -f backend/pom.xml test` 190 通过（含新增 4 例通道用例）；前端构建、通道专项与四组排版回归通过；真实数据库集成未测，见[服务端核验](tasks/LAYOUT-022-channel-server-verification.md)、[阈值提示](tasks/LAYOUT-023-channel-width-threshold-hints.md)。
 
+2026-10-22 LAYOUT-021 通道系统与补全路线：横/纵向通道成为排版约束兼画布对象——存于 `layoutPreferences.channels` 随画布 JSON 持久化，画布拖动定位（钳制在空间包围盒内、预览与提交同步不越界）、面板编辑宽度与「两侧净距」（clearanceMm，禁放带按 宽度+2×净距），纵向通道可「仅从二排起」保持首排完整（首排深度随实例保存供确认豁免）；课桌式网格原生切段分列/分排，其他排布把通道作硬阻挡；确认校验家具（旋转占地）不得压占通道，通道增删改使本空间确认失效。构建、通道专项 UI mock（分列/二排起/净距/钳制/拖动提交/确认拦截/横向/撤销/刷新）与自动排版、规划、自适应、会议四组回归通过，详见[任务记录](tasks/LAYOUT-021-canvas-aisle-channels.md)。注：本任务原编号 LAYOUT-020，因与边缘补位任务撞号改记为 LAYOUT-021。通道补全路线已立卡：LAYOUT-022 服务端核验、LAYOUT-023 宽度阈值提示（本期已完成，见上条）；待启动：LAYOUT-024 选中态与检查器、LAYOUT-025 宽度拖柄、LAYOUT-026 拖动吸附、LAYOUT-027 多边形裁剪、LAYOUT-028 端点留断、LAYOUT-029 入口疏散联动、LAYOUT-030 效果图呈现、LAYOUT-031 弧形布局与斜向通道（暂缓）。
+
 2026-10-22 画区旋转：按用户要求，形状模块（矩形/L 形/U 形）新增旋转角度输入——拖出包围盒后绕中心按角度旋转，预览实时跟随；端点先取整到 100mm 再旋转以保持直角，角度在屏幕上顺时针为正（毫米场景 Y 向上自动取反）。逐点描不受影响。e2e:space-review 增补 90° 旋转宽深互换断言（用同相机未旋转 L 形推导像素比例，含取整容差）并通过；smoke、drawing-entry 复跑通过。
 
 2026-10-22 画布名称标签快捷编辑：按用户要求，空间总览中选中空间的名称标签可直接点击，弹出就地编辑（名称/用途/矩形空间的宽与进深），保存走 `updateObject`/`resizeZoneByMm` 既有校验与联动；相机平移缩放、切换工具、切换选中、Esc、点击画布均自动关闭编辑器。仅选中且选择工具下的标签可点（`SpatialCanvas` 新增 spaceLabel 事件并阻止冒泡，避免误触发拖动），其余标签保持只读不挡交互。e2e:space-review 增补标签编辑断言（改名/改用途/改宽度联动轮廓）并通过；smoke、drawing-entry 复跑通过。

@@ -228,6 +228,14 @@ try {
     return channel && (channel.clearanceMm || 0) === 0 && channel.offsetMm === expected
   }, afterDrag)
 
+  // 5.6 宽度阈值提示：低于 900mm 给出策略提示（不拦截），恢复后提示消失。
+  await page.getByLabel('通道宽度（毫米）').fill('800')
+  await page.getByLabel('通道宽度（毫米）').press('Enter')
+  await page.getByTestId('channel-width-hint').waitFor()
+  await page.getByLabel('通道宽度（毫米）').fill('900')
+  await page.getByLabel('通道宽度（毫米）').press('Enter')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-width-hint"]'))
+
   // 6. 合法布局可以确认；新增压占家具的通道使确认失效且不能重新确认。
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   await page.getByRole('button', { name: '重新调整排版', exact: true }).waitFor()
