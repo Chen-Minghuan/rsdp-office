@@ -4,6 +4,8 @@ import type { LayoutBlocker } from '~/utils/layoutConstraints'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 
 export const DEFAULT_CHANNEL_WIDTH_MM = 900
+/** 通行宽度提示阈值（毫米）：低于此值给出策略提示，不拦截；非建筑规范强制。 */
+export const CHANNEL_WIDTH_HINT_MM = 900
 
 /** 单条通道（含净距）允许的位置区间：[lo, hi]；禁放带宽度超过可用跨度时返回 null（不强行挪动）。 */
 export function channelOffsetRange(zone: ZoneObject, channel: LayoutChannel): { lo: number; hi: number } | null {

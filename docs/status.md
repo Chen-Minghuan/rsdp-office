@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-22 LAYOUT-022/023 通道第一期：服务端核验与宽度阈值提示。后端 `OfficeLayoutValidationPolicy.requireConfirmedValid`（saveCanvas 与复核链路既有挂点）新增通道禁放带校验——语义对齐前端 `channelRects`（宽度+2×净距、包围盒裁剪、「仅从二排起」按 firstBlockDepthMm 豁免首排），已确认家具旋转占地压占即拒绝；前端通道宽度低于 900mm 给策略提示（非规范强制，不拦截）。`mvn -f backend/pom.xml test` 190 通过（含新增 4 例通道用例）；前端构建、通道专项与四组排版回归通过；真实数据库集成未测，见[服务端核验](tasks/LAYOUT-022-channel-server-verification.md)、[阈值提示](tasks/LAYOUT-023-channel-width-threshold-hints.md)。
+
 2026-10-22 画区旋转：按用户要求，形状模块（矩形/L 形/U 形）新增旋转角度输入——拖出包围盒后绕中心按角度旋转，预览实时跟随；端点先取整到 100mm 再旋转以保持直角，角度在屏幕上顺时针为正（毫米场景 Y 向上自动取反）。逐点描不受影响。e2e:space-review 增补 90° 旋转宽深互换断言（用同相机未旋转 L 形推导像素比例，含取整容差）并通过；smoke、drawing-entry 复跑通过。
 
 2026-10-22 画布名称标签快捷编辑：按用户要求，空间总览中选中空间的名称标签可直接点击，弹出就地编辑（名称/用途/矩形空间的宽与进深），保存走 `updateObject`/`resizeZoneByMm` 既有校验与联动；相机平移缩放、切换工具、切换选中、Esc、点击画布均自动关闭编辑器。仅选中且选择工具下的标签可点（`SpatialCanvas` 新增 spaceLabel 事件并阻止冒泡，避免误触发拖动），其余标签保持只读不挡交互。e2e:space-review 增补标签编辑断言（改名/改用途/改宽度联动轮廓）并通过；smoke、drawing-entry 复跑通过。

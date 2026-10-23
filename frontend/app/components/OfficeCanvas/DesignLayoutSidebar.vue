@@ -6,7 +6,7 @@ import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLa
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
-import { DEFAULT_CHANNEL_WIDTH_MM } from '~/utils/layoutChannels'
+import { DEFAULT_CHANNEL_WIDTH_MM, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 import { uid } from '~/utils/helpers'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
@@ -415,6 +415,7 @@ function clearLayout() {
                 <label>{{ channel.orientation === 'vertical' ? '距左' : '距上' }} mm<input :value="Math.round(channel.offsetMm - (channel.orientation === 'vertical' ? zoneBounds.minX : zoneBounds.minY))" type="number" step="100" aria-label="通道位置（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { offsetMm: Number(($event.target as HTMLInputElement).value) + (channel.orientation === 'vertical' ? zoneBounds.minX : zoneBounds.minY) })"></label>
               </div>
               <label class="mt-1 block">两侧净距 mm<input :value="channel.clearanceMm || 0" type="number" min="0" step="50" aria-label="通道两侧净距（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { clearanceMm: Math.max(0, Number(($event.target as HTMLInputElement).value) || 0) })"></label>
+              <p v-if="channel.widthMm < CHANNEL_WIDTH_HINT_MM" data-testid="channel-width-hint" class="mt-1 text-[10px] text-amber-600">宽度低于 {{ CHANNEL_WIDTH_HINT_MM }}mm 通行提示阈值（策略提示，非规范强制）</p>
               <label v-if="channel.orientation === 'vertical'" class="mt-1 block"><input :checked="!!channel.fromSecondRow" type="checkbox" aria-label="仅从二排起" @change="updateChannel(channel.id, { fromSecondRow: ($event.target as HTMLInputElement).checked })"> 仅从二排起（首排桌列不断开）</label>
             </div>
             <div class="mt-2 flex gap-3">
