@@ -534,10 +534,34 @@ function onPointerMove(e: PointerEvent) {
     const p = point(e)
     let dx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
     // 预览即钳制：通道（含净距）不允许拖出空间包围盒，松手提交同一值。
-    const channel = (designZone.value?.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
-    const range = channel && designZone.value ? channelOffsetRange(designZone.value, channel) : null
+    const zone = designZone.value
+    const channel = (zone?.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
+    const range = channel && zone ? channelOffsetRange(zone, channel) : null
     if (range) dx = Math.min(Math.max(dx, range.lo - (d.ox || 0)), range.hi - (d.ox || 0))
-    d.dx = dx
+    // 吸附（与家具同一 50mm 阈值与开关）：禁放带边缘/中线对齐墙边、家具边缘与其他通道边缘。
+    if (zone && channel && snapEnabled.value) {
+      const b = canvasZoneBounds(zone)
+      const clearance = Number.isFinite(channel.clearanceMm) && channel.clearanceMm! > 0 ? channel.clearanceMm! : 0
+      const vertical = d.orientation === 'vertical'
+      const band = vertical
+        ? { x: (d.ox || 0) + dx - clearance, y: b.minY, w: channel.widthMm + clearance * 2, h: b.maxY - b.minY }
+        : { x: b.minX, y: (d.ox || 0) + dx - clearance, w: b.maxX - b.minX, h: channel.widthMm + clearance * 2 }
+      const others = [
+        ...furniture.value.map(item => officeFurnitureFootprint(item)),
+        ...(zone.layoutPreferences?.channels || [])
+          .filter(other => other.id !== d.channelId)
+          .map(other => channelRects(zone, [other])[0])
+          .filter((rect): rect is LayoutBlocker => !!rect),
+      ]
+      const snapped = snapFurnitureEdges(band, zone, others, FURNITURE_SNAP_TOLERANCE_MM)
+      let snappedDx = dx + (vertical ? snapped.x - band.x : snapped.y - band.y)
+      if (range) snappedDx = Math.min(Math.max(snappedDx, range.lo - (d.ox || 0)), range.hi - (d.ox || 0))
+      d.dx = snappedDx
+      dragSnapGuides.value = vertical ? { x: snapped.guideX, y: null } : { x: null, y: snapped.guideY }
+    } else {
+      d.dx = dx
+      dragSnapGuides.value = { x: null, y: null }
+    }
   } else if (d.mode === 'channel-width' && d.channelId) {
     const p = point(e)
     const rawDx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)

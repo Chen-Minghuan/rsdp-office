@@ -317,6 +317,29 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
 
+  // 5.9 拖动吸附：拖到距左墙 40mm（50mm 阈值内）应吸附到墙缘 0，而不是停在 40。
+  const snapStripBox = await page.getByTestId('layout-channels').locator('[data-channel-id]').first().boundingBox()
+  assert.ok(snapStripBox, '通道条带不可见')
+  const snapZoom = snapStripBox.width / 900
+  await page.mouse.move(snapStripBox.x + snapStripBox.width / 2, snapStripBox.y + snapStripBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(snapStripBox.x + snapStripBox.width / 2 + (40 - afterDrag) * snapZoom, snapStripBox.y + snapStripBox.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await page.waitForFunction(expected => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.offsetMm !== expected
+  }, afterDrag)
+  assert.equal((await channelsState())[0].offsetMm, zoneMinX, '距墙 40mm 应吸附到墙缘（阈值 50mm）')
+  // 恢复位置，后续步骤不受影响。
+  await page.getByLabel('通道位置（毫米）').fill(String(Math.round(afterDrag - zoneMinX)))
+  await page.getByLabel('通道位置（毫米）').press('Enter')
+  await page.waitForFunction(expected => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.offsetMm === expected
+  }, afterDrag)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
+
   // 6. 合法布局可以确认；新增压占家具的通道使确认失效且不能重新确认。
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   await page.getByRole('button', { name: '重新调整排版', exact: true }).waitFor()
