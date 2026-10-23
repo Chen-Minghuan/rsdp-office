@@ -236,6 +236,27 @@ try {
   await page.getByLabel('通道宽度（毫米）').press('Enter')
   await page.waitForFunction(() => !document.querySelector('[data-testid="channel-width-hint"]'))
 
+  // 5.7 通道选中态：点选条带出现浮动编辑卡，卡内编辑宽度生效，Esc 取消选中。
+  const stripForSelect = page.getByTestId('layout-channels').locator('[data-channel-id]').first()
+  const selectBox = await stripForSelect.boundingBox()
+  assert.ok(selectBox, '通道条带不可见')
+  await page.mouse.click(selectBox.x + selectBox.width / 2, selectBox.y + selectBox.height / 2)
+  await page.getByTestId('channel-editor').waitFor()
+  await page.getByLabel('通道属性宽度（毫米）').fill('1000')
+  await page.getByLabel('通道属性宽度（毫米）').press('Enter')
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.widthMm === 1000
+  })
+  await page.getByLabel('通道属性宽度（毫米）').fill('900')
+  await page.getByLabel('通道属性宽度（毫米）').press('Enter')
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.widthMm === 900
+  })
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
+
   // 6. 合法布局可以确认；新增压占家具的通道使确认失效且不能重新确认。
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   await page.getByRole('button', { name: '重新调整排版', exact: true }).waitFor()
@@ -296,6 +317,23 @@ try {
   await page.getByTestId('layout-channels').locator('[data-channel-id]').first().waitFor()
   assert.equal((await page.getByTestId('layout-channels').locator('[data-channel-id]').count()), 2)
   assert.equal((await channelsState()).length, 2)
+
+  // 9. 选中通道后 Delete 移除，撤销恢复。
+  const stripFinal = page.getByTestId('layout-channels').locator('[data-channel-id]').first()
+  const finalBox = await stripFinal.boundingBox()
+  assert.ok(finalBox, '通道条带不可见')
+  await page.mouse.click(finalBox.x + finalBox.width / 2, finalBox.y + finalBox.height / 2)
+  await page.getByTestId('channel-editor').waitFor()
+  await page.keyboard.press('Delete')
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 1
+  })
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 2
+  })
 
   assert.deepEqual(errors, [], '页面运行时不应有未捕获异常')
   console.log('e2e-aisle-channels: 全部断言通过')

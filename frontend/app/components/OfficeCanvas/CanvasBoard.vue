@@ -13,7 +13,7 @@ import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWor
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
 import type { LayoutChannel, LayoutExclusion } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
-import { channelRects, channelOffsetRange } from '~/utils/layoutChannels'
+import { channelRects, channelOffsetRange, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 
 
 const store = useOfficeStore()
@@ -95,17 +95,50 @@ const designChannels = computed(() => {
     .filter((entry): entry is { channel: LayoutChannel; rect: LayoutBlocker } => !!entry.rect)
 })
 function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
-  const delta = drag.value?.mode === 'channel' && drag.value.channelId === entry.channel.id ? drag.value.dx || 0 : 0
+  const d = drag.value
   const vertical = entry.channel.orientation === 'vertical'
+  const selected = selectedChannelId.value === entry.channel.id
+  let { x, y, w, h } = entry.rect
+  if (d?.mode === 'channel' && d.channelId === entry.channel.id) {
+    // 位置拖动预览：只沿垂直轴平移
+    if (vertical) x += d.dx || 0
+    else y += d.dx || 0
+  }
   return {
-    left: entry.rect.x + (vertical ? delta : 0) + 'px',
-    top: entry.rect.y + (vertical ? 0 : delta) + 'px',
-    width: entry.rect.w + 'px',
-    height: entry.rect.h + 'px',
-    background: 'repeating-linear-gradient(45deg, rgba(48,111,203,0.10) 0 12px, rgba(48,111,203,0.02) 12px 24px)',
-    border: `${1.5 / store.zoom}px dashed #306fcb`,
+    left: x + 'px',
+    top: y + 'px',
+    width: Math.max(1, w) + 'px',
+    height: Math.max(1, h) + 'px',
+    background: selected
+      ? 'repeating-linear-gradient(45deg, rgba(48,111,203,0.22) 0 12px, rgba(48,111,203,0.06) 12px 24px)'
+      : 'repeating-linear-gradient(45deg, rgba(48,111,203,0.10) 0 12px, rgba(48,111,203,0.02) 12px 24px)',
+    border: `${(selected ? 2.5 : 1.5) / store.zoom}px ${selected ? 'solid' : 'dashed'} #306fcb`,
   }
 }
+/** 选中的通道（design 模式点选条带）；编辑走 store.updateZoneChannels 同一入口。 */
+const selectedChannel = computed(() => {
+  const zone = designZone.value
+  if (!zone || !selectedChannelId.value) return null
+  return (zone.layoutPreferences?.channels || []).find(channel => channel.id === selectedChannelId.value) || null
+})
+watch([designZone, designChannels], () => {
+  if (selectedChannelId.value && !selectedChannel.value) selectedChannelId.value = null
+})
+function updateSelectedChannel(patch: Partial<LayoutChannel>) {
+  const zone = designZone.value
+  if (!zone || !selectedChannelId.value) return
+  const id = selectedChannelId.value
+  store.updateZoneChannels(zone.id, (zone.layoutPreferences?.channels || []).map(channel => channel.id === id ? { ...channel, ...patch } : channel))
+}
+function removeSelectedChannel() {
+  const zone = designZone.value
+  if (!zone || !selectedChannelId.value) return
+  const id = selectedChannelId.value
+  store.updateZoneChannels(zone.id, (zone.layoutPreferences?.channels || []).filter(channel => channel.id !== id))
+  selectedChannelId.value = null
+}
+/** 选中通道位置输入的相对基准（与排版面板「距左/距上」一致）。 */
+const designZoneBounds = computed(() => designZone.value ? canvasZoneBounds(designZone.value) : null)
 function obstaclePoints(area: LayoutExclusion) {
   const polygon = area.polygon || [[area.x, area.y], [area.x + area.w, area.y], [area.x + area.w, area.y + area.h], [area.x, area.y + area.h]]
   return polygon.map(([x, y]) => `${x - area.x},${y - area.y}`).join(' ')
@@ -150,9 +183,9 @@ const placementProblem = computed(() => placementPreview.value && designZone.val
 watch(() => store.furniturePlacement, draft => {
   placementPointer.value = null
   placementMessage.value = ''
-  if (draft) { tool.value = 'select'; selectedId.value = null; selectedFurnitureIds.value = [] }
+  if (draft) { tool.value = 'select'; selectedId.value = null; selectedFurnitureIds.value = []; selectedChannelId.value = null }
 })
-watch(tool, value => { selectedFurnitureIds.value = []; if (!['select', 'pan'].includes(value)) store.cancelFurniturePlacement() })
+watch(tool, value => { selectedFurnitureIds.value = []; selectedChannelId.value = null; if (!['select', 'pan'].includes(value)) store.cancelFurniturePlacement() })
 
 // 识别图层：底图 + 多边形
 const floorPlan = computed<FloorPlanAnalysisResponse | null>(() => store.floorPlan)
@@ -273,6 +306,7 @@ interface DragState {
 const drag = ref<DragState | null>(null)
 const selectedFurniture = computed(() => furniture.value.find(item => item.id === selectedId.value) || null)
 const selectedFurnitureIds = ref<string[]>([])
+const selectedChannelId = ref<string | null>(null)
 const selectedFurnitureItems = computed(() => furniture.value.filter(item => selectedFurnitureIds.value.includes(item.id)))
 const moveProblem = ref('')
 const dragSnapGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
@@ -316,6 +350,7 @@ function chooseTool(t: string) {
   tool.value = t
   selectedId.value = null
   selectedFurnitureIds.value = []
+  selectedChannelId.value = null
   moveProblem.value = ''
 }
 
@@ -328,6 +363,10 @@ function onWheel(e: WheelEvent) {
 function onChannelPointerDown(channel: LayoutChannel, e: PointerEvent) {
   if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || placing.value || !canvasWindow.value) return
   const p = point(e)
+  // 点选条带即选中通道（与家具/对象选中互斥），拖动提交后选中保持。
+  selectedId.value = null
+  selectedFurnitureIds.value = []
+  selectedChannelId.value = channel.id
   drag.value = { mode: 'channel', channelId: channel.id, orientation: channel.orientation, cx: p.x, cy: p.y, ox: channel.offsetMm, dx: 0 }
   canvasWindow.value.setPointerCapture(e.pointerId)
   e.preventDefault()
@@ -355,6 +394,7 @@ function onPointerDown(e: PointerEvent) {
   }
 
   if (tool.value === 'select') {
+    selectedChannelId.value = null
     if (hit) {
       const id = hit.dataset.id!
       const o = store.objects.find((x) => x.id === id)!
@@ -593,6 +633,7 @@ function onKeydown(e: KeyboardEvent) {
     store.cancelFurniturePlacement()
     selectedId.value = null
     selectedFurnitureIds.value = []
+    selectedChannelId.value = null
     moveProblem.value = ''
     showSubmit.value = false
     return
@@ -603,9 +644,10 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key.toLowerCase() === 'r' && mode.value === 'design' && selectedFurnitureIds.value.length) { e.preventDefault(); rotateSelection(); return }
-  if (['Delete', 'Backspace'].includes(e.key) && (selectedId.value || selectedFurnitureIds.value.length)) {
+  if (['Delete', 'Backspace'].includes(e.key) && (selectedId.value || selectedFurnitureIds.value.length || selectedChannelId.value)) {
     e.preventDefault()
-    deleteSelection()
+    if (selectedChannelId.value) removeSelectedChannel()
+    else deleteSelection()
     return
   }
   const shortcuts: Record<string, string> = { v: 'select', h: 'pan', r: 'zone', n: 'note', a: 'arrow' }
@@ -695,6 +737,26 @@ function furnitureProduct(o: FurnitureObject) {
     @pointerleave="placementPointer = null"
   >
     <div v-if="mode === 'design' && props.showDimensions !== false" class="absolute right-3 bottom-12 z-10 rounded-lg border border-[#e8dfd5] bg-white/90 px-2 py-1 text-[10px] text-[#786b5d] pointer-events-none">绿色：离墙 · 棕色：组间净距<br>按家具外包占地测量，椅子为座席示意</div>
+    <!-- 选中通道浮动编辑卡：屏幕坐标系，不随画布缩放；编辑走 updateZoneChannels 同一入口 -->
+    <div
+      v-if="selectedChannel && designZoneBounds"
+      data-testid="channel-editor"
+      class="absolute top-3 left-1/2 -translate-x-1/2 z-20 w-64 rounded-xl border border-line bg-white/95 shadow-panel px-3 py-2.5 text-[11px] text-[#5b5751]"
+      @pointerdown.stop
+    >
+      <div class="flex items-center justify-between font-semibold">
+        <span>{{ selectedChannel.orientation === 'vertical' ? '纵向通道' : '横向通道' }}</span>
+        <button class="font-normal text-bronze underline" aria-label="移除选中通道" @click="removeSelectedChannel">移除</button>
+      </div>
+      <div class="grid grid-cols-2 gap-1.5 mt-2">
+        <label>宽度 mm<input :value="selectedChannel.widthMm" type="number" min="1" step="100" aria-label="通道属性宽度（毫米）" class="w-full border border-line px-1" @change="updateSelectedChannel({ widthMm: Math.max(1, Number(($event.target as HTMLInputElement).value) || selectedChannel!.widthMm) })"></label>
+        <label>两侧净距 mm<input :value="selectedChannel.clearanceMm || 0" type="number" min="0" step="50" aria-label="通道属性净距（毫米）" class="w-full border border-line px-1" @change="updateSelectedChannel({ clearanceMm: Math.max(0, Number(($event.target as HTMLInputElement).value) || 0) })"></label>
+        <label class="col-span-2">位置 mm（{{ selectedChannel.orientation === 'vertical' ? '距左' : '距上' }}）<input :value="Math.round(selectedChannel.offsetMm - (selectedChannel.orientation === 'vertical' ? designZoneBounds.minX : designZoneBounds.minY))" type="number" step="100" aria-label="通道属性位置（毫米）" class="w-full border border-line px-1" @change="updateSelectedChannel({ offsetMm: Number(($event.target as HTMLInputElement).value) + (selectedChannel!.orientation === 'vertical' ? designZoneBounds!.minX : designZoneBounds!.minY) })"></label>
+      </div>
+      <label v-if="selectedChannel.orientation === 'vertical'" class="mt-1.5 block"><input :checked="!!selectedChannel.fromSecondRow" type="checkbox" aria-label="通道属性首排不断开" @change="updateSelectedChannel({ fromSecondRow: ($event.target as HTMLInputElement).checked })"> 仅从二排起（首排桌列不断开）</label>
+      <p v-if="selectedChannel.widthMm < CHANNEL_WIDTH_HINT_MM" data-testid="channel-editor-width-hint" class="mt-1 text-[10px] text-amber-600">宽度低于 {{ CHANNEL_WIDTH_HINT_MM }}mm 通行提示阈值（策略提示，非规范强制）</p>
+      <p class="mt-1 text-[10px] text-muted">Delete 移除 · Esc 取消选中 · 排版面板同步编辑</p>
+    </div>
     <div
       ref="board"
       data-testid="office-scene-board"

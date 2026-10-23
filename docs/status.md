@@ -1,5 +1,9 @@
 # 开发进度与下一步
 
+2026-10-23 LAYOUT-024 通道选中态与画布内编辑：设计模式点选通道条带即选中（高亮实线边框+加深斜纹），画布顶部弹出浮动编辑卡（宽度/两侧净距/位置/「仅从二排起」/移除，含 900mm 阈值提示），编辑走 `updateZoneChannels` 同一入口（撤销/失效语义一致）；选中家具或对象、点空白、切换工具、Esc 均取消通道选中，Delete 直接移除选中通道。注：design 模式无属性检查器（右侧为选品面板），按任务卡记录的偏差改用浮动编辑卡。验证：`pnpm build`、通道专项（新增选中断言）、自动排版/规划/自适应/会议回归、`MOCK_API=1 pnpm e2e:smoke`（默认 3001 被旧构建残留实例占用，改用 BASE_URL=3011 对当前构建通过，残留进程未动）通过，见[任务记录](tasks/LAYOUT-024-channel-selection-inspector.md)。
+
+2026-10-23 手动画布常驻返回按钮：按用户反馈，空间核对总览工具条新增「← 返回上传图纸」（`data-testid="back-to-upload"`，在画区 inert 区外，画到一半也可返回），解决手动画图后突然有图纸要上传时无明确回退入口的问题；返回不清空手绘画布，已有手绘空间保留，重新上传识别仍走既有换图/快照保护。验证：`pnpm build`、`pnpm e2e:drawing-entry`（新增返回断言）、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke` 通过；空白态与已画空间态截图人工核对通过。
+
 2026-10-22 LAYOUT-022/023 通道第一期：服务端核验与宽度阈值提示。后端 `OfficeLayoutValidationPolicy.requireConfirmedValid`（saveCanvas 与复核链路既有挂点）新增通道禁放带校验——语义对齐前端 `channelRects`（宽度+2×净距、包围盒裁剪、「仅从二排起」按 firstBlockDepthMm 豁免首排），已确认家具旋转占地压占即拒绝；前端通道宽度低于 900mm 给策略提示（非规范强制，不拦截）。`mvn -f backend/pom.xml test` 190 通过（含新增 4 例通道用例）；前端构建、通道专项与四组排版回归通过；真实数据库集成未测，见[服务端核验](tasks/LAYOUT-022-channel-server-verification.md)、[阈值提示](tasks/LAYOUT-023-channel-width-threshold-hints.md)。
 
 2026-10-22 LAYOUT-021 通道系统与补全路线：横/纵向通道成为排版约束兼画布对象——存于 `layoutPreferences.channels` 随画布 JSON 持久化，画布拖动定位（钳制在空间包围盒内、预览与提交同步不越界）、面板编辑宽度与「两侧净距」（clearanceMm，禁放带按 宽度+2×净距），纵向通道可「仅从二排起」保持首排完整（首排深度随实例保存供确认豁免）；课桌式网格原生切段分列/分排，其他排布把通道作硬阻挡；确认校验家具（旋转占地）不得压占通道，通道增删改使本空间确认失效。构建、通道专项 UI mock（分列/二排起/净距/钳制/拖动提交/确认拦截/横向/撤销/刷新）与自动排版、规划、自适应、会议四组回归通过，详见[任务记录](tasks/LAYOUT-021-canvas-aisle-channels.md)。注：本任务原编号 LAYOUT-020，因与边缘补位任务撞号改记为 LAYOUT-021。通道补全路线已立卡：LAYOUT-022 服务端核验、LAYOUT-023 宽度阈值提示（本期已完成，见上条）；待启动：LAYOUT-024 选中态与检查器、LAYOUT-025 宽度拖柄、LAYOUT-026 拖动吸附、LAYOUT-027 多边形裁剪、LAYOUT-028 端点留断、LAYOUT-029 入口疏散联动、LAYOUT-030 效果图呈现、LAYOUT-031 弧形布局与斜向通道（暂缓）。
