@@ -103,6 +103,11 @@ function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
     // 位置拖动预览：只沿垂直轴平移
     if (vertical) x += d.dx || 0
     else y += d.dx || 0
+  } else if (d?.mode === 'channel-width' && d.channelId === entry.channel.id) {
+    // 宽度拖柄预览：净距不变，禁放带边缘随宽度等量伸缩
+    const dx = d.dx || 0
+    if (vertical) { if (d.edge === 'max') w += dx; else { x += dx; w -= dx } }
+    else { if (d.edge === 'max') h += dx; else { y += dx; h -= dx } }
   }
   return {
     left: x + 'px',
@@ -283,7 +288,7 @@ function rotateView(degrees: number) {
 }
 
 interface DragState {
-  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow' | 'channel'
+  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width'
   cx?: number
   cy?: number
   px?: number
@@ -291,6 +296,7 @@ interface DragState {
   id?: string
   ox?: number
   oy?: number
+  ow?: number
   moved?: boolean
   x?: number
   y?: number
@@ -301,6 +307,7 @@ interface DragState {
   dy?: number
   channelId?: string
   orientation?: 'vertical' | 'horizontal'
+  edge?: 'min' | 'max'
 }
 
 const drag = ref<DragState | null>(null)
@@ -370,6 +377,34 @@ function onChannelPointerDown(channel: LayoutChannel, e: PointerEvent) {
   drag.value = { mode: 'channel', channelId: channel.id, orientation: channel.orientation, cx: p.x, cy: p.y, ox: channel.offsetMm, dx: 0 }
   canvasWindow.value.setPointerCapture(e.pointerId)
   e.preventDefault()
+}
+
+/** 宽度拖柄：拖 max 边只改宽度；拖 min 边同时改位置与宽度（远端固定）。净距不变，钳制使禁放带不出包围盒。 */
+function onChannelEdgePointerDown(channel: LayoutChannel, edge: 'min' | 'max', e: PointerEvent) {
+  if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || placing.value || !canvasWindow.value) return
+  const p = point(e)
+  selectedId.value = null
+  selectedFurnitureIds.value = []
+  selectedChannelId.value = channel.id
+  drag.value = { mode: 'channel-width', channelId: channel.id, orientation: channel.orientation, edge, cx: p.x, cy: p.y, ox: channel.offsetMm, ow: channel.widthMm, dx: 0 }
+  canvasWindow.value.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+
+function clampChannelWidthDelta(d: DragState, rawDx: number): number {
+  const zone = designZone.value
+  if (!zone) return rawDx
+  const b = canvasZoneBounds(zone)
+  const channel = (zone.layoutPreferences?.channels || []).find(item => item.id === d.channelId)
+  if (!channel) return rawDx
+  const clearance = Number.isFinite(channel.clearanceMm) && channel.clearanceMm! > 0 ? channel.clearanceMm! : 0
+  const min = d.orientation === 'vertical' ? b.minX : b.minY
+  const max = d.orientation === 'vertical' ? b.maxX : b.maxY
+  const ox = d.ox || 0, ow = d.ow || 1
+  // min 边：offset+dx ≥ min+clearance 且宽度 ow-dx ≥ 1；max 边：宽度 ow+dx ≥ 1 且 offset+width+clearance ≤ max
+  return d.edge === 'max'
+    ? Math.min(Math.max(rawDx, 1 - ow), max - clearance - ox - ow)
+    : Math.min(Math.max(rawDx, min + clearance - ox), ow - 1)
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -503,6 +538,10 @@ function onPointerMove(e: PointerEvent) {
     const range = channel && designZone.value ? channelOffsetRange(designZone.value, channel) : null
     if (range) dx = Math.min(Math.max(dx, range.lo - (d.ox || 0)), range.hi - (d.ox || 0))
     d.dx = dx
+  } else if (d.mode === 'channel-width' && d.channelId) {
+    const p = point(e)
+    const rawDx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
+    d.dx = clampChannelWidthDelta(d, rawDx)
   } else if (d.mode === 'marquee') {
     const p = point(e)
     d.lastX = p.x
@@ -592,6 +631,17 @@ function onPointerUp(e: PointerEvent) {
     if (d.dx) {
       const offsetMm = Math.round((d.ox || 0) + d.dx)
       const channels = (designZone.value?.layoutPreferences?.channels || []).map(channel => channel.id === d.channelId ? { ...channel, offsetMm } : channel)
+      store.updateZoneChannels(store.designZoneId, channels)
+    }
+  } else if (d.mode === 'channel-width' && d.channelId && store.designZoneId) {
+    // 宽度拖柄：max 边只改宽度；min 边位置与宽度联动（远端固定）。
+    if (d.dx) {
+      const dx = Math.round(d.dx)
+      const channels = (designZone.value?.layoutPreferences?.channels || []).map(channel => channel.id === d.channelId
+        ? (d.edge === 'max'
+          ? { ...channel, widthMm: Math.max(1, Math.round((d.ow || 1) + dx)) }
+          : { ...channel, offsetMm: Math.round((d.ox || 0) + dx), widthMm: Math.max(1, Math.round((d.ow || 1) - dx)) })
+        : channel)
       store.updateZoneChannels(store.designZoneId, channels)
     }
   } else if (d.mode === 'arrow') {
@@ -938,11 +988,32 @@ function furnitureProduct(o: FurnitureObject) {
             :data-channel-id="entry.channel.id"
             class="pointer-events-auto absolute select-none"
             :class="entry.channel.orientation === 'vertical' ? 'cursor-ew-resize' : 'cursor-ns-resize'"
-            :title="`通道 ${entry.channel.widthMm} mm${entry.channel.clearanceMm ? ` + 两侧净距 ${entry.channel.clearanceMm} mm` : ''}${entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 仅从二排起' : ''} · 拖动调整位置，宽度与净距在排版面板编辑`"
+            :title="`通道 ${entry.channel.widthMm} mm${entry.channel.clearanceMm ? ` + 两侧净距 ${entry.channel.clearanceMm} mm` : ''}${entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 仅从二排起' : ''} · 拖动调整位置，选中后拖两端手柄改宽度`"
             :style="channelStyle(entry)"
             @pointerdown.stop="onChannelPointerDown(entry.channel, $event)"
           >
             <span class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-semibold pointer-events-none" :style="{ top: 4 / store.zoom + 'px', fontSize: 11 / store.zoom + 'px', color: '#306fcb' }">通道 {{ entry.channel.widthMm }}{{ entry.channel.clearanceMm ? `+2×${entry.channel.clearanceMm}` : '' }}{{ entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 二排起' : '' }}</span>
+            <!-- 选中后显示宽度拖柄（恒定屏幕尺寸） -->
+            <template v-if="selectedChannelId === entry.channel.id">
+              <div
+                v-for="edge in (['min', 'max'] as const)"
+                :key="edge"
+                :data-testid="`channel-width-handle-${edge}`"
+                :class="entry.channel.orientation === 'vertical' ? 'cursor-ew-resize' : 'cursor-ns-resize'"
+                class="absolute"
+                :style="entry.channel.orientation === 'vertical'
+                  ? { [edge === 'min' ? 'left' : 'right']: '0', top: '0', bottom: '0', width: 10 / store.zoom + 'px', transform: `translateX(${edge === 'min' ? -50 : 50}%)` }
+                  : { [edge === 'min' ? 'top' : 'bottom']: '0', left: '0', right: '0', height: 10 / store.zoom + 'px', transform: `translateY(${edge === 'min' ? -50 : 50}%)` }"
+                @pointerdown.stop="onChannelEdgePointerDown(entry.channel, edge, $event)"
+              >
+                <div
+                  class="absolute rounded-full bg-[#306fcb]"
+                  :style="entry.channel.orientation === 'vertical'
+                    ? { left: '50%', top: '50%', width: 4 / store.zoom + 'px', height: 36 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }
+                    : { top: '50%', left: '50%', height: 4 / store.zoom + 'px', width: 36 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }"
+                ></div>
+              </div>
+            </template>
           </div>
         </div>
 

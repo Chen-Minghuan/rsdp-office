@@ -257,6 +257,66 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
 
+  // 5.8 宽度拖柄：选中后拖 max 边加宽、拖 min 边远端固定、越界钳制；完成后恢复原值。
+  await page.mouse.click(selectBox.x + selectBox.width / 2, selectBox.y + selectBox.height / 2)
+  await page.getByTestId('channel-editor').waitFor()
+  const stripBox = await page.getByTestId('layout-channels').locator('[data-channel-id]').first().boundingBox()
+  assert.ok(stripBox, '通道条带不可见')
+  const zoom = stripBox.width / 900
+  const zoneMaxX = Math.max(...(await zoneState()).polygon.map(point => point[0]))
+  const maxHandle = page.getByTestId('channel-width-handle-max')
+  const maxBox = await maxHandle.boundingBox()
+  assert.ok(maxBox, '宽度拖柄不可见')
+  await page.mouse.move(maxBox.x + maxBox.width / 2, maxBox.y + maxBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(maxBox.x + maxBox.width / 2 + 3, maxBox.y + maxBox.height / 2, { steps: 2 })
+  await page.mouse.up()
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.widthMm !== 900
+  })
+  const afterMaxEdge = (await channelsState())[0]
+  assert.ok(Math.abs(afterMaxEdge.widthMm - (900 + 3 / zoom)) <= 2, `拖 max 边宽度异常: ${afterMaxEdge.widthMm}（zoom=${zoom}）`)
+  assert.equal(afterMaxEdge.offsetMm, afterDrag, '拖 max 边不应改位置')
+  const minBox = await page.getByTestId('channel-width-handle-min').boundingBox()
+  assert.ok(minBox, '宽度拖柄不可见')
+  await page.mouse.move(minBox.x + minBox.width / 2, minBox.y + minBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(minBox.x + minBox.width / 2 - 2, minBox.y + minBox.height / 2, { steps: 2 })
+  await page.mouse.up()
+  await page.waitForFunction(expected => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.offsetMm !== expected
+  }, afterMaxEdge.offsetMm)
+  const afterMinEdge = (await channelsState())[0]
+  assert.ok(Math.abs(afterMinEdge.offsetMm - (afterMaxEdge.offsetMm - 2 / zoom)) <= 2, '拖 min 边位置应随边缘移动')
+  assert.ok(Math.abs((afterMinEdge.offsetMm + afterMinEdge.widthMm) - (afterMaxEdge.offsetMm + afterMaxEdge.widthMm)) <= 2, '拖 min 边远端应保持固定')
+  // 越界：max 边大幅右拖，宽度钳制到 右缘-位置。
+  const clampBox = await page.getByTestId('channel-width-handle-max').boundingBox()
+  assert.ok(clampBox, '宽度拖柄不可见')
+  await page.mouse.move(clampBox.x + clampBox.width / 2, clampBox.y + clampBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(clampBox.x + clampBox.width / 2 + 2000, clampBox.y + clampBox.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await page.waitForFunction(width => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.widthMm > width
+  }, afterMinEdge.widthMm)
+  const clamped = (await channelsState())[0]
+  assert.ok(Math.abs(clamped.widthMm - (zoneMaxX - clamped.offsetMm)) <= 2, `越界拖宽应钳制到右缘: ${clamped.widthMm} + ${clamped.offsetMm} ≠ ${zoneMaxX}`)
+  // 恢复宽度与位置，保证后续步骤不受影响。
+  await page.getByLabel('通道属性宽度（毫米）').fill('900')
+  await page.getByLabel('通道属性宽度（毫米）').press('Enter')
+  await page.getByLabel('通道属性位置（毫米）').fill(String(Math.round(afterDrag - zoneMinX)))
+  await page.getByLabel('通道属性位置（毫米）').press('Enter')
+  await page.waitForFunction(expected => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const channel = (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]
+    return channel && channel.widthMm === 900 && channel.offsetMm === expected
+  }, afterDrag)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
+
   // 6. 合法布局可以确认；新增压占家具的通道使确认失效且不能重新确认。
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   await page.getByRole('button', { name: '重新调整排版', exact: true }).waitFor()
