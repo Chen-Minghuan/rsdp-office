@@ -33,6 +33,7 @@
     "e2e:recognition-progress": "node scripts/e2e-recognition-progress.mjs",
     "e2e:drawing-entry": "node scripts/e2e-drawing-entry.mjs",
     "test:layout-planning": "node scripts/test-layout-planning.mjs",
+    "test:layout-channels": "node scripts/test-layout-channels.mjs",
     "e2e:layout-planning": "node scripts/e2e-layout-planning.mjs",
     "test:reference-layouts": "node scripts/test-reference-layouts.mjs",
     "e2e:reference-layouts": "node scripts/e2e-reference-layouts.mjs",

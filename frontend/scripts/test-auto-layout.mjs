@@ -9,7 +9,10 @@ async function moduleUrl(path, dependencies = {}) {
   return 'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
 }
 const boundsUrl = await moduleUrl('../app/utils/floorPlan.ts')
-const { planOfficeFurniture: plan, planMeetingFurniture: planMeeting, planStrictArrangement: planStrict, layoutRectInsideRing: inside } = await import(await moduleUrl('../app/utils/officeAutoLayout.ts', { '~/utils/floorPlan': boundsUrl }))
+const geometryUrl = await moduleUrl('../app/utils/spatial/geometry.ts')
+const canvasViewUrl = await moduleUrl('../app/utils/officeCanvasView.ts', { '~/utils/floorPlan': boundsUrl })
+const channelsUrl = await moduleUrl('../app/utils/layoutChannels.ts', { '~/utils/officeCanvasView': canvasViewUrl, '~/utils/spatial/geometry': geometryUrl })
+const { planOfficeFurniture: plan, planMeetingFurniture: planMeeting, planStrictArrangement: planStrict, layoutRectInsideRing: inside } = await import(await moduleUrl('../app/utils/officeAutoLayout.ts', { '~/utils/floorPlan': boundsUrl, '~/utils/layoutChannels': channelsUrl }))
 const { manualRectContainedByUnion: contained } = await import(await moduleUrl('../app/utils/manualLayoutGeometry.ts'))
 const zone = (w, h, x = 0, y = 0) => ({ id: 'TEST', reviewUnit: 'mm', x, y, w, h, polygon: [[x,y],[x+w,y],[x+w,y+h],[x,y+h]] })
 const square = zone(4358, 4376)

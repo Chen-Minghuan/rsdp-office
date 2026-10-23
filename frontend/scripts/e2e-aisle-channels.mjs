@@ -418,6 +418,58 @@ try {
     return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 2
   })
 
+  // 10. U 形空间（LAYOUT-027）：通道按多边形裁剪——缺角内的纵向通道截断到缺口下方、不画出缺角；
+  // 缺口高度上的横向通道断成左右两段。
+  await page.evaluate(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const zone = draft.objects.find(object => object.id === 'CHANNEL-ROOM')
+    const xs = zone.polygon.map(point => point[0]), ys = zone.polygon.map(point => point[1])
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
+    const x1 = minX + (maxX - minX) * 0.375, x2 = minX + (maxX - minX) * 0.625, midY = minY + (maxY - minY) * 0.4
+    zone.polygon = [[minX, minY], [x1, minY], [x1, midY], [x2, midY], [x2, minY], [maxX, minY], [maxX, maxY], [minX, maxY]]
+    zone.layoutPreferences.channels = []
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('unit-module-catalog').waitFor()
+  await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+  // 纵向通道默认在包围盒中轴（x 落入缺口范围）：应只剩缺口下方一段，高度 ≈ 0.6 倍空间进深。
+  await page.getByTestId('add-channel-vertical').click()
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 1
+  })
+  const uZone = await zoneState()
+  const uMinY = Math.min(...uZone.polygon.map(point => point[1])), uMaxY = Math.max(...uZone.polygon.map(point => point[1]))
+  const uVerticalId = (await channelsState()).find(item => item.orientation === 'vertical').id
+  const uVerticalSegs = page.getByTestId('layout-channels').locator(`[data-channel-id="${uVerticalId}"]`)
+  assert.equal(await uVerticalSegs.count(), 1, '缺口内的纵向通道应裁剪为单段')
+  // 横向通道默认在包围盒中轴（缺口之下，全宽一段）；改位置到缺口高度后断成左右两段。
+  await page.getByTestId('add-channel-horizontal').click()
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 2
+  })
+  const uHorizontalId = (await channelsState()).find(item => item.orientation === 'horizontal').id
+  const uHorizontalSegs = page.getByTestId('layout-channels').locator(`[data-channel-id="${uHorizontalId}"]`)
+  assert.equal(await uHorizontalSegs.count(), 1, '缺口之下的横向通道应为全宽单段')
+  const hFullBox = await uHorizontalSegs.first().boundingBox()
+  const vSegBox = await uVerticalSegs.first().boundingBox()
+  assert.ok(hFullBox && vSegBox, '通道分段不可见')
+  // 同一 zoom：纵向分段高度(0.6 进深) ≈ 横向全宽分段宽度(全宽) × 0.6 × (进深/宽度)。
+  const uSpanX = Math.max(...uZone.polygon.map(point => point[0])) - Math.min(...uZone.polygon.map(point => point[0]))
+  const expectedRatio = 0.6 * (uMaxY - uMinY) / uSpanX
+  assert.ok(Math.abs(vSegBox.height / hFullBox.width - expectedRatio) < 0.05, `纵向通道应按缺口截断: ${vSegBox.height}/${hFullBox.width} ≉ ${expectedRatio}`)
+  // 把横向通道位置改到缺口高度（距上 20% 处），应断成左右两段且互不相交。
+  await page.mouse.click(hFullBox.x + hFullBox.width / 2, hFullBox.y + hFullBox.height / 2)
+  await page.getByTestId('channel-editor').waitFor()
+  await page.getByLabel('通道属性位置（毫米）').fill(String(Math.round((uMaxY - uMinY) * 0.2)))
+  await page.getByLabel('通道属性位置（毫米）').press('Enter')
+  await page.waitForFunction((id) => document.querySelectorAll(`[data-channel-id="${id}"]`).length === 2, uHorizontalId)
+  const segBoxes = await uHorizontalSegs.evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { x: box.x, right: box.x + box.width } }))
+  const leftSeg = segBoxes.reduce((a, b) => a.x < b.x ? a : b), rightSeg = segBoxes.reduce((a, b) => a.x > b.x ? a : b)
+  assert.ok(leftSeg.right < rightSeg.x, '缺口高度的横向通道应在缺角处断开为两段')
+
   assert.deepEqual(errors, [], '页面运行时不应有未捕获异常')
   console.log('e2e-aisle-channels: 全部断言通过')
 } finally {

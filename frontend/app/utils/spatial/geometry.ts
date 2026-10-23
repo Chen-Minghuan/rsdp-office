@@ -237,6 +237,57 @@ function normAngle(rad: number): number {
   return rad
 }
 
+/**
+ * 矩形 × 单环多边形裁剪（LAYOUT-027）：返回覆盖交集的轴对齐矩形集合。
+ * 扫描线按顶点 y 分段采样（奇偶规则求交），同跨度相邻段合并为大矩形。
+ * 轴对齐多边形结果精确；斜边在顶点 y 处阶梯近似（偏差由 eps 控制）。
+ * 输入矩形或环无效时返回空数组。
+ */
+export function clipRectToRingRects(
+  rect: { x: number; y: number; w: number; h: number },
+  ring: Array<[number, number]>,
+  eps = 0.5,
+): Array<{ x: number; y: number; w: number; h: number }> {
+  const x0 = rect.x, x1 = rect.x + rect.w, y0 = rect.y, y1 = rect.y + rect.h
+  if (![x0, x1, y0, y1].every(Number.isFinite) || !(x1 > x0 && y1 > y0) || ring.length < 3) return []
+  const ys: number[] = []
+  for (const v of [y0, ...ring.map(([, py]) => py).filter(py => py > y0 + eps && py < y1 - eps), y1].sort((a, b) => a - b)) {
+    if (!ys.length || v - ys[ys.length - 1] > eps) ys.push(v)
+  }
+  // 某一水平扫描线与环的奇偶交叉区间（已按矩形 x 范围裁剪）。
+  const intervalsAt = (midY: number): Array<{ x: number; w: number }> => {
+    const xs: number[] = []
+    for (let i = 0; i < ring.length; i++) {
+      const [ax, ay] = ring[i], [bx, by] = ring[(i + 1) % ring.length]
+      if ((ay <= midY) === (by <= midY)) continue
+      xs.push(ax + ((midY - ay) / (by - ay)) * (bx - ax))
+    }
+    xs.sort((a, b) => a - b)
+    const out: Array<{ x: number; w: number }> = []
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const from = Math.max(x0, xs[i]), to = Math.min(x1, xs[i + 1])
+      if (to - from > eps) out.push({ x: from, w: to - from })
+    }
+    return out
+  }
+  const sameIntervals = (a: Array<{ x: number; w: number }>, b: Array<{ x: number; w: number }>) =>
+    a.length === b.length && a.every((seg, i) => Math.abs(seg.x - b[i].x) <= eps && Math.abs(seg.w - b[i].w) <= eps)
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = []
+  let open: Array<{ x: number; w: number }> = [], openY = y0
+  for (let s = 0; s + 1 < ys.length; s++) {
+    const ya = ys[s], yb = ys[s + 1]
+    if (yb - ya <= eps) continue
+    const intervals = intervalsAt((ya + yb) / 2)
+    if (open.length && !sameIntervals(open, intervals)) {
+      for (const seg of open) rects.push({ x: seg.x, y: openY, w: seg.w, h: ya - openY })
+      open = []
+    }
+    if (intervals.length && !open.length) { open = intervals; openY = ya }
+  }
+  for (const seg of open) rects.push({ x: seg.x, y: openY, w: seg.w, h: y1 - openY })
+  return rects
+}
+
 /** 手动画区的形状模块：拖出包围盒，一次生成对应轮廓多边形（逐顶点，不重复首尾点）。 */
 export type SketchShapeKind = 'rect' | 'L' | 'U'
 

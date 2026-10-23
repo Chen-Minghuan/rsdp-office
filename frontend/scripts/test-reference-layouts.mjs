@@ -7,7 +7,10 @@ async function moduleUrl(path, deps = {}) {
   return 'data:text/javascript;base64,' + Buffer.from(code).toString('base64')
 }
 const bounds = await moduleUrl('../app/utils/floorPlan.ts')
-const { planStrictArrangement: plan } = await import(await moduleUrl('../app/utils/officeAutoLayout.ts', { '~/utils/floorPlan': bounds }))
+const geometry = await moduleUrl('../app/utils/spatial/geometry.ts')
+const canvasView = await moduleUrl('../app/utils/officeCanvasView.ts', { '~/utils/floorPlan': bounds })
+const channels = await moduleUrl('../app/utils/layoutChannels.ts', { '~/utils/officeCanvasView': canvasView, '~/utils/spatial/geometry': geometry })
+const { planStrictArrangement: plan } = await import(await moduleUrl('../app/utils/officeAutoLayout.ts', { '~/utils/floorPlan': bounds, '~/utils/layoutChannels': channels }))
 const zone = { id: 'REFERENCE', reviewUnit: 'mm', x: -10000, y: -8000, w: 20000, h: 16000, polygon: [[-10000,-8000],[10000,-8000],[10000,8000],[-10000,8000]] }
 const cases = [
   ['straight-desk', 'straight-desk-row', 1200, 600, 6, 1000],

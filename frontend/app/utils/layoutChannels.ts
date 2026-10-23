@@ -1,6 +1,7 @@
 import type { ZoneObject } from '~/types/office'
 import type { LayoutChannel } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
+import { clipRectToRingRects } from '~/utils/spatial/geometry'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 
 export const DEFAULT_CHANNEL_WIDTH_MM = 900
@@ -28,11 +29,17 @@ export function clampChannelsToZone(zone: ZoneObject, channels: LayoutChannel[])
   })
 }
 
-/** 通道矩形与家具/禁放区共用世界毫米坐标；纵向通道沿 Y 贯通，横向通道沿 X 贯通。 */
+/**
+ * 通道矩形与家具/禁放区共用世界毫米坐标；纵向通道沿 Y、横向通道沿 X 贯通。
+ * 禁放带先按包围盒钳制，再按房间多边形裁剪（LAYOUT-027）：凹形空间可能输出多段矩形；
+ * 矩形空间输出与裁剪前完全一致。无多边形数据时退化为包围盒单矩形。
+ * 排版切段（axisSegments）仍按未裁剪禁放带切轴——桌列不允许跨越通道线，裁剪只影响绘制与压占校验。
+ */
 export function channelRects(zone: ZoneObject, channels: LayoutChannel[], firstBlockDepthMm?: number): LayoutBlocker[] {
   const bounds = canvasZoneBounds(zone)
   if (![bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].every(Number.isFinite)) return []
   const rects: LayoutBlocker[] = []
+  const ring = zone.polygon && zone.polygon.length >= 3 ? zone.polygon : null
   for (const channel of channels) {
     if (!Number.isFinite(channel.offsetMm) || !Number.isFinite(channel.widthMm) || channel.widthMm < 1) continue
     const clearance = Number.isFinite(channel.clearanceMm) && channel.clearanceMm! > 0 ? channel.clearanceMm! : 0
@@ -44,10 +51,18 @@ export function channelRects(zone: ZoneObject, channels: LayoutChannel[], firstB
       }
       // 裁剪到包围盒：含净距的禁放带不超出空间（旧数据或净距增大后可能越界）。
       const from = Math.max(bounds.minX, channel.offsetMm - clearance), to = Math.min(bounds.maxX, channel.offsetMm + channel.widthMm + clearance)
-      if (to > from) rects.push({ x: from, y, w: to - from, h })
+      if (to > from) {
+        const band = { x: from, y, w: to - from, h }
+        if (ring) rects.push(...clipRectToRingRects(band, ring))
+        else rects.push(band)
+      }
     } else {
       const from = Math.max(bounds.minY, channel.offsetMm - clearance), to = Math.min(bounds.maxY, channel.offsetMm + channel.widthMm + clearance)
-      if (to > from) rects.push({ x: bounds.minX, y: from, w: bounds.maxX - bounds.minX, h: to - from })
+      if (to > from) {
+        const band = { x: bounds.minX, y: from, w: bounds.maxX - bounds.minX, h: to - from }
+        if (ring) rects.push(...clipRectToRingRects(band, ring))
+        else rects.push(band)
+      }
     }
   }
   return rects

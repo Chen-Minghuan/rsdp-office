@@ -86,13 +86,16 @@ const visibleZones = computed(() => visibleObjects.value.filter((o) => o.kind ==
 const arrows = computed(() => visibleObjects.value.filter((o) => o.kind === 'arrow'))
 const designZone = computed(() => zones.value.find((z) => z.id === store.designZoneId) || null)
 const designObstacles = computed(() => designZone.value ? zoneLayoutExclusions(designZone.value, false) : [])
-/** 通道条带：渲染和拖动都用全深矩形；「仅从二排起」的实际断开位置由排版预览体现。 */
+/** 通道条带：渲染和拖动预览基于多边形裁剪后的分段矩形（凹形空间一条通道可能多段）；标签与拖柄挂在最大分段上。 */
 const designChannels = computed(() => {
   const zone = designZone.value
-  if (!zone) return [] as Array<{ channel: LayoutChannel; rect: LayoutBlocker }>
-  return (zone.layoutPreferences?.channels || [])
-    .map(channel => ({ channel, rect: channelRects(zone, [channel])[0] }))
-    .filter((entry): entry is { channel: LayoutChannel; rect: LayoutBlocker } => !!entry.rect)
+  if (!zone) return [] as Array<{ channel: LayoutChannel; rect: LayoutBlocker; primary: boolean; key: string }>
+  return (zone.layoutPreferences?.channels || []).flatMap(channel => {
+    const segments = channelRects(zone, [channel])
+    if (!segments.length) return [] as Array<{ channel: LayoutChannel; rect: LayoutBlocker; primary: boolean; key: string }>
+    const largest = segments.reduce((best, rect) => rect.w * rect.h > best.w * best.h ? rect : best, segments[0])
+    return segments.map((rect, index) => ({ channel, rect, primary: rect === largest, key: `${channel.id}:${index}` }))
+  })
 })
 function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
   const d = drag.value
@@ -550,8 +553,7 @@ function onPointerMove(e: PointerEvent) {
         ...furniture.value.map(item => officeFurnitureFootprint(item)),
         ...(zone.layoutPreferences?.channels || [])
           .filter(other => other.id !== d.channelId)
-          .map(other => channelRects(zone, [other])[0])
-          .filter((rect): rect is LayoutBlocker => !!rect),
+          .flatMap(other => channelRects(zone, [other])),
       ]
       const snapped = snapFurnitureEdges(band, zone, others, FURNITURE_SNAP_TOLERANCE_MM)
       let snappedDx = dx + (vertical ? snapped.x - band.x : snapped.y - band.y)
@@ -1008,7 +1010,7 @@ function furnitureProduct(o: FurnitureObject) {
         <div v-if="mode === 'design' && designChannels.length" class="absolute inset-0 pointer-events-none" data-testid="layout-channels">
           <div
             v-for="entry in designChannels"
-            :key="entry.channel.id"
+            :key="entry.key"
             :data-channel-id="entry.channel.id"
             class="pointer-events-auto absolute select-none"
             :class="entry.channel.orientation === 'vertical' ? 'cursor-ew-resize' : 'cursor-ns-resize'"
@@ -1016,9 +1018,9 @@ function furnitureProduct(o: FurnitureObject) {
             :style="channelStyle(entry)"
             @pointerdown.stop="onChannelPointerDown(entry.channel, $event)"
           >
-            <span class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-semibold pointer-events-none" :style="{ top: 4 / store.zoom + 'px', fontSize: 11 / store.zoom + 'px', color: '#306fcb' }">通道 {{ entry.channel.widthMm }}{{ entry.channel.clearanceMm ? `+2×${entry.channel.clearanceMm}` : '' }}{{ entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 二排起' : '' }}</span>
-            <!-- 选中后显示宽度拖柄（恒定屏幕尺寸） -->
-            <template v-if="selectedChannelId === entry.channel.id">
+            <span v-if="entry.primary" class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-semibold pointer-events-none" :style="{ top: 4 / store.zoom + 'px', fontSize: 11 / store.zoom + 'px', color: '#306fcb' }">通道 {{ entry.channel.widthMm }}{{ entry.channel.clearanceMm ? `+2×${entry.channel.clearanceMm}` : '' }}{{ entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 二排起' : '' }}</span>
+            <!-- 选中后显示宽度拖柄（恒定屏幕尺寸，挂在最大分段上） -->
+            <template v-if="entry.primary && selectedChannelId === entry.channel.id">
               <div
                 v-for="edge in (['min', 'max'] as const)"
                 :key="edge"
