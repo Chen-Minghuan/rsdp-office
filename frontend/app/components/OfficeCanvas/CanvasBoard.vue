@@ -9,7 +9,7 @@ import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProbl
 import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
-import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld } from '~/utils/officeCanvasView'
+import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld, rotateCanvasVector } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
 import type { LayoutChannel, LayoutExclusion } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
@@ -147,6 +147,48 @@ function removeSelectedChannel() {
 }
 /** 选中通道位置输入的相对基准（与排版面板「距左/距上」一致）。 */
 const designZoneBounds = computed(() => designZone.value ? canvasZoneBounds(designZone.value) : null)
+/** 选中通道浮动编辑卡的屏幕位置：跟随通道条带（含位置/宽度拖动预览），优先放条带右侧（横向条带放下侧），空间不足换边，并钳制在画布窗口内。 */
+const channelEditorStyle = computed(() => {
+  const channel = selectedChannel.value
+  const v = canvasWindow.value
+  if (!channel || !v) return {}
+  const entry = designChannels.value.find(item => item.channel.id === channel.id && item.primary) || designChannels.value.find(item => item.channel.id === channel.id)
+  if (!entry) return {}
+  let { x, y, w, h } = entry.rect
+  const d = drag.value
+  if (d?.mode === 'channel' && d.channelId === channel.id) {
+    if (channel.orientation === 'vertical') x += d.dx || 0
+    else y += d.dx || 0
+  } else if (d?.mode === 'channel-width' && d.channelId === channel.id) {
+    const dx = d.dx || 0
+    if (channel.orientation === 'vertical') { if (d.edge === 'max') w += dx; else { x += dx; w -= dx } }
+    else { if (d.edge === 'max') h += dx; else { y += dx; h -= dx } }
+  }
+  const world = worldBounds.value
+  const center = { x: world.minX + world.width / 2, y: world.minY + world.height / 2 }
+  const toScreen = (wx: number, wy: number) => {
+    const local = rotateCanvasVector({ x: wx - center.x, y: wy - center.y }, viewRotation.value)
+    return { x: local.x * store.zoom + v.clientWidth / 2 + store.panX, y: local.y * store.zoom + v.clientHeight / 2 + store.panY }
+  }
+  const p0 = toScreen(x, y), p1 = toScreen(x + w, y + h)
+  const band = { minX: Math.min(p0.x, p1.x), maxX: Math.max(p0.x, p1.x), minY: Math.min(p0.y, p1.y), maxY: Math.max(p0.y, p1.y) }
+  const cardW = 264, cardH = 260, gap = 12
+  let left: number, top: number
+  if (band.maxY - band.minY >= band.maxX - band.minX) {
+    const rightSpace = v.clientWidth - 8 - (band.maxX + gap)
+    const leftSpace = band.minX - gap - 8
+    left = rightSpace >= cardW ? band.maxX + gap : leftSpace >= cardW ? band.minX - gap - cardW : rightSpace >= leftSpace ? v.clientWidth - 8 - cardW : 8
+    top = band.minY
+  } else {
+    const belowSpace = v.clientHeight - 8 - (band.maxY + gap)
+    const aboveSpace = band.minY - gap - 8
+    top = belowSpace >= cardH ? band.maxY + gap : aboveSpace >= cardH ? band.minY - gap - cardH : belowSpace >= aboveSpace ? v.clientHeight - 8 - cardH : 8
+    left = band.minX
+  }
+  left = Math.max(8, Math.min(left, Math.max(8, v.clientWidth - cardW - 8)))
+  top = Math.max(8, Math.min(top, Math.max(8, v.clientHeight - cardH - 8)))
+  return { left: `${Math.round(left)}px`, top: `${Math.round(top)}px` }
+})
 function obstaclePoints(area: LayoutExclusion) {
   const polygon = area.polygon || [[area.x, area.y], [area.x + area.w, area.y], [area.x + area.w, area.y + area.h], [area.x, area.y + area.h]]
   return polygon.map(([x, y]) => `${x - area.x},${y - area.y}`).join(' ')
@@ -817,7 +859,8 @@ function furnitureProduct(o: FurnitureObject) {
     <div
       v-if="selectedChannel && designZoneBounds"
       data-testid="channel-editor"
-      class="absolute top-3 left-1/2 -translate-x-1/2 z-20 w-64 rounded-xl border border-line bg-white/95 shadow-panel px-3 py-2.5 text-[11px] text-[#5b5751]"
+      class="absolute z-20 w-64 rounded-xl border border-line bg-white/95 shadow-panel px-3 py-2.5 text-[11px] text-[#5b5751]"
+      :style="channelEditorStyle"
       @pointerdown.stop
     >
       <div class="flex items-center justify-between font-semibold">

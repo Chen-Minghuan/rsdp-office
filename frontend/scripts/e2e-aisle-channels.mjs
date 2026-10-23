@@ -242,6 +242,19 @@ try {
   assert.ok(selectBox, '通道条带不可见')
   await page.mouse.click(selectBox.x + selectBox.width / 2, selectBox.y + selectBox.height / 2)
   await page.getByTestId('channel-editor').waitFor()
+  // 编辑卡跟随通道条带位置：与条带相邻（一侧间隙小），且不超出画布窗口
+  {
+    const editorBox = await page.getByTestId('channel-editor').boundingBox()
+    const canvasBox = await page.getByTestId('office-design-canvas').boundingBox()
+    assert.ok(editorBox && canvasBox, '编辑卡或画布不可见')
+    const gapRight = editorBox.x - (selectBox.x + selectBox.width)
+    const gapLeft = selectBox.x - (editorBox.x + editorBox.width)
+    const gapBelow = editorBox.y - (selectBox.y + selectBox.height)
+    const gapAbove = selectBox.y - (editorBox.y + editorBox.height)
+    const adjacent = (gapRight >= -2 && gapRight < 40) || (gapLeft >= -2 && gapLeft < 40) || (gapBelow >= -2 && gapBelow < 40) || (gapAbove >= -2 && gapAbove < 40)
+    assert.ok(adjacent, `编辑卡应跟随条带相邻显示: gaps R${gapRight.toFixed(0)} L${gapLeft.toFixed(0)} B${gapBelow.toFixed(0)} A${gapAbove.toFixed(0)}`)
+    assert.ok(editorBox.x >= canvasBox.x && editorBox.y >= canvasBox.y && editorBox.x + editorBox.width <= canvasBox.x + canvasBox.width + 1 && editorBox.y + editorBox.height <= canvasBox.y + canvasBox.height + 1, '编辑卡钳制在画布窗口内')
+  }
   await page.getByLabel('通道属性宽度（毫米）').fill('1000')
   await page.getByLabel('通道属性宽度（毫米）').press('Enter')
   await page.waitForFunction(() => {
@@ -508,6 +521,47 @@ try {
   const segBoxes = await uHorizontalSegs.evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { x: box.x, right: box.x + box.width } }))
   const leftSeg = segBoxes.reduce((a, b) => a.x < b.x ? a : b), rightSeg = segBoxes.reduce((a, b) => a.x > b.x ? a : b)
   assert.ok(leftSeg.right < rightSeg.x, '缺口高度的横向通道应在缺角处断开为两段')
+
+  // 12. 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）：未标注门洞净空→未核验提示；
+  // 端头衔接门洞→无提示；衔接走廊被禁放区贯穿→截断提示；门远离通道→未衔接提示。
+  const setupEgress = async (mode) => {
+    await page.evaluate((m) => {
+      const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+      const zone = draft.objects.find(object => object.id === 'CHANNEL-ROOM')
+      const xs = zone.polygon.map(point => point[0]), ys = zone.polygon.map(point => point[1])
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
+      zone.polygon = [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]]
+      const cx = Math.round(minX + (maxX - minX) / 2)
+      zone.layoutPreferences.channels = [{ id: 'CH-EGRESS', orientation: 'vertical', offsetMm: cx, widthMm: 900 }]
+      zone.layoutPreferences.exclusions = []
+      zone.obstacles = []
+      if (m !== 'unmarked') {
+        // 门洞净空与 obstacles.ts 的 doorClearanceObstacle 同构（存储坐标 Y 向上）。
+        const hingeX = m === 'far' ? minX + 100 : cx + 400
+        const hinge = [hingeX, -maxY], radius = 900
+        const outer = [hinge]
+        for (let index = 0; index <= 16; index++) outer.push([hinge[0] + radius * Math.cos(index * Math.PI / 32), hinge[1] + radius * Math.sin(index * Math.PI / 32)])
+        zone.obstacles = [{ obstacleId: 'DOOR-EGRESS', kind: 'DOOR_CLEARANCE', spaceId: zone.id, geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer, outerVertexIds: outer.map((_, i) => 'DOOR-EGRESS-V-' + i), holes: [], holeVertexIds: [] }, excludesFloorArea: false, source: 'MANUAL' }]
+        if (m === 'blocked') zone.layoutPreferences.exclusions = [{ id: 'EX-EGRESS', label: '禁放', x: cx + 500, y: maxY - 1000, w: 100, h: 1100 }]
+      }
+      localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+    }, mode)
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.getByTestId('unit-module-catalog').waitFor()
+    await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+    return page.locator('[data-testid="channel-egress-hint"]')
+  }
+  let egressHints = await setupEgress('unmarked')
+  assert.equal(await egressHints.count(), 1, '未标注门洞净空应给出未核验提示')
+  assert.match(await egressHints.first().textContent(), /未核验/)
+  egressHints = await setupEgress('linked')
+  assert.equal(await egressHints.count(), 0, '通道端头衔接门洞后不应有提示')
+  egressHints = await setupEgress('blocked')
+  assert.equal(await egressHints.count(), 1, '衔接走廊被贯穿应给出截断提示')
+  assert.match(await egressHints.first().textContent(), /净宽不足/)
+  egressHints = await setupEgress('far')
+  assert.equal(await egressHints.count(), 1, '门远离通道应给出未衔接提示')
+  assert.match(await egressHints.first().textContent(), /未衔接/)
 
   assert.deepEqual(errors, [], '页面运行时不应有未捕获异常')
   console.log('e2e-aisle-channels: 全部断言通过')
