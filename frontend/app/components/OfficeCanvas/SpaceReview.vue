@@ -629,8 +629,8 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
               <input v-model="renameDraft" :aria-label="'重命名空间 ' + zone.name" maxlength="40" @blur="commitRoomRename(zone.id)" @keydown.esc.prevent="renamingId = null">
             </form>
             <button v-else class="review-room-card" :class="{ selected: zone.id === selectedId }" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)">
-              <div><strong>{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
-              <div><small>{{ dimensions(zone) }}</small><small>{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
+              <div><strong :title="zone.name">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
+              <div><small class="review-room-dims" :title="dimensions(zone)">{{ dimensions(zone) }}</small><small class="review-room-area">{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
             </button>
             <button class="review-room-rename" type="button" :disabled="!!tracing || calibrating || !!sketching" :aria-label="'重命名空间 ' + zone.name" title="重命名空间" @click="startRoomRename(zone)">改名</button>
             <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" title="删除空间（选中后也可按 Delete 键）" @click="deleteSpace(zone.id)">删除</button>
@@ -729,7 +729,10 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
               <strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink>
             </template>
           </div>
-          <div v-if="calibrating && calibrationPoints.length < 2" class="calibration-canvas-hint">两点校准：请依次点击已知尺寸边的两个端点<button @click="cancelCalibration">取消</button></div>
+          <template v-if="calibrating">
+            <div v-if="calibrationPoints.length < 2" class="calibration-canvas-hint">两点校准：请依次点击已知尺寸边的两个端点</div>
+            <button type="button" class="calibration-cancel" data-testid="cancel-calibration" @click="cancelCalibration">取消校准</button>
+          </template>
           <form v-if="calibrationInputAnchor" class="calibration-inline" :style="{ left: calibrationInputAnchor.x + 'px', top: calibrationInputAnchor.y + 'px' }" @submit.prevent="applyCalibrationInput">
             <label>实际长度<input ref="calibrationInput" v-model.number="calibrationLength" aria-label="校准参考长度（毫米）" type="number" min="1" step="any"><span>mm</span></label>
             <div class="calibration-inline-actions"><button type="submit" :disabled="!Number.isFinite(calibrationLength) || calibrationLength <= 0">应用校准</button><button type="button" @click="cancelCalibration">取消</button></div>

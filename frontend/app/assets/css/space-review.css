@@ -44,10 +44,13 @@
 .review-room-card { display:block; width:100%; padding:12px 10px; border:1px solid transparent; border-radius:8px; background:#fff; text-align:left; margin-bottom:2px; }
 .review-room-card.selected { border-color:#a7c5e5; background:#f4f8fc; }
 .review-room-card:hover { background:#f6f8f5; }
-.review-room-card>div { display:flex; align-items:center; justify-content:space-between; gap:5px; }
+.review-room-card>div { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:2px 5px; }
 .review-room-card>div+div { margin-top:10px; color:#95998e; }
-.review-room-card strong { font-size:12px; font-weight:650; }
-.review-room-card small { font-size:10px; white-space:nowrap; }
+.review-room-card strong { font-size:12px; font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.review-room-card small { font-size:10px; }
+.review-room-card .review-badge { flex:none; }
+.review-room-card .review-room-dims { min-width:0; overflow-wrap:anywhere; }
+.review-room-card .review-room-area { flex:none; white-space:nowrap; }
 .review-badge { padding:3px 6px; border-radius:4px; white-space:nowrap; font-size:10px; line-height:1.2; }
 .review-badge.verified { background:#e9f3ee; color:#55957c; }
 .review-badge.pending { background:#fcf0d9; color:#b08a48; }
@@ -165,7 +168,8 @@
 .review-page-footer { flex:none; display:flex; align-items:center; justify-content:space-between; height:42px; padding:0 30px; color:#a2a89b; font-size:10px; }
 .review-toast { position:absolute; z-index:5; bottom:115px; left:50%; transform:translateX(-50%); background:#435c4c; color:#fff; box-shadow:0 3px 15px #52664925; border-radius:7px; padding:12px 20px; font-size:11px; max-width:85%; text-align:center; pointer-events:none; }
 .calibration-canvas-hint { position:absolute; z-index:3; top:66px; left:50%; transform:translateX(-50%); padding:11px; border:1px solid #ead4ad; border-radius:7px; background:#fffcf2; color:#a38450; font-size:11px; white-space:nowrap; }
-.calibration-canvas-hint button { margin-left:12px; text-decoration:underline; }
+.calibration-cancel { position:absolute; z-index:3; top:66px; right:18px; padding:9px 12px; border:1px solid #ead4ad; border-radius:7px; background:#fffcf2; color:#a38450; font-size:11px; white-space:nowrap; }
+.calibration-cancel:hover { background:#fdf3df; }
 .missing-source-note { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:310px; background:#fffcf4f5; padding:20px; border:1px solid #eadcbc; border-radius:10px; color:#9a855e; font-size:12px; line-height:1.8; text-align:center; }
 .missing-source-note p { font-size:11px; }
 .missing-source-note a { color:#9e7348; }

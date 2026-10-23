@@ -8,6 +8,10 @@
 
 2026-10-23 LAYOUT-025 通道宽度拖柄：选中通道条带后两端显示恒定屏幕尺寸拖柄，拖 max 边只改宽度、拖 min 边位置与宽度联动（远端固定），净距不变、禁放带不出包围盒（预览即钳制、松手一次提交走 updateZoneChannels 撤销/失效路径）。验证：`pnpm build`、通道专项（新增拖柄换算/远端固定/越界钳制断言）、四组排版回归通过，见[任务记录](tasks/LAYOUT-025-channel-width-handles.md)。
 
+2026-10-23 两点校准取消按钮移至画布右上角：按用户反馈，原居中提示条内的「取消」链接拆出为画布右上角独立「取消校准」按钮（`data-testid="cancel-calibration"`），居中提示条只保留操作指引；校准全程（含已选点待输入时）都可一键取消。验证：`pnpm build`、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke` 通过；校准态截图人工核对按钮位置与点击取消恢复正常。
+
+2026-10-23 空间卡片尺寸溢出适配：按用户反馈，总览左侧空间卡片在超大空间（如 81,500 × 59,800 mm）下尺寸行 nowrap 溢出、挤压改名/删除按钮。卡片两行改为允许换行：尺寸文本 `overflow-wrap:anywhere` 自动折行并加 title 悬浮全文，面积固定 nowrap 不挤掉，空间名超长省略加 title，徽标不收缩。验证：`pnpm build`、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke` 通过；超大+普通双空间卡片截图人工核对通过。
+
 2026-10-23 LAYOUT-024 通道选中态与画布内编辑：设计模式点选通道条带即选中（高亮实线边框+加深斜纹），画布顶部弹出浮动编辑卡（宽度/两侧净距/位置/「仅从二排起」/移除，含 900mm 阈值提示），编辑走 `updateZoneChannels` 同一入口（撤销/失效语义一致）；选中家具或对象、点空白、切换工具、Esc 均取消通道选中，Delete 直接移除选中通道。注：design 模式无属性检查器（右侧为选品面板），按任务卡记录的偏差改用浮动编辑卡。验证：`pnpm build`、通道专项（新增选中断言）、自动排版/规划/自适应/会议回归、`MOCK_API=1 pnpm e2e:smoke`（默认 3001 被旧构建残留实例占用，改用 BASE_URL=3011 对当前构建通过，残留进程未动）通过，见[任务记录](tasks/LAYOUT-024-channel-selection-inspector.md)。
 
 2026-10-23 手动画布常驻返回按钮：按用户反馈，空间核对总览工具条新增「← 返回上传图纸」（`data-testid="back-to-upload"`，在画区 inert 区外，画到一半也可返回），解决手动画图后突然有图纸要上传时无明确回退入口的问题；返回不清空手绘画布，已有手绘空间保留，重新上传识别仍走既有换图/快照保护。验证：`pnpm build`、`pnpm e2e:drawing-entry`（新增返回断言）、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke` 通过；空白态与已画空间态截图人工核对通过。
