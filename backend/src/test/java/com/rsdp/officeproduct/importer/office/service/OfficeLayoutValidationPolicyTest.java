@@ -89,4 +89,49 @@ class OfficeLayoutValidationPolicyTest {
         ((ObjectNode) wall.get(1)).put("x", 50).putObject("layoutSettings").putObject("spacing").put("wallMm", 300);
         assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(wall));
     }
+
+    private ObjectNode addChannel(ArrayNode objects, String orientation, double offset, double width) {
+        return ((ObjectNode) objects.get(0).path("layoutPreferences")).putArray("channels").addObject()
+            .put("id", "CH-1").put("orientation", orientation).put("offsetMm", offset).put("widthMm", width);
+    }
+    @Test void rejectsConfirmedFurnitureBlockingChannel() throws Exception {
+        ArrayNode objects = scene();
+        addChannel(objects, "vertical", 3000, 900); // 禁放带 [3000,3900]×全高，桌子 2000..4800 压占
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ((ObjectNode) objects.get(1)).put("layoutConfirmed", false); // 草稿未确认不受通道约束
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+    @Test void acceptsFurnitureBesideChannelAndRejectsClearanceExpansion() throws Exception {
+        ArrayNode objects = scene();
+        addChannel(objects, "vertical", 3000, 900);
+        ((ObjectNode) objects.get(1)).put("x", 200); // 200..3000 与禁放带贴边，允许
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ArrayNode expanded = scene();
+        addChannel(expanded, "vertical", 3000, 900).put("clearanceMm", 300); // 扩展带 [2700,4200]
+        ((ObjectNode) expanded.get(1)).put("x", 200); // 200..3000 压占扩展带
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(expanded));
+    }
+    @Test void fromSecondRowChannelExemptsSavedFirstBlockOnly() throws Exception {
+        ArrayNode objects = scene();
+        addChannel(objects, "vertical", 3000, 900).put("fromSecondRow", true);
+        ObjectNode table = (ObjectNode) objects.get(1);
+        table.put("y", 1000); // 首排 y 1000..2200
+        table.putObject("layoutSettings").put("firstBlockDepthMm", 2500); // 禁放带从 y=2500 起
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        objects.addObject().put("id", "T2").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("x", 2000).put("y", 3000).put("w", 2800).put("h", 1200).put("rotation", 0).put("furnitureTemplateId", "table-conference-rect");
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects)); // 二排起之后的家具仍不得压占
+        ArrayNode noDepth = scene();
+        addChannel(noDepth, "vertical", 3000, 900).put("fromSecondRow", true); // 无首排深度记录按全深从严
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(noDepth));
+    }
+    @Test void horizontalChannelBlocksRowsAndInvalidChannelsIgnored() throws Exception {
+        ArrayNode objects = scene();
+        addChannel(objects, "horizontal", 3000, 900); // 禁放带 y 3000..3900
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ((ObjectNode) objects.get(1)).put("y", 4200); // 4200..5400 避开通道带
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ArrayNode invalid = scene();
+        addChannel(invalid, "vertical", 3000, 0); // 宽度非法，与前端一致跳过
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(invalid));
+    }
 }

@@ -37,6 +37,8 @@ public final class OfficeLayoutValidationPolicy {
                 if (!zone.path("id").asText().equals(obstacle.path("spaceId").asText())) throw new BusinessException("建筑约束归属无效");
                 exclusions.add(obstacleArea(obstacle));
             }
+            // 通道禁放带：语义对齐前端 channelRects（宽度+2×净距、包围盒裁剪、「仅从二排起」按 firstBlockDepthMm 豁免首排）。
+            List<Rectangle2D.Double> channelBands = channelBands(points, preferences, furniture);
             for (int i = 0; i < furniture.size(); i++) {
                 JsonNode item = furniture.get(i);
                 if (!item.path("layoutConfirmed").asBoolean()) continue;
@@ -52,6 +54,7 @@ public final class OfficeLayoutValidationPolicy {
                     if (!expanded.isEmpty()) throw new BusinessException("已确认家具离墙或通行预留不足");
                 }
                 for (Area area : exclusions) if (overlaps(bounds.get(i), area)) throw new BusinessException("已确认家具占用了入口或禁放区");
+                for (Rectangle2D.Double band : channelBands) if (bounds.get(i).intersects(band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
                 for (int j = 0; j < furniture.size(); j++) if (i != j && bounds.get(i).intersects(bounds.get(j))) throw new BusinessException("已确认家具存在重叠");
                 double clearance = nonNegative(preferences, "seatClearanceMm");
                 if ("seat".equals(item.path("layoutRole").asText()) && clearance > 0) {
@@ -101,6 +104,40 @@ public final class OfficeLayoutValidationPolicy {
     private static boolean overlaps(Rectangle2D.Double rectangle, Area exclusion) {
         Area intersection = new Area(rectangle); intersection.intersect(exclusion);
         return !intersection.isEmpty();
+    }
+    /** Mirrors frontend channelRects: keep-out band = widthMm + 2×clearanceMm, clipped to the polygon bounding box; fromSecondRow vertical channels start below the saved first-block depth. */
+    private static List<Rectangle2D.Double> channelBands(JsonNode points, JsonNode preferences, List<JsonNode> furniture) {
+        JsonNode channels = preferences.path("channels");
+        if (!channels.isArray() || channels.isEmpty()) return List.of();
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+        for (JsonNode p : points) {
+            minX = Math.min(minX, p.get(0).asDouble()); maxX = Math.max(maxX, p.get(0).asDouble());
+            minY = Math.min(minY, p.get(1).asDouble()); maxY = Math.max(maxY, p.get(1).asDouble());
+        }
+        Double firstBlockDepth = null;
+        for (JsonNode item : furniture) {
+            JsonNode value = item.path("layoutSettings").path("firstBlockDepthMm");
+            if (value.isNumber() && Double.isFinite(value.asDouble())) { firstBlockDepth = value.asDouble(); break; }
+        }
+        List<Rectangle2D.Double> bands = new ArrayList<>();
+        for (JsonNode channel : channels) {
+            JsonNode offsetNode = channel.path("offsetMm"), widthNode = channel.path("widthMm");
+            if (!offsetNode.isNumber() || !widthNode.isNumber()) continue;
+            double offset = offsetNode.asDouble(), width = widthNode.asDouble();
+            if (!Double.isFinite(offset) || !Double.isFinite(width) || width < 1) continue;
+            JsonNode clearanceNode = channel.path("clearanceMm");
+            double clearance = clearanceNode.isNumber() && Double.isFinite(clearanceNode.asDouble()) && clearanceNode.asDouble() > 0 ? clearanceNode.asDouble() : 0;
+            if ("vertical".equals(channel.path("orientation").asText())) {
+                double y = minY, h = maxY - minY;
+                if (channel.path("fromSecondRow").asBoolean() && firstBlockDepth != null && firstBlockDepth > 0 && firstBlockDepth < h) { y = minY + firstBlockDepth; h = maxY - y; }
+                double from = Math.max(minX, offset - clearance), to = Math.min(maxX, offset + width + clearance);
+                if (to > from) bands.add(new Rectangle2D.Double(from, y, to - from, h));
+            } else {
+                double from = Math.max(minY, offset - clearance), to = Math.min(maxY, offset + width + clearance);
+                if (to > from) bands.add(new Rectangle2D.Double(minX, from, maxX - minX, to - from));
+            }
+        }
+        return bands;
     }
     private static Area obstacleArea(JsonNode obstacle) {
         JsonNode outer = obstacle.path("geometry").path("outer");
