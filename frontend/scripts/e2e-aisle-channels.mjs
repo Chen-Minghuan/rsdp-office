@@ -418,6 +418,45 @@ try {
     return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 2
   })
 
+  // 11. 端点留断（LAYOUT-028）：纵向通道设起点后条带只覆盖后半跨；刷新保持；起点>终点无有效禁放带（条带消失）；清空恢复贯通。
+  const epZone = await zoneState()
+  const epMinY = Math.min(...epZone.polygon.map(point => point[1])), epMaxY = Math.max(...epZone.polygon.map(point => point[1]))
+  const epSpanY = epMaxY - epMinY
+  const epChannelId = (await channelsState()).find(item => item.orientation === 'vertical').id
+  const epStrip = page.getByTestId('layout-channels').locator(`[data-channel-id="${epChannelId}"]`)
+  const epFullBox = await epStrip.first().boundingBox()
+  assert.ok(epFullBox, '通道条带不可见')
+  // 避免点在纵/横条带交叠处（上层条带会抢走点击）：取 1/4 高度处。
+  await page.mouse.click(epFullBox.x + epFullBox.width / 2, epFullBox.y + epFullBox.height * 0.25)
+  await page.getByTestId('channel-editor').waitFor()
+  await page.getByLabel('通道属性起点（毫米）').fill(String(Math.round(epSpanY / 2)))
+  await page.getByLabel('通道属性起点（毫米）').press('Enter')
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return Number.isFinite((draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.orientation === 'vertical')?.startMm)
+  })
+  const epHalfBox = await epStrip.first().boundingBox()
+  assert.ok(epHalfBox && Math.abs(epHalfBox.height - epFullBox.height / 2) < epFullBox.height * 0.06, `设起点后条带高度应约为一半: ${epHalfBox?.height} vs ${epFullBox.height}`)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('layout-channels').locator(`[data-channel-id="${epChannelId}"]`).first().waitFor()
+  const epPersisted = (await channelsState()).find(item => item.orientation === 'vertical')
+  assert.ok(Number.isFinite(epPersisted.startMm), '刷新后通道起点应保持')
+  const epReloadBox = await epStrip.first().boundingBox()
+  assert.ok(epReloadBox && Math.abs(epReloadBox.height - epFullBox.height / 2) < epFullBox.height * 0.06, '刷新后条带应保持留断跨度')
+  // 起点 > 终点：无有效禁放带，条带消失（validateChannels 同步给出问题文案，单测覆盖）。
+  await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+  await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').fill(String(Math.round(epSpanY * 0.1)))
+  await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').press('Enter')
+  await page.waitForFunction((id) => !document.querySelector(`[data-channel-id="${id}"]`), epChannelId)
+  // 清空起终点恢复贯通。
+  await page.getByTestId('channel-vertical').getByLabel('通道起点（毫米）').fill('')
+  await page.getByTestId('channel-vertical').getByLabel('通道起点（毫米）').press('Enter')
+  await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').fill('')
+  await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').press('Enter')
+  await page.waitForFunction((id) => document.querySelectorAll(`[data-channel-id="${id}"]`).length === 1, epChannelId)
+  const epRestoredBox = await epStrip.first().boundingBox()
+  assert.ok(epRestoredBox && Math.abs(epRestoredBox.height - epFullBox.height) < epFullBox.height * 0.03, '清空起终点后条带应恢复全跨')
+
   // 10. U 形空间（LAYOUT-027）：通道按多边形裁剪——缺角内的纵向通道截断到缺口下方、不画出缺角；
   // 缺口高度上的横向通道断成左右两段。
   await page.evaluate(() => {

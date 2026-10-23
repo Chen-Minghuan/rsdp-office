@@ -53,7 +53,19 @@ assert.deepEqual(channelRects(legacyZone, [{ id: 'c', orientation: 'horizontal',
 // axisSegments 仍按未裁剪禁放带全轴切段（LAYOUT-027 定稿语义）。
 assert.deepEqual(axisSegments(0, 6000, 300, [{ offsetMm: 2500, widthMm: 900 }]), [{ start: 300, length: 2200 }, { start: 3400, length: 2300 }])
 assert.deepEqual(axisSegments(0, 6000, 300, [{ offsetMm: 2500, widthMm: 900, clearanceMm: 200 }]), [{ start: 300, length: 2000 }, { start: 3600, length: 2100 }], 'clearance widens the cut')
+// 端点留断（LAYOUT-028）：startMm/endMm 收窄走向范围，缺省贯通；越界自动按包围盒收敛。
+assert.deepEqual(channelRects(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, startMm: 1500, endMm: 3000 }]), [rect(1000, 1500, 900, 1500)], 'vertical endpoints bound the span')
+assert.deepEqual(channelRects(rectZone, [{ id: 'c', orientation: 'horizontal', offsetMm: 1000, widthMm: 900, startMm: 2000 }]), [rect(2000, 1000, 4000, 900)], 'horizontal start only, open end')
+assert.deepEqual(channelRects(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, startMm: -500, endMm: 99000 }]), [rect(1000, 0, 900, 4000)], 'out-of-range endpoints clamp to bbox')
+assert.deepEqual(channelRects(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, startMm: 3000, endMm: 3000 }]), [], 'empty span yields no band')
+// 端点与二排起取交集：startMm 更靠下时保持 startMm。
+assert.deepEqual(channelRects(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, fromSecondRow: true, startMm: 2000 }], 1200), [rect(1000, 2000, 900, 2000)], 'startMm wins when deeper than first block')
+assert.deepEqual(channelRects(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, fromSecondRow: true, endMm: 3000 }], 1200), [rect(1000, 1200, 900, 1800)], 'fromSecondRow shifts start, endMm bounds the end')
+// 端点与多边形裁剪叠加：先收窄再裁剪。
+assert.deepEqual(channelRects(uZone, [{ id: 'c', orientation: 'vertical', offsetMm: 3000, widthMm: 900, endMm: 4500 }]), [rect(3000, 2000, 900, 2500)], 'endpoints compose with polygon clipping')
+assert.equal(validateChannels(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, startMm: 3000, endMm: 2000 }]), '通道起点必须小于终点')
+assert.equal(validateChannels(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, startMm: NaN }]), '通道起点必须是有效毫米数')
 // clamp/validate 基本行为保持。
 assert.deepEqual(clampChannelsToZone(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: -500, widthMm: 900 }])[0].offsetMm, 0)
 assert.equal(validateChannels(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 9000, widthMm: 900 }]), '纵向通道不在空间范围内，请调整位置')
-console.log('PASS: rect×polygon clipping (rect identity, U/L segmentation, degenerate guards), channelRects clipping + fallback, axisSegments full-band cuts, clamp/validate')
+console.log('PASS: rect×polygon clipping (rect identity, U/L segmentation, degenerate guards), channelRects clipping + fallback, axisSegments full-band cuts, endpoint breaks (startMm/endMm + fromSecondRow compose), clamp/validate')

@@ -105,7 +105,7 @@ public final class OfficeLayoutValidationPolicy {
         Area intersection = new Area(rectangle); intersection.intersect(exclusion);
         return !intersection.isEmpty();
     }
-    /** Mirrors frontend channelRects: keep-out band = widthMm + 2×clearanceMm, clipped to the polygon bounding box; fromSecondRow vertical channels start below the saved first-block depth. */
+    /** Mirrors frontend channelRects: keep-out band = widthMm + 2×clearanceMm, clipped to the polygon bounding box; startMm/endMm bound the travel-axis span (default full); fromSecondRow vertical channels start below the saved first-block depth. */
     private static List<Rectangle2D.Double> channelBands(JsonNode points, JsonNode preferences, List<JsonNode> furniture) {
         JsonNode channels = preferences.path("channels");
         if (!channels.isArray() || channels.isEmpty()) return List.of();
@@ -127,14 +127,18 @@ public final class OfficeLayoutValidationPolicy {
             if (!Double.isFinite(offset) || !Double.isFinite(width) || width < 1) continue;
             JsonNode clearanceNode = channel.path("clearanceMm");
             double clearance = clearanceNode.isNumber() && Double.isFinite(clearanceNode.asDouble()) && clearanceNode.asDouble() > 0 ? clearanceNode.asDouble() : 0;
+            JsonNode startNode = channel.path("startMm"), endNode = channel.path("endMm");
+            Double start = startNode.isNumber() && Double.isFinite(startNode.asDouble()) ? startNode.asDouble() : null;
+            Double end = endNode.isNumber() && Double.isFinite(endNode.asDouble()) ? endNode.asDouble() : null;
             if ("vertical".equals(channel.path("orientation").asText())) {
-                double y = minY, h = maxY - minY;
-                if (channel.path("fromSecondRow").asBoolean() && firstBlockDepth != null && firstBlockDepth > 0 && firstBlockDepth < h) { y = minY + firstBlockDepth; h = maxY - y; }
+                double axisFrom = start != null ? Math.max(minY, start) : minY, axisTo = end != null ? Math.min(maxY, end) : maxY;
+                if (channel.path("fromSecondRow").asBoolean() && firstBlockDepth != null && firstBlockDepth > 0 && firstBlockDepth < maxY - minY) axisFrom = Math.max(axisFrom, minY + firstBlockDepth);
                 double from = Math.max(minX, offset - clearance), to = Math.min(maxX, offset + width + clearance);
-                if (to > from) bands.add(new Rectangle2D.Double(from, y, to - from, h));
+                if (to > from && axisTo > axisFrom) bands.add(new Rectangle2D.Double(from, axisFrom, to - from, axisTo - axisFrom));
             } else {
+                double axisFrom = start != null ? Math.max(minX, start) : minX, axisTo = end != null ? Math.min(maxX, end) : maxX;
                 double from = Math.max(minY, offset - clearance), to = Math.min(maxY, offset + width + clearance);
-                if (to > from) bands.add(new Rectangle2D.Double(minX, from, maxX - minX, to - from));
+                if (to > from && axisTo > axisFrom) bands.add(new Rectangle2D.Double(axisFrom, from, axisTo - axisFrom, to - from));
             }
         }
         return bands;

@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-23 LAYOUT-028 通道端点留断：通道新增 `startMm`/`endMm`（世界毫米，缺省贯通、旧数据无需迁移），与「仅从二排起」按交集收窄走向跨度；渲染、压占确认（前端 confirmedLayoutProblem + 服务端 channelBands 同步语义与测试）按留断范围生效，编辑卡与排版面板均可数值编辑（空=贯通）。定稿：fromSecondRow 保留独立动态字段不迁移；横向不做对称布尔（列轴无"首块"语义，用端点数值表达）；自动排版切段仍按未留断全轴禁放带（绕过端点需二维装箱，留作后续评估）。验证：`pnpm build`、`test:layout-channels`/`test:layout-planning`、mvn 191 通过（新增端点用例）、通道专项 e2e 步骤 11、smoke（自建 3012 端口）通过，见[任务记录](tasks/LAYOUT-028-channel-endpoint-breaks.md)。真实提交链路集成验证未执行（同 LAYOUT-022 记录）。
+
 2026-10-23 LAYOUT-027 通道多边形裁剪：`clipRectToRingRects`（扫描线分段纯函数）把通道禁放带按房间多边形裁剪——凹形空间条带不再画出缺角，一条通道可输出多段矩形参与渲染/压占校验/避障；矩形空间输出与现状逐值一致。排版切段仍按未裁剪全轴禁放带（桌列不跨通道线）；服务端核验无需改动（确认家具先强制在轮廓内，交集判定等价）。验证：`pnpm build`、新增 `test:layout-channels` 单测、通道专项 e2e 步骤 10（U 形截断/断开断言）、排版回归与 smoke 通过，见[任务记录](tasks/LAYOUT-027-channel-polygon-clipping.md)。顺带修复既有损坏：`test:auto-layout`/`test:reference-layouts` 加载器未别名 layoutChannels 传递依赖（自 a3f5278 起无法运行）；`test:design-corrections` 仍因 `./obstacles` 未别名失败（与本任务无关，未修）。
 
 2026-10-23 LAYOUT-026 通道拖动吸附：通道位置拖动复用家具吸附模块（禁放带为吸附矩形，目标=墙边+家具占地边缘+其他通道带边缘），阈值与开关与家具吸附一致（50mm、工具栏"吸附"），参考线走既有 snap-guide 覆盖层；吸附量叠加后再经包围盒钳制。取舍记录：未做"间隙中线"吸附与缩放换算阈值（与家具吸附保持同一手感）。验证：`pnpm build`、通道专项（新增吸附断言）、四组排版回归通过，见[任务记录](tasks/LAYOUT-026-channel-drag-snapping.md)。至此通道补全第二期（选中态/拖柄/吸附）完成。

@@ -134,4 +134,20 @@ class OfficeLayoutValidationPolicyTest {
         addChannel(invalid, "vertical", 3000, 0); // 宽度非法，与前端一致跳过
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(invalid));
     }
+    @Test void channelEndpointBreaksBoundTheTravelSpan() throws Exception {
+        ArrayNode objects = scene();
+        addChannel(objects, "vertical", 3000, 900).put("startMm", 4000); // 禁放带 [3000,3900]×y4000..6000，桌子 y 2000..3200 在留断范围外
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        objects.addObject().put("id", "T2").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("x", 3000).put("y", 4200).put("w", 900).put("h", 1000).put("rotation", 0).put("furnitureTemplateId", "table-conference-rect");
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects)); // 留断范围内仍不得压占
+        ArrayNode ending = scene();
+        addChannel(ending, "vertical", 3000, 900).put("endMm", 2500); // 禁放带 y 0..2500，桌子 y 2000..3200 压占
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(ending));
+        ArrayNode horizontal = scene();
+        addChannel(horizontal, "horizontal", 3000, 900).put("startMm", 5000); // 横向禁放带 x 5000..8000，桌子 x 2000..4800 不在范围
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(horizontal));
+        ArrayNode inverted = scene();
+        addChannel(inverted, "vertical", 3000, 900).put("startMm", 5000).put("endMm", 1000); // 起点大于终点：无有效带，与前端一致跳过
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(inverted));
+    }
 }

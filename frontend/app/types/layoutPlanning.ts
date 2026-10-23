@@ -9,7 +9,19 @@ export interface LayoutExclusion { id: string; label: string; x: number; y: numb
  * offsetMm 与家具 x/y 共用世界毫米坐标（纵向取 x、横向取 y），不是相对偏移。
  * fromSecondRow 仅对纵向通道和课桌式网格排布生效：首排（对组模式的首个对组）不被断开。
  */
-export interface LayoutChannel { id: string; orientation: 'vertical' | 'horizontal'; offsetMm: number; widthMm: number; fromSecondRow?: boolean; /** 通道两侧额外净距（毫米），排版与确认按 widthMm + 2×clearanceMm 的禁放带处理；缺省为 0。 */ clearanceMm?: number }
+export interface LayoutChannel {
+  id: string
+  orientation: 'vertical' | 'horizontal'
+  offsetMm: number
+  widthMm: number
+  fromSecondRow?: boolean
+  /** 通道两侧额外净距（毫米），排版与确认按 widthMm + 2×clearanceMm 的禁放带处理；缺省为 0。 */
+  clearanceMm?: number
+  /** 沿走向的起点（世界毫米：纵向为 y、横向为 x）；缺省从空间包围盒起贯通（LAYOUT-028）。 */
+  startMm?: number
+  /** 沿走向的终点（世界毫米）；缺省贯通到包围盒末端。 */
+  endMm?: number
+}
 export interface LayoutPreferences {
   strategy: 'template' | 'recommended'
   targetSeats: number

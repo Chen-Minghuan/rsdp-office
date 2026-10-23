@@ -136,4 +136,12 @@ for (const id of ['cabinet-mobile', 'sofa-double', 'chair-office', 'desk-manager
  const blockedGeneral = plan(zone, [], { ...generic, presetId: 'general-auto', preferences: { ...defaults(), exclusions: [{id: 'ALL', x:-12000,y:-8000,w:12000,h:8000}] } })
  assert.equal(blockedGeneral.furniture.length, 0)
 }
+// 通道端点留断（LAYOUT-028）：确认校验按留断范围生效；缺省贯通保持旧行为。
+const channelZone = { ...zone, layoutPreferences: { ...defaults(), channels: [{ id: 'CH', orientation: 'vertical', offsetMm: -6000, widthMm: 900, startMm: -4000 }] } }
+const aboveBreak = { ...cabinetForTest(), id: 'ABOVE', zoneId: zone.id, x: -6300, y: -7000, w: 600, h: 400, rotation: 0 } // 跨过通道线但位于留断范围之上
+const insideBreak = { ...aboveBreak, id: 'INSIDE', y: -3500 }
+assert.equal(confirmedLayoutProblem(channelZone, [aboveBreak]), null, '留断范围外的家具不受通道约束')
+assert.match(confirmedLayoutProblem(channelZone, [insideBreak]) || '', /压占通道/, '留断范围内仍不得压占')
+const fullSpanZone = { ...zone, layoutPreferences: { ...defaults(), channels: [{ id: 'CH', orientation: 'vertical', offsetMm: -6000, widthMm: 900 }] } }
+assert.match(confirmedLayoutProblem(fullSpanZone, [aboveBreak]) || '', /压占通道/, '缺省贯通时同一位置仍压占')
 console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs')
