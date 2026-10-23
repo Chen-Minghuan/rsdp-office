@@ -309,3 +309,21 @@ export function sketchShapePolygon(shape: SketchShapeKind, a: { x: number; y: nu
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
   return ring.map(([x, y]): [number, number] => [cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos])
 }
+
+/** 绕多边形面积质心旋转（角度在当前坐标系内，度；Y 向下坐标系中正值在屏幕上为顺时针）。质心是旋转不动点，连续旋转不漂移。 */
+export function rotateRing(ring: Array<[number, number]>, angleDeg: number): Array<[number, number]> | null {
+  if (ring.length < 3 || !Number.isFinite(angleDeg) || !angleDeg) return null
+  let twiceArea = 0, cx = 0, cy = 0
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i], [x1, y1] = ring[(i + 1) % ring.length]
+    const cross = x0 * y1 - x1 * y0
+    twiceArea += cross
+    cx += (x0 + x1) * cross
+    cy += (y0 + y1) * cross
+  }
+  if (Math.abs(twiceArea) < 1e-9) return null
+  cx /= 3 * twiceArea
+  cy /= 3 * twiceArea
+  const rad = angleDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad)
+  return ring.map(([x, y]): [number, number] => [cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos])
+}

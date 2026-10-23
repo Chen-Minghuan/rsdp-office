@@ -11,7 +11,7 @@ import type { ZoneObject } from '~/types/office'
 import { transformContour } from '~/utils/spatial/contourTransform'
 import type { ContourOperation, ContourPoint } from '~/utils/spatial/contourTransform'
 import { canRestoreSourceContour, sourceContour } from '~/utils/spatial/designCorrections'
-import { polygonBounds, polygonCentroid, sketchShapePolygon } from '~/utils/spatial/geometry'
+import { polygonBounds, polygonCentroid, rotateRing, sketchShapePolygon } from '~/utils/spatial/geometry'
 import { ZONE_TYPES } from '~/utils/sample'
 import type { SketchShapeKind } from '~/utils/spatial/geometry'
 import { doorClearanceObstacle, moveObstacle, obstacleLabel, rectangleObstacle, reshapeObstacle, snapObstacleToZone } from '~/utils/spatial/obstacles'
@@ -34,6 +34,14 @@ const calibrating = ref(false), calibrationPoints = ref<Array<{ x: number; y: nu
 const calibrationLength = ref(6000), calibrationInput = ref<HTMLInputElement | null>(null)
 const drag = ref<{ zoneId: string; index: number; polygon: Array<[number, number]>; initial?: Array<[number, number]>; start?: ContourPoint; operation?: ContourOperation } | null>(null)
 const keepAspect = ref(false)
+const rotateAngle = ref(90)
+const rotateDirty = ref(false)
+watch(selectedId, () => { rotateDirty.value = false })
+/** 仅「应用」/Enter 保存旋转；点击画布、选中空间、拖动或失焦只丢弃预览，不应用。 */
+function discardRotatePreview() { rotateDirty.value = false }
+function onRotateInput() { rotateDirty.value = true }
+function onRotateEsc() { rotateDirty.value = false }
+function onRotateBlur() { rotateDirty.value = false }
 // Stays false while the camera is only auto-fitted; manual pan/zoom disables resize refit.
 const cameraTouched = ref(false)
 const shiftPressed = ref(false)
@@ -50,7 +58,18 @@ const sketchDrag = ref<{ start: { x: number; y: number }; current: { x: number; 
 const showTemplate = ref(false)
 let messageTimer: ReturnType<typeof setTimeout> | null = null
 
-const zones = computed(() => store.zones.map(zone => drag.value?.zoneId === zone.id ? { ...zone, polygon: drag.value.polygon } : zone))
+/** 旋转角度调整中的实时预览：仅渲染层覆盖，应用/Enter 后才落库。 */
+const rotatePreviewRing = computed(() => {
+  const zone = store.zones.find(item => item.id === selectedId.value)
+  if (!rotateDirty.value || drag.value || !zone?.polygon?.length) return null
+  if (!Number.isFinite(rotateAngle.value) || !rotateAngle.value) return null
+  return rotateRing(zone.polygon, rotateAngle.value)
+})
+const zones = computed(() => store.zones.map(zone => {
+  if (drag.value?.zoneId === zone.id) return { ...zone, polygon: drag.value.polygon }
+  if (rotatePreviewRing.value && zone.id === selectedId.value) return { ...zone, polygon: rotatePreviewRing.value }
+  return zone
+}))
 const scene = computed(() => reviewScene(zones.value, store.floorPlan, pixelBounds.value))
 const selected = computed(() => zones.value.find(zone => zone.id === selectedId.value) || null)
 const selectedSpace = computed(() => scene.value.spaces.find(space => space.spaceId === selectedId.value) || null)
@@ -187,6 +206,7 @@ function zoom(factor: number) {
 }
 function selectSpace(id: string) {
   if (tracing.value) return
+  discardRotatePreview()
   selectedId.value = id
   selectedObstacleId.value = null
   if (!zones.value.slice(0, 6).some(zone => zone.id === id)) showAllSpaces.value = true
@@ -352,6 +372,7 @@ function applyCalibrationInput() {
 }
 
 function pointerDown(point: { x: number; y: number }) {
+  discardRotatePreview()
   labelEditing.value = false
   if (tool.value.startsWith('obstacle-') && selected.value && calibrated.value) {
     obstacleDraft.value = { spaceId: selected.value.id, kind: tool.value.slice(9) as SpatialObstacleKind, start: point, current: point }
@@ -377,6 +398,26 @@ function startTrace() {
   showUnderlay.value = true
   tracing.value = { zoneId: selected.value.id, points: [] }
 }
+/** 旋转选中空间：绕质心，屏幕顺时针为正；柱/门洞随轮廓同步旋转，可撤销。 */
+function applyRotate() {
+  const zone = selected.value
+  if (!zone?.polygon?.length || !Number.isFinite(rotateAngle.value) || !rotateAngle.value) return
+  const problem = store.rotateZone(zone.id, rotateAngle.value)
+  if (problem) { notify('旋转未应用：' + problem); return }
+  rotateDirty.value = false
+  notify(`已绕中心顺时针旋转 ${rotateAngle.value}°，尺寸标注随轮廓更新；可撤销`)
+}
+
+/** 一键顺时针 90°：显式按钮动作，点击即应用（丢弃未提交的角度预览）。 */
+function rotate90() {
+  const zone = selected.value
+  if (!zone?.polygon?.length) return
+  rotateDirty.value = false
+  const problem = store.rotateZone(zone.id, 90)
+  if (problem) { notify('旋转未应用：' + problem); return }
+  notify('已绕中心顺时针旋转 90°，尺寸标注随轮廓更新；可撤销')
+}
+
 function cancelTrace() {
   tracing.value = null
   if (tool.value === 'trace') tool.value = 'edit'
@@ -504,6 +545,7 @@ function keyUp(event: KeyboardEvent) { shiftPressed.value = event.shiftKey }
 function cancelInteraction() { drag.value = null; obstacleDraft.value = null; obstacleManipulation.value = null; sketchDrag.value = null; labelEditing.value = false; shiftPressed.value = false }
 function startTransform(zoneId: string, operation: ContourOperation, point: ContourPoint) {
   if (calibrating.value || tracing.value || sketching.value) return
+  discardRotatePreview()
   const zone = store.zones.find(item => item.id === zoneId)
   if (!zone?.polygon) return
   const polygon = zone.polygon.map(([x, y]): [number, number] => [x, y])
@@ -680,6 +722,11 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           <div v-else-if="tool === 'select' && !calibrating" class="contour-edit-bar">
           <span>拖动内部移动；拉边调整宽深，拉角缩放。滚轮缩放视图，中键平移。</span>
           <label><input v-model="keepAspect" type="checkbox"> 锁定比例（角点 / Shift）</label>
+          <form v-if="selected?.polygon?.length" class="rotate-form" data-testid="rotate-form" title="调整角度即时预览；仅 Enter 或点「应用」保存，点击其他位置或 Esc 放弃预览" @submit.prevent="applyRotate">
+            旋转<input v-model.number="rotateAngle" type="number" min="-360" max="360" step="5" aria-label="空间旋转角度（度，顺时针为正）" @input="onRotateInput" @keydown.enter.prevent="applyRotate" @keydown.esc.prevent="onRotateEsc" @blur="onRotateBlur"><span>°</span>
+            <button type="submit" :disabled="!Number.isFinite(rotateAngle) || !rotateAngle" data-testid="apply-rotation">应用</button>
+            <button type="button" data-testid="rotate-90" title="立即绕中心顺时针旋转 90°，可撤销" @click="rotate90">旋转 90°</button>
+          </form>
         </div>
         <div v-if="sketching" class="contour-edit-bar" data-testid="sketch-bar">
           <span class="sketch-shapes" role="group" aria-label="空间形状模块">

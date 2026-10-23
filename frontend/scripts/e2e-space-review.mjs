@@ -485,6 +485,112 @@ try {
   await page.mouse.click(20, 20)
   drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
   assert.equal(drawn.length, 4, 'Esc 取消画区不产生空间')
+  // 已画空间旋转：绕质心、屏幕顺时针为正（存储环 Y 向下，正角即屏幕顺时针），逐顶点核对
+  {
+    const centroid = ring => {
+      let twiceArea = 0, cx = 0, cy = 0
+      for (let i = 0; i < ring.length; i++) {
+        const [x0, y0] = ring[i], [x1, y1] = ring[(i + 1) % ring.length]
+        const cross = x0 * y1 - x1 * y0
+        twiceArea += cross; cx += (x0 + x1) * cross; cy += (y0 + y1) * cross
+      }
+      return { x: cx / (3 * twiceArea), y: cy / (3 * twiceArea) }
+    }
+    const rotate = (ring, angleDeg) => {
+      const c = centroid(ring), rad = angleDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad)
+      return ring.map(([x, y]) => [c.x + (x - c.x) * cos - (y - c.y) * sin, c.y + (x - c.x) * sin + (y - c.y) * cos])
+    }
+    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('[data-testid="rotate-form"]').waitFor()
+    const before = drawn[3].polygon
+    assert.equal(before.length, 6, '以六顶点 L 形验证任意多边形旋转')
+    await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('30')
+    // 调整角度只预览不落库
+    {
+      const during = (await stored()).objects.find(object => object.id === drawn[3].id)
+      during.polygon.forEach(([px, py], i) => {
+        assert.ok(Math.abs(px - before[i][0]) < 1e-9 && Math.abs(py - before[i][1]) < 1e-9, '输入角度未应用前存盘几何不变')
+      })
+    }
+    await page.locator('[data-testid="apply-rotation"]').click()
+    await page.waitForTimeout(200)
+    let rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    const expected = rotate(before, 30)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - expected[i][0]) < 1e-6 && Math.abs(py - expected[i][1]) < 1e-6, '旋转后顶点 ' + i + ' 与质心旋转 30° 一致')
+    })
+    assert.ok(rotated.actualWidthMm > 0 && rotated.actualDepthMm > 0, '旋转后尺寸派生自新轮廓')
+    // 再转 -30° 回到原轮廓（质心不动点，连续旋转不漂移）；Enter 热键应用
+    await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('-30')
+    await page.getByLabel('空间旋转角度（度，顺时针为正）').press('Enter')
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - before[i][0]) < 1e-6 && Math.abs(py - before[i][1]) < 1e-6, '反向旋转 30° 恢复原轮廓')
+    })
+    // 撤销恢复旋转前状态
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - before[i][0]) < 1e-6 && Math.abs(py - before[i][1]) < 1e-6, '撤销恢复旋转前轮廓')
+    })
+    // 点击空白处只是放弃预览，不会应用
+    await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('15')
+    {
+      const box = await page.locator('.space-review svg').first().boundingBox()
+      await page.mouse.click(box.x + box.width * 0.05, box.y + box.height * 0.95)
+    }
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - before[i][0]) < 1e-9 && Math.abs(py - before[i][1]) < 1e-9, '点击空白处不应用旋转')
+    })
+    // 预览放弃后「应用」仍按当前角度提交
+    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('[data-testid="apply-rotation"]').click()
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    const expected15 = rotate(before, 15)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - expected15[i][0]) < 1e-6 && Math.abs(py - expected15[i][1]) < 1e-6, '点「应用」提交 15° 旋转')
+    })
+    // Esc 取消预览：之后点击画布同样不应用
+    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('10')
+    await page.getByLabel('空间旋转角度（度，顺时针为正）').press('Escape')
+    {
+      const box = await page.locator('.space-review svg').first().boundingBox()
+      await page.mouse.click(box.x + box.width * 0.05, box.y + box.height * 0.95)
+    }
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - expected15[i][0]) < 1e-6 && Math.abs(py - expected15[i][1]) < 1e-6, 'Esc 取消后点击画布不应用')
+    })
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - before[i][0]) < 1e-6 && Math.abs(py - before[i][1]) < 1e-6, '撤销已应用的旋转')
+    })
+    // 一键旋转 90°：点击即应用，无需输入角度
+    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('[data-testid="rotate-90"]').click()
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    const expected90 = rotate(before, 90)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - expected90[i][0]) < 1e-6 && Math.abs(py - expected90[i][1]) < 1e-6, '一键旋转 90° 逐顶点一致')
+    })
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.waitForTimeout(200)
+    rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
+    rotated.polygon.forEach(([px, py], i) => {
+      assert.ok(Math.abs(px - before[i][0]) < 1e-6 && Math.abs(py - before[i][1]) < 1e-6, '撤销一键 90° 旋转')
+    })
+  }
   // 空间列表直接改名
   await page.getByRole('button', { name: '重命名空间 手画开放办公区', exact: true }).click()
   const renameInput = page.getByRole('textbox', { name: '重命名空间 手画开放办公区', exact: true })
@@ -515,7 +621,7 @@ try {
   assert.equal(edited.zoneType, 'MEETING_ROOM', '画布标签改用途已保存')
   assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
   assert.deepEqual(errors, [])
-  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消）。使用模拟 API。')
+  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消）。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

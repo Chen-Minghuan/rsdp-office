@@ -31,4 +31,32 @@
 
 验证：`pnpm build`、`pnpm e2e:drawing-entry`（新增返回按钮断言）、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke` 通过；空白态与已画空间态两张截图已人工查看。
 
+## 2026-10-23 追加：已画空间旋转
+
+用户反馈画好的空间应可旋转。总览选择工具条新增「旋转」输入（默认 90°，屏幕顺时针为正），`store.rotateZone` 绕面积质心旋转轮廓（`rotateRing` 纯函数），建筑约束（柱/门洞/禁放区）随轮廓同步旋转，`zoneLayoutProblem` 校验失败不落库，可撤销；旋转致矩形非轴对齐时宽/深数值编辑自动停用。
+
+验证：`pnpm build`、`pnpm e2e:space-review`（新增 30°/-30° 逐顶点与撤销断言）、`MOCK_API=1 pnpm e2e:smoke` 通过；U 形 1400×400 旋转 30° 与回退两张截图已人工查看。
+
+## 2026-10-23 追加：旋转实时预览与 Enter 应用
+
+按用户反馈：旋转角度输入即时预览（渲染层覆盖选中空间，dirty 门控），未应用不落库；Enter 热键或「应用」提交，Esc/失焦/切换选中取消预览。
+
+验证：`pnpm build`、`pnpm e2e:space-review`（新增预览不落库与 Enter 断言）、`MOCK_API=1 pnpm e2e:smoke` 通过；U 形 45° 预览截图已人工查看，并确认预览期间 localStorage 几何不变、Enter 后写入。
+
+## 2026-10-23 追加：旋转仅 Enter/应用提交
+
+用户最终明确：只有点「应用」或 Enter 才应用旋转，点空白处不应用。定稿行为：输入角度即时预览（不落库）；画布 pointer-down、选中空间、拖动变换或输入框失焦只放弃预览；Esc 放弃预览；角度值保留，放弃后点「应用」仍按当前角度提交。（曾短暂实现"点任意处自动保存"，按用户纠正回退。）
+
+验证：`pnpm build`、`pnpm e2e:space-review`（点空白不应用、放弃后「应用」提交 15° 逐顶点比对、Esc 后点击不应用、撤销断言）、`MOCK_API=1 pnpm e2e:smoke` 通过。
+
+## 2026-10-23 追加：一键旋转 90°
+
+旋转表单新增「旋转 90°」按钮：显式动作点击即应用（绕质心顺时针，丢弃未提交预览，可撤销），与角度输入的 Enter/应用提交并存。
+
+验证：`pnpm build`、`pnpm e2e:space-review`（一键 90° 逐顶点比对与撤销断言）、`MOCK_API=1 pnpm e2e:smoke` 通过；工具条与 U 形旋转结果截图已人工查看。
+
 ## 遗留与边界
+
+- 本地浏览器 localStorage 中旧的 `rsdp-office-manual-canvas-v01` 沙盒数据不再被读取，无迁移逻辑。
+- `e2e:furniture-modules` 的既有超时未修复，需单独排查。
+- 手动画图清空图纸文件不进入撤销快照，与既有 `removeFile` 行为一致；UI 已通过确认弹窗提示。

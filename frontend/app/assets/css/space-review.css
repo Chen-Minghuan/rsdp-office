@@ -263,4 +263,7 @@
 .space-label-editable { cursor:pointer; }
 .space-label-editable:hover rect { stroke:#4b8bc6; stroke-width:1.2; }
 .contour-edit-bar .sketch-angle { flex:0 0 auto; min-width:0; display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.contour-edit-bar .rotate-form { flex:0 0 auto; min-width:0; display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.contour-edit-bar .rotate-form input { width:60px; border:1px solid #b7cde0; border-radius:5px; padding:4px 5px; background:#fff; }
+.contour-edit-bar .rotate-form span { flex:none; min-width:0; }
 .contour-edit-bar .sketch-angle input { width:60px; border:1px solid #b7cde0; border-radius:5px; padding:4px 5px; background:#fff; }

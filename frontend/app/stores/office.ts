@@ -34,7 +34,7 @@ import type { OfficeFurniturePlacement } from '~/utils/officeManualPlacement'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
 import { geometryForZone, ringProblem, ringsOverlap, zoneProblem, zoneRing, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
-import { inferRectangleFrame, resizeRectangle } from '~/utils/spatial/geometry'
+import { inferRectangleFrame, resizeRectangle, rotateRing } from '~/utils/spatial/geometry'
 import type { SpaceTemplate } from '~/types/spaceTemplate'
 import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFromTemplate, templatePlan } from '~/utils/spatial/spaceTemplate'
 import { officeReviewExample } from '~/utils/spatial/example'
@@ -42,7 +42,7 @@ import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import type { LayoutChannel, LayoutRequest } from '~/types/layoutPlanning'
 import type { SpatialObstacle } from '~/types/spatial'
-import { migrateLegacyDoorClearances } from '~/utils/spatial/obstacles'
+import { migrateLegacyDoorClearances, obstacleRing } from '~/utils/spatial/obstacles'
 import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 
@@ -683,6 +683,35 @@ export const useOfficeStore = defineStore('office', {
         geometrySource: 'manual_geometry',
       } as Partial<ZoneObject>)
       return true
+    },
+
+    /** 旋转已确认/绘制空间轮廓：绕面积质心，屏幕顺时针为正（存储环 Y 向下，直接按正角旋转即屏幕顺时针）。柱/门洞等建筑约束随轮廓同步旋转，校验失败不落库。 */
+    rotateZone(id: string, angleDeg: number): string | null {
+      const zone = this.zones.find(item => item.id === id)
+      if (!zone?.polygon?.length) return '空间缺少可旋转轮廓'
+      if (!Number.isFinite(angleDeg) || !angleDeg) return '请输入非零旋转角度'
+      const polygon = rotateRing(zoneRing(zone), angleDeg)
+      if (!polygon) return '轮廓退化，无法旋转'
+      const problem = ringProblem(polygon)
+      if (problem) return problem
+      const factor = zone.reviewUnit === 'mm' ? -1 : 1
+      const obstacles = (zone.obstacles || []).map(obstacle => {
+        const ring = rotateRing(obstacleRing(zone, obstacle), angleDeg)
+        if (!ring) return obstacle
+        return { ...obstacle, geometry: { ...obstacle.geometry, outer: ring.map(([x, y]): [number, number] => [x, y * factor]) } }
+      })
+      if (zone.reviewUnit === 'mm') {
+        const layoutProblem = zoneLayoutProblem({ ...zone, polygon, obstacles })
+        if (layoutProblem) return layoutProblem
+      }
+      const bounds = polygonBoundsMm(polygon)!
+      this.updateObject(id, {
+        polygon, obstacles, x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY,
+        actualWidthMm: zone.reviewUnit === 'mm' ? bounds.maxX - bounds.minX : undefined,
+        actualDepthMm: zone.reviewUnit === 'mm' ? bounds.maxY - bounds.minY : undefined,
+        geometrySource: 'manual_geometry',
+      } as Partial<ZoneObject>)
+      return null
     },
 
     saveZoneObstacle(zoneId: string, obstacle: SpatialObstacle) {
