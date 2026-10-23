@@ -104,7 +104,7 @@
 .review-canvas-footer b { color:#608b74; }
 .review-canvas-footer .pending-total, .review-canvas-footer .pending-total b { color:#b28b4c; }
 .review-canvas-footer>button { padding:12px 14px; border-radius:8px; background:#a77c50; color:white; font-size:11px; white-space:nowrap; }
-.review-canvas-footer>button:disabled { cursor:not-allowed; background:#e9e6df; color:#b2b1a4; }
+.review-canvas-footer>button:disabled, .review-canvas-footer>button[aria-disabled="true"] { cursor:not-allowed; background:#e9e6df; color:#b2b1a4; }
 .review-inspector { padding:20px 17px; overflow:auto; scrollbar-width:thin; scrollbar-color:#dedfd6 transparent; }
 .inspector-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
 .selected-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }

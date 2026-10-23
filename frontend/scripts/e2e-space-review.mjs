@@ -191,6 +191,23 @@ try {
   for (let i = 0; i < outline.length; i++) for (let axis = 0; axis < 2; axis++) assert.ok(Math.abs(traced.polygon[i][axis] - outline[i][axis]) < 0.01)
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual((await stored()).objects, beforeTrace)
+  // 未校准：生成模板/进入排版灰化，点击弹出提示引导两点校准且不跳转
+  {
+    const advanceBtn = page.getByTestId('advance-layout')
+    const templateBtn = page.getByTestId('template-workbench')
+    assert.equal(await advanceBtn.getAttribute('aria-disabled'), 'true', '未校准进入排版灰化')
+    assert.equal(await templateBtn.getAttribute('aria-disabled'), 'true', '未校准生成模板灰化')
+    await advanceBtn.dispatchEvent('click')
+    const toast = page.locator('.review-toast')
+    await toast.waitFor()
+    const text = await toast.innerText()
+    assert.ok(text.includes('待校准') && text.includes('两点校准'), '弹出提示说明需先两点校准：' + text)
+    await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+    assert.equal(await page.locator('[data-testid="unit-module-catalog"]').count(), 0, '弹出提示后不进入排版')
+    await templateBtn.dispatchEvent('click')
+    await page.locator('.review-toast').waitFor()
+    assert.equal(await page.locator('.space-template-dialog, [role="dialog"]').count(), 0, '弹出提示后不打开模板工作台')
+  }
   await page.getByRole('button', { name: /两点校准图纸比例/ }).click()
   for (const point of [[100, 100], [700, 100]]) {
     const screen = await sourceScreenPoint(point)

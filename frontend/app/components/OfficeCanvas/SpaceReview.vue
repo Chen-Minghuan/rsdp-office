@@ -132,6 +132,23 @@ const labelEditAnchor = computed(() => {
     y: Math.max(8, Math.min(screen.y, Math.max(8, viewport.value.height - 170))),
   }
 })
+function onTemplateWorkbench() {
+  if (footerBlocker.value) { notify(footerBlocker.value); return }
+  showTemplate.value = true
+}
+function onAdvanceLayout() {
+  if (footerBlocker.value) { notify(footerBlocker.value); return }
+  advance()
+}
+/** 页脚按钮被禁用时给出原因与下一步引导（未校准优先指向两点校准）。 */
+const footerBlocker = computed(() => {
+  if (calibrating.value) return '正在两点校准：在底图上选两个端点并输入实际长度后即可继续'
+  if (tracing.value || sketching.value) return '请先保存或取消当前描边/画区'
+  if (obstacleDraft.value || obstacleManipulation.value) return '请先完成或取消当前建筑约束编辑'
+  const blocker = store.layoutBlocker
+  if (!blocker) return null
+  return blocker.includes('待校准') ? blocker + '，请先用工具条「两点校准」确认图纸尺寸比例' : blocker
+})
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
 const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
@@ -798,7 +815,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button :disabled="!selectedId" @click="focusSelectedSpace">{{ focusedZoneId ? '返回全图' : '放大核对当前空间' }}</button><button @click="showEverySpace">显示全部空间</button></div>
           <div v-if="message" class="review-toast" role="status">{{ message }}</div>
         </div>
-        <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 需复核</span></div><button class="template-workbench-button" :disabled="!store.canEnterLayout || calibrating || !!tracing || !!obstacleDraft || !!obstacleManipulation" @click="showTemplate = true">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button><button :disabled="!store.canEnterLayout || calibrating || !!tracing || !!obstacleDraft || !!obstacleManipulation" @click="advance">进入家具排版 →</button></footer>
+        <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 需复核</span></div><button class="template-workbench-button" :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="template-workbench" @click="onTemplateWorkbench">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button><button :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="advance-layout" @click="onAdvanceLayout">进入家具排版 →</button></footer>
       </section>
       <SpatialInspector :inert="!!tracing" :space="selectedSpace" :is-calibrated="calibrated" :pending-count="pendingCount" :issue="selectedIssue" :issue-blocking="selectedBlocking" :needs-review="!!selectedId && reviewSpaceIds.includes(selectedId)" :layout-blocker="store.layoutBlocker" :template-source="store.floorPlan?.inputMode === 'manual'"
         :source-note="selected?.note" :can-restore-source="restorable && !calibrating && !drag"

@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-23 页脚按钮阻塞弹出提示：按用户反馈（未校准时「生成空间模板」「进入家具排版」只禁用无说明；且要求弹出提示而非旁侧文字），两按钮改为 `aria-disabled` 灰化但可点击（`data-testid="template-workbench"/"advance-layout"`），点击时在画布中央弹出 toast 告知原因与下一步——未校准提示「图纸比例待校准，请先用工具条『两点校准』确认图纸尺寸比例」，校准中/描边中/约束编辑中分别给出对应引导；无阻塞时正常进入。e2e:space-review 增补灰化、点击弹 toast、不跳转/不开模板断言并通过；build、smoke、workflows 通过；toast 截图人工核对通过。
+
 2026-10-23 LAYOUT-028 通道端点留断：通道新增 `startMm`/`endMm`（世界毫米，缺省贯通、旧数据无需迁移），与「仅从二排起」按交集收窄走向跨度；渲染、压占确认（前端 confirmedLayoutProblem + 服务端 channelBands 同步语义与测试）按留断范围生效，编辑卡与排版面板均可数值编辑（空=贯通）。定稿：fromSecondRow 保留独立动态字段不迁移；横向不做对称布尔（列轴无"首块"语义，用端点数值表达）；自动排版切段仍按未留断全轴禁放带（绕过端点需二维装箱，留作后续评估）。验证：`pnpm build`、`test:layout-channels`/`test:layout-planning`、mvn 191 通过（新增端点用例）、通道专项 e2e 步骤 11、smoke（自建 3012 端口）通过，见[任务记录](tasks/LAYOUT-028-channel-endpoint-breaks.md)。真实提交链路集成验证未执行（同 LAYOUT-022 记录）。
 
 2026-10-23 LAYOUT-027 通道多边形裁剪：`clipRectToRingRects`（扫描线分段纯函数）把通道禁放带按房间多边形裁剪——凹形空间条带不再画出缺角，一条通道可输出多段矩形参与渲染/压占校验/避障；矩形空间输出与现状逐值一致。排版切段仍按未裁剪全轴禁放带（桌列不跨通道线）；服务端核验无需改动（确认家具先强制在轮廓内，交集判定等价）。验证：`pnpm build`、新增 `test:layout-channels` 单测、通道专项 e2e 步骤 10（U 形截断/断开断言）、排版回归与 smoke 通过，见[任务记录](tasks/LAYOUT-027-channel-polygon-clipping.md)。顺带修复既有损坏：`test:auto-layout`/`test:reference-layouts` 加载器未别名 layoutChannels 传递依赖（自 a3f5278 起无法运行）；`test:design-corrections` 仍因 `./obstacles` 未别名失败（与本任务无关，未修）。
