@@ -70,7 +70,7 @@ try {
     assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1, 'L 型屏风卡位提供' + label)
   }
   await page.getByRole('tab', { name: '选择模块', exact: true }).click()
-  // 排版目录在座席示意后追加 .layout-seat，与手动布局比较线稿前先剔除。
+  // 排版目录在座席示意后追加 .layout-seat，断言线稿前先剔除（手动布局沙盒页已删除，目录线稿同源 `furnitureCatalogTemplates`）。
   const modules = await catalog().locator('[data-module-id]').evaluateAll(cards => cards.map(card => {
     const glyph = card.querySelector('.manual-furniture-glyph').cloneNode(true)
     glyph.querySelectorAll('.layout-seat').forEach(node => node.remove())
@@ -82,20 +82,8 @@ try {
   }))
   assert.equal(modules.length, 29)
   assert.equal(await catalog().locator('details').count(), 9)
-  assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '与手动布局一致，不暴露隐藏目录项')
-  const manual = await context.newPage()
-  await manual.goto(baseUrl + '/manual-canvas', { waitUntil: 'networkidle' })
-  const manualModules = await manual.locator('.furniture-catalog .furniture-template-grid button').evaluateAll(cards => cards.map(card => {
-    const glyph = card.querySelector('.manual-furniture-glyph').cloneNode(true)
-    glyph.querySelectorAll('.layout-seat').forEach(node => node.remove())
-    const comments = []
-    const walker = document.createTreeWalker(glyph, NodeFilter.SHOW_COMMENT)
-    while (walker.nextNode()) comments.push(walker.currentNode)
-    comments.forEach(node => node.remove())
-    return { name: card.querySelector('.furniture-template-copy b').textContent, geometry: glyph.innerHTML }
-  }))
-  assert.deepEqual(modules.map(({ id, ...module }) => module), manualModules, '目录与每个缩略线稿必须和手动布局完全一致')
-  await manual.close()
+  assert.ok(modules.every(module => module.name && module.geometry.includes('<')), '每个目录项都有名称与参数化线稿')
+  assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '不暴露隐藏目录项')
 
   for (const module of modules) {
     await choose(module.id)
@@ -158,7 +146,7 @@ try {
   assert.ok((await furniture()).every(item => item.layoutConfirmed))
   await page.getByText('排版已确认', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('单位模块 UI 通过：29 个可见图例/9 类与手动布局目录和线稿一致、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
+  console.log('单位模块 UI 通过：29 个可见图例/9 类均带名称与参数化线稿、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

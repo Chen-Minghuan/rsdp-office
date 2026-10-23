@@ -1,5 +1,4 @@
 import type { ProjectFile, OfficeObject, FurnitureObject, Product, ProductCombo, AgentMessage, DesignBrief } from '~/types/office'
-import type { ManualFloorPlanLayout } from '~/types/manualCanvas'
 
 export const TONES = {
   blue: { stroke: '#82b5e5', fill: '#8fbcea46' },
@@ -123,78 +122,4 @@ export function createWelcomeMessages(submitted: DesignBrief): AgentMessage[] {
       content: `已读取办公空间画布（${submitted.canvasRevisionId}）。\n\n画布已标注 ${submitted.zones.length} 个功能区。\n\n请先选择左侧区域，我可以根据区域用途给您展示办公家具的演示候选。实际尺寸与工位容量仍需校准确认。`,
     },
   ]
-}
-
-export function sampleManualLayout(): ManualFloorPlanLayout {
-  const openOffice: import('~/types/manualCanvas').ManualLayoutRoom = {
-    clientId: 'room-open-01',
-    label: '开放办公区',
-    roomType: 'OPEN_OFFICE',
-    parts: [
-      { id: 'part-open-a', x: 0, y: 0, w: 6000, h: 4000 },
-      { id: 'part-open-b', x: 6000, y: 0, w: 2000, h: 6000 },
-    ],
-    placementZone: { id: null, x: 500, y: 500, w: 5000, h: 3000 },
-    placementZones: [
-      { id: null, x: 500, y: 500, w: 5000, h: 3000 },
-      { id: null, x: 6200, y: 500, w: 1400, h: 5000 },
-    ],
-  }
-  const meetingRoom: import('~/types/manualCanvas').ManualLayoutRoom = {
-    clientId: 'room-meeting-01',
-    label: '会议室',
-    roomType: 'MEETING_ROOM',
-    parts: [
-      { id: 'part-meeting-a', x: 8500, y: 0, w: 4000, h: 3000 },
-    ],
-    placementZone: { id: null, x: 8700, y: 200, w: 3600, h: 2600 },
-    placementZones: [{ id: null, x: 8700, y: 200, w: 3600, h: 2600 }],
-  }
-  return {
-    version: 3,
-    canvas: { widthMm: 16000, heightMm: 9000, gridMm: 100, mode: 'unbounded' },
-    rooms: [openOffice, meetingRoom],
-    furniture: [
-      {
-        id: 'f-desk-01',
-        templateId: 'desk-straight',
-        roomClientId: 'room-open-01',
-        xMm: 1200,
-        yMm: 1200,
-        widthMm: 1400,
-        depthMm: 700,
-        rotationDeg: 0,
-      },
-      {
-        id: 'f-desk-02',
-        templateId: 'desk-straight',
-        roomClientId: 'room-open-01',
-        xMm: 3000,
-        yMm: 1200,
-        widthMm: 1400,
-        depthMm: 700,
-        rotationDeg: 0,
-      },
-      {
-        id: 'f-chair-01',
-        templateId: 'chair-office',
-        roomClientId: 'room-open-01',
-        xMm: 1200,
-        yMm: 2000,
-        widthMm: 650,
-        depthMm: 650,
-        rotationDeg: 0,
-      },
-      {
-        id: 'f-table-01',
-        templateId: 'table-conference-rect',
-        roomClientId: 'room-meeting-01',
-        xMm: 10500,
-        yMm: 1500,
-        widthMm: 2800,
-        depthMm: 1200,
-        rotationDeg: 0,
-      },
-    ],
-  }
 }

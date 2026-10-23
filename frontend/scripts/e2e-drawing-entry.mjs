@@ -194,8 +194,35 @@ try {
   await page.getByRole('button', { name: '进入空间总览', exact: true }).click()
   await page.getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
   assert.equal((await current()).plan.analysisId, 'DRAWING-7-4')
+  // 手动画图入口：有内容时需确认，取消保留原稿；确认后清空图纸与空间进入空白毫米画布，原稿进撤销快照。
+  await page.goto(baseUrl, { waitUntil: 'networkidle' })
+  page.once('dialog', dialog => dialog.dismiss())
+  await page.getByTestId('start-hand-drawing').click()
+  await page.waitForSelector('h1:has-text("上传办公图纸")')
+  assert.ok((await current()).plan, '取消手动画图保留原设计与图纸')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByTestId('start-hand-drawing').click()
+  await page.waitForURL(/\/canvas\?mode=overview/)
+  await page.getByText('无需图纸：点击「画新空间」', { exact: false }).waitFor()
+  await page.getByRole('button', { name: '画新空间', exact: true }).waitFor()
+  const hand = await current()
+  assert.equal(hand.plan, null)
+  assert.deepEqual(hand.files, [])
+  assert.deepEqual(hand.objects, [])
+  assert.ok(hand.undo.some(snapshot => JSON.parse(snapshot).floorPlan?.analysisId === 'DRAWING-7-4'), '手动画图前的设计稿进入撤销快照')
+  // 空白状态下再次进入无需确认。
+  await page.goto(baseUrl, { waitUntil: 'networkidle' })
+  await page.getByRole('button', { name: '没有图纸？手动画图', exact: true }).click()
+  await page.waitForURL(/\/canvas\?mode=overview/)
+  await page.getByRole('button', { name: '画新空间', exact: true }).waitFor()
+  // 手动画布常驻返回按钮：随时可回上传页改为上传图纸识别。
+  await page.getByTestId('back-to-upload').click()
+  await page.waitForSelector('h1:has-text("上传办公图纸")')
+  await page.getByTestId('start-hand-drawing').click()
+  await page.waitForURL(/\/canvas\?mode=overview/)
+  await page.getByRole('button', { name: '画新空间', exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('图纸交接 UI 通过：5→7、未识别/旧链接/设计入口防串图、识别中预览、完成导入、模板/家具隔离、旧稿快照、刷新保留编辑、同名同大小换图和失败保护。API 全部模拟。')
+  console.log('图纸交接 UI 通过：5→7、未识别/旧链接/设计入口防串图、识别中预览、完成导入、模板/家具隔离、旧稿快照、刷新保留编辑、同名同大小换图、失败保护和手动画图入口。API 全部模拟。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) {

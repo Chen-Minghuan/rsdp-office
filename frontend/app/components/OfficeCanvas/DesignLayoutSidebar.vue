@@ -444,7 +444,7 @@ function clearLayout() {
               <input v-model.number="unitD" aria-label="模块进深（毫米）" type="number" min="10" class="w-full h-8 px-2 border border-line rounded-lg text-xs outline-none focus:border-bronze">
             </label>
           </div>
-          <p class="text-[9px] text-muted mt-1.5">图例与手动布局共用，按实际毫米尺寸排版</p>
+          <p class="text-[9px] text-muted mt-1.5">图例来自共享家具模板目录，按实际毫米尺寸排版</p>
           <div class="mt-4 border-t border-[#eee7df] pt-3">
             <div class="flex items-center justify-between mb-2">
               <span class="text-[11px] font-semibold text-[#5b5751]">空间间距</span>

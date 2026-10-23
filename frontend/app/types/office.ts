@@ -94,7 +94,7 @@ export interface FurnitureObject {
   layoutGroupId?: string
   layoutClusterId?: string
   layoutRole?: 'primary' | 'seat'
-  /** 手动布局共用的家具图例；与实际商品引用分开。 */
+  /** 共享家具模板目录的图例；与实际商品引用分开。 */
   furnitureTemplateId?: string
   /** Immutable definition for a custom instance, independent of local catalog edits. */
   moduleSnapshot?: CustomOfficeModule

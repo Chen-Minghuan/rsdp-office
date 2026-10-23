@@ -647,6 +647,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       <section class="review-canvas-panel review-panel">
         <div v-if="store.spaceTemplate" class="template-layout-link"><span>{{ store.spaceTemplate.name }} · {{ store.spaceTemplateCurrent ? store.spaceTemplate.storage === 'SAVED' ? '模板已保存' : '本地模板' : '空间已修改，模板需更新' }}</span><button @click="showTemplate = true">查看模板</button></div>
         <div class="review-toolbar">
+          <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留">← 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
             <button :class="{ active: tool === 'select' }" @click="tool = 'select'">选择 / 缩放</button>
             <button :class="{ active: tool === 'pan' }" @click="tool = 'pan'">拖动画布</button><i></i>

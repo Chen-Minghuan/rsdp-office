@@ -162,7 +162,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 ## 7. 当前迁移重点
 
-空间核对总览内联手动画区：`SpaceReview` 的「画新空间」工具逐点描出新空间多边形，经 `store.addDrawnZone` 建为正式 ZoneObject（`source: user_annotation`、`geometrySource: manual_geometry`、`evidenceKind: MANUAL`）。无图纸的空白画布直接以毫米建空间（默认视野 12000×8000mm）；已识别但未校准的底图上以源单位记录，随两点校准统一换算；已校准毫米场景按世界毫米存储。画区分形状模块与逐点描两种方式：矩形/L 形/U 形模块拖出包围盒一次生成轮廓（`sketchShapePolygon`），支持旋转角度输入（绕包围盒中心，屏幕顺时针为正，毫米场景按坐标系取反符号；端点先取整再旋转以保持直角），毫米场景自动取整 100mm；逐点描保留沿墙精描。画区与描边/编辑共用同一相机逆变换，支持撤销、Esc 取消与改名（SpatialInspector）。独立 `/manual-canvas` 沙盒页保留但不进入排版流程。
+空间核对总览内联手动画区：`SpaceReview` 的「画新空间」工具逐点描出新空间多边形，经 `store.addDrawnZone` 建为正式 ZoneObject（`source: user_annotation`、`geometrySource: manual_geometry`、`evidenceKind: MANUAL`）。无图纸的空白画布直接以毫米建空间（默认视野 12000×8000mm）；已识别但未校准的底图上以源单位记录，随两点校准统一换算；已校准毫米场景按世界毫米存储。画区分形状模块与逐点描两种方式：矩形/L 形/U 形模块拖出包围盒一次生成轮廓（`sketchShapePolygon`），支持旋转角度输入（绕包围盒中心，屏幕顺时针为正，毫米场景按坐标系取反符号；端点先取整再旋转以保持直角），毫米场景自动取整 100mm；逐点描保留沿墙精描。画区与描边/编辑共用同一相机逆变换，支持撤销、Esc 取消与改名（SpatialInspector）。已画空间可在选择工具条输入角度旋转：`store.rotateZone` 绕面积质心旋转存储环（Y 向下坐标系正角即屏幕顺时针），建筑约束同步旋转并经 zoneLayoutProblem 校验，旋转后非轴对齐矩形停用宽/深数值编辑、保留异形轮廓。独立 `/manual-canvas` 手动布局沙盒页已删除（页面、组件、store 与专用相机移除，共享家具模板/图例类型保留）；无图纸时从上传页「手动画图」入口进入空白毫米画布（`store.startHandDrawing` 清空图纸/识别/空间并进撤销快照），再用「画新空间」逐点或形状模块绘制。
 
 本轮 `/canvas` 的空间核对使用 `SpaceReview` / `SpatialCanvas`：来源范围和设计多边形共用相机，矩形毫米编辑与异形顶点拖动更新 polygon，面积从几何派生。旧 `CanvasBoard` 保留给单空间排版，仅渲染当前 designZoneId 的空间、家具及显式归属的局部内容，单空间不绘制整层底图。视图范围取当前多边形，内容偏移、指针逆变换与适屏共用世界原点；负坐标与远坐标不需平移设计数据。整层底图及全部空间仍在核对总览展示，旧 px 草稿不会被猜测为已校准。
 

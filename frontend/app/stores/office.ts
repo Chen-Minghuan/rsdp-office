@@ -379,6 +379,24 @@ export const useOfficeStore = defineStore('office', {
       this.schedulePersist()
     },
 
+    /** 上传页手动画图入口：清空图纸、识别结果与空间，从空白毫米画布开始手绘。空间/确认等可通过撤销恢复，图纸需重新上传。 */
+    startHandDrawing() {
+      this.snapshotUndo()
+      this.files = []
+      this.objects = []
+      this.floorPlan = null
+      this.floorPlanError = null
+      this.spaceTemplate = null
+      this.submitted = null
+      this.cart = []
+      this.activeZoneId = null
+      this.blank = true
+      this.canvasMode = 'overview'
+      this.designZoneId = null
+      this.canvasRevision++
+      this.schedulePersist()
+    },
+
     removeFile(name: string) {
       this.files = this.files.filter((f) => f.name !== name)
       this.schedulePersist()

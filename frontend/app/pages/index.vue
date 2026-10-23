@@ -457,6 +457,26 @@ async function enterCurrentDrawing() {
     await applyRecognitionToCanvas()
   } else await navigateTo(id ? { path: '/canvas', query: { analysisId: id, mode: 'overview' } } : '/canvas')
 }
+
+const hasCanvasContent = computed(() => !!store.files.length || !!store.floorPlan || !!store.zones.length)
+
+async function startHandDrawing() {
+  if (uploadBusy.value) return
+  if (hasCanvasContent.value && !window.confirm('手动画图将从空白画布开始：当前图纸与已绘空间会被清空（空间可在画布中撤销，图纸需重新上传）。是否继续？')) return
+  forgetRecognitionTask()
+  const current = store.files[0]
+  fileMap.value.clear()
+  activeFile.value = null
+  recognitionResult.value = null
+  recognitionSource.value = null
+  analysisId.value = null
+  parseError.value = null
+  uploadError.value = null
+  for (const name of Object.keys(pdfPages)) delete pdfPages[name]
+  if (current) await deletePersistedFile(current.name)
+  store.startHandDrawing()
+  await navigateTo('/canvas?mode=overview')
+}
 </script>
 
 <template>
@@ -464,7 +484,7 @@ async function enterCurrentDrawing() {
     <div class="flex items-start justify-between gap-5 flex-none">
       <div>
         <h1 class="text-[25px] font-bold tracking-tight mb-2">上传办公图纸</h1>
-        <p class="text-xs text-muted">上传 PDF/PNG 参考图或 CAD 图纸（DWG/DXF），自动识别空间布局并生成可编辑的办公功能分区。</p>
+        <p class="text-xs text-muted">上传 PDF/PNG 参考图或 CAD 图纸（DWG/DXF），自动识别空间布局并生成可编辑的办公功能分区；没有图纸可点「手动画图」直接在空白画布绘制。</p>
       </div>
     </div>
 
@@ -682,6 +702,9 @@ async function enterCurrentDrawing() {
           <div>
             <AppIcon name="upload" size="8" class="mx-auto mb-2 text-muted" />
             暂无图纸<br>上传 PDF、PNG 或 CAD 文件开始识别空间布局
+            <button type="button" class="mt-4 inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-xs font-semibold text-[#5f5b56] transition hover:bg-[#f7f3ef]" :disabled="uploadBusy" @click="startHandDrawing">
+              <AppIcon name="pencil" size="4" /> 没有图纸？手动画图
+            </button>
           </div>
         </div>
       </div>
@@ -693,6 +716,9 @@ async function enterCurrentDrawing() {
         <AppIcon name="reset" size="4" /> 恢复演示示例
       </button>
       <div class="flex gap-2.5">
+        <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef] flex items-center gap-2" :disabled="uploadBusy" title="没有图纸时在空白画布上按毫米手绘空间" data-testid="start-hand-drawing" @click="startHandDrawing">
+          <AppIcon name="pencil" size="4" /> 手动画图
+        </button>
         <button class="px-4 py-2.5 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" :disabled="uploadBusy" @click="!uploadBusy && fileInput?.click()">
           <AppIcon name="upload" size="3" /> {{ store.files.length ? '更换图纸' : '上传图纸' }}
         </button>
