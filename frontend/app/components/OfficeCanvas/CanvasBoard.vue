@@ -2,7 +2,7 @@
 import { uid } from '~/utils/helpers'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { TONES } from '~/utils/sample'
-import type { OfficeObject, ZoneObject, FurnitureObject } from '~/types/office'
+import type { OfficeObject, ZoneObject, FurnitureObject, NoteObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
 import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
@@ -29,6 +29,9 @@ const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 const DEFAULT_W = 1540
 const DEFAULT_H = 960
 const WORLD_PADDING = 240
+const NOTE_SCREEN_WIDTH = 220
+const NOTE_SCREEN_MIN_HEIGHT = 104
+const NOTE_SCREEN_FONT_SIZE = 14
 
 const canvasWindow = ref<HTMLDivElement | null>(null)
 const board = ref<HTMLDivElement | null>(null)
@@ -315,7 +318,19 @@ interface DragState {
 
 const drag = ref<DragState | null>(null)
 const selectedFurniture = computed(() => furniture.value.find(item => item.id === selectedId.value) || null)
+const selectedNote = computed(() => {
+  const object = visibleObjects.value.find(item => item.id === selectedId.value)
+  return object?.kind === 'note' ? object : null
+})
 const selectedFurnitureIds = ref<string[]>([])
+const editingNoteId = ref<string | null>(null)
+const draftNoteText = ref('')
+const noteEditor = ref<HTMLTextAreaElement | null>(null)
+let lastNotePointerDown: { id: string; at: number; x: number; y: number } | null = null
+
+function setNoteEditor(element: unknown) {
+  noteEditor.value = element instanceof HTMLTextAreaElement ? element : null
+}
 const selectedChannelId = ref<string | null>(null)
 const selectedFurnitureItems = computed(() => furniture.value.filter(item => selectedFurnitureIds.value.includes(item.id)))
 const moveProblem = ref('')
@@ -338,11 +353,51 @@ function deleteSelection() {
   }
   const object = visibleObjects.value.find(item => item.id === selectedId.value)
   if (!object || (mode.value === 'design' && object.kind === 'zone')) return
+  if (object.kind === 'note' && editingNoteId.value === object.id) cancelNoteEdit()
   if (store.deleteObject(object.id)) {
     if (object.kind === 'furniture') lastDeletedFurnitureId.value = object.id
     selectedId.value = null
     selectedFurnitureIds.value = []
   }
+}
+
+function startNoteEdit(note: NoteObject) {
+  selectedId.value = note.id
+  selectedFurnitureIds.value = []
+  editingNoteId.value = note.id
+  draftNoteText.value = note.text
+  nextTick(() => {
+    noteEditor.value?.focus()
+    noteEditor.value?.select()
+  })
+}
+
+function saveNoteEdit() {
+  const id = editingNoteId.value
+  if (!id) return
+  const note = store.objects.find(item => item.id === id && item.kind === 'note') as NoteObject | undefined
+  const text = draftNoteText.value
+  editingNoteId.value = null
+  if (note && note.text !== text) store.updateObject(id, { text })
+}
+
+function cancelNoteEdit() {
+  editingNoteId.value = null
+}
+
+function onNotePointerDown(note: NoteObject, event: PointerEvent) {
+  if (editingNoteId.value === note.id) return
+  const now = Date.now()
+  const previous = lastNotePointerDown
+  const isDoubleClick = previous?.id === note.id && now - previous.at <= 350
+    && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 6
+  lastNotePointerDown = isDoubleClick ? null : { id: note.id, at: now, x: event.clientX, y: event.clientY }
+  if (isDoubleClick) {
+    event.preventDefault()
+    startNoteEdit(note)
+    return
+  }
+  onPointerDown(event)
 }
 
 function rotateSelection() {
@@ -357,6 +412,7 @@ function mirrorSelection() {
 
 function chooseTool(t: string) {
   if (mode.value === 'design' && ['zone', 'arrow'].includes(t)) return
+  cancelNoteEdit()
   tool.value = t
   selectedId.value = null
   selectedFurnitureIds.value = []
@@ -769,6 +825,22 @@ function objectStyle(o: OfficeObject) {
   return base
 }
 
+function noteStyle(o: NoteObject) {
+  const zoom = Math.max(store.zoom, 0.00001)
+  return {
+    ...objectStyle(o),
+    width: `${NOTE_SCREEN_WIDTH / zoom}px`,
+    minHeight: `${NOTE_SCREEN_MIN_HEIGHT / zoom}px`,
+    padding: `${14 / zoom}px`,
+    fontSize: `${NOTE_SCREEN_FONT_SIZE / zoom}px`,
+    lineHeight: '1.55',
+    borderRadius: `${3 / zoom}px`,
+    boxShadow: `0 ${4 / zoom}px ${12 / zoom}px rgba(74, 55, 25, 0.18)`,
+    outline: selectedId.value === o.id ? `${3 / zoom}px solid #5092db` : undefined,
+    outlineOffset: `${2 / zoom}px`,
+  }
+}
+
 function zoneStyle(o: ZoneObject) {
   const t = TONES[o.tone] || TONES.blue
   return {
@@ -969,15 +1041,31 @@ function furnitureProduct(o: FurnitureObject) {
           <div
             v-else-if="o.kind === 'note'"
             :data-id="o.id"
-            class="board-element pointer-events-auto w-[180px] min-h-[114px] bg-[#fff0a5] shadow-lg p-4 text-[#634c2b] whitespace-pre-wrap text-[17px] leading-relaxed cursor-move overflow-wrap-anywhere transition-opacity"
+            data-testid="canvas-note"
+            class="board-element pointer-events-auto bg-[#fff0a5] text-[#634c2b] whitespace-pre-wrap overflow-wrap-anywhere transition-opacity"
+            :class="editingNoteId === o.id ? 'cursor-text' : 'cursor-move'"
             style="transform: rotate(-3deg);"
-            :class="[
-              selectedId === o.id ? 'outline outline-4 outline-[#5092db]' : '',
-            ]"
-            :style="objectStyle(o)"
-            @pointerdown.stop="onPointerDown"
+            :style="noteStyle(o)"
+            @pointerdown.stop="onNotePointerDown(o, $event)"
+            @dblclick.stop
           >
-            {{ (o as any).text }}
+            <textarea
+              v-if="editingNoteId === o.id"
+              :ref="setNoteEditor"
+              v-model="draftNoteText"
+              data-testid="note-editor"
+              aria-label="标注文字"
+              class="block w-full resize-none border-0 bg-transparent p-0 outline-none"
+              style="font: inherit;"
+              :style="{ height: `${70 / Math.max(store.zoom, 0.00001)}px` }"
+              @pointerdown.stop
+              @dblclick.stop
+              @blur="saveNoteEdit"
+              @keydown.esc.prevent.stop="cancelNoteEdit"
+              @keydown.ctrl.enter.prevent.stop="saveNoteEdit"
+              @keydown.meta.enter.prevent.stop="saveNoteEdit"
+            />
+            <template v-else>{{ o.text || '空标注' }}</template>
           </div>
 
           <!-- Reference -->
@@ -1100,6 +1188,17 @@ function furnitureProduct(o: FurnitureObject) {
       <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="旋转 90°（R）" data-testid="rotate-selection" @click.stop="rotateSelection">旋转 90°</button>
       <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="水平镜像" data-testid="mirror-selection" @click.stop="mirrorSelection">水平镜像</button>
       <button class="flex-none rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="Delete / Backspace" @click.stop="deleteSelection">删除选中模块</button>
+    </div>
+    <div v-if="selectedNote && !placing" data-testid="note-actions" class="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-sm" @pointerdown.prevent.stop>
+      <span class="text-xs text-[#5b5751]">标注</span>
+      <template v-if="editingNoteId === selectedNote.id">
+        <button class="rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" aria-label="完成标注编辑" @click.stop="saveNoteEdit">完成</button>
+        <button class="rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" aria-label="取消标注编辑" @click.stop="cancelNoteEdit">取消</button>
+      </template>
+      <template v-else>
+        <button class="rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" aria-label="编辑标注" data-testid="edit-note" @click.stop="startNoteEdit(selectedNote)">编辑</button>
+        <button class="rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50" aria-label="删除标注" data-testid="delete-note" @click.stop="deleteSelection">删除</button>
+      </template>
     </div>
     <div v-if="mode === 'design' && designZone" class="absolute left-4 top-4 rounded-lg border border-line bg-white/90 px-3 py-2 text-xs text-[#56636e] pointer-events-none">{{ designZone.name }}</div>
     <div :role="placing || deleteFeedback ? 'status' : undefined" class="absolute left-4 bottom-3.5 bg-white/90 border border-line rounded-lg px-3 py-2 text-[11px] text-[#79736d] z-10">
