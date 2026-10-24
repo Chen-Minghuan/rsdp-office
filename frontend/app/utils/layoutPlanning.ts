@@ -10,7 +10,7 @@ import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects, validateChannels } from './layoutChannels'
 
 export function defaultLayoutPreferences(): LayoutPreferences {
-  return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, exclusions: [], channels: [] }
+  return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, channels: [] }
 }
 
 export function layoutSourceKey(zone: ZoneObject, existing: FurnitureObject[]) {
@@ -75,7 +75,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   const meeting = request.module.category === '会议与洽谈'
   const general = request.productStyleId === 'general'
   const channels = prefs.channels || []
-  const exclusions = zoneLayoutExclusions({ ...zone, layoutPreferences: prefs })
+  const exclusions = zoneLayoutExclusions(zone)
   const replaceIds = replaceableLayoutIds(zone, existing, request)
   const retained = existing.filter(item => item.zoneId === zone.id && !replaceIds.includes(item.id))
   const result: LayoutProposal = { furniture: [], replaceIds, retainedIds: retained.map(item => item.id), seats: 0, shortfall: prefs.targetSeats, label: '', problem: null, warnings: [exclusions.length ? '已按已记录的柱、门洞净空和禁放区避障；请复核现场通道' : '门窗、柱及真实通道尚未自动核验；请在空间核对中补充'], sourceKey: layoutSourceKey(zone, existing) }

@@ -15,7 +15,7 @@ import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/of
 import { moduleGlyphId } from '~/utils/officeModules'
 import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
 
-const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: LayoutPreferences['exclusions'] } | null] }>()
+const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null] }>()
 const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
 // Off by default: entering a space shows only actually placed furniture. Selecting a module/preset or the checkbox enables the proposal preview.
 const showPreview = ref(false)
@@ -180,7 +180,7 @@ function updateChannel(id: string, patch: Partial<LayoutChannel>) {
 function removeChannel(id: string) {
   saveChannels(channels.value.filter(channel => channel.id !== id))
 }
-const buildingConstraints = computed(() => zone.value ? zoneLayoutExclusions(zone.value, false) : [])
+const buildingConstraints = computed(() => zone.value ? zoneLayoutExclusions(zone.value) : [])
 const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(channels.value)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
 const proposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
 const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
@@ -192,7 +192,7 @@ const autoPlan = plan
 const capacity = computed(() => proposal.value?.furniture.length || 0)
 watch([proposal, showPreview, draftApplied], () => {
   applicationMessage.value = ''
-  emit('preview', zone.value && showPreview.value ? { zoneId: zone.value.id, furniture: draftApplied.value ? [] : proposal.value?.furniture || [], replaceIds: proposal.value?.replaceIds || [], seatClearanceMm: preferences.seatClearanceMm, exclusions: preferences.exclusions } : null)
+  emit('preview', zone.value && showPreview.value ? { zoneId: zone.value.id, furniture: draftApplied.value ? [] : proposal.value?.furniture || [], replaceIds: proposal.value?.replaceIds || [], seatClearanceMm: preferences.seatClearanceMm } : null)
 }, { immediate: true, deep: true })
 onUnmounted(() => emit('preview', null))
 
@@ -201,10 +201,11 @@ onUnmounted(() => emit('preview', null))
 // so the canvas shows only what is actually placed, instead of immediately
 // re-drawing the removed modules as dimmed ghosts. Re-enable via the checkbox.
 watch(() => store.lastManualFurnitureEdit, mark => { if (mark && mark.zoneId === zone.value?.id) showPreview.value = false })
-function addExclusion() {
+// GEOM-013：入口/禁放区统一为空间核对页的建筑约束；面板只读展示并跳回标注。
+function backToReviewAnnotate() {
   if (!zone.value) return
-  const bounds = canvasZoneBounds(zone.value)
-  preferences.exclusions.push({ id: 'reserved-' + Date.now(), label: '入口或禁放区', x: bounds.minX, y: bounds.minY, w: 1000, h: 1000 })
+  store.reviewFocusZoneId = zone.value.id
+  store.setCanvasMode('overview')
 }
 
 function selectModule(template: OfficeModuleTemplate) {
@@ -394,14 +395,14 @@ function clearLayout() {
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
           <p v-if="!showPreview" class="text-[10px] text-muted mt-1">预览已关闭：画布只显示实际已放置的家具；选择模块/排布或勾选后查看方案预览，删除或清空排版会自动关闭预览。</p>
-          <details><summary class="cursor-pointer">入口与禁放区 · {{ preferences.exclusions.length }}</summary>
-            <p v-if="buildingConstraints.length" class="mt-2 rounded bg-[#f9eeeb] p-2 text-[10px] text-[#a24f45]">空间核对已标注 {{ buildingConstraints.length }} 处建筑约束，会自动参与避障；请返回空间核对修改。</p>
-            <p class="mt-2 text-[10px] text-muted">从空间左上角起量，单位 mm；红框区域不可摆放。</p>
-            <div v-for="area in preferences.exclusions" :key="area.id" class="mt-2 rounded border border-line p-2">
-              <input v-model="area.label" aria-label="预留区域名称" class="w-full border border-line px-1">
-              <div class="grid grid-cols-2 gap-1 mt-1"><label v-for="key in (['x', 'y', 'w', 'h'] as const)" :key="key">{{ { x: '距左', y: '距上', w: '宽', h: '深' }[key] }} mm<input :value="area[key] - (key === 'x' ? zoneBounds.minX : key === 'y' ? zoneBounds.minY : 0)" @input="area[key] = Number(($event.target as HTMLInputElement).value) + (key === 'x' ? zoneBounds.minX : key === 'y' ? zoneBounds.minY : 0)" :aria-label="'预留区域 ' + key" type="number" :min="key === 'w' || key === 'h' ? 1 : undefined" class="w-full border border-line px-1"></label></div>
-              <button class="mt-1 text-bronze underline" @click="preferences.exclusions = preferences.exclusions.filter(item => item.id !== area.id)">移除预留区域</button>
-            </div><button class="mt-2 text-bronze underline" @click="addExclusion">添加入口或禁放区</button>
+          <details data-testid="constraints-panel"><summary class="cursor-pointer">入口与禁放区 · {{ buildingConstraints.length }}</summary>
+            <p class="mt-2 text-[10px] text-muted">柱、门洞净空和禁放区是不可摆放的建筑约束；画布上以红/蓝虚线常显，自动排版与逐件添加都会避让。</p>
+            <div v-for="area in buildingConstraints" :key="area.id" class="mt-1.5 flex items-center justify-between gap-2 rounded border border-line px-2 py-1.5 text-[10px]">
+              <span class="truncate" :title="area.label">{{ area.label }}</span>
+              <span class="flex-none text-muted">{{ Math.round(area.w) }}×{{ Math.round(area.h) }} mm</span>
+            </div>
+            <p v-if="!buildingConstraints.length" class="mt-2 text-[10px] text-muted">尚未标注；门口、柱子或固定设施需要避让时，请先返回空间核对标注。</p>
+            <button class="mt-2 w-full rounded-lg border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" data-testid="back-to-review-annotate" @click="backToReviewAnnotate">返回空间核对标注</button>
           </details>
           <details data-testid="channel-panel"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
             <p class="mt-2 text-[10px] text-muted">通道是排版约束：自动排版绕开通道、确认时家具不得压占；位置可直接在画布上拖动。两侧净距会在宽度之外再留出空档。宽度数值为当前策略，非规范要求。</p>
@@ -517,7 +518,7 @@ function clearLayout() {
           <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}<span v-if="proposal.shortfall" class="text-[#a65e4c]"> · 尚缺 {{ proposal.shortfall }} {{ isGeneral ? '件' : '人' }}</span></p>
           <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>
           <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
-          <p v-if="proposal" class="mt-1 text-[9px] text-muted">门窗、柱及连续通道待现场核验；可添加预留区域。</p>
+          <p v-if="proposal" class="mt-1 text-[9px] text-muted">门窗、柱及连续通道待现场核验；入口/禁放区请在空间核对页标注。</p>
           <p v-if="applicationMessage" role="status" class="mt-1 text-[10px] text-[#56636e]">{{ applicationMessage }}</p>
           <p v-if="plan?.problem" role="status" class="mt-1 text-[10px] text-[#a65e4c]">{{ plan.problem }}</p>
         </div>

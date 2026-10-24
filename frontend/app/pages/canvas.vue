@@ -8,7 +8,7 @@ const router = useRouter()
 
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
-const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null>(null)
+const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const overviewCollapsed = ref(false)

@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-24 GEOM-013 入口与禁放区统一为建筑约束：按用户确认方案，排版面板「入口与禁放区」改为只读摘要（名称+毫米尺寸）+「返回空间核对标注」跳转（自动选中并聚焦当前空间）；旧 `layoutPreferences.exclusions` 加载时迁移为 NO_PLACEMENT obstacle（保留稳定 ID 与命名，新增 `SpatialObstacle.label`），`zoneLayoutExclusions` 去掉 legacy 分支，预览层 exclusions 渲染移除；设计页常显约束红/蓝虚线，修复“看不到效果”。`pnpm build`、`test:layout-planning`、`e2e:space-obstacles`/`e2e:layout-planning`/`e2e:space-review`/`e2e:annotations`、mvn 191 项（188 通过/3 跳过）与 `git diff --check` 通过；截图人工核对通过；后端零改动，真实集成验收未执行，见[任务记录](tasks/GEOM-013-unify-exclusions-into-obstacles.md)。
+
 2026-10-24 GEOM-012 画布标注可读性与编辑：按用户确认方案，便签位置仍使用世界坐标，显示按缩放反向补偿，保持约 220px 宽和 14px 屏幕字号；接入双击/选中操作栏编辑、完成/取消、删除及撤销，保留空间归属和刷新恢复。`pnpm build`、`pnpm e2e:annotations`（API 全模拟）及 `git diff --check` 通过，专项截图已人工核对；未执行真实后端集成或完整业务验收，见[任务记录](tasks/GEOM-012-readable-annotation-editing.md)。
 
 2026-10-23 页脚按钮阻塞弹出提示：按用户反馈（未校准时「生成空间模板」「进入家具排版」只禁用无说明；且要求弹出提示而非旁侧文字），两按钮改为 `aria-disabled` 灰化但可点击（`data-testid="template-workbench"/"advance-layout"`），点击时在画布中央弹出 toast 告知原因与下一步——未校准提示「图纸比例待校准，请先用工具条『两点校准』确认图纸尺寸比例」，校准中/描边中/约束编辑中分别给出对应引导；无阻塞时正常进入。e2e:space-review 增补灰化、点击弹 toast、不跳转/不开模板断言并通过；build、smoke、workflows 通过；toast 截图人工核对通过。

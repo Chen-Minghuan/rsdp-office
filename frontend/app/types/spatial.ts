@@ -128,6 +128,8 @@ export interface SpatialObstacle {
   obstacleId: string
   kind: SpatialObstacleKind
   spaceId: string | null
+  /** 可选用户命名（如迁移自旧排版预留区的名称）；缺省按 kind 显示。 */
+  label?: string
   geometry: SpatialGeometry
   excludesFloorArea: boolean
   source?: 'MANUAL' | 'CAD_GEOMETRY' | 'AI_VISION'

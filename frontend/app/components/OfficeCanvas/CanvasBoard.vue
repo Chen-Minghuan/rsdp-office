@@ -17,7 +17,7 @@ import { channelRects, channelOffsetRange, CHANNEL_WIDTH_HINT_MM } from '~/utils
 
 
 const store = useOfficeStore()
-const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number; exclusions: import('~/types/layoutPlanning').LayoutExclusion[] } | null; showDimensions?: boolean }>()
+const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null; showDimensions?: boolean }>()
 const activePreview = computed(() => props.layoutPreview?.zoneId === store.designZoneId ? props.layoutPreview : null)
 const viewRotation = defineModel<number>('viewRotation', { default: 0 })
 const tool = defineModel<string>('tool', { default: 'select' })
@@ -88,7 +88,7 @@ const zones = computed(() => store.objects.filter((o) => o.kind === 'zone') as Z
 const visibleZones = computed(() => visibleObjects.value.filter((o) => o.kind === 'zone') as ZoneObject[])
 const arrows = computed(() => visibleObjects.value.filter((o) => o.kind === 'arrow'))
 const designZone = computed(() => zones.value.find((z) => z.id === store.designZoneId) || null)
-const designObstacles = computed(() => designZone.value ? zoneLayoutExclusions(designZone.value, false) : [])
+const designObstacles = computed(() => designZone.value ? zoneLayoutExclusions(designZone.value) : [])
 /** 通道条带：渲染和拖动预览基于多边形裁剪后的分段矩形（凹形空间一条通道可能多段）；标签与拖柄挂在最大分段上。 */
 const designChannels = computed(() => {
   const zone = designZone.value
@@ -1162,7 +1162,6 @@ function furnitureProduct(o: FurnitureObject) {
         <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id" class="absolute opacity-50" :style="{ ...furnitureStyle(item), outline: `${1.5 / store.zoom}px dashed #306fcb` }">
           <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(item)!" :width-mm="item.w" :depth-mm="item.h" :wing-width-mm="item.wingWidthMm" :stroke-scale="1 / store.zoom" :show-seat="officeFurnitureShowsSeat(item)" />
         </div>
-        <div v-for="area in activePreview.exclusions" :key="area.id" :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px', border: `${2 / store.zoom}px dashed #c45c4c`, background: '#c45c4c22', fontSize: `${11 / store.zoom}px` }">{{ area.label }}</div>
       </div>
 
       <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && props.showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />

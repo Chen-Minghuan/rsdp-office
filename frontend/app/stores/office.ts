@@ -42,7 +42,7 @@ import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import type { LayoutChannel, LayoutRequest } from '~/types/layoutPlanning'
 import type { SpatialObstacle } from '~/types/spatial'
-import { migrateLegacyDoorClearances, obstacleRing } from '~/utils/spatial/obstacles'
+import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } from '~/utils/spatial/obstacles'
 import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 
@@ -78,6 +78,8 @@ interface OfficeState {
   furniturePlacement: OfficeFurniturePlacement | null
   /** Session-only signal: the user manually edited furniture in a zone (delete/clear/move/place); the design sidebar pauses the proposal preview so the canvas shows only what is actually placed. */
   lastManualFurnitureEdit: { zoneId: string; at: number } | null
+  /** Session-only：排版面板「返回空间核对标注」携带的待聚焦空间（GEOM-013），SpaceReview 消费后清空，不持久化。 */
+  reviewFocusZoneId: string | null
   syncState: 'idle' | 'saving' | 'saved' | 'error'
   syncError: string | null
 }
@@ -110,6 +112,7 @@ function defaultState(): OfficeState {
     customModules: [],
     furniturePlacement: null,
     lastManualFurnitureEdit: null,
+    reviewFocusZoneId: null,
     syncState: 'idle',
     syncError: null,
   }
@@ -137,7 +140,7 @@ function loadLocalState(): Partial<OfficeState> {
       return value
     }) as OfficeState
     parsed.files = singleDrawing(parsed.files, parsed.floorPlan?.sourceName)
-    const migratedZoneIds = migrateLegacyDoorClearances(parsed.objects || [])
+    const migratedZoneIds = [...new Set([...migrateLegacyDoorClearances(parsed.objects || []), ...migrateLayoutExclusions(parsed.objects || [])])]
     if (migratedZoneIds.length) {
       parsed.canvasRevision = (parsed.canvasRevision || 0) + 1
       parsed.objects?.forEach(object => { if (object.kind === 'furniture' && migratedZoneIds.includes(object.zoneId)) object.layoutConfirmed = false })
@@ -251,7 +254,7 @@ export const useOfficeStore = defineStore('office', {
         this.products = SAMPLE_PRODUCTS
         this.combos = SAMPLE_COMBOS
       }
-      const migratedZoneIds = migrateLegacyDoorClearances(this.objects)
+      const migratedZoneIds = [...new Set([...migrateLegacyDoorClearances(this.objects), ...migrateLayoutExclusions(this.objects)])]
       if (migratedZoneIds.length) {
         this.snapshotUndo()
         this.canvasRevision++
@@ -277,7 +280,7 @@ export const useOfficeStore = defineStore('office', {
 
     saveLocal() {
       if (typeof window === 'undefined') return
-      const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, ...persisted } = this.$state
+      const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, reviewFocusZoneId, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     },

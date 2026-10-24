@@ -28,7 +28,8 @@ export interface LayoutPreferences {
   includeChairs: boolean
   resizeMeetingTable: boolean
   seatClearanceMm: number
-  exclusions: LayoutExclusion[]
+  /** @deprecated GEOM-013 起迁移为 zone.obstacles（NO_PLACEMENT）；仅保留旧数据读取兼容。 */
+  exclusions?: LayoutExclusion[]
   channels?: LayoutChannel[]
 }
 export interface LayoutRequest {

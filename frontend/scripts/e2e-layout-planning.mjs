@@ -104,12 +104,28 @@ try {
   assert.ok(await page.getByTestId('apply-layout').isEnabled(), 'meeting room allows staff desks')
   assert.ok(await page.getByRole('button', { name: '逐件添加', exact: true }).isEnabled())
   await catalog.locator('[data-module-id="table-conference-rect"]').click()
+  // GEOM-013：面板只读；空间核对标注的禁放区（建筑约束）常显并阻止应用，移除后恢复。
+  await page.evaluate(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const room = draft.objects.find(item => item.id === 'MEETING-ROOM')
+    const xs = room.polygon.map(point => point[0]), ys = room.polygon.map(point => point[1])
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
+    // obstacle 几何存储 y 取反（毫米空间），覆盖整个房间画布范围。
+    room.obstacles = [{ obstacleId: 'OBS-ALL', kind: 'NO_PLACEMENT', spaceId: 'MEETING-ROOM', label: '整间禁放', excludesFloorArea: false, source: 'MANUAL', geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer: [[minX, -minY], [maxX, -minY], [maxX, -maxY], [minX, -maxY]], outerVertexIds: [], holes: [], holeVertexIds: [] } }]
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
   await page.locator('summary').filter({ hasText: '入口与禁放区' }).click()
-  await page.getByRole('button', { name: '添加入口或禁放区', exact: true }).click()
-  await page.getByRole('spinbutton', { name: '预留区域 w', exact: true }).fill('12000')
-  await page.getByRole('spinbutton', { name: '预留区域 h', exact: true }).fill('8000')
+  await page.getByTestId('constraints-panel').getByText('整间禁放', { exact: true }).waitFor()
   assert.ok(await page.getByTestId('apply-layout').isDisabled())
-  await page.getByRole('button', { name: '移除预留区域', exact: true }).click()
+  assert.equal(await page.getByRole('button', { name: '添加入口或禁放区', exact: true }).count(), 0)
+  assert.equal(await page.getByTestId('design-obstacles').locator(':scope > div').count(), 1)
+  await page.evaluate(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    draft.objects.find(item => item.id === 'MEETING-ROOM').obstacles = []
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '自动推荐', exact: true }).click()
   await page.screenshot({ path: (process.env.OUT_DIR || 'C:/Users/cmh/AppData/Local/Temp') + '/rsdp-layout-planning.png' })
   const savedMeeting = (await state()).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'MEETING-ROOM')
