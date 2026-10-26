@@ -17,7 +17,8 @@ class FloorPlanProgressPersistenceTest {
     private final FloorPlanRoomMapper rooms = mock(FloorPlanRoomMapper.class);
     private final FloorPlanSceneRevisionMapper revisions = mock(FloorPlanSceneRevisionMapper.class);
     private final ImageAssetsMapper assets = mock(ImageAssetsMapper.class);
-    private final FloorPlanService service = new FloorPlanService(analyses, rooms, revisions, assets,
+    private final FloorPlanService service = new FloorPlanService(analyses,
+        mock(com.rsdp.officeproduct.importer.office.service.OfficeProjectService.class), rooms, revisions, assets,
         mock(CadParseClient.class), mock(VisionRecognitionClient.class), mock(FloorPlanDimensionService.class),
         mock(FloorPlanDesignCorrectionService.class), json, new SpatialGeometryService());
     private FloorPlanAnalysis analysis;

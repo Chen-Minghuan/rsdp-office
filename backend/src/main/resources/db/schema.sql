@@ -212,6 +212,27 @@ insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_or
 ('factory_level', 'C', 'C级', null, 3)
 on conflict (dict_type, dict_code) do nothing;
 
+-- 办公设计项目与楼层；既有业务表的 project_id 对应楼层 ID。
+create table if not exists office_design_project (
+    project_id varchar(64) primary key,
+    name varchar(200) not null,
+    customer_requirements text not null default '',
+    requirements_revision integer not null default 1,
+    created_at timestamp not null default now(),
+    updated_at timestamp not null default now()
+);
+
+create table if not exists office_design_floor (
+    floor_id varchar(64) primary key,
+    project_id varchar(64) not null references office_design_project(project_id),
+    name varchar(200) not null,
+    sort_order integer not null default 0,
+    created_at timestamp not null default now(),
+    updated_at timestamp not null default now()
+);
+create index if not exists idx_office_design_floor_project on office_design_floor(project_id, sort_order, created_at);
+create unique index if not exists uk_office_design_floor_name on office_design_floor(project_id, lower(name));
+
 -- 办公画布数据；project_id 仅作为现有设计工作区的隔离键。
 create table if not exists office_canvas (
     canvas_id bigserial primary key,

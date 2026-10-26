@@ -18,7 +18,7 @@ import static org.mockito.ArgumentMatchers.*;
 class OfficeProductCatalogTest {
     @Test void exposesExactSkuDimensionsAndQueriesOnlyApprovedActiveProductsAndActiveVariants() {
         var products = mock(RspuMasterMapper.class); var variants = mock(RspuVariantMapper.class);
-        var service = new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeCanvasMapper.class), mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), products, variants, new ObjectMapper());
+        var service = new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeProjectService.class), mock(OfficeCanvasMapper.class), mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), products, variants, new ObjectMapper());
         var master = new RspuMaster(); master.setRspuId("MASTER"); master.setProductName("办公桌"); master.setRetailPrice(BigDecimal.TEN);
         when(products.selectList(any())).thenAnswer(call -> {
             QueryWrapper<?> query = call.getArgument(0); assertTrue(query.getSqlSegment().contains("audit_status"));
@@ -36,7 +36,7 @@ class OfficeProductCatalogTest {
     }
     @Test void rejectsMultipleDrawingFilesBeforeWritingCanvas() {
         var locks = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
-        var service = new OfficeService(locks, canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
+        var service = new OfficeService(locks, mock(OfficeProjectService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
         var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setMode("overview");
         request.setFiles(List.of(Map.of("name", "first.png"), Map.of("name", "second.pdf")));
         assertEquals("一次只能上传一张图纸，请移除多余文件", assertThrows(BusinessException.class, () -> service.saveCanvas(request)).getMessage());
@@ -44,7 +44,7 @@ class OfficeProductCatalogTest {
     }
     @Test void staleDebouncedCanvasWritesCannotOverwriteNewerModuleSelections() {
         var projects = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
-        var service = new OfficeService(projects, canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
+        var service = new OfficeService(projects, mock(OfficeProjectService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
         var latest = new OfficeCanvas(); latest.setProjectId("P"); latest.setRevision(10); latest.setMode("overview"); latest.setObjectsJson("[]"); latest.setFilesJson("[]");
         when(canvases.selectList(any())).thenReturn(List.of(latest));
         var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setRevision(9); request.setMode("overview"); request.setObjects(List.of());

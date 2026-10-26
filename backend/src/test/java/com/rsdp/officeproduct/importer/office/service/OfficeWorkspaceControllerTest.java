@@ -14,11 +14,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class OfficeWorkspaceControllerTest {
     @Test
-    void projectProfileRoutesAreRemoved() throws Exception {
+    void legacyProjectProfileRoutesAreRemoved() throws Exception {
         var office = mock(OfficeService.class);
         var mvc = MockMvcBuilders.standaloneSetup(new OfficeController(office, mock(OfficeModuleRecommendationService.class))).build();
         mvc.perform(get("/api/v1/office/projects/P")).andExpect(status().isNotFound());
-        mvc.perform(post("/api/v1/office/projects").contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isNotFound());
         mvc.perform(put("/api/v1/office/projects/P").contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isNotFound());
         verifyNoInteractions(office);
     }
