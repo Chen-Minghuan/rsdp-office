@@ -18,6 +18,8 @@ async function load(path) {
 }
 const { clipRectToRingRects } = await import(await load(new URL('../app/utils/spatial/geometry.ts', import.meta.url)))
 const { channelRects, axisSegments, clampChannelsToZone, validateChannels } = await import(await load(new URL('../app/utils/layoutChannels.ts', import.meta.url)))
+const { doorClearanceObstacle } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
+const { channelEgressHints, MIN_PASSAGE_MM } = await import(await load(new URL('../app/utils/channelEgress.ts', import.meta.url)))
 
 const rect = (x, y, w, h) => ({ x, y, w, h })
 // 矩形空间：裁剪输出与输入逐值一致（回归基线）。
@@ -68,4 +70,36 @@ assert.equal(validateChannels(rectZone, [{ id: 'c', orientation: 'vertical', off
 // clamp/validate 基本行为保持。
 assert.deepEqual(clampChannelsToZone(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: -500, widthMm: 900 }])[0].offsetMm, 0)
 assert.equal(validateChannels(rectZone, [{ id: 'c', orientation: 'vertical', offsetMm: 9000, widthMm: 900 }]), '纵向通道不在空间范围内，请调整位置')
-console.log('PASS: rect×polygon clipping (rect identity, U/L segmentation, degenerate guards), channelRects clipping + fallback, axisSegments full-band cuts, endpoint breaks (startMm/endMm + fromSecondRow compose), clamp/validate')
+
+// 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）。门洞净空存储坐标 Y 向上（mm 空间读取时翻转）。
+const egressRoom = [[0, 0], [8000, 0], [8000, 6000], [0, 6000]]
+const egressZone = { id: 'Z', reviewUnit: 'mm', polygon: egressRoom, x: 0, y: 0, w: 8000, h: 6000 }
+const egressChannel = [{ id: 'c', orientation: 'vertical', offsetMm: 4000, widthMm: 900 }] // 带 x[4000,4900] 全深
+// 无门洞净空标注：只提示未核验。
+assert.deepEqual(channelEgressHints(egressZone, egressChannel, []), ['未标注门洞净空（入口）：通道与入口的连通未核验，可在空间核对中补充标注'])
+// 门在下墙（存储铰链 y=-6000 → 画布 y=6000），与通道下端头衔接：无提示。
+const doorBottom = doorClearanceObstacle('Z', { x: 4400, y: -6000 }, { x: 5300, y: -5100 })
+assert.deepEqual(channelEgressHints({ ...egressZone, obstacles: [doorBottom] }, egressChannel, []), [], 'channel end linked to door gives no hint')
+// 门在左下角远离通道：两端都未衔接。
+const doorFar = doorClearanceObstacle('Z', { x: 100, y: -6000 }, { x: 1000, y: -5100 })
+assert.equal(channelEgressHints({ ...egressZone, obstacles: [doorFar] }, egressChannel, []).length, 1, 'door out of reach warns')
+assert.match(channelEgressHints({ ...egressZone, obstacles: [doorFar] }, egressChannel, [])[0], /两端都未衔接/)
+// 衔接走廊被家具挤占到净宽不足：走廊 x[4000,5300]×y[5100,6000]，纵向家具贯穿走廊全高。
+const blocker = { id: 'F', zoneId: 'Z', x: 4600, y: 5000, w: 100, h: 1200, rotation: 0 }
+const blockedHints = channelEgressHints({ ...egressZone, obstacles: [doorBottom] }, egressChannel, [blocker])
+assert.equal(blockedHints.length, 1, 'corridor blocked warns')
+assert.match(blockedHints[0], new RegExp(`净宽不足 ${MIN_PASSAGE_MM}mm`))
+// 家具只占走廊一角、剩余净宽 ≥ 阈值：不提示。
+const partial = { id: 'F', zoneId: 'Z', x: 4600, y: 5100, w: 100, h: 300, rotation: 0 }
+assert.deepEqual(channelEgressHints({ ...egressZone, obstacles: [doorBottom] }, egressChannel, [partial]), [], 'partial blockage above threshold stays silent')
+// 端点留断（028）：通道下端止于 y=3000，门在下墙 → 未衔接。
+assert.match(channelEgressHints({ ...egressZone, obstacles: [doorBottom] }, [{ ...egressChannel[0], endMm: 3000 }], [])[0] || '', /两端都未衔接/, 'end-break channel away from door warns')
+// 横向通道：门在左墙（存储铰链 (0,-3400) → 画布 (0,3400)），与左端头衔接；走廊被禁放区截断时提示。
+const doorLeft = doorClearanceObstacle('Z', { x: 0, y: -3400 }, { x: 900, y: -2500 })
+const hChannel = [{ id: 'h', orientation: 'horizontal', offsetMm: 3000, widthMm: 900 }]
+assert.deepEqual(channelEgressHints({ ...egressZone, obstacles: [doorLeft] }, hChannel, []), [], 'horizontal channel linked to left wall door')
+const legacyBlock = { ...egressZone, obstacles: [doorLeft], layoutPreferences: { exclusions: [{ id: 'E', label: '禁放', x: -100, y: 3000, w: 1100, h: 100 }] } }
+assert.equal(channelEgressHints(legacyBlock, hChannel, []).length, 1, 'legacy exclusion can sever the corridor')
+// 无通道时不核验。
+assert.deepEqual(channelEgressHints(egressZone, [], []), [])
+console.log('PASS: rect×polygon clipping (rect identity, U/L segmentation, degenerate guards), channelRects clipping + fallback, axisSegments full-band cuts, endpoint breaks (startMm/endMm + fromSecondRow compose), clamp/validate, egress hints (LAYOUT-029: unmarked/door-linked/corridor-blocked/end-break/horizontal)')

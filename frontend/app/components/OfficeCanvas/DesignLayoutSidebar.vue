@@ -7,6 +7,7 @@ import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
 import { DEFAULT_CHANNEL_WIDTH_MM, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
+import { channelEgressHints } from '~/utils/channelEgress'
 import { uid } from '~/utils/helpers'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
@@ -164,6 +165,14 @@ const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, 
 const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
 // 通道直接读写 zone.layoutPreferences（画布拖动也写同一份），不走面板本地副本，避免双写分叉。
 const channels = computed<LayoutChannel[]>(() => zone.value?.layoutPreferences?.channels || [])
+// 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）：入口代理为人工标注的门洞净空；首排深度取已保存排版记录。
+const channelEgressMessages = computed(() => {
+  const z = zone.value
+  if (!z) return []
+  const items = currentFurniture.value
+  const firstBlockDepthMm = items.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
+  return channelEgressHints(z, channels.value, items, firstBlockDepthMm)
+})
 function saveChannels(next: LayoutChannel[]) {
   if (!zone.value) return
   store.updateZoneChannels(zone.value.id, next)
@@ -424,6 +433,7 @@ function clearLayout() {
               <button class="text-bronze underline" data-testid="add-channel-vertical" @click="addChannel('vertical')">添加纵向通道</button>
               <button class="text-bronze underline" data-testid="add-channel-horizontal" @click="addChannel('horizontal')">添加横向通道</button>
             </div>
+            <p v-for="message in channelEgressMessages" :key="message" data-testid="channel-egress-hint" class="mt-2 text-[10px] text-amber-600">{{ message }}</p>
           </details>
         </div>
 
