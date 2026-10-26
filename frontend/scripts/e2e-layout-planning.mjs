@@ -89,7 +89,12 @@ try {
   await page.getByRole('button', { name: '确认当前排版', exact: false }).click()
   assert.ok((await state()).objects.filter(item => item.kind === 'furniture').every(item => item.layoutConfirmed))
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('60')
-  await page.getByTestId('layout-seat-summary').getByText('尚缺', { exact: false }).waitFor()
+  // LAYOUT-035：座位不足迁入统一预警块（红级+修改建议）。人均面积阈值触发由单测覆盖（需要密集小空间场景）。
+  const shortfallWarning = page.locator('[data-warning-id="shortfall"]')
+  await shortfallWarning.waitFor()
+  assert.equal(await shortfallWarning.getAttribute('data-level'), 'error')
+  assert.match(await shortfallWarning.innerText(), /座位不足/)
+  assert.match(await shortfallWarning.innerText(), /建议：/)
   assert.ok((await state()).objects.filter(item => item.kind === 'furniture').every(item => item.layoutConfirmed), 'editing draft does not unconfirm saved layout')
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.getByRole('spinbutton', { name: '目标人数', exact: true }).inputValue(), '8')
@@ -178,7 +183,7 @@ try {
     assert.ok(box.y >= 0 && box.y + box.height <= 900, 'main action visible in 900px viewport')
   }
   assert.deepEqual(errors, [])
-  console.log('PASS: meeting module compatibility, real table/chair seats, preview/application equality, no draft persistence, manual retention, undo, refresh, exclusion and shortfall feedback, candidate cards compare/switch/apply (LAYOUT-034)')
+  console.log('PASS: meeting module compatibility, real table/chair seats, preview/application equality, no draft persistence, manual retention, undo, refresh, exclusion and shortfall feedback, candidate cards compare/switch/apply (LAYOUT-034), unified warning levels & advice (LAYOUT-035)')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

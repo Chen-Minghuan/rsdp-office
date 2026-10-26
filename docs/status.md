@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-26 LAYOUT-035 校核预警分级与修改建议：分级口径定稿（红=会被确认/应用拒绝的硬冲突，含方案无法排出与座位不足；黄=低于策略阈值，含通道宽度<900mm、入口未衔接/截断、人均面积<2.0㎡/座、边缘补位；info=未核验与现场核验说明），黄/红附修改建议；023 通道宽度与 029 入口联动提示迁入统一预警块（保留旧 testid），座位摘要「尚缺」迁入红级条目，proposal.warnings 首次在面板可见；新增人均面积校核（净面积/座位，策略值）。顺带修复侧栏统计区溢出遮盖点击（候选/预警块加 max-h 内部滚动，smoke 复现）。`pnpm build`、`test:layout-planning`（新增分级用例）、`e2e:layout-planning`/`e2e:aisle-channels`、auto-layout/meeting/adaptive/proposal-layout 回归、smoke、workflows、`git diff --check` 通过；后端零改动、真实集成验收未执行，见[任务记录](tasks/LAYOUT-035-warning-levels-and-advice.md)。
+
 2026-10-26 LAYOUT-034 多方案候选评分对比：排版引擎返回 Top 3 候选（课桌式网格暴露 auto 内部朝向/对齐变体、会议沿用尺寸×朝向×位置枚举，签名去重），评分口径定稿为目标达成单因子（1000 分/座封顶于目标、超出 1 分/座，并列保持生成顺序，默认方案不漂移），利用率/人均余量仅展示；面板候选卡片点击切换预览（不落库）、按家具签名跟随选中、应用携带候选索引走既有失效链路。`pnpm build`、`test:layout-planning`（新增评分/去重/排序/指标用例）、`e2e:layout-planning`（新增卡片切换/应用断言）及 auto-layout/meeting/adaptive/aisle-channels/proposal-layout 回归、smoke、workflows、`git diff --check` 通过；顺带修复 e2e-proposal-layout 缺 auth 模拟的既有缺口；后端零改动、真实集成验收未执行，见[任务记录](tasks/LAYOUT-034-candidate-scheme-comparison.md)。
 
 2026-10-26 外部参考盘点与新任务卡：按用户提供的 Kimi 分享链接（培训空间自动布局原型 V1–V6 会话）逐项比对 RSDP 现状，产出[差距分析](../docs/references/kimi-training-layout-tool-gap-analysis.md)（标注外部参考、非目标契约，其数值均为对方策略值）。已覆盖：通道系统（021–029 语义超出原型）、门洞避让、椅子占位、目标人数校核。据此立卡：LAYOUT-032 U 型/回字型、LAYOUT-033 剧院式纯椅排、LAYOUT-034 多方案候选评分对比、LAYOUT-035 校核预警分级与修改建议（含人均面积）、LAYOUT-036 求解模式扩展、LAYOUT-037 宽桌双侧坐人、LAYOUT-038 椅背通行净宽自动加宽；弧形/阶梯直排并入 LAYOUT-031（暂缓）；讲台朝向、主席台产品类型、组合会议桌、线条图导出需业务确认后再立卡。纯文档变更，无代码改动。

@@ -6,9 +6,9 @@ import { officeFurnitureFootprint, officePlacementProblem } from './officeManual
 import { canvasZoneBounds } from './officeCanvasView'
 import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
 import { zoneLayoutExclusions } from './spatial/obstacles'
-import { ringArea } from './spatial/geometry'
 import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects, validateChannels } from './layoutChannels'
+import { zoneNetAreaMm2 } from './layoutWarnings'
 
 /** LAYOUT-034：面板最多展示的候选方案数（策略值）。 */
 export const LAYOUT_CANDIDATE_TOP_N = 3
@@ -234,7 +234,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
     return true
   })
   // 净面积 = 轮廓面积 − 建筑约束外包矩形面积（近似）；利用率与人均余量为展示指标，见 layoutCandidateScore 注释。
-  const netAreaMm2 = Math.max(1, Math.abs(ringArea(zone.polygon!)) - exclusions.reduce((sum, area) => sum + area.w * area.h, 0))
+  const netAreaMm2 = zoneNetAreaMm2(zone)
   const retainedAreaMm2 = retained.reduce((sum, entry) => { const f = officeFurnitureFootprint(entry); return sum + f.w * f.h }, 0)
   const best = distinct[0]
   if (!best) return { ...result, problem: result.problem || '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }

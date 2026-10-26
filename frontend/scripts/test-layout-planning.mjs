@@ -17,6 +17,7 @@ async function load(path) {
   return url
 }
 const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect, layoutCandidateScore, LAYOUT_CANDIDATE_TOP_N } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
+const { layoutPanelWarnings, layoutWarningTestId, zoneNetAreaMm2, AREA_PER_SEAT_HINT_M2 } = await import(await load(new URL('../app/utils/layoutWarnings.ts', import.meta.url)))
 const { furnitureById } = await import(await load(new URL('../app/utils/manualFurniture.ts', import.meta.url)))
 const { rectangleObstacle, zoneLayoutExclusions, migrateLegacyDoorClearances, migrateLayoutExclusions, moveObstacle, reshapeObstacle, snapObstacleToZone } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
 const { rectOverlapsBlocker } = await import(await load(new URL('../app/utils/layoutConstraints.ts', import.meta.url)))
@@ -190,4 +191,51 @@ assert.equal(sig(squareDesks.candidates[0].furniture), sig(squareDesks.furniture
 const singleCandidate = plan(zone, [], { ...request, module: furnitureById.get('cabinet-mobile'), widthMm: 500, depthMm: 500, productStyleId: 'general', presetId: 'general-center', preferences: defaults() })
 assert.equal(singleCandidate.candidates.length, 1)
 assert.equal(sig(singleCandidate.candidates[0].furniture), sig(singleCandidate.furniture))
-console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs, candidate scoring & comparison (LAYOUT-034)')
+// LAYOUT-035 统一校核预警分级（红=硬冲突；黄=低于策略阈值；info=未核验说明；黄/红必附建议）。
+const synth = patch => ({ furniture: [], replaceIds: [], retainedIds: [], seats: 0, shortfall: 0, label: '', problem: null, warnings: [], sourceKey: '', ...patch })
+// 净面积：zone 为 12000×8000=96㎡；禁放障碍按外包矩形扣除。
+assert.equal(Math.round(zoneNetAreaMm2(zone) / 1e6), 96)
+const zoneWithBlock = { ...zone, kind: 'zone', obstacles: [rectangleObstacle(zone.id, 'NO_PLACEMENT', { x: -2000, y: -2000 }, { x: 0, y: 0 }, 'NP-1')] }
+assert.equal(Math.round(zoneNetAreaMm2(zoneWithBlock) / 1e6), 96 - 4)
+const byId = list => Object.fromEntries(list.map(w => [w.id, w]))
+// 座位不足为红级（确认会被拒绝）并附建议；补足则不出现。
+let ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 4, shortfall: 4 }) }))
+assert.equal(ws.shortfall.level, 'error')
+assert.match(ws.shortfall.text, /座位不足/)
+assert.ok(ws.shortfall.advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 8, shortfall: 0 }) }))
+assert.ok(!ws.shortfall)
+// 人均面积：96㎡/60 座=1.6 < 阈值 2 → 黄级附建议；96/8=12 不出现。
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 60 }) }))
+assert.equal(ws['area-per-seat'].level, 'warning')
+assert.match(ws['area-per-seat'].text, new RegExp(`低于 ${AREA_PER_SEAT_HINT_M2}`))
+assert.ok(ws['area-per-seat'].advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 8 }) }))
+assert.ok(!ws['area-per-seat'])
+// 方案无法排出为红级；边缘补位警告为黄级；现场核验为 info。
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ problem: '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }) }))
+assert.equal(ws['proposal-problem'].level, 'error')
+assert.ok(ws['proposal-problem'].advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ warnings: ['主排布之外的边缘余量已用单件补位 2 件，座位朝房间内侧；请核对补位位置与现场通道'] }) }))
+assert.equal(ws['edge-fill'].level, 'warning')
+assert.ok(ws['edge-fill'].advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ warnings: ['门窗、柱及真实通道尚未自动核验；请在空间核对中补充'] }) }))
+assert.equal(ws['field-review'].level, 'info')
+// 通道宽度黄级（沿用 023 阈值与 testid 映射）。
+const narrow = [{ id: 'CH1', orientation: 'vertical', offsetMm: -6000, widthMm: 600 }]
+ws = layoutPanelWarnings({ zone: { ...zone, kind: 'zone', obstacles: [] }, channels: narrow, furniture: [], proposal: null })
+const widthItem = ws.find(w => w.id === 'channel-width')
+assert.equal(widthItem.level, 'warning')
+assert.ok(widthItem.advice)
+assert.equal(layoutWarningTestId(widthItem), 'channel-width-hint')
+// 入口联动迁入：未标注门洞为 info，保留 029 testid 映射；无通道时不产出。
+const egressItems = layoutPanelWarnings({ zone: { ...zone, kind: 'zone', obstacles: [] }, channels: [{ id: 'CH2', orientation: 'vertical', offsetMm: -6000, widthMm: 900 }], furniture: [], proposal: null })
+const unmarked = egressItems.find(w => w.id === 'channel-egress-unmarked')
+assert.equal(unmarked.level, 'info')
+assert.equal(layoutWarningTestId(unmarked), 'channel-egress-hint')
+assert.equal(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: null }).length, 0)
+// 排序：红 > 黄 > info。
+const mixed = layoutPanelWarnings({ zone: { ...zone, kind: 'zone', obstacles: [] }, channels: narrow, furniture: [], proposal: synth({ seats: 4, shortfall: 4 }) })
+const levels = mixed.map(w => w.level)
+assert.deepEqual(levels, [...levels].sort((a, b) => ({ error: 0, warning: 1, info: 2 })[a] - ({ error: 0, warning: 1, info: 2 })[b]))
+console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs, candidate scoring & comparison (LAYOUT-034), unified warning levels & advice (LAYOUT-035)')

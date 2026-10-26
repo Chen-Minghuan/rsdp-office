@@ -56,6 +56,11 @@ function minFreeWidth(corridor: Rect, blockers: Rect[]): number {
 }
 
 /**
+ * LAYOUT-035 结构化出口：kind 供统一预警分级（unmarked=info、unlinked/blocked=warning）。
+ */
+export interface ChannelEgressIssue { kind: 'unmarked' | 'unlinked' | 'blocked'; text: string }
+
+/**
  * 通道与入口/疏散联动提示（LAYOUT-029，提示级不拦截——saveCanvas 无 warnings 通道，后端不接入，如实记录于任务卡）。
  * 入口代理 = 人工标注的门洞净空障碍（DOOR_CLEARANCE）；识别层不产出门/开口数据，未标注时只提示未核验。
  * 规则 1：通道带走向两端头（含 028 端点留断后的实际跨度、027 多边形裁剪后的分段包围范围）至少一端在
@@ -63,10 +68,10 @@ function minFreeWidth(corridor: Rect, blockers: Rect[]): number {
  * 规则 2：已衔接端头到对应门洞的走廊（端头边缘与门洞包围盒的并集包围盒）被家具占地/禁放区/柱等挤占后
  *         剩余净宽低于 MIN_PASSAGE_MM，提示衔接路径被截断。门洞净空自身不算阻挡。
  */
-export function channelEgressHints(zone: ZoneObject, channels: LayoutChannel[], furniture: FurnitureObject[], firstBlockDepthMm?: number): string[] {
+export function channelEgressIssues(zone: ZoneObject, channels: LayoutChannel[], furniture: FurnitureObject[], firstBlockDepthMm?: number): ChannelEgressIssue[] {
   if (!channels.length) return []
   const doors = (zone.obstacles || []).filter(obstacle => obstacle.kind === 'DOOR_CLEARANCE')
-  if (!doors.length) return ['未标注门洞净空（入口）：通道与入口的连通未核验，可在空间核对中补充标注']
+  if (!doors.length) return [{ kind: 'unmarked', text: '未标注门洞净空（入口）：通道与入口的连通未核验，可在空间核对中补充标注' }]
   const doorRings = doors.map(obstacle => obstacleRing(zone, obstacle))
   const doorBoxes = doorRings.map(bounds)
   const blockers: Rect[] = [
@@ -76,7 +81,7 @@ export function channelEgressHints(zone: ZoneObject, channels: LayoutChannel[], 
       .map(obstacle => obstacleExclusion(zone, obstacle)).filter((area): area is NonNullable<typeof area> => !!area)
       .map(area => ({ x: area.x, y: area.y, w: area.w, h: area.h })),
   ]
-  const hints: string[] = []
+  const hints: ChannelEgressIssue[] = []
   channels.forEach((channel, index) => {
     const label = `${channel.orientation === 'vertical' ? '纵向' : '横向'}通道${channels.length > 1 ? ' ' + (index + 1) : ''}`
     const segments = channelRects(zone, [channel], firstBlockDepthMm)
@@ -107,9 +112,14 @@ export function channelEgressHints(zone: ZoneObject, channels: LayoutChannel[], 
         h: Math.max(door.y + door.h, edge.y + edge.h) - Math.min(door.y, edge.y),
       }
       const free = minFreeWidth(corridor, blockers)
-      if (free < MIN_PASSAGE_MM) hints.push(`「${label}」${end === 0 ? (vertical ? '上' : '左') : (vertical ? '下' : '右')}端与入口之间的衔接路径净宽不足 ${MIN_PASSAGE_MM}mm（剩余约 ${Math.round(free)}mm），可能被家具或禁放区截断（策略提示，非规范强制）`)
+      if (free < MIN_PASSAGE_MM) hints.push({ kind: 'blocked', text: `「${label}」${end === 0 ? (vertical ? '上' : '左') : (vertical ? '下' : '右')}端与入口之间的衔接路径净宽不足 ${MIN_PASSAGE_MM}mm（剩余约 ${Math.round(free)}mm），可能被家具或禁放区截断（策略提示，非规范强制）` })
     })
-    if (!linked) hints.push(`「${label}」两端都未衔接到门洞净空（入口），请核对通道是否连到入口（策略提示，非规范强制）`)
+    if (!linked) hints.push({ kind: 'unlinked', text: `「${label}」两端都未衔接到门洞净空（入口），请核对通道是否连到入口（策略提示，非规范强制）` })
   })
   return hints
+}
+
+/** 兼容包装：只取文案（LAYOUT-035 起面板经 channelEgressIssues 拿分级）。 */
+export function channelEgressHints(zone: ZoneObject, channels: LayoutChannel[], furniture: FurnitureObject[], firstBlockDepthMm?: number): string[] {
+  return channelEgressIssues(zone, channels, furniture, firstBlockDepthMm).map(issue => issue.text)
 }

@@ -6,8 +6,8 @@ import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLa
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, layoutCandidateKey, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
-import { DEFAULT_CHANNEL_WIDTH_MM, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
-import { channelEgressHints } from '~/utils/channelEgress'
+import { DEFAULT_CHANNEL_WIDTH_MM } from '~/utils/layoutChannels'
+import { layoutPanelWarnings, layoutWarningTestId, type LayoutWarningLevel } from '~/utils/layoutWarnings'
 import { uid } from '~/utils/helpers'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
@@ -165,14 +165,7 @@ const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, 
 const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
 // 通道直接读写 zone.layoutPreferences（画布拖动也写同一份），不走面板本地副本，避免双写分叉。
 const channels = computed<LayoutChannel[]>(() => zone.value?.layoutPreferences?.channels || [])
-// 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）：入口代理为人工标注的门洞净空；首排深度取已保存排版记录。
-const channelEgressMessages = computed(() => {
-  const z = zone.value
-  if (!z) return []
-  const items = currentFurniture.value
-  const firstBlockDepthMm = items.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
-  return channelEgressHints(z, channels.value, items, firstBlockDepthMm)
-})
+// LAYOUT-035：通道宽度/入口联动等散点提示统一进面板预警块（layoutPanelWarnings），此处不再单独渲染。
 function saveChannels(next: LayoutChannel[]) {
   if (!zone.value) return
   store.updateZoneChannels(zone.value.id, next)
@@ -212,6 +205,15 @@ const proposal = computed(() => {
   return { ...base, furniture: candidate.furniture, seats: candidate.seats, shortfall: candidate.shortfall, label: candidate.label, rows: candidate.rows, columns: candidate.columns, rotated: candidate.rotated, fillCount: candidate.fillCount }
 })
 const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
+// LAYOUT-035 统一校核预警（红=会被确认/应用拒绝；黄=低于策略阈值；info=未核验说明），数值均为策略值非规范。
+const panelWarnings = computed(() => {
+  const z = zone.value
+  if (!z) return []
+  const items = currentFurniture.value
+  const firstBlockDepthMm = items.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
+  return layoutPanelWarnings({ zone: z, channels: channels.value, furniture: items, proposal: proposal.value, firstBlockDepthMm })
+})
+const warningLevelClass: Record<LayoutWarningLevel, string> = { error: 'text-[#a65e4c]', warning: 'text-amber-600', info: 'text-muted' }
 const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
 const draftApplied = computed(() => difference.value === '与当前布局一致' && !preferencesChanged.value)
 const differenceText = computed(() => difference.value === '与当前布局一致' && preferencesChanged.value ? '需求或预留参数已变化，应用后保存新参数' : difference.value)
@@ -446,14 +448,12 @@ function clearLayout() {
                 <label>终点 mm（空=贯通）<input :value="channel.endMm === undefined ? '' : Math.round(channel.endMm - (channel.orientation === 'vertical' ? zoneBounds.minY : zoneBounds.minX))" type="number" step="100" aria-label="通道终点（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { endMm: ($event.target as HTMLInputElement).value === '' ? undefined : Number(($event.target as HTMLInputElement).value) + (channel.orientation === 'vertical' ? zoneBounds.minY : zoneBounds.minX) })"></label>
               </div>
               <label class="mt-1 block">两侧净距 mm<input :value="channel.clearanceMm || 0" type="number" min="0" step="50" aria-label="通道两侧净距（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { clearanceMm: Math.max(0, Number(($event.target as HTMLInputElement).value) || 0) })"></label>
-              <p v-if="channel.widthMm < CHANNEL_WIDTH_HINT_MM" data-testid="channel-width-hint" class="mt-1 text-[10px] text-amber-600">宽度低于 {{ CHANNEL_WIDTH_HINT_MM }}mm 通行提示阈值（策略提示，非规范强制）</p>
               <label v-if="channel.orientation === 'vertical'" class="mt-1 block"><input :checked="!!channel.fromSecondRow" type="checkbox" aria-label="仅从二排起" @change="updateChannel(channel.id, { fromSecondRow: ($event.target as HTMLInputElement).checked })"> 仅从二排起（首排桌列不断开）</label>
             </div>
             <div class="mt-2 flex gap-3">
               <button class="text-bronze underline" data-testid="add-channel-vertical" @click="addChannel('vertical')">添加纵向通道</button>
               <button class="text-bronze underline" data-testid="add-channel-horizontal" @click="addChannel('horizontal')">添加横向通道</button>
             </div>
-            <p v-for="message in channelEgressMessages" :key="message" data-testid="channel-egress-hint" class="mt-2 text-[10px] text-amber-600">{{ message }}</p>
           </details>
         </div>
 
@@ -545,7 +545,7 @@ function clearLayout() {
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
           <div v-if="baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="mt-2" data-testid="layout-candidates">
             <div class="mb-1 text-[9px] text-[#8a8178]">候选方案 · 按目标达成优先排序；利用率/人均余量为策略参考值</div>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-1 max-h-36 overflow-y-auto">
               <button
                 v-for="(candidate, index) in baseProposal.candidates"
                 :key="index"
@@ -560,10 +560,23 @@ function clearLayout() {
             </div>
           </div>
           <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
-          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}<span v-if="proposal.shortfall" class="text-[#a65e4c]"> · 尚缺 {{ proposal.shortfall }} {{ isGeneral ? '件' : '人' }}</span></p>
+          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}</p>
+          <div v-if="panelWarnings.length" class="mt-2 flex flex-col gap-1 max-h-32 overflow-y-auto" data-testid="layout-warnings">
+            <div
+              v-for="warning in panelWarnings"
+              :key="warning.id"
+              :data-testid="layoutWarningTestId(warning)"
+              :data-warning-id="warning.id"
+              :data-level="warning.level"
+              class="rounded-lg border px-2 py-1 text-[10px] leading-relaxed"
+              :class="[warning.level === 'error' ? 'border-[#ecc9c0] bg-[#fdf3f1]' : warning.level === 'warning' ? 'border-[#f0d9b3] bg-[#fff8e8]' : 'border-line bg-white', warningLevelClass[warning.level]]"
+            >
+              <span>{{ warning.text }}</span>
+              <span v-if="warning.advice" class="block opacity-80">建议：{{ warning.advice }}</span>
+            </div>
+          </div>
           <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>
           <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
-          <p v-if="proposal" class="mt-1 text-[9px] text-muted">门窗、柱及连续通道待现场核验；入口/禁放区请在空间核对页标注。</p>
           <p v-if="applicationMessage" role="status" class="mt-1 text-[10px] text-[#56636e]">{{ applicationMessage }}</p>
           <p v-if="plan?.problem" role="status" class="mt-1 text-[10px] text-[#a65e4c]">{{ plan.problem }}</p>
         </div>
