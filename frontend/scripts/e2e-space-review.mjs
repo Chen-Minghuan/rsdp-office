@@ -388,7 +388,7 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
   await page.screenshot({ path: outDir + '/08-reused-contour.png' })
-  assert.deepEqual(profileRequests, [], '不调用已删除的项目资料接口')
+  assert.ok(profileRequests.every(url => new URL(url).pathname === '/api/v1/office/projects'), '只调用新项目树接口，不调用已删除的项目资料详情接口')
   assert.deepEqual(errors, [])
   console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护。使用模拟 API。')
 } finally {

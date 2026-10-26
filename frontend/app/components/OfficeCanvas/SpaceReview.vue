@@ -14,7 +14,7 @@ import { transformContour } from '~/utils/spatial/contourTransform'
 import type { ContourOperation, ContourPoint } from '~/utils/spatial/contourTransform'
 import { canRestoreSourceContour, sourceContour } from '~/utils/spatial/designCorrections'
 
-const store = useOfficeStore(), router = useRouter(), route = useRoute()
+const store = useOfficeStore(), workspace = useWorkspaceStore(), router = useRouter(), route = useRoute()
 const selectedId = ref<string | null>(null)
 const tool = ref('select'), showAllSpaces = ref(false)
 const showUnderlay = ref(true), showOutline = ref(true), showDimensions = ref(true), showOriginal = ref(false)
@@ -305,7 +305,8 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
     <div class="review-columns">
       <aside class="review-project review-panel">
         <div class="project-section">
-          <div class="section-heading"><h2>项目与空间</h2><small>本地草稿</small></div>
+          <div class="section-heading"><h2>项目与空间</h2><small>{{ workspace.currentFloorName }}</small></div>
+          <ProjectFloorTree compact />
           <div class="review-project-card"><h3>{{ store.floorPlan?.sourceName || store.drawingName }}</h3><p>{{ calibrated ? '图纸比例已校准，尺寸单位 mm' : '比例待校准，可先核对空间轮廓' }}</p></div>
           <div class="review-source-file"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板' : store.floorPlan?.inputMode === 'pdf' ? 'PDF' : store.floorPlan?.inputMode === 'cad' ? 'CAD' : isExample ? 'SVG' : 'PNG' }}</span><div><strong>{{ store.floorPlan?.sourceName || '待关联原始图纸' }}</strong><small>{{ isExample ? '演示底图 · 示例几何' : store.floorPlan?.inputMode === 'manual' ? '空间模板 · 布局设计副本' : '原始底图 · 当前识别页' }}</small></div></div>
         </div>

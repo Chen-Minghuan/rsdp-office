@@ -1,18 +1,28 @@
 <script setup lang="ts">
-const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const { projectSteps, currentStep } = useWorkspaceNavigation()
+const showCreate = ref(false)
 </script>
 
 <template>
   <section class="flex-none border-b border-line bg-bg px-5 py-3 xl:px-7" aria-label="项目设计流程">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
-        <div class="text-[11px] text-muted mb-1">项目工作台 / 空间设计</div>
-        <div class="truncate text-sm font-semibold">{{ store.drawingName }}</div>
+        <div class="text-xs font-semibold">{{ workspace.currentProjectName }} / {{ workspace.currentFloorName }}</div>
       </div>
       <nav class="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="项目设计步骤">
         <template v-for="(step, index) in projectSteps" :key="step.label">
+          <button
+            v-if="index === 0"
+            type="button"
+            class="flex items-center gap-2 rounded-lg px-2 py-2 text-xs text-muted transition hover:bg-cream hover:text-ink sm:px-3"
+            @click="showCreate = true"
+          >
+            <span class="grid h-6 w-6 place-items-center rounded-full border border-line bg-white text-[11px]">1</span>
+            <span>{{ step.label }}</span>
+          </button>
           <NuxtLink
+            v-else
             :to="step.to"
             :aria-current="index === currentStep ? 'step' : undefined"
             class="flex items-center gap-2 rounded-lg px-2 py-2 text-xs transition sm:px-3"
@@ -25,5 +35,6 @@ const { projectSteps, currentStep } = useWorkspaceNavigation()
         </template>
       </nav>
     </div>
+    <ProjectCreateDialog v-if="showCreate" @close="showCreate = false" />
   </section>
 </template>

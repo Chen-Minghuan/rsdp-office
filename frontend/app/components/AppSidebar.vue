@@ -14,12 +14,13 @@ function isActive(to: string) {
 </script>
 
 <template>
-  <aside class="flex-none bg-white border-b border-line p-3 md:w-56 md:border-b-0 md:border-r md:flex md:flex-col md:p-5 md:pb-4">
+  <aside class="flex-none overflow-y-auto bg-white border-b border-line p-3 md:w-60 md:border-b-0 md:border-r md:flex md:flex-col md:p-4 md:pb-4">
     <div class="hidden items-center gap-2 mb-9 px-3 md:flex">
       <span class="text-2xl font-extrabold tracking-tight text-ink">RSDP</span>
       <span class="text-[10px] text-muted leading-tight">办公空间<br>智能设计平台</span>
     </div>
-    <nav class="grid grid-cols-2 gap-3 md:grid-cols-1 md:gap-7" aria-label="工作区导航">
+    <ProjectFloorTree class="mb-5" />
+    <nav class="grid grid-cols-2 gap-3 md:grid-cols-1 md:gap-5" aria-label="工作区导航">
       <div>
         <div class="px-3 mb-2 text-[11px] font-medium tracking-wider text-muted">项目工作台</div>
         <NuxtLink

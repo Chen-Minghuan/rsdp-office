@@ -28,7 +28,8 @@
     "e2e:module-recommendations": "node scripts/e2e-module-recommendations.mjs",
     "e2e:upload-hmr": "node scripts/e2e-upload-hmr.mjs",
     "e2e:recognition-progress": "node scripts/e2e-recognition-progress.mjs",
-    "e2e:drawing-entry": "node scripts/e2e-drawing-entry.mjs"
+    "e2e:drawing-entry": "node scripts/e2e-drawing-entry.mjs",
+    "e2e:project-floors": "node scripts/e2e-project-floors.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

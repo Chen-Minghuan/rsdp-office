@@ -4,6 +4,7 @@ import { drawingFileDescriptor } from '~/utils/drawingUpload'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 
 const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const api = useOfficeApi()
 const floorPlanApi = useFloorPlanApi()
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -19,7 +20,7 @@ const activeFile = ref<string | null>(null)
 const recognitionSource = ref<'cad' | 'vision' | null>(null)
 const analysisId = ref<string | null>(null)
 const pdfPages = reactive<Record<string, number>>({})
-const taskStorageKey = 'rsdp-office-recognition-task-v1'
+const taskStorageKey = () => `rsdp-office-recognition-task-v1:${api.projectId}`
 const isRecognitionRunning = recognitionRunning
 const hasRunningResult = computed(() => isRecognitionRunning(recognitionResult.value))
 let recognitionSequence = 0
@@ -30,7 +31,7 @@ function forgetRecognitionTask() {
   recognitionSequence++
   clearTimeout(recognitionPoll)
   recognitionPoll = undefined
-  sessionStorage.removeItem(taskStorageKey)
+  sessionStorage.removeItem(taskStorageKey())
 }
 
 async function pollRecognition(id: string, ticket: number) {
@@ -49,14 +50,14 @@ async function pollRecognition(id: string, ticket: number) {
     if (detail.status === 'failed') {
       parseError.value = detail.errorMessage || '图纸识别失败'
       isParsing.value = false
-      sessionStorage.removeItem(taskStorageKey)
+      sessionStorage.removeItem(taskStorageKey())
       return
     }
     if (isRecognitionRunning(detail)) {
       recognitionPoll = setTimeout(() => pollRecognition(id, ticket), 1000)
     } else {
       isParsing.value = false
-      sessionStorage.removeItem(taskStorageKey)
+      sessionStorage.removeItem(taskStorageKey())
     }
   } catch (error) {
     if (disposed || ticket !== recognitionSequence) return
@@ -77,7 +78,7 @@ onMounted(() => {
   watch(() => store.initialized, ready => {
     if (!ready || isParsing.value) return
     try {
-      const task = JSON.parse(sessionStorage.getItem(taskStorageKey) || 'null')
+      const task = JSON.parse(sessionStorage.getItem(taskStorageKey()) || 'null')
       const drawing = store.files[0]
       if (!task || task.projectId !== api.projectId || task.name !== drawing?.name || task.size !== drawing?.size) return
       if (task.drawingId && task.drawingId !== drawing?.drawingId) return
@@ -85,14 +86,14 @@ onMounted(() => {
         const bound = { ...drawing, drawingId: drawing.drawingId || crypto.randomUUID(), analysisId: task.analysisId, analysisPageNumber: task.pageNumber }
         store.$patch({ files: [bound] })
         store.schedulePersist()
-        sessionStorage.setItem(taskStorageKey, JSON.stringify({ ...task, drawingId: bound.drawingId }))
+        sessionStorage.setItem(taskStorageKey(), JSON.stringify({ ...task, drawingId: bound.drawingId }))
       }
       activeFile.value = task.name
       pdfPages[task.name] = task.pageNumber
       analysisId.value = task.analysisId
       recognitionSource.value = task.source
       resumeRecognition()
-    } catch { sessionStorage.removeItem(taskStorageKey) }
+    } catch { sessionStorage.removeItem(taskStorageKey()) }
   }, { immediate: true })
 })
 onBeforeUnmount(() => { disposed = true; recognitionSequence++; clearTimeout(recognitionPoll) })
@@ -102,10 +103,11 @@ const requiresCalibration = computed(() => recognitionResult.value?.unitResoluti
 // 保留真实 File 对象，用于图纸识别时读取二进制内容
 const fileMap = ref<Map<string, File>>(new Map())
 
-// IndexedDB：刷新页面后仍可恢复已上传文件，避免识别时提示“找不到文件”
+// IndexedDB：按楼层和上传 ID 保存文件，切换楼层不会删除其他楼层的原图。
 const DB_NAME = 'rsdp-office-files'
-const DB_STORE = 'files'
-const DB_VERSION = 1
+const DB_STORE = 'floorFiles'
+const LEGACY_DB_STORE = 'files'
+const DB_VERSION = 2
 
 function openFileDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -114,20 +116,30 @@ function openFileDB(): Promise<IDBDatabase> {
     req.onsuccess = () => resolve(req.result)
     req.onupgradeneeded = () => {
       const db = req.result
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE, { keyPath: 'name' })
-      }
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: 'id' })
     }
   })
 }
 
-async function persistFile(file: File): Promise<void> {
+function fileStorageId(name: string, drawingId?: string) {
+  return `${api.projectId}:${drawingId || name}`
+}
+
+async function readRecord(db: IDBDatabase, storeName: string, id: string): Promise<any> {
+  if (!db.objectStoreNames.contains(storeName)) return null
+  const tx = db.transaction(storeName, 'readonly')
+  return await new Promise<any>((resolve, reject) => {
+    const req = tx.objectStore(storeName).get(id)
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function persistFile(file: File, drawingId?: string): Promise<void> {
   try {
     const db = await openFileDB()
     const tx = db.transaction(DB_STORE, 'readwrite')
-    const os = tx.objectStore(DB_STORE)
-    os.clear()
-    os.put({ name: file.name, type: file.type, size: file.size, blob: file })
+    tx.objectStore(DB_STORE).put({ id: fileStorageId(file.name, drawingId), floorId: api.projectId, name: file.name, type: file.type, size: file.size, blob: file })
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
@@ -137,16 +149,10 @@ async function persistFile(file: File): Promise<void> {
   }
 }
 
-async function loadPersistedFile(name: string): Promise<File | null> {
+async function loadPersistedFile(name: string, drawingId?: string): Promise<File | null> {
   try {
     const db = await openFileDB()
-    const tx = db.transaction(DB_STORE, 'readonly')
-    const os = tx.objectStore(DB_STORE)
-    const record = await new Promise<any>((resolve, reject) => {
-      const req = os.get(name)
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
+    const record = await readRecord(db, DB_STORE, fileStorageId(name, drawingId)) || await readRecord(db, LEGACY_DB_STORE, name)
     if (!record?.blob) return null
     return new File([record.blob], record.name, { type: record.type })
   } catch (e) {
@@ -155,12 +161,11 @@ async function loadPersistedFile(name: string): Promise<File | null> {
   }
 }
 
-async function deletePersistedFile(name: string): Promise<void> {
+async function deletePersistedFile(name: string, drawingId?: string): Promise<void> {
   try {
     const db = await openFileDB()
     const tx = db.transaction(DB_STORE, 'readwrite')
-    const os = tx.objectStore(DB_STORE)
-    os.delete(name)
+    tx.objectStore(DB_STORE).delete(fileStorageId(name, drawingId))
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
@@ -174,7 +179,7 @@ onMounted(async () => {
   // 从 IndexedDB 恢复刷新前上传的真实文件
   for (const f of store.files) {
     if (f.mock || fileMap.value.has(f.name)) continue
-    const restored = await loadPersistedFile(f.name)
+    const restored = await loadPersistedFile(f.name, f.drawingId)
     if (restored) {
       fileMap.value.set(f.name, restored)
     }
@@ -245,7 +250,7 @@ async function acceptDrawing(list: FileList | null) {
     analysisId.value = null
     parseError.value = null
     for (const name of Object.keys(pdfPages)) delete pdfPages[name]
-    await persistFile(file)
+    await persistFile(file, drawing.drawingId)
   } catch (error) {
     uploadError.value = error instanceof Error ? error.message : '上传图纸失败'
   } finally {
@@ -271,6 +276,7 @@ async function removeFile(name: string) {
   isUploading.value = true
   uploadError.value = null
   try {
+    const drawingId = store.files.find(file => file.name === name)?.drawingId
     forgetRecognitionTask()
     store.removeFile(name)
     fileMap.value.delete(name)
@@ -281,7 +287,7 @@ async function removeFile(name: string) {
       analysisId.value = null
       parseError.value = null
     }
-    await deletePersistedFile(name)
+    await deletePersistedFile(name, drawingId)
   } finally {
     isUploading.value = false
   }
@@ -304,7 +310,7 @@ async function recognizeFile(file: ProjectFile) {
   try {
     let rawFile = fileMap.value.get(file.name)
     if (!rawFile && !file.mock) {
-      rawFile = await loadPersistedFile(file.name)
+      rawFile = await loadPersistedFile(file.name, file.drawingId)
       if (rawFile) fileMap.value.set(file.name, rawFile)
     }
     if (!rawFile) {
@@ -331,7 +337,7 @@ async function recognizeFile(file: ProjectFile) {
     store.$patch({ files: store.files.map(drawing => drawing === file || drawing.drawingId && drawing.drawingId === file.drawingId
       ? { ...drawing, analysisId: result.analysisId, analysisPageNumber: pageNumber } : drawing) })
     store.schedulePersist()
-    sessionStorage.setItem(taskStorageKey, JSON.stringify({ analysisId: result.analysisId, name: file.name, size: file.size,
+    sessionStorage.setItem(taskStorageKey(), JSON.stringify({ analysisId: result.analysisId, name: file.name, size: file.size,
       drawingId: file.drawingId, projectId: api.projectId, pageNumber, source: recognitionSource.value }))
     await pollRecognition(result.analysisId, ticket)
   } catch (e: any) {
@@ -434,7 +440,7 @@ async function applyRecognitionToCanvas() {
     if (isRecognitionRunning(detail) || detail.status === 'failed') throw new Error('空间识别尚未完成，请稍后再应用')
     if (!detail.rooms?.length) throw new Error('当前图纸未识别出可用空间，请重新识别')
     store.importFloorPlanToZones({ ...detail, sourceDrawingId: store.files[0]?.drawingId })
-    await navigateTo(`/canvas?analysisId=${id}&mode=overview`)
+    await navigateTo({ path: '/canvas', query: { analysisId: id, mode: 'overview', floorId: api.projectId } })
   } catch (error) {
     if (disposed || ticket !== recognitionSequence) return
     parseError.value = error instanceof Error ? error.message : '导入空间失败'
@@ -453,7 +459,7 @@ async function enterCurrentDrawing() {
   const id = store.files[0]?.analysisId
   if (id && id === analysisId.value && recognitionResult.value && !hasRunningResult.value && recognitionResult.value.status !== 'failed') {
     await applyRecognitionToCanvas()
-  } else await navigateTo(id ? { path: '/canvas', query: { analysisId: id, mode: 'overview' } } : '/canvas')
+  } else await navigateTo(id ? { path: '/canvas', query: { analysisId: id, mode: 'overview', floorId: api.projectId } } : { path: '/canvas', query: { floorId: api.projectId } })
 }
 </script>
 
@@ -461,8 +467,8 @@ async function enterCurrentDrawing() {
   <div class="flex flex-col gap-4 h-full">
     <div class="flex items-start justify-between gap-5 flex-none">
       <div>
-        <h1 class="text-[25px] font-bold tracking-tight mb-2">上传办公图纸</h1>
-        <p class="text-xs text-muted">上传 PDF/PNG 参考图或 CAD 图纸（DWG/DXF），自动识别空间布局并生成可编辑的办公功能分区。</p>
+        <h1 class="text-[25px] font-bold tracking-tight mb-2">{{ workspace.currentFloorName }} · 上传办公图纸</h1>
+        <p class="text-xs text-muted">当前楼层的独立图纸：上传 PDF/PNG 参考图或 CAD 图纸（DWG/DXF），识别后生成可编辑空间。</p>
       </div>
     </div>
 

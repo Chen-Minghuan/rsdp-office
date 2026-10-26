@@ -1,10 +1,15 @@
 <script setup lang="ts">
 const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const { isProjectWorkflow } = useWorkspaceNavigation()
 const route = useRoute()
 const isSpatialWorkbench = computed(() => route.path === '/spatial-canvas' || (route.path === '/canvas' && store.canvasMode === 'overview'))
-onMounted(() => {
-  store.init()
+watch(() => route.query.floorId, floorId => {
+  if (workspace.initialized && typeof floorId === 'string' && floorId !== workspace.currentFloorId) void workspace.activateFloor(floorId)
+})
+onMounted(async () => {
+  await workspace.init()
+  await store.init()
 })
 </script>
 
@@ -15,7 +20,8 @@ onMounted(() => {
       <AppTopbar v-if="!isSpatialWorkbench" />
       <AppProjectSteps v-if="!isSpatialWorkbench && isProjectWorkflow" />
       <div :class="isSpatialWorkbench ? '' : 'flex flex-col flex-1 min-h-0 p-4 gap-4 md:p-5'">
-        <NuxtPage />
+        <div v-if="workspace.switching" class="grid flex-1 place-items-center text-sm text-muted">正在切换楼层并加载独立工作区…</div>
+        <NuxtPage v-else :key="workspace.currentFloorId" />
       </div>
     </main>
   </div>

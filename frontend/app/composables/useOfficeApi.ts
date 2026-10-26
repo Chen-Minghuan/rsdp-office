@@ -58,10 +58,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export function useOfficeApi() {
-  const projectId = PROJECT_ID
+  const currentProjectId = () => useWorkspaceStore().currentFloorId || PROJECT_ID
 
   async function loadCanvas(): Promise<{ objects: OfficeObject[]; files: ProjectFile[]; mode: 'overview' | 'design'; designZoneId: string | null; revision: number; blank: boolean } | null> {
-    const dto = await request<CanvasDto | null>('GET', `/api/v1/office/projects/${projectId}/canvas`)
+    const dto = await request<CanvasDto | null>('GET', `/api/v1/office/projects/${currentProjectId()}/canvas`)
     if (!dto) return null
     return {
       objects: dto.objects || [],
@@ -80,9 +80,9 @@ export function useOfficeApi() {
     designZoneId: string | null
     revision: number
     blank: boolean
-  }): Promise<void> {
-    await request<void>('PUT', `/api/v1/office/projects/${projectId}/canvas`, {
-      projectId,
+  }, workspaceId = currentProjectId()): Promise<void> {
+    await request<void>('PUT', `/api/v1/office/projects/${workspaceId}/canvas`, {
+      projectId: workspaceId,
       revision: payload.revision,
       mode: payload.mode,
       designZoneId: payload.designZoneId,
@@ -93,12 +93,12 @@ export function useOfficeApi() {
   }
 
   async function loadCart(): Promise<CartItem[]> {
-    const list = await request<Array<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>>('GET', `/api/v1/office/projects/${projectId}/cart`)
+    const list = await request<Array<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>>('GET', `/api/v1/office/projects/${currentProjectId()}/cart`)
     return list.map(c => ({ id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }))
   }
 
   async function addCartItem(item: CartItem): Promise<CartItem> {
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${projectId}/cart`, {
+    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${currentProjectId()}/cart`, {
       lineId: item.id,
       projectId: item.projectId,
       zoneId: item.zoneId,
@@ -110,25 +110,25 @@ export function useOfficeApi() {
   }
 
   async function updateCartItemQty(lineId: string, qty: number): Promise<CartItem | null> {
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${projectId}/cart/${lineId}?qty=${qty}`, {})
+    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${currentProjectId()}/cart/${lineId}?qty=${qty}`, {})
     if (!c) return null
     return { id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }
   }
 
   async function deleteCartItem(lineId: string): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/projects/${projectId}/cart/${lineId}`)
+    await request<void>('DELETE', `/api/v1/office/projects/${currentProjectId()}/cart/${lineId}`)
   }
 
   async function clearCart(): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/projects/${projectId}/cart`)
+    await request<void>('DELETE', `/api/v1/office/projects/${currentProjectId()}/cart`)
   }
 
   async function loadMessages(): Promise<AgentMessage[]> {
-    return await request<AgentMessage[]>('GET', `/api/v1/office/projects/${projectId}/agent-messages`)
+    return await request<AgentMessage[]>('GET', `/api/v1/office/projects/${currentProjectId()}/agent-messages`)
   }
 
   async function sendMessage(content: string): Promise<AgentMessage> {
-    return await request<AgentMessage>('POST', `/api/v1/office/projects/${projectId}/agent-messages`, { role: 'user', content })
+    return await request<AgentMessage>('POST', `/api/v1/office/projects/${currentProjectId()}/agent-messages`, { role: 'user', content })
   }
 
   async function loadProducts(): Promise<Product[]> {
@@ -149,15 +149,15 @@ export function useOfficeApi() {
   }
 
   async function recommendModule(requestBody: ModuleRecommendationRequest): Promise<ModuleRecommendation> {
-    return await request('POST', `/api/v1/office/projects/${projectId}/module-recommendations`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${currentProjectId()}/module-recommendations`, requestBody)
   }
 
   async function selectModuleProduct(requestBody: ModuleRecommendationRequest): Promise<ModuleProductSelection> {
-    return await request('POST', `/api/v1/office/projects/${projectId}/module-products`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${currentProjectId()}/module-products`, requestBody)
   }
 
   async function exportProposal(): Promise<Blob> {
-    const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${projectId}/proposal/export`), {
+    const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${currentProjectId()}/proposal/export`), {
       method: 'POST',
       credentials: 'include',
     })
@@ -165,7 +165,7 @@ export function useOfficeApi() {
   }
 
   async function resetProject(): Promise<void> {
-    await request<void>('POST', `/api/v1/office/projects/${projectId}/reset`, {})
+    await request<void>('POST', `/api/v1/office/projects/${currentProjectId()}/reset`, {})
   }
 
   async function downloadImportTemplate(): Promise<Blob> {
@@ -323,7 +323,7 @@ export function useOfficeApi() {
   }
 
   return {
-    projectId,
+    get projectId() { return currentProjectId() },
     loadCanvas,
     saveCanvas,
     loadCart,

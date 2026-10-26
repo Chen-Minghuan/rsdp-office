@@ -12,22 +12,24 @@ export function useWorkspaceNavigation() {
     path: '/canvas',
     query: {
       mode: 'design',
+      floorId: useWorkspaceStore().currentFloorId,
       ...(store.designZoneId ? { zoneId: store.designZoneId } : {}),
     },
   }))
 
   const projectSteps = computed(() => [
-    { label: '上传图纸', to: '/' },
+    { label: '项目创建', to: '/' },
+    { label: '图纸识别', to: '/' },
     { label: '空间总览', to: '/canvas' },
-    { label: '单空间设计', to: designRoute.value },
-    { label: '方案报价', to: '/proposal' },
+    { label: '布局选品', to: designRoute.value },
+    { label: '预算清单', to: '/proposal' },
   ])
 
   const currentStep = computed(() => {
     if (!isProjectWorkflow.value) return -1
-    if (route.path === '/proposal') return 3
-    if (route.path === '/agent' || (route.path === '/canvas' && route.query.mode === 'design')) return 2
-    return route.path === '/canvas' ? 1 : 0
+    if (route.path === '/proposal') return 4
+    if (route.path === '/agent' || (route.path === '/canvas' && route.query.mode === 'design')) return 3
+    return route.path === '/canvas' ? 2 : 1
   })
 
   return { isProjectWorkflow, lastProjectRoute, projectSteps, currentStep }
