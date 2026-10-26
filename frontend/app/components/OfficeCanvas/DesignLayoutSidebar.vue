@@ -5,7 +5,7 @@ import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
-import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
+import { defaultLayoutPreferences, layoutCandidateKey, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
 import { DEFAULT_CHANNEL_WIDTH_MM, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 import { channelEgressHints } from '~/utils/channelEgress'
 import { uid } from '~/utils/helpers'
@@ -191,7 +191,26 @@ function removeChannel(id: string) {
 }
 const buildingConstraints = computed(() => zone.value ? zoneLayoutExclusions(zone.value) : [])
 const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(channels.value)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
-const proposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
+const baseProposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
+// LAYOUT-034：Top N 候选卡片选择。选择按候选家具签名跟随：应用候选后候选集重算，同一候选仍在榜则保持选中
+// （新摆放与当前布局一致、预览退场）；参数或保留家具变化导致该候选消失时回落到评分最高的默认方案。
+const selectedCandidateKey = ref<string | null>(null)
+const selectedCandidateIndex = computed(() => {
+  if (!selectedCandidateKey.value) return 0
+  const index = baseProposal.value?.candidates?.findIndex(candidate => layoutCandidateKey(candidate) === selectedCandidateKey.value) ?? -1
+  return index >= 0 ? index : 0
+})
+function selectCandidate(index: number) {
+  const candidate = index > 0 ? baseProposal.value?.candidates?.[index] : undefined
+  selectedCandidateKey.value = candidate ? layoutCandidateKey(candidate) : null
+}
+const proposal = computed(() => {
+  const base = baseProposal.value
+  if (!base) return null
+  const candidate = selectedCandidateIndex.value > 0 ? base.candidates?.[selectedCandidateIndex.value] : undefined
+  if (!candidate) return base
+  return { ...base, furniture: candidate.furniture, seats: candidate.seats, shortfall: candidate.shortfall, label: candidate.label, rows: candidate.rows, columns: candidate.columns, rotated: candidate.rotated, fillCount: candidate.fillCount }
+})
 const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
 const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
 const draftApplied = computed(() => difference.value === '与当前布局一致' && !preferencesChanged.value)
@@ -274,7 +293,7 @@ function addToCanvas() {
 function applyLayout() {
   if (!zone.value || !proposal.value || proposal.value.problem || draftApplied.value) return
   const planned = proposal.value
-  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey)
+  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey, selectedCandidateIndex.value)
   if (!applied) { applicationMessage.value = '空间或家具已变化，请重新预览后应用'; return }
   nextTick(() => { applicationMessage.value = '已应用：' + planned.furniture.length + ' 件，保留 ' + planned.retainedIds.length + ' 件' })
 }
@@ -524,6 +543,22 @@ function clearLayout() {
             </div>
           </div>
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
+          <div v-if="baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="mt-2" data-testid="layout-candidates">
+            <div class="mb-1 text-[9px] text-[#8a8178]">候选方案 · 按目标达成优先排序；利用率/人均余量为策略参考值</div>
+            <div class="flex flex-col gap-1">
+              <button
+                v-for="(candidate, index) in baseProposal.candidates"
+                :key="index"
+                type="button"
+                data-testid="layout-candidate-card"
+                :class="['rounded-lg border px-2 py-1.5 text-left text-[10px] leading-snug', index === selectedCandidateIndex ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line bg-white text-muted hover:bg-[#f9f7f4]']"
+                @click="selectCandidate(index)"
+              >
+                <span class="block font-semibold">{{ candidate.label }}</span>
+                <span class="mt-0.5 block">{{ isMeetingLayout ? '座位' : isGeneral ? '家具' : '工位' }} {{ candidate.seats }}<span v-if="preferences.targetSeats"> / 目标 {{ preferences.targetSeats }}</span> · 利用率 {{ Math.round(candidate.metrics.utilization * 100) }}%<span v-if="candidate.metrics.freeAreaPerSeatM2 != null"> · 人均余量 {{ candidate.metrics.freeAreaPerSeatM2.toFixed(1) }} ㎡</span></span>
+              </button>
+            </div>
+          </div>
           <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
           <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}<span v-if="proposal.shortfall" class="text-[#a65e4c]"> · 尚缺 {{ proposal.shortfall }} {{ isGeneral ? '件' : '人' }}</span></p>
           <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>

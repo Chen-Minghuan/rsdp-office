@@ -1184,7 +1184,7 @@ export const useOfficeStore = defineStore('office', {
       return true
     },
 
-    applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string) {
+    applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string, candidateIndex = 0) {
       const zone = this.zones.find(zone => zone.id === zoneId)
       if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
       const existing = this.furnitureForZone(zoneId)
@@ -1193,13 +1193,16 @@ export const useOfficeStore = defineStore('office', {
       if (!template) return false
       const proposal = planLayoutProposal(zone, existing, { ...request, module: template })
       if (proposal.problem || !proposal.furniture.length) return false
+      // LAYOUT-034：应用用户在面板上选中的候选；索引越界时回落到评分最高的默认方案。
+      const chosen = candidateIndex > 0 ? proposal.candidates?.[candidateIndex] : undefined
+      const chosenFurniture = chosen?.furniture || proposal.furniture
       this.cancelFurniturePlacement()
       if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
       this.objectUpdate(() => {
         const removedProducts = new Map<string, number>()
         for (const item of existing) if (proposal.replaceIds.includes(item.id) && item.productId) removedProducts.set(item.productId, (removedProducts.get(item.productId) || 0) + 1)
         this.objects = this.objects.filter(object => !proposal.replaceIds.includes(object.id))
-        for (const furniture of proposal.furniture) this.objects.push({ ...furniture, id: uid('f'), spaceTemplateId: this.spaceTemplate!.templateId, templateSpaceId: zoneId })
+        for (const furniture of chosenFurniture) this.objects.push({ ...furniture, id: uid('f'), spaceTemplateId: this.spaceTemplate!.templateId, templateSpaceId: zoneId })
         zone.layoutPreferences = JSON.parse(JSON.stringify(request.preferences))
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null

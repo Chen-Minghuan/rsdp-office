@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-10-26 LAYOUT-034 多方案候选评分对比：排版引擎返回 Top 3 候选（课桌式网格暴露 auto 内部朝向/对齐变体、会议沿用尺寸×朝向×位置枚举，签名去重），评分口径定稿为目标达成单因子（1000 分/座封顶于目标、超出 1 分/座，并列保持生成顺序，默认方案不漂移），利用率/人均余量仅展示；面板候选卡片点击切换预览（不落库）、按家具签名跟随选中、应用携带候选索引走既有失效链路。`pnpm build`、`test:layout-planning`（新增评分/去重/排序/指标用例）、`e2e:layout-planning`（新增卡片切换/应用断言）及 auto-layout/meeting/adaptive/aisle-channels/proposal-layout 回归、smoke、workflows、`git diff --check` 通过；顺带修复 e2e-proposal-layout 缺 auth 模拟的既有缺口；后端零改动、真实集成验收未执行，见[任务记录](tasks/LAYOUT-034-candidate-scheme-comparison.md)。
+
 2026-10-26 外部参考盘点与新任务卡：按用户提供的 Kimi 分享链接（培训空间自动布局原型 V1–V6 会话）逐项比对 RSDP 现状，产出[差距分析](../docs/references/kimi-training-layout-tool-gap-analysis.md)（标注外部参考、非目标契约，其数值均为对方策略值）。已覆盖：通道系统（021–029 语义超出原型）、门洞避让、椅子占位、目标人数校核。据此立卡：LAYOUT-032 U 型/回字型、LAYOUT-033 剧院式纯椅排、LAYOUT-034 多方案候选评分对比、LAYOUT-035 校核预警分级与修改建议（含人均面积）、LAYOUT-036 求解模式扩展、LAYOUT-037 宽桌双侧坐人、LAYOUT-038 椅背通行净宽自动加宽；弧形/阶梯直排并入 LAYOUT-031（暂缓）；讲台朝向、主席台产品类型、组合会议桌、线条图导出需业务确认后再立卡。纯文档变更，无代码改动。
 
 2026-10-24 GEOM-013 入口与禁放区统一为建筑约束：按用户确认方案，排版面板「入口与禁放区」改为只读摘要（名称+毫米尺寸）+「返回空间核对标注」跳转（自动选中并聚焦当前空间）；旧 `layoutPreferences.exclusions` 加载时迁移为 NO_PLACEMENT obstacle（保留稳定 ID 与命名，新增 `SpatialObstacle.label`），`zoneLayoutExclusions` 去掉 legacy 分支，预览层 exclusions 渲染移除；设计页常显约束红/蓝虚线，修复“看不到效果”。`pnpm build`、`test:layout-planning`、`e2e:space-obstacles`/`e2e:layout-planning`/`e2e:space-review`/`e2e:annotations`、mvn 191 项（188 通过/3 跳过）与 `git diff --check` 通过；截图人工核对通过；后端零改动，真实集成验收未执行，见[任务记录](tasks/GEOM-013-unify-exclusions-into-obstacles.md)。

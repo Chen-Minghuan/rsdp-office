@@ -16,7 +16,7 @@ async function load(path) {
   cache.set(path.href, url)
   return url
 }
-const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
+const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect, layoutCandidateScore, LAYOUT_CANDIDATE_TOP_N } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
 const { furnitureById } = await import(await load(new URL('../app/utils/manualFurniture.ts', import.meta.url)))
 const { rectangleObstacle, zoneLayoutExclusions, migrateLegacyDoorClearances, migrateLayoutExclusions, moveObstacle, reshapeObstacle, snapObstacleToZone } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
 const { rectOverlapsBlocker } = await import(await load(new URL('../app/utils/layoutConstraints.ts', import.meta.url)))
@@ -162,4 +162,32 @@ assert.equal(confirmedLayoutProblem(channelZone, [aboveBreak]), null, '留断范
 assert.match(confirmedLayoutProblem(channelZone, [insideBreak]) || '', /压占通道/, '留断范围内仍不得压占')
 const fullSpanZone = { ...zone, layoutPreferences: { ...defaults(), channels: [{ id: 'CH', orientation: 'vertical', offsetMm: -6000, widthMm: 900 }] } }
 assert.match(confirmedLayoutProblem(fullSpanZone, [aboveBreak]) || '', /压占通道/, '缺省贯通时同一位置仍压占')
-console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs')
+// LAYOUT-034 多方案候选：评分口径（目标达成 1000/座封顶 − 超出 1/座；未指定目标按容量；并列保持生成顺序）。
+assert.equal(layoutCandidateScore(8, 8), 8000)
+assert.equal(layoutCandidateScore(10, 8), 7998)
+assert.equal(layoutCandidateScore(6, 8), 6000)
+assert.equal(layoutCandidateScore(5, 0), 5)
+const sig = items => items.map(e => [e.furnitureTemplateId, Math.round(e.x), Math.round(e.y), Math.round(e.w), Math.round(e.h), Math.round(e.rotation)].join(':')).sort().join('|')
+const meetingCandidates = meeting.candidates
+assert.ok(meetingCandidates.length >= 2 && meetingCandidates.length <= LAYOUT_CANDIDATE_TOP_N, '会议枚举应给出 2~N 个候选')
+assert.equal(sig(meetingCandidates[0].furniture), sig(meeting.furniture), 'candidates[0] 即默认方案')
+assert.equal(new Set(meetingCandidates.map(c => sig(c.furniture))).size, meetingCandidates.length, '候选按家具签名去重')
+for (let i = 1; i < meetingCandidates.length; i++) assert.ok(layoutCandidateScore(meetingCandidates[i - 1].seats, 8) >= layoutCandidateScore(meetingCandidates[i].seats, 8), '候选按评分降序')
+for (const c of meetingCandidates) {
+  assert.ok(c.metrics.utilization > 0 && c.metrics.utilization <= 1, '利用率在 (0,1]')
+  assert.ok(c.metrics.freeAreaPerSeatM2 >= 0, '人均余量非负')
+  assert.equal(c.shortfall, Math.max(0, 8 - c.seats), '候选缺口与座位一致')
+}
+// 课桌式网格：auto 内部的备选朝向进入候选集（两种朝向都有效时 ≥2 个候选，默认方案不变）。
+const generalDeskRequest = { ...request, module: furnitureById.get('sofa-double'), widthMm: 1600, depthMm: 850, productStyleId: 'general', presetId: 'general-auto', preferences: { ...defaults(), targetSeats: 8 } }
+const squareZone = { id: 'SQ', zoneType: 'OPEN_OFFICE', reviewUnit: 'mm', polygon: [[0, 0], [6000, 0], [6000, 6000], [0, 6000]] }
+const squareDesks = plan(squareZone, [], generalDeskRequest)
+assert.equal(squareDesks.problem, null)
+assert.ok(squareDesks.candidates.length >= 2, '横纵朝向都有效时应给出候选')
+assert.ok(squareDesks.candidates.some(c => c.rotated) && squareDesks.candidates.some(c => !c.rotated), '候选覆盖两种朝向')
+assert.equal(sig(squareDesks.candidates[0].furniture), sig(squareDesks.furniture), '网格默认方案不漂移')
+// 单变体路径（general-center 居中单件 / 职员桌 adaptive）候选恰好 1 个且等于默认方案。
+const singleCandidate = plan(zone, [], { ...request, module: furnitureById.get('cabinet-mobile'), widthMm: 500, depthMm: 500, productStyleId: 'general', presetId: 'general-center', preferences: defaults() })
+assert.equal(singleCandidate.candidates.length, 1)
+assert.equal(sig(singleCandidate.candidates[0].furniture), sig(singleCandidate.furniture))
+console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs, candidate scoring & comparison (LAYOUT-034)')

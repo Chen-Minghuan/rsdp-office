@@ -56,6 +56,19 @@ try {
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('8')
   await page.getByTestId('layout-seat-summary').getByText('已排座位 8', { exact: false }).waitFor()
   const preview = await page.locator('[data-preview-id]').evaluateAll(nodes => nodes.map(n => ({ x: n.style.left, y: n.style.top, w: n.style.width, h: n.style.height, transform: n.style.transform })))
+  // LAYOUT-034：候选方案卡片——出现 Top N、展示指标、切换预览且不落库、切回默认还原。
+  await page.getByTestId('layout-candidates').waitFor()
+  const candidateCards = page.getByTestId('layout-candidate-card')
+  const candidateCount = await candidateCards.count()
+  assert.ok(candidateCount >= 2 && candidateCount <= 3, '会议排版给出 2~3 个候选方案')
+  assert.match(await candidateCards.nth(0).innerText(), /利用率 \d+%/)
+  await candidateCards.nth(1).click()
+  const previewSnapshot = () => page.locator('[data-preview-id]').evaluateAll(nodes => nodes.map(n => ({ x: n.style.left, y: n.style.top, w: n.style.width, h: n.style.height, transform: n.style.transform })))
+  const altPreview = await previewSnapshot()
+  assert.notDeepEqual(altPreview, preview, '切换候选后预览随之更新')
+  assert.deepEqual((await state()).objects, snapshot.objects, '切换候选仍为纯预览，不落库')
+  await candidateCards.nth(0).click()
+  assert.deepEqual(await previewSnapshot(), preview, '切回默认候选恢复原预览')
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     store.$onAction(({ name, args }) => { if (name === 'applyLayoutProposal') window.appliedArguments = JSON.parse(JSON.stringify(args)) })
@@ -98,6 +111,24 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual((await state()).objects, beforeReplan, 'one undo restores group, preferences and confirmation')
   assert.equal((await state()).cart[0].id, 'CART-OLD', 'undo restores associated selections')
+  // LAYOUT-034：应用选中的非默认候选——携带候选索引、预览与应用几何一致，撤销后恢复。
+  await page.getByTestId('layout-candidates').waitFor()
+  await candidateCards.nth(1).click()
+  await page.getByTestId('apply-layout').waitFor({ state: 'visible' })
+  await page.waitForFunction(() => !document.querySelector('[data-testid="apply-layout"]')?.disabled)
+  const candidatePreview = await previewSnapshot()
+  // 前面的刷新已重置页面上下文，这里重新挂接动作捕获。
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.$onAction(({ name, args }) => { if (name === 'applyLayoutProposal') window.candidateApplyArgs = JSON.parse(JSON.stringify(args)) })
+  })
+  await page.getByTestId('apply-layout').click()
+  assert.equal(await page.evaluate(() => window.candidateApplyArgs?.[3]), 1, '应用携带候选索引')
+  await page.waitForFunction(n => [...document.querySelectorAll('[data-testid="office-design-canvas"] .board-element[data-id]')].filter(el => el.getAttribute('data-id') !== 'KEEP-CABINET' && el.querySelector('[data-furniture-template]')).length === n, candidatePreview.length)
+  const placedCandidate = await page.locator('[data-testid="office-design-canvas"] .board-element[data-id]:not([data-id="KEEP-CABINET"])').filter({ has: page.locator('[data-furniture-template]') }).evaluateAll(nodes => nodes.map(n => ({ x: n.style.left, y: n.style.top, w: n.style.width, h: n.style.height, transform: n.style.transform })))
+  assert.deepEqual(placedCandidate, candidatePreview, '选中候选的预览与应用几何一致')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.deepEqual((await state()).objects, beforeReplan, 'undo after candidate apply restores prior layout')
   await page.getByRole('tab', { name: '选择模块', exact: true }).click()
   await catalog.locator('summary').filter({ hasText: '职员桌' }).click()
   await catalog.locator('[data-module-id="desk-l"]').click()
@@ -147,7 +178,7 @@ try {
     assert.ok(box.y >= 0 && box.y + box.height <= 900, 'main action visible in 900px viewport')
   }
   assert.deepEqual(errors, [])
-  console.log('PASS: meeting module compatibility, real table/chair seats, preview/application equality, no draft persistence, manual retention, undo, refresh, exclusion and shortfall feedback')
+  console.log('PASS: meeting module compatibility, real table/chair seats, preview/application equality, no draft persistence, manual retention, undo, refresh, exclusion and shortfall feedback, candidate cards compare/switch/apply (LAYOUT-034)')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

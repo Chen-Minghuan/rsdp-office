@@ -22,7 +22,7 @@ export interface OfficeLayoutSpacing {
   staggerOffsetMm?: number
 }
 export const OFFICE_LAYOUT_SPACING: OfficeLayoutSpacing = { wallMm: 300, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
-export interface OfficeLayoutPlan { slots: LayoutRect[]; rows: number; columns: number; rotated: boolean; problem: string | null; presetId?: OfficeArrangementPresetId; productStyleId?: OfficeProductStyleId; firstBlockDepthMm?: number }
+export interface OfficeLayoutPlan { slots: LayoutRect[]; rows: number; columns: number; rotated: boolean; problem: string | null; presetId?: OfficeArrangementPresetId; productStyleId?: OfficeProductStyleId; firstBlockDepthMm?: number; /** LAYOUT-034：auto 网格内部评估过的其他有效变体（不含 best 本身），供候选方案对比；仅网格路径产出。 */ alternates?: OfficeLayoutPlan[] }
 const EPS = 0.0001 // millimetres; boundary arithmetic only
 const MAX_CELLS = 2000
 type Rect = { x: number; y: number; w: number; h: number }
@@ -242,10 +242,13 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
       return { slots, rows: rows.size, columns: maxRowCols, rotated, problem: null, firstBlockDepthMm }
     }
     const channelCandidates = (mode === 'auto' ? [false, true] : [false]).map(rotated => grid(rotated))
-    return channelCandidates.reduce((best, candidate) => candidate.slots.length > best.slots.length ? candidate : best, empty(null))
+    const channelBest = channelCandidates.reduce((best, candidate) => candidate.slots.length > best.slots.length ? candidate : best, empty(null))
+    if (channelBest.slots.length) channelBest.alternates = channelCandidates.filter(candidate => candidate !== channelBest && candidate.slots.length)
+    return channelBest
   }
 
   let best = empty(null), exceeded = false
+  const variants: OfficeLayoutPlan[] = []
   for (const rotated of mode === 'auto' ? [false, true] : [false]) {
     const localW = rotated ? spanY : spanX, localH = rotated ? spanX : spanY
     const cols = fit(localW - 2 * spacing.wallMm, widthMm, spacing.gapMm)
@@ -270,9 +273,11 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
           : { x: bounds.minX + x, y: bounds.minY + y, w: widthMm, h: depthMm, rotation: ((mode === 'faceToFace' && row % 2 === 0) || (mode === 'backToBack' && row % 2 === 1)) ? 180 : 0 }
         if (valid(slot)) { slots.push(slot); rows.add(row); columns.add(col) }
       }
-      if (slots.length > best.slots.length) best = { slots, rows: rows.size, columns: columns.size, rotated, problem: null }
+      if (slots.length) variants.push({ slots, rows: rows.size, columns: columns.size, rotated, problem: null })
+      if (slots.length > best.slots.length) best = variants[variants.length - 1]!
     }
   }
+  if (best.slots.length) best.alternates = variants.filter(variant => variant !== best)
   return best.slots.length ? best : empty(exceeded ? '预计数量过多，请增大家具尺寸或间距' : '当前家具尺寸和间距无法放入此空间')
 }
 

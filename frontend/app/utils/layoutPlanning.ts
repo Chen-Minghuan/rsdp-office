@@ -1,13 +1,29 @@
 import type { FurnitureObject, ZoneObject } from '~/types/office'
-import type { LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
+import type { LayoutCandidate, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
 import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture, seatSideRect, seatWallClearance, workstationSeatCorner, workstationSeatOverhang } from './officeAutoLayout'
 import { planAdaptiveArrangement } from './officeAdaptiveLayout'
 import { officeFurnitureFootprint, officePlacementProblem } from './officeManualPlacement'
 import { canvasZoneBounds } from './officeCanvasView'
 import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
 import { zoneLayoutExclusions } from './spatial/obstacles'
+import { ringArea } from './spatial/geometry'
 import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects, validateChannels } from './layoutChannels'
+
+/** LAYOUT-034：面板最多展示的候选方案数（策略值）。 */
+export const LAYOUT_CANDIDATE_TOP_N = 3
+
+/**
+ * LAYOUT-034 定稿的候选评分口径（策略值，非规范）：
+ * - 目标达成主导：指定目标人数时，每满足 1 个座位计 1000 分（封顶于目标）；
+ * - 超出惩罚：超出目标的每个座位扣 1 分（宁愿刚好满足，不过量摆放）；
+ * - 未指定目标时仅比容量（每座 1 分）。
+ * 并列保持候选生成顺序（引擎先产出的是既有默认方案，保证默认行为不漂移）。
+ * 面积利用率/人均余量等舒适度指标只展示、不参与排序。
+ */
+export function layoutCandidateScore(seats: number, targetSeats: number): number {
+  return targetSeats > 0 ? Math.min(targetSeats, seats) * 1000 - Math.max(0, seats - targetSeats) : seats
+}
 
 export function defaultLayoutPreferences(): LayoutPreferences {
   return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, channels: [] }
@@ -15,6 +31,14 @@ export function defaultLayoutPreferences(): LayoutPreferences {
 
 export function layoutSourceKey(zone: ZoneObject, existing: FurnitureObject[]) {
   return JSON.stringify([zone, existing])
+}
+
+/**
+ * LAYOUT-034：候选手项的稳定键（家具集合签名）。方形家具旋转 90° 占地不变，
+ * 归一化旋转角以避免产出视觉相同的伪候选；同一候选重算后键不变，供面板选择跟随。
+ */
+export function layoutCandidateKey(candidate: Pick<LayoutCandidate, 'furniture'>): string {
+  return candidate.furniture.map(entry => [entry.furnitureTemplateId, Math.round(entry.x), Math.round(entry.y), Math.round(entry.w), Math.round(entry.h), Math.round(entry.w) === Math.round(entry.h) ? 0 : Math.round(entry.rotation), entry.mirrorX ? 1 : 0].join(':')).sort().join('|')
 }
 
 export function automaticModuleProblem(zone: ZoneObject, request: LayoutRequest): string | null {
@@ -172,9 +196,11 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       }
     }
   } else {
-    const plans = [general
+    // LAYOUT-034：课桌式网格把 auto 内部评估过的其他有效变体（朝向/对齐）也作为候选；首个仍是既有默认方案。
+    const primary = general
       ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing, channels)
-      : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)]
+      : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)
+    const plans = [primary, ...(primary.alternates || [])]
     for (const plan of plans) {
       const furniture: FurnitureObject[] = []
       const fillCount = general ? 0 : plan.slots.filter(slot => slot.fill).length
@@ -198,15 +224,30 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       if (plan.problem && !candidates.length) result.problem = general ? plan.problem.replace('会议桌', '家具') : plan.problem
     }
   }
-  candidates.sort((a, b) => {
-    const target = prefs.targetSeats
-    const score = (c: typeof a) => target ? Math.min(target, c.seats) * 1000 - Math.max(0, c.seats - target) : c.seats
-    return score(b) - score(a)
+  candidates.sort((a, b) => layoutCandidateScore(b.seats, prefs.targetSeats) - layoutCandidateScore(a.seats, prefs.targetSeats))
+  // LAYOUT-034：去除家具完全相同的变体（会议位置枚举常产生同集结果），保留 Top N 并附展示指标。
+  const seen = new Set<string>()
+  const distinct = candidates.filter(candidate => {
+    const key = layoutCandidateKey(candidate)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
   })
-  const best = candidates[0]
+  // 净面积 = 轮廓面积 − 建筑约束外包矩形面积（近似）；利用率与人均余量为展示指标，见 layoutCandidateScore 注释。
+  const netAreaMm2 = Math.max(1, Math.abs(ringArea(zone.polygon!)) - exclusions.reduce((sum, area) => sum + area.w * area.h, 0))
+  const retainedAreaMm2 = retained.reduce((sum, entry) => { const f = officeFurnitureFootprint(entry); return sum + f.w * f.h }, 0)
+  const best = distinct[0]
   if (!best) return { ...result, problem: result.problem || '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }
+  const topCandidates: LayoutCandidate[] = distinct.slice(0, LAYOUT_CANDIDATE_TOP_N).map(candidate => {
+    const area = retainedAreaMm2 + candidate.furniture.reduce((sum, entry) => { const f = officeFurnitureFootprint(entry); return sum + f.w * f.h }, 0)
+    return {
+      furniture: candidate.furniture, seats: candidate.seats, shortfall: Math.max(0, prefs.targetSeats - candidate.seats), label: candidate.label,
+      rows: candidate.rows, columns: candidate.columns, rotated: candidate.rotated, fillCount: candidate.fillCount,
+      metrics: { utilization: Math.min(1, area / netAreaMm2), freeAreaPerSeatM2: candidate.seats > 0 ? Math.max(0, (netAreaMm2 - area) / candidate.seats / 1_000_000) : null },
+    }
+  })
   const fillWarning = best.fillCount ? `主排布之外的边缘余量已用单件补位 ${best.fillCount} 件，座位朝房间内侧；请核对补位位置与现场通道` : null
-  return { ...result, ...best, shortfall: Math.max(0, prefs.targetSeats - best.seats), problem: null, warnings: fillWarning ? [...result.warnings, fillWarning] : result.warnings }
+  return { ...result, ...best, shortfall: Math.max(0, prefs.targetSeats - best.seats), problem: null, warnings: fillWarning ? [...result.warnings, fillWarning] : result.warnings, candidates: topCandidates }
 }
 
 export function proposalDifference(current: FurnitureObject[], proposal: LayoutProposal) {
