@@ -46,12 +46,39 @@ export function obstacleExclusion(zone: ZoneObject, obstacle: SpatialObstacle): 
   const bounds = polygonBounds({ type: 'POLYGON', coordinateSystem: zone.reviewUnit === 'mm' ? 'WORLD_MM' : 'SOURCE_PAGE', outer: obstacleRing(zone, obstacle), outerVertexIds: [], holes: [], holeVertexIds: [] })
   if (!bounds) return null
   const polygon = obstacleRing(zone, obstacle)
-  return { id: obstacle.obstacleId, label: obstacleLabel(obstacle.kind), x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY, polygon }
+  return { id: obstacle.obstacleId, label: obstacle.label || obstacleLabel(obstacle.kind), x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY, polygon }
 }
 
-export function zoneLayoutExclusions(zone: ZoneObject, includeLegacy = true): LayoutExclusion[] {
-  const obstacles = (zone.obstacles || []).map(obstacle => obstacleExclusion(zone, obstacle)).filter((area): area is LayoutExclusion => !!area)
-  return includeLegacy ? [...obstacles, ...(zone.layoutPreferences?.exclusions || [])] : obstacles
+/** 排版避障只认建筑约束（GEOM-013）；旧 layoutPreferences.exclusions 由 migrateLayoutExclusions 迁移。 */
+export function zoneLayoutExclusions(zone: ZoneObject): LayoutExclusion[] {
+  return (zone.obstacles || []).map(obstacle => obstacleExclusion(zone, obstacle)).filter((area): area is LayoutExclusion => !!area)
+}
+
+/** 旧排版面板预留区域（layoutPreferences.exclusions）迁移为 NO_PLACEMENT 建筑约束；返回发生实际几何迁移的空间 ID。 */
+export function migrateLayoutExclusions(objects: OfficeObject[]) {
+  const changedZoneIds: string[] = []
+  for (const object of objects) {
+    if (object.kind !== 'zone') continue
+    const zone = object as ZoneObject
+    const preferences = zone.layoutPreferences
+    if (!preferences || !('exclusions' in preferences)) continue
+    const exclusions = Array.isArray(preferences.exclusions) ? preferences.exclusions : []
+    delete preferences.exclusions
+    if (!exclusions.length) continue
+    const factor = zone.reviewUnit === 'mm' ? -1 : 1
+    const obstacles = [...(zone.obstacles || [])]
+    for (const area of exclusions) {
+      if (![area.x, area.y, area.w, area.h].every(Number.isFinite) || area.w <= 0 || area.h <= 0) continue
+      if (obstacles.some(item => item.obstacleId === area.id)) continue
+      const obstacle = rectangleObstacle(zone.id, 'NO_PLACEMENT', { x: area.x, y: area.y * factor }, { x: area.x + area.w, y: (area.y + area.h) * factor }, area.id || createUuid())
+      if (!obstacle) continue
+      if (area.label) obstacle.label = area.label
+      obstacles.push(obstacle)
+    }
+    zone.obstacles = obstacles
+    changedZoneIds.push(zone.id)
+  }
+  return changedZoneIds
 }
 
 export function migrateLegacyDoorClearances(objects: OfficeObject[]) {

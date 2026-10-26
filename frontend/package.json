@@ -26,6 +26,7 @@
     "e2e:custom-modules": "node scripts/e2e-custom-modules.mjs",
     "e2e:furniture-modules": "node scripts/e2e-furniture-modules.mjs",
     "e2e:meeting-layout": "node scripts/e2e-meeting-layout.mjs",
+    "e2e:annotations": "node scripts/e2e-annotations.mjs",
     "e2e:single-space": "node scripts/e2e-single-space.mjs",
     "e2e:templates": "node scripts/e2e-space-template.mjs",
     "e2e:module-recommendations": "node scripts/e2e-module-recommendations.mjs",

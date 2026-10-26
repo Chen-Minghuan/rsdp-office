@@ -18,7 +18,7 @@ async function load(path) {
 }
 const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
 const { furnitureById } = await import(await load(new URL('../app/utils/manualFurniture.ts', import.meta.url)))
-const { rectangleObstacle, zoneLayoutExclusions, migrateLegacyDoorClearances, moveObstacle, reshapeObstacle, snapObstacleToZone } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
+const { rectangleObstacle, zoneLayoutExclusions, migrateLegacyDoorClearances, migrateLayoutExclusions, moveObstacle, reshapeObstacle, snapObstacleToZone } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
 const { rectOverlapsBlocker } = await import(await load(new URL('../app/utils/layoutConstraints.ts', import.meta.url)))
 const { zoneMeasurements, reviewScene, zoneLayoutProblem } = await import(await load(new URL('../app/utils/spatial/review.ts', import.meta.url)))
 const { captureSpaceTemplate, zonesFromTemplate } = await import(await load(new URL('../app/utils/spatial/spaceTemplate.ts', import.meta.url)))
@@ -57,6 +57,23 @@ const legacyZone = { ...zone, kind: 'zone', obstacles: [legacyDoor] }
 assert.deepEqual(migrateLegacyDoorClearances([legacyZone]), [zone.id])
 assert.ok(legacyZone.obstacles[0].geometry.outer.length > 4, 'legacy rectangular door is upgraded in place')
 assert.deepEqual(migrateLegacyDoorClearances([legacyZone]), [])
+// GEOM-013：旧排版预留区域迁移为 NO_PLACEMENT 建筑约束；y 轴换算、命名保留、幂等。
+const legacyExclusionZone = { ...zone, kind: 'zone', obstacles: [], layoutPreferences: { ...defaults(), exclusions: [{ id: 'EX-1', label: '正门入口', x: -12000, y: -8000, w: 1000, h: 900 }] } }
+assert.deepEqual(migrateLayoutExclusions([legacyExclusionZone]), [zone.id])
+assert.equal('exclusions' in legacyExclusionZone.layoutPreferences, false)
+assert.equal(legacyExclusionZone.obstacles.length, 1)
+const migratedExclusion = legacyExclusionZone.obstacles[0]
+assert.equal(migratedExclusion.kind, 'NO_PLACEMENT')
+assert.equal(migratedExclusion.obstacleId, 'EX-1')
+assert.equal(migratedExclusion.label, '正门入口')
+assert.equal(migratedExclusion.excludesFloorArea, false)
+const migratedArea = zoneLayoutExclusions(legacyExclusionZone)[0]
+assert.deepEqual([migratedArea.x, migratedArea.y, migratedArea.w, migratedArea.h], [-12000, -8000, 1000, 900], 'canvas rect survives the y-flip round trip')
+assert.equal(migratedArea.label, '正门入口')
+assert.deepEqual(migrateLayoutExclusions([legacyExclusionZone]), [], 'migration is idempotent')
+const emptyExclusionZone = { ...zone, kind: 'zone', obstacles: [], layoutPreferences: { ...defaults(), exclusions: [] } }
+assert.deepEqual(migrateLayoutExclusions([emptyExclusionZone]), [], 'empty key cleanup is not a geometry change')
+assert.equal('exclusions' in emptyExclusionZone.layoutPreferences, false)
 const doorExclusion = zoneLayoutExclusions({ ...zone, obstacles: [doorClearance] }, false)[0]
 assert.equal(rectOverlapsBlocker({ x: -200, y: -900, w: 50, h: 50 }, doorExclusion), false, 'bounding box outside the arc is not blocked')
 assert.equal(rectOverlapsBlocker({ x: -900, y: -100, w: 50, h: 50 }, doorExclusion), true, 'furniture inside the arc is blocked')
@@ -103,7 +120,8 @@ assert.equal(again.replaceIds.length, 9)
 assert.deepEqual(again.retainedIds, ['MANUAL'])
 assert.equal(proposalDifference([...existing, cabinet], again), '与当前布局一致')
 assert.match(proposalDifference(existing.map((item, i) => i ? item : { ...item, x: item.x + 100 }), meeting), /自动组|位置/)
-const blocked = plan(zone, [], { ...request, preferences: { ...request.preferences, exclusions: [{ id: 'ALL', label: '禁放区', x: -12000, y: -8000, w: 12000, h: 8000 }] } })
+const fullRoomBlock = rectangleObstacle(zone.id, 'NO_PLACEMENT', { x: -12000, y: 8000 }, { x: 0, y: 0 }, 'ALL')
+const blocked = plan({ ...zone, obstacles: [fullRoomBlock] }, [], request)
 assert.ok(blocked.problem)
 assert.equal(blocked.furniture.length, 0)
 const open = { ...zone, zoneType: 'OPEN_OFFICE' }
@@ -133,7 +151,7 @@ for (const id of ['cabinet-mobile', 'sofa-double', 'chair-office', 'desk-manager
  const multiple = plan(zone, [], { ...generic, presetId: 'general-auto', preferences: { ...defaults(), targetSeats: 3 } })
  assert.equal(multiple.furniture.length, 3, id)
  assert.equal(confirmedLayoutProblem({ ...zone, layoutPreferences: defaults() }, multiple.furniture), null)
- const blockedGeneral = plan(zone, [], { ...generic, presetId: 'general-auto', preferences: { ...defaults(), exclusions: [{id: 'ALL', x:-12000,y:-8000,w:12000,h:8000}] } })
+ const blockedGeneral = plan({ ...zone, obstacles: [fullRoomBlock] }, [], { ...generic, presetId: 'general-auto', preferences: defaults() })
  assert.equal(blockedGeneral.furniture.length, 0)
 }
 // 通道端点留断（LAYOUT-028）：确认校验按留断范围生效；缺省贯通保持旧行为。

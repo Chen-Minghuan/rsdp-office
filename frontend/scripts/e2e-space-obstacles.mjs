@@ -24,6 +24,7 @@ try {
   }
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) }))
   const page = await context.newPage()
   const errors = []
@@ -147,8 +148,16 @@ try {
   await page.screenshot({ path: outDir + '/02-layout-obstacles.png', fullPage: true })
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.getByTestId('design-obstacles').locator(':scope > div').count(), 2)
+  // GEOM-013：排版面板只读展示建筑约束，并跳回空间核对聚焦当前空间标注。
+  await page.locator('summary').filter({ hasText: '入口与禁放区' }).click()
+  const constraintsPanel = page.getByTestId('constraints-panel')
+  assert.equal(await constraintsPanel.locator(':scope > div').count(), 2)
+  assert.equal(await page.getByRole('button', { name: '添加入口或禁放区', exact: true }).count(), 0)
+  await page.getByTestId('back-to-review-annotate').click()
+  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('button', { name: '返回全图', exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('空间建筑约束 UI 通过：单空间放大、柱/门洞创建、拖动移动、手柄/数值编辑、方向切换、创建/移动贴墙吸附、吸附开关、刷新恢复、排版禁放显示。使用模拟 API。')
+  console.log('空间建筑约束 UI 通过：单空间放大、柱/门洞创建、拖动移动、手柄/数值编辑、方向切换、创建/移动贴墙吸附、吸附开关、刷新恢复、排版禁放显示、面板只读与跳回聚焦标注。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

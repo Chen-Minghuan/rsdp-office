@@ -58,6 +58,15 @@ const sketchDrag = ref<{ start: { x: number; y: number }; current: { x: number; 
 const showTemplate = ref(false)
 let messageTimer: ReturnType<typeof setTimeout> | null = null
 
+// GEOM-013：排版面板「返回空间核对标注」携带 zoneId 跳回，直接选中并聚焦该空间。
+watch(() => store.reviewFocusZoneId, id => {
+  if (!id) return
+  store.reviewFocusZoneId = null
+  if (!store.zones.some(zone => zone.id === id)) return
+  selectedId.value = id
+  focusSelectedSpace()
+}, { immediate: true })
+
 /** 旋转角度调整中的实时预览：仅渲染层覆盖，应用/Enter 后才落库。 */
 const rotatePreviewRing = computed(() => {
   const zone = store.zones.find(item => item.id === selectedId.value)
