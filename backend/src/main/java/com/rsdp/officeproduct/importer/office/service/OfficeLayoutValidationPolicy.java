@@ -47,9 +47,19 @@ public final class OfficeLayoutValidationPolicy {
                 JsonNode spacing = item.path("layoutSettings").path("spacing");
                 if (item.hasNonNull("layoutGroupId")) {
                     double wall = nonNegative(spacing, "wallMm"), aisle = nonNegative(spacing, "aisleMm");
-                    double margin = "seat".equals(item.path("layoutRole").asText()) ? Math.max(wall, aisle) : wall;
                     Rectangle2D.Double rect = bounds.get(i);
-                    Area expanded = new Area(new Rectangle2D.Double(rect.x - margin, rect.y - margin, rect.width + margin * 2, rect.height + margin * 2));
+                    Area expanded;
+                    if ("seat".equals(item.path("layoutRole").asText())) {
+                        // 椅子四边保留 max(离墙, 组间过道)
+                        double margin = Math.max(wall, aisle);
+                        expanded = new Area(new Rectangle2D.Double(rect.x - margin, rect.y - margin, rect.width + margin * 2, rect.height + margin * 2));
+                    } else {
+                        // 与前端 seatSideRect 一致：桌子/卡位只在座椅侧留 max(离墙, 560)，屏风/桌板侧可靠墙；L/U 卡位按转角两边（含镜像）
+                        String kind = moduleKind(item);
+                        double margin = Math.max(wall, "desk".equals(kind) ? 560 : 0);
+                        boolean corner = "l-desk".equals(kind) || "rounded-l-desk".equals(kind) || "u-desk".equals(kind);
+                        expanded = new Area(seatSide(rect, margin, number(item, "rotation"), item.path("mirrorX").asBoolean(), corner));
+                    }
                     expanded.subtract(room);
                     if (!expanded.isEmpty()) throw new BusinessException("已确认家具离墙或通行预留不足");
                 }
@@ -142,6 +152,36 @@ public final class OfficeLayoutValidationPolicy {
             }
         }
         return bands;
+    }
+    /** 座椅侧方向性外扩（对齐前端 seatSideRect）：基面 S（+y），随 rotation 顺时针旋转；转角卡位含 S+W/E 两边。 */
+    private static Rectangle2D.Double seatSide(Rectangle2D.Double rect, double clearance, double rotation, boolean mirrorX, boolean corner) {
+        if (clearance <= 0) return rect;
+        int side = (int) (((rotation % 360) + 360) % 360);
+        List<String> sides = new ArrayList<>();
+        sides.add("S");
+        if (corner) sides.add(mirrorX ? "E" : "W");
+        for (int i = 0; i < side / 90.0; i++) {
+            List<String> next = new ArrayList<>();
+            for (String d : sides) next.add(switch (d) { case "N" -> "E"; case "E" -> "S"; case "S" -> "W"; default -> "N"; });
+            sides = next;
+        }
+        double x = rect.x - (sides.contains("W") ? clearance : 0);
+        double y = rect.y - (sides.contains("N") ? clearance : 0);
+        double w = rect.width + (sides.contains("W") ? clearance : 0) + (sides.contains("E") ? clearance : 0);
+        double h = rect.height + (sides.contains("N") ? clearance : 0) + (sides.contains("S") ? clearance : 0);
+        return new Rectangle2D.Double(x, y, w, h);
+    }
+    /** 桌子族 kind：优先模块快照（自定义模块），再查内建模板表；未知按非桌子处理（只留座位侧 wall）。 */
+    private static String moduleKind(JsonNode item) {
+        String snapshot = item.path("moduleSnapshot").path("kind").asText("");
+        if (!snapshot.isEmpty()) return snapshot;
+        return switch (item.path("furnitureTemplateId").asText("")) {
+            case "desk-straight", "desk-screen-straight", "desk-manager", "desk-manager-double", "desk-executive" -> "desk";
+            case "desk-l", "desk-manager-l", "desk-executive-l", "counter-l" -> "l-desk";
+            case "desk-screen-l", "desk-l-rounded" -> "rounded-l-desk";
+            case "desk-u" -> "u-desk";
+            default -> "";
+        };
     }
     private static Area obstacleArea(JsonNode obstacle) {
         JsonNode outer = obstacle.path("geometry").path("outer");
