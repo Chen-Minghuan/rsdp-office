@@ -1,6 +1,6 @@
 # 架构与空间数据契约
 
-更新日期：2026-10-17。本文定义后续实现的目标契约；新增字段和模型不代表现有 API 已支持。
+更新日期：2026-10-26。本文区分当前实现与后续目标契约；新增目标字段和模型不代表现有 API 已支持。
 业务依据见 [产品需求](product-requirements.md)，迁移差距见 [进度表](status.md)。
 首期 PDF/PNG 闭环的详细设计见 [Spatial 架构](../Spatial_Canvas_Engine_空间解析编辑与无限画布系统架构设计_V1.1.md)、[数据协议](../Spatial_Scene_数据协议规范_V1.0.md)与[实施方案](../Spatial_Canvas_Engine_前后端开发实施方案_V1.0.md)。
 编码前固定的规则见 [几何](spatial/geometry-rules.md)、[接口/存储](spatial/api-storage-contract.md)、[确认失效](spatial/confirmation-rules.md)和[真实样本](spatial/recognition-validation.md)四份附件。
@@ -21,22 +21,25 @@
 ## 2. 核心数据关系（目标模型）
 
 ```text
-WorkspaceScope（projectId 隔离键，无项目资料实体/表）
-  ├─ SourceAsset / SourcePage / RecognitionRun
-  ├─ SourceScene（识别原始几何及质量，保留版本）
-  ├─ DesignScene（可编辑世界坐标与版本）
-  │    ├─ Space（建筑房间及功能分区、确认状态）
-  │    ├─ Wall / Opening / Obstacle / Underlay
-  │    └─ Layout（布局版本）→ Placement（家具需求与占地）
-  └─ ConfirmedProposal（确认快照）
-       ├─ ProductSelection（Placement → Product → Variant）
-       └─ RenderJob / RenderArtifact
+DesignProject（项目资料与客户需求备注）
+  └─ DesignFloor（floorId 作为既有 projectId 工作区隔离键）
+       ├─ SourceAsset / SourcePage / RecognitionRun
+       ├─ SourceScene（识别原始几何及质量，保留版本）
+       ├─ DesignScene（可编辑世界坐标与版本）
+       │    ├─ Space（建筑房间及功能分区、确认状态）
+       │    ├─ Wall / Opening / Obstacle / Underlay
+       │    └─ Layout（布局版本）→ Placement（家具需求与占地）
+       └─ ConfirmedProposal（确认快照）
+            ├─ ProductSelection（Placement → Product → Variant）
+            └─ RenderJob / RenderArtifact
 
 Product / Variant → AvailabilityRevision（上下架、尺寸、价格等变化）
 Viewport（平移、缩放）独立于上述物理几何
 ```
 
-2026-10-17 移除项目资料及 office_project 表；保留业务表 project_id 和现有路径中的 projects 以兼容稳定 ID。上传、画布、模板、选品与预览无需先创建项目资料。启动迁移仅删除旧表及指向它的外键，不级联删除业务记录。画布保存、模块选品与预览创建共用按隔离键获取的 PostgreSQL 事务 advisory lock，替代原项目行锁，详见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。
+2026-10-17 曾移除项目资料及 office_project 表，历史迁移见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。2026-10-26 按最新需求新增 `office_design_project` / `office_design_floor` 和项目树、创建项目/楼层、添加楼层、修改客户需求接口。项目保存名称、需求备注及需求修订；楼层保存项目归属、名称和排序。
+
+楼层的 `floorId` 直接作为既有业务表 `project_id` 与路径 `projectId` 的隔离键，复用上传、画布、模板、选品和预览能力。默认 `OFFICE-PROJECT-001` 映射为默认项目/楼层以保留旧数据；上传与画布保存核验楼层存在。前端按楼层隔离 Office localStorage、识别 sessionStorage 和 IndexedDB 原图，切层时保存旧层并完整加载目标层，过期响应不得污染当前层。客户需求只作提醒，不自动使几何变化或替代下游复核。实现见 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md)。
 
 当前上传页和 office_canvas.files_json 使用零或一张当前图纸；后端保存拒绝多文件。旧草稿恢复时优先选择与底图同名的文件，否则保留首个。更换文件只更新上传文件和二进制缓存、清除上传页旧识别预览，不删除已保存几何或历史识别；见 [UPLOAD-001](tasks/UPLOAD-001-single-drawing.md)。
 

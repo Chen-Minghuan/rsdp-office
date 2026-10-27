@@ -79,6 +79,7 @@ watch([targetAnalysisId, () => store.initialized, () => drawing.value?.drawingId
       const snapshot = await useFloorPlanApi().getFloorPlan(id!)
       if (cancelled || targetAnalysisId.value !== id) return
       if (snapshot.analysisId !== id) throw new Error('识别结果与当前图纸任务不一致，请重新识别')
+      if (snapshot.projectId && snapshot.projectId !== store.workspaceId) throw new Error('识别结果不属于当前楼层，请返回对应楼层查看')
       if (drawing.value && !drawing.value.drawingId && !drawing.value.mock && snapshot.sourceName !== drawing.value.name) {
         throw new Error('当前识别结果不属于 ' + drawing.value.name + '，请返回上传页识别当前图纸')
       }

@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 public class OfficeService {
 
     private final OfficeWorkspaceLockMapper workspaceLocks;
+    private final OfficeProjectService projectService;
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeCartMapper cartMapper;
     private final OfficeAgentMessageMapper messageMapper;
@@ -65,6 +66,7 @@ public class OfficeService {
             OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(request.getObjects()), request.getDesignZoneId());
         }
         String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
+        projectService.requireFloor(projectId);
         workspaceLocks.lockWorkspace(projectId);
         CanvasDto latest = getCanvas(projectId);
         int revision = request.getRevision() != null ? request.getRevision() : 1;

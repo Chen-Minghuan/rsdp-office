@@ -414,8 +414,6 @@ try {
   })
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
-  assert.deepEqual(profileRequests, [], '不调用已删除的项目资料接口')
-
   // 空白画布（无图纸）手动画区：形状模块拖出毫米空间
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
@@ -637,6 +635,7 @@ try {
   assert.ok(edited, '画布标签改名已保存')
   assert.equal(edited.zoneType, 'MEETING_ROOM', '画布标签改用途已保存')
   assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
+  assert.ok(profileRequests.every(url => new URL(url).pathname === '/api/v1/office/projects'), '只调用新项目树接口，不调用已删除的项目资料详情接口')
   assert.deepEqual(errors, [])
   console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消）。使用模拟 API。')
 } finally {

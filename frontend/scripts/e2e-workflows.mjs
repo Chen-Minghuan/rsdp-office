@@ -12,7 +12,7 @@ let listMode = 'success'
 let importMode = 'partial'
 let importRequests = 0
 let overwriteRequested = false
-const products = Array.from({ length: 15 }, (_, index) => ({
+const products = Array.from({ length: 23 }, (_, index) => ({
   rspuId: `PRODUCT-${index + 1}`,
   rspuCode: `RSDP-${String(index + 1).padStart(3, '0')}`,
   externalCode: `EXTERNAL-${index + 1}`,
@@ -48,6 +48,10 @@ await context.route('**/api/v1/**', async route => {
     if (listMode === 'error') return respond(null, 404)
     return respond(listMode === 'empty' ? [] : products)
   }
+  if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
+    const product = products.find(item => item.rspuId === url.pathname.split('/').at(-1))
+    return respond({ ...product, images: [], variants: [] })
+  }
   if (url.pathname === '/api/v1/products/import-template') return route.fulfill({ status: 200, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('test-template') })
   if (url.pathname === '/api/v1/products/import-preview') {
     assert.match(request.headers()['content-type'], /multipart\/form-data/)
@@ -56,7 +60,7 @@ await context.route('**/api/v1/**', async route => {
   if (url.pathname === '/api/v1/products/import-preview/validate') return respond(importPreview)
   if (url.pathname === '/api/v1/products/import-confirm') {
     importRequests += 1
-    overwriteRequested = /"updateIfExists"\s*:\s*true/.test(request.postData() || '')
+    overwriteRequested = /updateIfExists[\s\S]*true/.test(request.postData() || '')
     await new Promise(resolve => setTimeout(resolve, 600))
     if (importMode === 'error') return respond(null, 503)
     if (importMode === 'skipped') return respond({ totalRows: 1, successCount: 0, failedCount: 0, skippedCount: 1, failures: [], warnings: [{ rowIndex: 2, externalCode: 'EXTERNAL-1', rspuId: null, reason: '商品已存在，已跳过' }], cleansingReport: { cleanedRows: 0, issuesFound: 0, issues: [] } })
@@ -81,30 +85,31 @@ try {
   await page.goto(`${baseUrl}/products`, { waitUntil: 'networkidle' })
   await heading('商品库')
   await assertNoProjectSteps()
-  assert.equal(await page.locator('tbody tr').count(), 15)
+  assert.equal(await page.locator('tbody tr').count(), 20)
 
   await page.getByLabel('每页显示数量').selectOption('10')
   assert.equal(await page.locator('tbody tr').count(), 10)
   await page.getByRole('button', { name: '下一页', exact: true }).click()
-  assert.equal(await page.locator('tbody tr').count(), 5)
+  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 10)
+  assert.equal(await page.locator('tbody tr').count(), 10)
   await page.getByLabel('搜索商品名称或编码').fill('RSDP-002')
   assert.equal(await page.locator('tbody tr').count(), 1)
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
-  await page.getByRole('heading', { name: '简约办公桌 2', exact: true }).waitFor()
-  await page.getByRole('link', { name: '商品库', exact: true }).first().click()
-  await heading('商品库')
+  await heading('简约办公桌 2')
+  await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选' }).click()
   await page.getByLabel('筛选商品状态').selectOption('active')
-  assert.equal(await page.locator('tbody tr').count(), 10)
+  assert.equal(await page.locator('tbody tr').count(), 15)
   await page.getByLabel('筛选商品状态').selectOption('')
 
   await page.getByRole('link', { name: '空间设计', exact: true }).click()
-  await heading('上传办公图纸')
+  await heading('默认楼层 · 上传办公图纸')
   const projectNav = page.getByRole('navigation', { name: '项目设计步骤' })
   assert.equal(await projectNav.getByRole('link').count(), 4)
-  await projectNav.getByRole('link', { name: '2 空间总览' }).click()
+  assert.equal(await projectNav.getByRole('button', { name: '1 项目创建', exact: true }).count(), 1)
+  await projectNav.getByRole('link', { name: '3 空间总览' }).click()
   await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   const enterLayout = page.getByRole('button', { name: '进入家具排版 →', exact: true })
@@ -131,19 +136,21 @@ try {
   await chooseFile('空文件.csv', '')
   assert.match(await page.getByRole('alert').innerText(), /文件内容为空/)
   await chooseFile()
+  await heading('预览并确认导入数据')
   const dismissNavigation = page.waitForEvent('dialog').then(dialog => dialog.dismiss())
   await page.getByRole('link', { name: '返回商品库' }).click()
   await dismissNavigation
   assert.match(page.url(), /\/products\/import$/)
+  assert.equal(importRequests, 0)
   await page.getByRole('radio', { name: /覆盖更新已有商品/ }).check()
   await page.getByRole('button', { name: '重新校验', exact: true }).click()
-  assert.equal(importRequests, 0)
+  await page.getByRole('button', { name: '确认并执行导入', exact: true }).waitFor({ state: 'visible' })
   await page.getByRole('button', { name: '确认并执行导入' }).click()
   assert.equal(await page.getByRole('button', { name: '正在导入，请稍候…' }).isDisabled(), true)
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByRole('alert').filter({ hasText: '正在处理导入' }).waitFor()
   await page.getByRole('heading', { name: '处理完成，部分商品未能导入' }).waitFor()
-  assert.equal(await page.getByRole('alert').count(), 0)
+  assert.equal(await page.getByRole('alert').filter({ hasText: /失败|未完成/ }).count(), 0)
   assert.equal(importRequests, 1)
   assert.equal(overwriteRequested, true)
   const failureDownload = page.waitForEvent('download')

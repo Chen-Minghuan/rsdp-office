@@ -57,6 +57,7 @@ public class FloorPlanService {
     private static final List<String> CAD_TYPES = List.of("application/octet-stream", "application/dwg", "application/dxf");
 
     private final FloorPlanAnalysisMapper analysisMapper;
+    private final com.rsdp.officeproduct.importer.office.service.OfficeProjectService officeProjectService;
     private final FloorPlanRoomMapper roomMapper;
     private final FloorPlanSceneRevisionMapper revisionMapper;
     private final ImageAssetsMapper imageAssetsMapper;
@@ -440,6 +441,7 @@ public class FloorPlanService {
         if (projectId == null || projectId.isBlank() || projectId.length() > 64) {
             throw new BusinessException("设计工作区 ID 无效");
         }
+        officeProjectService.requireFloor(projectId);
     }
 
     private boolean isPdf(MultipartFile file) {

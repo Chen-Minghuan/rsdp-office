@@ -47,10 +47,15 @@ import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayou
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 
 const STORAGE_KEY = 'rsdp-office-v01'
-// Read existing drafts once so the workspace rename preserves browser data.
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
+const DEFAULT_WORKSPACE_ID = 'OFFICE-PROJECT-001'
+
+function storageKey(workspaceId: string) {
+  return workspaceId === DEFAULT_WORKSPACE_ID ? STORAGE_KEY : `${STORAGE_KEY}:${workspaceId}`
+}
 
 interface OfficeState {
+  workspaceId: string
   files: ProjectFile[]
   objects: OfficeObject[]
   blank: boolean
@@ -86,6 +91,7 @@ interface OfficeState {
 
 function defaultState(): OfficeState {
   return {
+    workspaceId: DEFAULT_WORKSPACE_ID,
     files: [],
     objects: [],
     blank: false,
@@ -123,11 +129,12 @@ function singleDrawing(files: ProjectFile[] = [], sourceName?: string): ProjectF
   return file ? [file] : []
 }
 
-function loadLocalState(): Partial<OfficeState> {
+function loadLocalState(workspaceId: string): Partial<OfficeState> {
   if (typeof window === 'undefined') return {}
   try {
-    const current = localStorage.getItem(STORAGE_KEY)
-    const raw = current || localStorage.getItem(LEGACY_STORAGE_KEY)
+    const key = storageKey(workspaceId)
+    const current = localStorage.getItem(key)
+    const raw = current || (workspaceId === DEFAULT_WORKSPACE_ID ? localStorage.getItem(LEGACY_STORAGE_KEY) : null)
     if (!raw) return {}
     const parsed = JSON.parse(raw, (key, value) => {
       if (key === 'project' || key === 'projectContext') return undefined
@@ -146,8 +153,8 @@ function loadLocalState(): Partial<OfficeState> {
       parsed.objects?.forEach(object => { if (object.kind === 'furniture' && migratedZoneIds.includes(object.zoneId)) object.layoutConfirmed = false })
       parsed.submitted = null
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
-    localStorage.removeItem(LEGACY_STORAGE_KEY)
+    localStorage.setItem(key, JSON.stringify(parsed))
+    if (workspaceId === DEFAULT_WORKSPACE_ID) localStorage.removeItem(LEGACY_STORAGE_KEY)
     const { undoStack, ...rest } = parsed
     return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null }
   } catch {
@@ -164,7 +171,7 @@ function debounce<T extends (this: any, ...args: any[]) => any>(fn: T, ms: numbe
 }
 
 export const useOfficeStore = defineStore('office', {
-  state: (): OfficeState => ({ ...defaultState(), ...loadLocalState(), initialized: false, loading: false, floorPlanLoading: false, syncState: 'idle', syncError: null }),
+  state: (): OfficeState => ({ ...defaultState(), initialized: false, loading: false, floorPlanLoading: false, syncState: 'idle', syncError: null }),
 
   getters: {
     drawingName: (state): string => state.files[0]?.name || state.floorPlan?.sourceName || '办公空间',
@@ -220,6 +227,9 @@ export const useOfficeStore = defineStore('office', {
   actions: {
     async init() {
       if (this.loading || this.initialized) return
+      const workspaceId = useWorkspaceStore().currentFloorId || DEFAULT_WORKSPACE_ID
+      this.workspaceId = workspaceId
+      this.$patch(loadLocalState(workspaceId))
       this.loading = true
       const api = useOfficeApi()
       try {
@@ -229,6 +239,7 @@ export const useOfficeStore = defineStore('office', {
           api.loadMessages().catch(() => [] as AgentMessage[]),
           api.loadProducts().catch(() => [] as Product[]),
         ])
+        if (this.workspaceId !== workspaceId) return
 
         this.apiReady = canvasResult.available
         const canvas = canvasResult.canvas
@@ -278,11 +289,23 @@ export const useOfficeStore = defineStore('office', {
       this.initialized = true
     },
 
+    async activateFloor(workspaceId: string) {
+      if (this.workspaceId === workspaceId && this.initialized) return
+      this.saveLocal()
+      if (this.apiReady) {
+        try {
+          await useOfficeApi().saveCanvas({ objects: this.objects, files: this.files, mode: this.canvasMode, designZoneId: this.designZoneId, revision: this.canvasRevision, blank: this.blank }, this.workspaceId)
+        } catch { /* The floor-scoped local draft remains available when the remote save is unavailable. */ }
+      }
+      this.$patch({ ...defaultState(), ...loadLocalState(workspaceId), workspaceId })
+      await this.init()
+    },
+
     saveLocal() {
       if (typeof window === 'undefined') return
       const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, reviewFocusZoneId, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      localStorage.setItem(storageKey(this.workspaceId), JSON.stringify(payload))
     },
 
     schedulePersist() {
@@ -294,6 +317,7 @@ export const useOfficeStore = defineStore('office', {
 
     _persistToApi: debounce(async function (this: any) {
       const api = useOfficeApi()
+      const workspaceId = this.workspaceId
       if (!this.apiReady) {
         this.syncState = 'saved'
         return
@@ -306,10 +330,12 @@ export const useOfficeStore = defineStore('office', {
           designZoneId: this.designZoneId,
           revision: this.canvasRevision,
           blank: this.blank,
-        })
+        }, workspaceId)
+        if (this.workspaceId !== workspaceId) return
         this.syncState = 'saved'
         this.syncError = null
       } catch (e) {
+        if (this.workspaceId !== workspaceId) return
         this.syncState = 'error'
         this.syncError = e instanceof Error ? e.message : '远端保存失败'
         console.warn('同步到后端失败', e)
