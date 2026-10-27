@@ -41,6 +41,28 @@ export interface LayoutRequest {
   presetId: OfficeArrangementPresetId
   preferences: LayoutPreferences
 }
+/**
+ * LAYOUT-034 候选方案的展示指标：策略性参考值，从几何派生，不参与排序。
+ * 净面积 = 空间轮廓面积 − 建筑约束外包矩形面积（近似，障碍按外包矩形计）。
+ */
+export interface LayoutCandidateMetrics {
+  /** 面积利用率：候选家具（含保留件）物理占地 / 空间净面积（0–1）。 */
+  utilization: number
+  /** 人均余量：(净面积 − 占地) / 总座位（㎡）；无座位时为 null。 */
+  freeAreaPerSeatM2: number | null
+}
+/** LAYOUT-034 候选方案：与 LayoutProposal 同源的单一变体，仅用于对比预览与选择应用。 */
+export interface LayoutCandidate {
+  furniture: FurnitureObject[]
+  seats: number
+  shortfall: number
+  label: string
+  rows?: number
+  columns?: number
+  rotated?: boolean
+  fillCount?: number
+  metrics: LayoutCandidateMetrics
+}
 export interface LayoutProposal {
   rows?: number
   columns?: number
@@ -56,4 +78,6 @@ export interface LayoutProposal {
   problem: string | null
   warnings: string[]
   sourceKey: string
+  /** LAYOUT-034 Top N 候选（按评分降序，candidates[0] 即本方案本身）；少于 2 个有效变体时只有 1 项。 */
+  candidates?: LayoutCandidate[]
 }

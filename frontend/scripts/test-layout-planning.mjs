@@ -16,7 +16,9 @@ async function load(path) {
   cache.set(path.href, url)
   return url
 }
-const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
+const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect, layoutCandidateScore, LAYOUT_CANDIDATE_TOP_N } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
+const { layoutPanelWarnings, layoutWarningTestId, zoneNetAreaMm2, AREA_PER_SEAT_HINT_M2 } = await import(await load(new URL('../app/utils/layoutWarnings.ts', import.meta.url)))
+const { planOfficeFurniture, chairBackMinGapMm, CHAIR_BACK_PASSAGE_MM } = await import(await load(new URL('../app/utils/officeAutoLayout.ts', import.meta.url)))
 const { furnitureById } = await import(await load(new URL('../app/utils/manualFurniture.ts', import.meta.url)))
 const { rectangleObstacle, zoneLayoutExclusions, migrateLegacyDoorClearances, migrateLayoutExclusions, moveObstacle, reshapeObstacle, snapObstacleToZone } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
 const { rectOverlapsBlocker } = await import(await load(new URL('../app/utils/layoutConstraints.ts', import.meta.url)))
@@ -162,4 +164,116 @@ assert.equal(confirmedLayoutProblem(channelZone, [aboveBreak]), null, '留断范
 assert.match(confirmedLayoutProblem(channelZone, [insideBreak]) || '', /压占通道/, '留断范围内仍不得压占')
 const fullSpanZone = { ...zone, layoutPreferences: { ...defaults(), channels: [{ id: 'CH', orientation: 'vertical', offsetMm: -6000, widthMm: 900 }] } }
 assert.match(confirmedLayoutProblem(fullSpanZone, [aboveBreak]) || '', /压占通道/, '缺省贯通时同一位置仍压占')
-console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs')
+// LAYOUT-034 多方案候选：评分口径（目标达成 1000/座封顶 − 超出 1/座；未指定目标按容量；并列保持生成顺序）。
+assert.equal(layoutCandidateScore(8, 8), 8000)
+assert.equal(layoutCandidateScore(10, 8), 7998)
+assert.equal(layoutCandidateScore(6, 8), 6000)
+assert.equal(layoutCandidateScore(5, 0), 5)
+const sig = items => items.map(e => [e.furnitureTemplateId, Math.round(e.x), Math.round(e.y), Math.round(e.w), Math.round(e.h), Math.round(e.rotation)].join(':')).sort().join('|')
+const meetingCandidates = meeting.candidates
+assert.ok(meetingCandidates.length >= 2 && meetingCandidates.length <= LAYOUT_CANDIDATE_TOP_N, '会议枚举应给出 2~N 个候选')
+assert.equal(sig(meetingCandidates[0].furniture), sig(meeting.furniture), 'candidates[0] 即默认方案')
+assert.equal(new Set(meetingCandidates.map(c => sig(c.furniture))).size, meetingCandidates.length, '候选按家具签名去重')
+for (let i = 1; i < meetingCandidates.length; i++) assert.ok(layoutCandidateScore(meetingCandidates[i - 1].seats, 8) >= layoutCandidateScore(meetingCandidates[i].seats, 8), '候选按评分降序')
+for (const c of meetingCandidates) {
+  assert.ok(c.metrics.utilization > 0 && c.metrics.utilization <= 1, '利用率在 (0,1]')
+  assert.ok(c.metrics.freeAreaPerSeatM2 >= 0, '人均余量非负')
+  assert.equal(c.shortfall, Math.max(0, 8 - c.seats), '候选缺口与座位一致')
+}
+// 课桌式网格：auto 内部的备选朝向进入候选集（两种朝向都有效时 ≥2 个候选，默认方案不变）。
+const generalDeskRequest = { ...request, module: furnitureById.get('sofa-double'), widthMm: 1600, depthMm: 850, productStyleId: 'general', presetId: 'general-auto', preferences: { ...defaults(), targetSeats: 8 } }
+const squareZone = { id: 'SQ', zoneType: 'OPEN_OFFICE', reviewUnit: 'mm', polygon: [[0, 0], [6000, 0], [6000, 6000], [0, 6000]] }
+const squareDesks = plan(squareZone, [], generalDeskRequest)
+assert.equal(squareDesks.problem, null)
+assert.ok(squareDesks.candidates.length >= 2, '横纵朝向都有效时应给出候选')
+assert.ok(squareDesks.candidates.some(c => c.rotated) && squareDesks.candidates.some(c => !c.rotated), '候选覆盖两种朝向')
+assert.equal(sig(squareDesks.candidates[0].furniture), sig(squareDesks.furniture), '网格默认方案不漂移')
+// 单变体路径（general-center 居中单件 / 职员桌 adaptive）候选恰好 1 个且等于默认方案。
+const singleCandidate = plan(zone, [], { ...request, module: furnitureById.get('cabinet-mobile'), widthMm: 500, depthMm: 500, productStyleId: 'general', presetId: 'general-center', preferences: defaults() })
+assert.equal(singleCandidate.candidates.length, 1)
+assert.equal(sig(singleCandidate.candidates[0].furniture), sig(singleCandidate.furniture))
+// LAYOUT-035 统一校核预警分级（红=硬冲突；黄=低于策略阈值；info=未核验说明；黄/红必附建议）。
+const synth = patch => ({ furniture: [], replaceIds: [], retainedIds: [], seats: 0, shortfall: 0, label: '', problem: null, warnings: [], sourceKey: '', ...patch })
+// 净面积：zone 为 12000×8000=96㎡；禁放障碍按外包矩形扣除。
+assert.equal(Math.round(zoneNetAreaMm2(zone) / 1e6), 96)
+const zoneWithBlock = { ...zone, kind: 'zone', obstacles: [rectangleObstacle(zone.id, 'NO_PLACEMENT', { x: -2000, y: -2000 }, { x: 0, y: 0 }, 'NP-1')] }
+assert.equal(Math.round(zoneNetAreaMm2(zoneWithBlock) / 1e6), 96 - 4)
+const byId = list => Object.fromEntries(list.map(w => [w.id, w]))
+// 座位不足为红级（确认会被拒绝）并附建议；补足则不出现。
+let ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 4, shortfall: 4 }) }))
+assert.equal(ws.shortfall.level, 'error')
+assert.match(ws.shortfall.text, /座位不足/)
+assert.ok(ws.shortfall.advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 8, shortfall: 0 }) }))
+assert.ok(!ws.shortfall)
+// 人均面积：96㎡/60 座=1.6 < 阈值 2 → 黄级附建议；96/8=12 不出现。
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 60 }) }))
+assert.equal(ws['area-per-seat'].level, 'warning')
+assert.match(ws['area-per-seat'].text, new RegExp(`低于 ${AREA_PER_SEAT_HINT_M2}`))
+assert.ok(ws['area-per-seat'].advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ seats: 8 }) }))
+assert.ok(!ws['area-per-seat'])
+// 方案无法排出为红级；边缘补位警告为黄级；现场核验为 info。
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ problem: '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }) }))
+assert.equal(ws['proposal-problem'].level, 'error')
+assert.ok(ws['proposal-problem'].advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ warnings: ['主排布之外的边缘余量已用单件补位 2 件，座位朝房间内侧；请核对补位位置与现场通道'] }) }))
+assert.equal(ws['edge-fill'].level, 'warning')
+assert.ok(ws['edge-fill'].advice)
+ws = byId(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: synth({ warnings: ['门窗、柱及真实通道尚未自动核验；请在空间核对中补充'] }) }))
+assert.equal(ws['field-review'].level, 'info')
+// 通道宽度黄级（沿用 023 阈值与 testid 映射）。
+const narrow = [{ id: 'CH1', orientation: 'vertical', offsetMm: -6000, widthMm: 600 }]
+ws = layoutPanelWarnings({ zone: { ...zone, kind: 'zone', obstacles: [] }, channels: narrow, furniture: [], proposal: null })
+const widthItem = ws.find(w => w.id === 'channel-width')
+assert.equal(widthItem.level, 'warning')
+assert.ok(widthItem.advice)
+assert.equal(layoutWarningTestId(widthItem), 'channel-width-hint')
+// 入口联动迁入：未标注门洞为 info，保留 029 testid 映射；无通道时不产出。
+const egressItems = layoutPanelWarnings({ zone: { ...zone, kind: 'zone', obstacles: [] }, channels: [{ id: 'CH2', orientation: 'vertical', offsetMm: -6000, widthMm: 900 }], furniture: [], proposal: null })
+const unmarked = egressItems.find(w => w.id === 'channel-egress-unmarked')
+assert.equal(unmarked.level, 'info')
+assert.equal(layoutWarningTestId(unmarked), 'channel-egress-hint')
+assert.equal(layoutPanelWarnings({ zone, channels: [], furniture: [], proposal: null }).length, 0)
+// 排序：红 > 黄 > info。
+const mixed = layoutPanelWarnings({ zone: { ...zone, kind: 'zone', obstacles: [] }, channels: narrow, furniture: [], proposal: synth({ seats: 4, shortfall: 4 }) })
+const levels = mixed.map(w => w.level)
+assert.deepEqual(levels, [...levels].sort((a, b) => ({ error: 0, warning: 1, info: 2 })[a] - ({ error: 0, warning: 1, info: 2 })[b]))
+// LAYOUT-038 椅背相对通行净宽：引擎自动加宽（faceToFace 组内间隔、backToBack 组间排距），不足→减排；提示说明原因与数值。
+assert.equal(chairBackMinGapMm(400), 2 * 400 + CHAIR_BACK_PASSAGE_MM)
+const pairedSpacing = { wallMm: 300, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
+// faceToFace：faceGapMm 0 自动加宽到 1300，与显式 1300 结果一致；显式 2000 不被缩小。
+const faceAuto = planOfficeFurniture(open, 1200, 600, 'faceToFace', { ...pairedSpacing, faceGapMm: 0 }, [], 400)
+const faceExplicit = planOfficeFurniture(open, 1200, 600, 'faceToFace', { ...pairedSpacing, faceGapMm: 1300 }, [], 400)
+assert.deepEqual(faceAuto.slots, faceExplicit.slots, 'faceToFace 组内间隔加宽到净宽')
+const faceLarger = planOfficeFurniture(open, 1200, 600, 'faceToFace', { ...pairedSpacing, faceGapMm: 2000 }, [], 400)
+assert.ok(faceLarger.slots.length <= faceAuto.slots.length && faceLarger.slots.length > 0, '显式更大间隔保留且不缩减')
+// backToBack：组间 aisleMm 900 自动加宽到 1300，与显式 1300 结果一致。
+const backAuto = planOfficeFurniture(open, 1200, 600, 'backToBack', pairedSpacing, [], 400)
+const backExplicit = planOfficeFurniture(open, 1200, 600, 'backToBack', { ...pairedSpacing, aisleMm: 1300 }, [], 400)
+assert.deepEqual(backAuto.slots, backExplicit.slots, 'backToBack 组间排距加宽到净宽')
+// 加宽后放不下→减少排数：扁空间（12000×3900）拉椅预留 400 时加宽减排，预留 0（净宽 500<900 不加宽）保持。
+const flatZone = { id: 'FLAT', zoneType: 'OPEN_OFFICE', reviewUnit: 'mm', polygon: [[0, 0], [12000, 0], [12000, 3900], [0, 3900]] }
+const flatWidened = planOfficeFurniture(flatZone, 1200, 600, 'backToBack', pairedSpacing, [], 400)
+const flatUnwidened = planOfficeFurniture(flatZone, 1200, 600, 'backToBack', pairedSpacing, [], 0)
+assert.ok(flatWidened.slots.length > 0 && flatWidened.slots.length < flatUnwidened.slots.length, '加宽后放不下则减少排数')
+// 提示：低于净宽时黄级说明原因与数值（含自动加宽后的值），达标不出现；faceToFace 检查 faceGapMm。
+let ws038 = layoutPanelWarnings({ zone: open, channels: [], furniture: [], proposal: null, spacing: pairedSpacing, presetId: 'generic-back-to-back', seatClearanceMm: 400 })
+const gapItem = ws038.find(w => w.id === 'chair-back-gap')
+assert.equal(gapItem.level, 'warning')
+assert.match(gapItem.text, /自动加宽到 1300mm/)
+assert.ok(gapItem.advice)
+ws038 = layoutPanelWarnings({ zone: open, channels: [], furniture: [], proposal: null, spacing: { ...pairedSpacing, aisleMm: 1300 }, presetId: 'generic-back-to-back', seatClearanceMm: 400 })
+assert.ok(!ws038.some(w => w.id === 'chair-back-gap'), '排距达标不提示')
+ws038 = layoutPanelWarnings({ zone: open, channels: [], furniture: [], proposal: null, spacing: pairedSpacing, presetId: 'generic-face-to-face', seatClearanceMm: 400 })
+assert.ok(ws038.some(w => w.id === 'chair-back-gap'), 'faceToFace 组内间隔低于净宽同样提示')
+ws038 = layoutPanelWarnings({ zone: open, channels: [], furniture: [], proposal: null, spacing: pairedSpacing, presetId: 'generic-auto', seatClearanceMm: 400 })
+assert.ok(!ws038.some(w => w.id === 'chair-back-gap'), '非配对排布不提示')
+// 样式参考排布（adaptive 路径）间距按素材固定：低于净宽只提示、文案不含自动加宽。
+ws038 = layoutPanelWarnings({ zone: open, channels: [], furniture: [], proposal: null, spacing: { ...pairedSpacing, faceGapMm: 1000 }, presetId: 'straight-desk-row', seatClearanceMm: 400 })
+const refGapItem = ws038.find(w => w.id === 'chair-back-gap')
+assert.equal(refGapItem.level, 'warning')
+assert.match(refGapItem.text, /未自动加宽/)
+ws038 = layoutPanelWarnings({ zone: open, channels: [], furniture: [], proposal: null, spacing: { ...pairedSpacing, faceGapMm: 1600 }, presetId: 'straight-desk-face-to-face', seatClearanceMm: 400 })
+assert.ok(!ws038.some(w => w.id === 'chair-back-gap'), '参考排布净距达标不提示')
+console.log('PASS: purpose, actual seats/shortfall, explicit resize, pure preview, retained manual furniture, group replacement, spatial obstacles, net area, template roundtrip, blockers, recommended layouts, invalid inputs, candidate scoring & comparison (LAYOUT-034), unified warning levels & advice (LAYOUT-035), chair-back passage auto-widen (LAYOUT-038)')

@@ -5,9 +5,9 @@ import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
-import { defaultLayoutPreferences, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
-import { DEFAULT_CHANNEL_WIDTH_MM, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
-import { channelEgressHints } from '~/utils/channelEgress'
+import { defaultLayoutPreferences, layoutCandidateKey, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
+import { DEFAULT_CHANNEL_WIDTH_MM } from '~/utils/layoutChannels'
+import { layoutPanelWarnings, layoutWarningTestId, type LayoutWarningLevel } from '~/utils/layoutWarnings'
 import { uid } from '~/utils/helpers'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
@@ -154,6 +154,8 @@ const effectivePresetId = computed<OfficeArrangementPresetId>(() => {
 // This also prevents an older, now-retired preset from leaking back into the
 // summary when a saved layout is opened.
 const selectedPreset = computed(() => availablePresets.value.find(preset => preset.id === effectivePresetId.value) || availablePresets.value[0])
+/** 当前家具的默认排布（与初始选中一致），在排布列表中标记「推荐」。 */
+const recommendedPresetId = computed(() => defaultPresetForProductStyle(isMeetingLayout.value ? 'meeting-table' : productStyle.value).id)
 const selectedStyleLabel = computed(() => selectedPreset.value?.label || '')
 const activeStepIndex = computed(() => layoutPanelSteps.findIndex(step => step.id === activeStep.value) + 1)
 
@@ -163,14 +165,7 @@ const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, 
 const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
 // 通道直接读写 zone.layoutPreferences（画布拖动也写同一份），不走面板本地副本，避免双写分叉。
 const channels = computed<LayoutChannel[]>(() => zone.value?.layoutPreferences?.channels || [])
-// 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）：入口代理为人工标注的门洞净空；首排深度取已保存排版记录。
-const channelEgressMessages = computed(() => {
-  const z = zone.value
-  if (!z) return []
-  const items = currentFurniture.value
-  const firstBlockDepthMm = items.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
-  return channelEgressHints(z, channels.value, items, firstBlockDepthMm)
-})
+// LAYOUT-035：通道宽度/入口联动等散点提示统一进面板预警块（layoutPanelWarnings），此处不再单独渲染。
 function saveChannels(next: LayoutChannel[]) {
   if (!zone.value) return
   store.updateZoneChannels(zone.value.id, next)
@@ -189,8 +184,36 @@ function removeChannel(id: string) {
 }
 const buildingConstraints = computed(() => zone.value ? zoneLayoutExclusions(zone.value) : [])
 const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(channels.value)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
-const proposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
+const baseProposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
+// LAYOUT-034：Top N 候选卡片选择。选择按候选家具签名跟随：应用候选后候选集重算，同一候选仍在榜则保持选中
+// （新摆放与当前布局一致、预览退场）；参数或保留家具变化导致该候选消失时回落到评分最高的默认方案。
+const selectedCandidateKey = ref<string | null>(null)
+const selectedCandidateIndex = computed(() => {
+  if (!selectedCandidateKey.value) return 0
+  const index = baseProposal.value?.candidates?.findIndex(candidate => layoutCandidateKey(candidate) === selectedCandidateKey.value) ?? -1
+  return index >= 0 ? index : 0
+})
+function selectCandidate(index: number) {
+  const candidate = index > 0 ? baseProposal.value?.candidates?.[index] : undefined
+  selectedCandidateKey.value = candidate ? layoutCandidateKey(candidate) : null
+}
+const proposal = computed(() => {
+  const base = baseProposal.value
+  if (!base) return null
+  const candidate = selectedCandidateIndex.value > 0 ? base.candidates?.[selectedCandidateIndex.value] : undefined
+  if (!candidate) return base
+  return { ...base, furniture: candidate.furniture, seats: candidate.seats, shortfall: candidate.shortfall, label: candidate.label, rows: candidate.rows, columns: candidate.columns, rotated: candidate.rotated, fillCount: candidate.fillCount }
+})
 const difference = computed(() => proposal.value ? proposalDifference(currentFurniture.value, proposal.value) : '')
+// LAYOUT-035 统一校核预警（红=会被确认/应用拒绝；黄=低于策略阈值；info=未核验说明），数值均为策略值非规范。
+const panelWarnings = computed(() => {
+  const z = zone.value
+  if (!z) return []
+  const items = currentFurniture.value
+  const firstBlockDepthMm = items.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
+  return layoutPanelWarnings({ zone: z, channels: channels.value, furniture: items, proposal: proposal.value, firstBlockDepthMm, spacing: { ...spacing }, presetId: effectivePresetId.value, seatClearanceMm: preferences.seatClearanceMm })
+})
+const warningLevelClass: Record<LayoutWarningLevel, string> = { error: 'text-[#a65e4c]', warning: 'text-amber-600', info: 'text-muted' }
 const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
 const draftApplied = computed(() => difference.value === '与当前布局一致' && !preferencesChanged.value)
 const differenceText = computed(() => difference.value === '与当前布局一致' && preferencesChanged.value ? '需求或预留参数已变化，应用后保存新参数' : difference.value)
@@ -272,7 +295,7 @@ function addToCanvas() {
 function applyLayout() {
   if (!zone.value || !proposal.value || proposal.value.problem || draftApplied.value) return
   const planned = proposal.value
-  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey)
+  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey, selectedCandidateIndex.value)
   if (!applied) { applicationMessage.value = '空间或家具已变化，请重新预览后应用'; return }
   nextTick(() => { applicationMessage.value = '已应用：' + planned.furniture.length + ' 件，保留 ' + planned.retainedIds.length + ' 件' })
 }
@@ -281,8 +304,12 @@ function applyAutoLayout() {
   applyLayout()
 }
 
+/** 确认排版的实时阻塞原因，展示在按钮上方，点击确认时同样使用。 */
+const confirmProblem = computed(() => zone.value && store.furnitureForZone(zone.value.id).length > 0 && !layoutConfirmed.value ? store.layoutConfirmProblem(zone.value.id) : null)
 function confirmLayout() {
   if (!zone.value) return
+  const problem = store.layoutConfirmProblem(zone.value.id)
+  if (problem) { applicationMessage.value = problem; return }
   if (store.confirmLayout(zone.value.id) === false) applicationMessage.value = '当前家具存在越界、重叠、禁放区冲突或目标不足，请检查后确认'
 }
 
@@ -395,7 +422,7 @@ function clearLayout() {
           <template v-if="isMeetingLayout">
             <label class="block"><input v-model="preferences.includeChairs" type="checkbox" aria-label="生成会议椅"> 同时生成会议椅</label>
             <label class="block"><input v-model="preferences.resizeMeetingTable" type="checkbox" aria-label="按人数调整桌长"> 按目标人数调整桌长（预览实际尺寸）</label>
-            <label class="flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded-none border border-line px-2 py-1"></label>
+
           </template>
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
@@ -409,7 +436,10 @@ function clearLayout() {
             <p v-if="!buildingConstraints.length" class="mt-2 text-[10px] text-muted">尚未标注；门口、柱子或固定设施需要避让时，请先返回空间核对标注。</p>
             <button class="mt-2 w-full rounded-none border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" data-testid="back-to-review-annotate" @click="backToReviewAnnotate">返回空间核对标注</button>
           </details>
-          <details data-testid="channel-panel"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
+          <details data-testid="advanced-options" class="rounded-none border border-[#eee5dc] bg-[#fdfcfa] px-2 py-1.5">
+            <summary class="cursor-pointer text-[10px] text-muted">高级选项（拉椅预留 / 通道）—— 新手可跳过，按默认排满即可</summary>
+            <label v-if="isMeetingLayout" class="mt-2 flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded-none border border-line px-2 py-1"></label>
+          <details data-testid="channel-panel" class="mt-1"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
             <p class="mt-2 text-[10px] text-muted">通道是排版约束：自动排版绕开通道、确认时家具不得压占；位置可直接在画布上拖动。两侧净距会在宽度之外再留出空档。宽度数值为当前策略，非规范要求。</p>
             <div v-for="channel in channels" :key="channel.id" class="mt-2 rounded-none border border-line p-2" :data-testid="'channel-' + channel.orientation">
               <div class="flex items-center justify-between text-[10px] font-semibold text-[#5b5751]">
@@ -423,14 +453,13 @@ function clearLayout() {
                 <label>终点 mm（空=贯通）<input :value="channel.endMm === undefined ? '' : Math.round(channel.endMm - (channel.orientation === 'vertical' ? zoneBounds.minY : zoneBounds.minX))" type="number" step="100" aria-label="通道终点（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { endMm: ($event.target as HTMLInputElement).value === '' ? undefined : Number(($event.target as HTMLInputElement).value) + (channel.orientation === 'vertical' ? zoneBounds.minY : zoneBounds.minX) })"></label>
               </div>
               <label class="mt-1 block">两侧净距 mm<input :value="channel.clearanceMm || 0" type="number" min="0" step="50" aria-label="通道两侧净距（毫米）" class="w-full border border-line px-1" @change="updateChannel(channel.id, { clearanceMm: Math.max(0, Number(($event.target as HTMLInputElement).value) || 0) })"></label>
-              <p v-if="channel.widthMm < CHANNEL_WIDTH_HINT_MM" data-testid="channel-width-hint" class="mt-1 text-[10px] text-amber-600">宽度低于 {{ CHANNEL_WIDTH_HINT_MM }}mm 通行提示阈值（策略提示，非规范强制）</p>
               <label v-if="channel.orientation === 'vertical'" class="mt-1 block"><input :checked="!!channel.fromSecondRow" type="checkbox" aria-label="仅从二排起" @change="updateChannel(channel.id, { fromSecondRow: ($event.target as HTMLInputElement).checked })"> 仅从二排起（首排桌列不断开）</label>
             </div>
             <div class="mt-2 flex gap-3">
               <button class="text-bronze underline" data-testid="add-channel-vertical" @click="addChannel('vertical')">添加纵向通道</button>
               <button class="text-bronze underline" data-testid="add-channel-horizontal" @click="addChannel('horizontal')">添加横向通道</button>
             </div>
-            <p v-for="message in channelEgressMessages" :key="message" data-testid="channel-egress-hint" class="mt-2 text-[10px] text-amber-600">{{ message }}</p>
+          </details>
           </details>
         </div>
 
@@ -452,8 +481,9 @@ function clearLayout() {
             </label>
           </div>
           <p class="text-[9px] text-muted mt-1.5">图例来自共享家具模板目录，按实际毫米尺寸排版</p>
-          <div class="mt-4 border-t border-[#eee7df] pt-3">
-            <div class="flex items-center justify-between mb-1.5">
+          <details data-testid="advanced-spacing" class="mt-2 border-t border-[#eee7df] pt-2">
+            <summary class="cursor-pointer text-[10px] text-muted">高级间距参数（有默认值，可跳过）</summary>
+            <div class="mb-1.5 mt-2 flex items-center justify-between">
               <span class="text-[11px] font-semibold text-[#5b5751]">空间间距</span>
               <span class="text-[9px] text-muted">单位：mm</span>
             </div>
@@ -467,6 +497,7 @@ function clearLayout() {
             </div>
             <label v-if="isMeetingLayout" class="mt-2 flex items-center gap-1.5 rounded-none bg-[#faf7f3] px-2 py-1.5 text-[10px] text-muted"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">启用同排留缝</label>
             <p class="mt-2 text-[9px] leading-relaxed text-muted">{{ isWorkstation ? '保持参考图的朝向、镜像和紧贴关系，按空间大小自动增加排数、列数或组合；横纵方向自动比较。' : '按当前家具实际尺寸及间距检查方案，已放置的其他家具会保留并避让。' }}</p>
+          </details>
           <p v-if="currentFurniture.length && !draftApplied" class="mt-2 rounded-none border border-[#f0d9b3] bg-[#fff8e8] px-2.5 py-2 text-[10px] leading-relaxed text-[#8a6a2c]">
             {{ differenceText }}。画布虚线为待应用预览，原排版保留。
           </p>
@@ -474,7 +505,6 @@ function clearLayout() {
             下一步：选择排布
             <AppIcon name="arrowRight" size="3" class="ml-1 inline-block" />
           </button>
-          </div>
         </div>
 
         <!-- Product style and arrangement topology -->
@@ -489,7 +519,7 @@ function clearLayout() {
             </span>
             <AppIcon name="arrowRight" size="3.5" class="flex-none text-[#aa8a6a]" />
           </button>
-          <div class="text-[11px] font-semibold text-[#5b5751] mt-2 mb-1.5">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-1.5">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
+          <div class="mb-1.5 mt-2 text-[11px] font-semibold text-[#5b5751]">当前家具支持的排布<span class="ml-2 font-normal text-[9px] text-muted">已默认选中推荐排布，可直接点「应用当前方案」</span></div><p v-if="isWorkstation" class="mb-1.5 text-[10px] text-muted">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
           <div class="grid grid-cols-2 gap-1.5">
             <button
               v-for="preset in availablePresets"
@@ -500,6 +530,7 @@ function clearLayout() {
               @click="selectPreset(preset.id)"
             >
               <span class="font-semibold">{{ preset.label }}</span>
+              <span v-if="preset.id === recommendedPresetId" class="ml-1 rounded-none bg-[#e6f5ee] px-1 py-0.5 text-[9px] text-green">推荐</span>
               <span class="block mt-0.5 opacity-75 leading-tight">{{ preset.description }}</span>
             </button>
           </div>
@@ -520,11 +551,40 @@ function clearLayout() {
             </div>
           </div>
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
+          <div v-if="baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="mt-2" data-testid="layout-candidates">
+            <div class="mb-1 text-[9px] text-[#8a8178]">候选方案 · 按目标达成优先排序；利用率/人均余量为策略参考值</div>
+            <div class="flex max-h-36 flex-col gap-1 overflow-y-auto">
+              <button
+                v-for="(candidate, index) in baseProposal.candidates"
+                :key="index"
+                type="button"
+                data-testid="layout-candidate-card"
+                :class="['rounded-none border px-2 py-1.5 text-left text-[10px] leading-snug', index === selectedCandidateIndex ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line bg-white text-muted hover:bg-[#f9f7f4]']"
+                @click="selectCandidate(index)"
+              >
+                <span class="block font-semibold">{{ candidate.label }}</span>
+                <span class="mt-0.5 block">{{ isMeetingLayout ? '座位' : isGeneral ? '家具' : '工位' }} {{ candidate.seats }}<span v-if="preferences.targetSeats"> / 目标 {{ preferences.targetSeats }}</span> · 利用率 {{ Math.round(candidate.metrics.utilization * 100) }}%<span v-if="candidate.metrics.freeAreaPerSeatM2 != null"> · 人均余量 {{ candidate.metrics.freeAreaPerSeatM2.toFixed(1) }} ㎡</span></span>
+              </button>
+            </div>
+          </div>
           <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-none border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
-          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}<span v-if="proposal.shortfall" class="text-[#a65e4c]"> · 尚缺 {{ proposal.shortfall }} {{ isGeneral ? '件' : '人' }}</span></p>
+          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}</p>
+          <div v-if="panelWarnings.length" class="mt-2 flex max-h-32 flex-col gap-1 overflow-y-auto" data-testid="layout-warnings">
+            <div
+              v-for="warning in panelWarnings"
+              :key="warning.id"
+              :data-testid="layoutWarningTestId(warning)"
+              :data-warning-id="warning.id"
+              :data-level="warning.level"
+              class="rounded-none border px-2 py-1 text-[10px] leading-relaxed"
+              :class="[warning.level === 'error' ? 'border-[#ecc9c0] bg-[#fdf3f1]' : warning.level === 'warning' ? 'border-[#f0d9b3] bg-[#fff8e8]' : 'border-line bg-white', warningLevelClass[warning.level]]"
+            >
+              <span>{{ warning.text }}</span>
+              <span v-if="warning.advice" class="block opacity-80">建议：{{ warning.advice }}</span>
+            </div>
+          </div>
           <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>
           <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
-          <p v-if="proposal" class="mt-1 text-[9px] text-muted">门窗、柱及连续通道待现场核验；入口/禁放区请在空间核对页标注。</p>
           <p v-if="applicationMessage" role="status" class="mt-1 text-[10px] text-[#56636e]">{{ applicationMessage }}</p>
           <p v-if="plan?.problem" role="status" class="mt-1 text-[10px] text-[#a65e4c]">{{ plan.problem }}</p>
         </div>
@@ -549,6 +609,7 @@ function clearLayout() {
             <button :class="['px-2.5 py-2 rounded-none text-[11px] border font-semibold', store.furniturePlacement ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line hover:bg-[#f9f7f4]']" @click="addToCanvas">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
             <button class="px-2.5 py-2 rounded-none text-[11px] border border-line text-[#746d65] hover:bg-[#fff5f3] hover:text-red-500" @click="clearLayout">清空排版</button>
           </div>
+          <p v-if="confirmProblem" data-testid="confirm-problem" class="text-[10px] text-amber-600 leading-relaxed">暂不能确认：{{ confirmProblem }}</p>
           <button
             v-if="store.furnitureForZone(zone.id).length > 0 && !layoutConfirmed"
             class="w-full px-3 py-2 rounded-none text-[11px] font-semibold bg-[#e6f5ee] text-green border border-[#d0ead9] hover:bg-[#d8f0e3] flex items-center justify-center gap-1.5"

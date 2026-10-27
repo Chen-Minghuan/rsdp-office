@@ -19,6 +19,7 @@ try {
     { id: 'DESK-A', kind: 'furniture', zoneId: zone.id, productId: '', furnitureTemplateId: 'desk-l', x: -5000, y: -3000, w: 1400, h: 1400, rotation: 90, mirrorX: true },
     { id: 'DESK-B', kind: 'furniture', zoneId: zone.id, productId: '', furnitureTemplateId: 'desk-straight', x: -3000, y: -3000, w: 1200, h: 600, rotation: 0 },
   ]
+  await page.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await page.route('**/api/v1/**', route => route.fulfill({ json: { code: 200, data: route.request().url().endsWith('/canvas') ? null : [] } }))
   await page.addInitScript(objects => localStorage.setItem('rsdp-office-v01', JSON.stringify({ objects, files: [], cart: [], canvasRevision: 1 })), objects)
   await page.goto('http://127.0.0.1:3197/proposal', { waitUntil: 'networkidle' })

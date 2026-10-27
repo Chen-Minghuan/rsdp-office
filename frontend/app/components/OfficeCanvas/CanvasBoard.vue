@@ -5,7 +5,7 @@ import { TONES } from '~/utils/sample'
 import type { OfficeObject, ZoneObject, FurnitureObject, NoteObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
-import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
+import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
 import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
@@ -232,7 +232,7 @@ const placementSnap = computed(() => {
 const placementShown = computed(() => placementSnap.value.item)
 const activeSnapGuides = computed(() => placing.value ? placementSnap.value.guides : dragSnapGuides.value)
 const placementProblem = computed(() => placementPreview.value && designZone.value
-  ? officePlacementProblem(designZone.value, placementShown.value!, furniture.value, store.furniturePlacement!.spacing) : null)
+  ? officePlacementHardProblem(designZone.value, placementShown.value!, furniture.value, store.furniturePlacement!.spacing) : null)
 watch(() => store.furniturePlacement, draft => {
   placementPointer.value = null
   placementMessage.value = ''

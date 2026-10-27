@@ -36,14 +36,14 @@ export function officeFurnitureShowsSeat(item: FurnitureObject): boolean {
   return !!template && ['职员桌', '主管桌', '高管桌'].includes(template.category)
 }
 
-export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' | 'other' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId']) {
+export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' | 'other' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId'], seatClearanceMm?: number) {
   const plan = context === 'meeting'
     ? planMeetingFurniture(zone, widthMm, depthMm, spacing)
     : productStyleId === 'general'
-      ? arrangementPresetId === 'general-center' ? planMeetingFurniture(zone, widthMm, depthMm, spacing) : planOfficeFurniture(zone, widthMm, depthMm, 'auto', spacing)
+      ? arrangementPresetId === 'general-center' ? planMeetingFurniture(zone, widthMm, depthMm, spacing) : planOfficeFurniture(zone, widthMm, depthMm, 'auto', spacing, [], seatClearanceMm ?? 400)
     : productStyleId && arrangementPresetId
       ? planAdaptiveArrangement(zone, widthMm, depthMm, productStyleId, arrangementPresetId, spacing)
-      : planOfficeFurniture(zone, widthMm, depthMm, arrangement, spacing)
+      : planOfficeFurniture(zone, widthMm, depthMm, arrangement, spacing, [], seatClearanceMm ?? 400)
   return plan.slots
 }
 
@@ -69,9 +69,10 @@ export function createTemplateFurniture(
   arrangement: OfficeLayoutMode,
   spacing?: OfficeLayoutSpacing,
   meta?: OfficeLayoutSettingsMeta,
+  seatClearanceMm?: number,
 ): FurnitureObject[] {
   const context: 'meeting' | 'workstation' = meta?.layoutContext === 'meeting' || template.category === '会议与洽谈' ? 'meeting' : 'workstation'
-  return furnitureTemplateArrangement(zone, widthMm, depthMm, arrangement, spacing, context, meta?.productStyleId, meta?.arrangementPresetId).map((slot, index) => {
+  return furnitureTemplateArrangement(zone, widthMm, depthMm, arrangement, spacing, context, meta?.productStyleId, meta?.arrangementPresetId, seatClearanceMm).map((slot, index) => {
     // Slots describe the rotated footprint; stored width/depth describe the actual object.
     const turned = slot.rotation === 90 || slot.rotation === 270
     const w = turned ? slot.h : slot.w, h = turned ? slot.w : slot.h

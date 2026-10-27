@@ -162,6 +162,15 @@ export function zoneReviewMessage(zone: ZoneObject, zones: ZoneObject[]): string
     ? '图像识别轮廓建议对照原图复核；发现不符可直接修改，不影响继续排版' : null)
 }
 
+/** 当前楼层 ID 来自 Nuxt 自动注入的 workspace store；纯函数单测环境没有该注入，回退占位符，不阻断几何场景构建。 */
+function workspaceFloorId(): string {
+  try {
+    return typeof useWorkspaceStore === 'function' ? useWorkspaceStore().currentFloorId ?? 'LOCAL-FLOOR' : 'LOCAL-FLOOR'
+  } catch {
+    return 'LOCAL-FLOOR'
+  }
+}
+
 export function reviewScene(zones: ZoneObject[], plan: FloorPlanAnalysisResponse | null, pixelBounds?: FloorPlanDrawingBounds | null): SpatialSceneSnapshot {
   const calibrated = zones.length > 0 && zones.every(zone => zone.reviewUnit === 'mm')
   const rawBounds = validBounds(plan?.previewBounds) ? plan.previewBounds : validBounds(plan?.drawingBounds) ? plan.drawingBounds : pixelBounds
@@ -169,7 +178,7 @@ export function reviewScene(zones: ZoneObject[], plan: FloorPlanAnalysisResponse
   const scale = calibrated ? zones[0]?.mmPerSourceUnit ?? 1 : 1
   const evidenceKind = zones[0]?.evidenceKind ?? 'ESTIMATED'
   return {
-    schemaVersion: '1.2', sceneId: plan?.analysisId ?? 'LOCAL-DRAFT', projectId: useWorkspaceStore().currentFloorId,
+    schemaVersion: '1.2', sceneId: plan?.analysisId ?? 'LOCAL-DRAFT', projectId: workspaceFloorId(),
     revision: 1, scopeRevision: 1, geometryPolicyVersion: 'GEOM-P1-1', sourcePageId: plan?.imageId ?? 'PAGE',
     sourceSceneId: plan?.analysisId ?? null, failedRunId: null,
     workingCoordinateSystem: calibrated ? 'WORLD_MM' : 'SOURCE_PAGE',

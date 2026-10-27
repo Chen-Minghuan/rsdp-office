@@ -38,6 +38,36 @@ class OfficeLayoutValidationPolicyTest {
         ((ObjectNode) office.get(0)).put("zoneType", "OPEN_OFFICE");
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(office));
     }
+    @Test void deskOnlyOwesSeatSideClearance() throws Exception {
+        // 桌板侧靠墙可通过（前端 7b3dcd2 方向性规则的服务端对齐）：desk 座椅侧朝 S(+y)，x=0 贴左墙不再四边外扩拦截
+        ArrayNode objects = scene();
+        ObjectNode desk = (ObjectNode) objects.get(1);
+        desk.put("furnitureTemplateId", "desk-straight").put("w", 1200).put("h", 600).put("x", 0).put("y", 2000).put("rotation", 0);
+        desk.putObject("layoutSettings").putObject("spacing").put("wallMm", 800).put("aisleMm", 900);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        // 座椅侧净空不足（S 侧 2000+600+800=3400 超不出，改放到下边缘外）：rotation 180 → 座椅侧朝 N(-y)，y=0 贴顶墙被拦
+        ((ObjectNode) objects.get(1)).put("y", 0).put("rotation", 180);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+    @Test void cornerDeskRespectsMirrorSide() throws Exception {
+        // L 卡位转角校验 S+W（mirrorX=false）：贴左墙被拦；镜像后转角侧改为 E，贴左墙放行
+        ArrayNode objects = scene();
+        ObjectNode desk = (ObjectNode) objects.get(1);
+        desk.put("furnitureTemplateId", "desk-l").put("w", 1400).put("h", 1400).put("x", 0).put("y", 2000).put("rotation", 0);
+        desk.putObject("layoutSettings").putObject("spacing").put("wallMm", 560).put("aisleMm", 0);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ((ObjectNode) objects.get(1)).put("mirrorX", true);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+    @Test void seatsKeepAllSideMargin() throws Exception {
+        // 椅子仍四边保留 max(离墙, 组间过道)
+        ArrayNode objects = scene();
+        ((ObjectNode) objects.get(1)).put("layoutRole", "seat").put("furnitureTemplateId", "chair-office").put("w", 600).put("h", 600).put("x", 0).put("y", 2000);
+        ((ObjectNode) objects.get(1)).putObject("layoutSettings").putObject("spacing").put("wallMm", 300).put("aisleMm", 900);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        ((ObjectNode) objects.get(1)).put("x", 1000);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
     @Test void rejectsExclusionOverlapAndOutOfBounds() throws Exception {
         ArrayNode objects = scene();
         ((ArrayNode) objects.get(0).path("layoutPreferences").path("exclusions")).addObject().put("x", 2000).put("y", 2000).put("w", 1000).put("h", 1000);
@@ -86,7 +116,10 @@ class OfficeLayoutValidationPolicyTest {
         objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("layoutRole", "seat").put("x", 3000).put("y", 3300).put("w", 550).put("h", 580).put("rotation", 0).put("furnitureTemplateId", "chair-meeting");
         assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
         ArrayNode wall = scene();
+        // 方向性离墙（与前端 seatSideRect 对齐）：非座椅侧贴墙不拦，座椅侧（S=+y）不足才拦
         ((ObjectNode) wall.get(1)).put("x", 50).putObject("layoutSettings").putObject("spacing").put("wallMm", 300);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(wall));
+        ((ObjectNode) wall.get(1)).put("x", 2000).put("y", 6000 - 1200 - 200);
         assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(wall));
     }
 
