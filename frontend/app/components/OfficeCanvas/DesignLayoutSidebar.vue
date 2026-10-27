@@ -156,6 +156,8 @@ const effectivePresetId = computed<OfficeArrangementPresetId>(() => {
 // This also prevents an older, now-retired preset from leaking back into the
 // summary when a saved layout is opened.
 const selectedPreset = computed(() => availablePresets.value.find(preset => preset.id === effectivePresetId.value) || availablePresets.value[0])
+/** 当前家具的默认排布（与初始选中一致），在排布列表中标记「推荐」。 */
+const recommendedPresetId = computed(() => defaultPresetForProductStyle(isMeetingLayout.value ? 'meeting-table' : productStyle.value).id)
 const selectedStyleLabel = computed(() => selectedPreset.value?.label || '')
 const activeStepIndex = computed(() => layoutPanelSteps.findIndex(step => step.id === activeStep.value) + 1)
 
@@ -304,8 +306,12 @@ function applyAutoLayout() {
   applyLayout()
 }
 
+/** 确认排版的实时阻塞原因，展示在按钮上方，点击确认时同样使用。 */
+const confirmProblem = computed(() => zone.value && store.furnitureForZone(zone.value.id).length > 0 && !layoutConfirmed.value ? store.layoutConfirmProblem(zone.value.id) : null)
 function confirmLayout() {
   if (!zone.value) return
+  const problem = store.layoutConfirmProblem(zone.value.id)
+  if (problem) { applicationMessage.value = problem; return }
   if (store.confirmLayout(zone.value.id) === false) applicationMessage.value = '当前家具存在越界、重叠、禁放区冲突或目标不足，请检查后确认'
 }
 
@@ -420,7 +426,6 @@ function clearLayout() {
           <template v-if="isMeetingLayout">
             <label class="block"><input v-model="preferences.includeChairs" type="checkbox" aria-label="生成会议椅"> 同时生成会议椅</label>
             <label class="block"><input v-model="preferences.resizeMeetingTable" type="checkbox" aria-label="按人数调整桌长"> 按目标人数调整桌长（预览实际尺寸）</label>
-            <label class="flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded border border-line px-2 py-1"></label>
           </template>
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
@@ -434,7 +439,10 @@ function clearLayout() {
             <p v-if="!buildingConstraints.length" class="mt-2 text-[10px] text-muted">尚未标注；门口、柱子或固定设施需要避让时，请先返回空间核对标注。</p>
             <button class="mt-2 w-full rounded-lg border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" data-testid="back-to-review-annotate" @click="backToReviewAnnotate">返回空间核对标注</button>
           </details>
-          <details data-testid="channel-panel"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
+          <details data-testid="advanced-options" class="rounded-lg border border-[#eee5dc] bg-[#fdfcfa] px-2 py-1.5">
+            <summary class="cursor-pointer text-[10px] text-muted">高级选项（拉椅预留 / 通道）—— 新手可跳过，按默认排满即可</summary>
+            <label v-if="isMeetingLayout" class="mt-2 flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded border border-line px-2 py-1"></label>
+          <details data-testid="channel-panel" class="mt-1"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
             <p class="mt-2 text-[10px] text-muted">通道是排版约束：自动排版绕开通道、确认时家具不得压占；位置可直接在画布上拖动。两侧净距会在宽度之外再留出空档。宽度数值为当前策略，非规范要求。</p>
             <div v-for="channel in channels" :key="channel.id" class="mt-2 rounded border border-line p-2" :data-testid="'channel-' + channel.orientation">
               <div class="flex items-center justify-between text-[10px] font-semibold text-[#5b5751]">
@@ -454,6 +462,7 @@ function clearLayout() {
               <button class="text-bronze underline" data-testid="add-channel-vertical" @click="addChannel('vertical')">添加纵向通道</button>
               <button class="text-bronze underline" data-testid="add-channel-horizontal" @click="addChannel('horizontal')">添加横向通道</button>
             </div>
+          </details>
           </details>
         </div>
 
@@ -475,8 +484,9 @@ function clearLayout() {
             </label>
           </div>
           <p class="text-[9px] text-muted mt-1.5">图例来自共享家具模板目录，按实际毫米尺寸排版</p>
-          <div class="mt-4 border-t border-[#eee7df] pt-3">
-            <div class="flex items-center justify-between mb-2">
+          <details data-testid="advanced-spacing" class="mt-4 border-t border-[#eee7df] pt-3">
+            <summary class="cursor-pointer text-[10px] text-muted">高级间距参数（有默认值，可跳过）</summary>
+            <div class="flex items-center justify-between mb-2 mt-2">
               <span class="text-[11px] font-semibold text-[#5b5751]">空间间距</span>
               <span class="text-[9px] text-muted">单位：mm</span>
             </div>
@@ -490,6 +500,7 @@ function clearLayout() {
             </div>
             <label v-if="isMeetingLayout" class="mt-2 flex items-center gap-2 rounded-lg bg-[#faf7f3] px-2 py-1.5 text-[10px] text-muted"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">启用同排留缝</label>
             <p class="mt-2 text-[9px] leading-relaxed text-muted">{{ isWorkstation ? '保持参考图的朝向、镜像和紧贴关系，按空间大小自动增加排数、列数或组合；横纵方向自动比较。' : '按当前家具实际尺寸及间距检查方案，已放置的其他家具会保留并避让。' }}</p>
+          </details>
           <p v-if="currentFurniture.length && !draftApplied" class="mt-3 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2.5 py-2 text-[10px] leading-relaxed text-[#8a6a2c]">
             {{ differenceText }}。画布虚线为待应用预览，原排版保留。
           </p>
@@ -497,7 +508,6 @@ function clearLayout() {
             下一步：选择排布
             <AppIcon name="arrowRight" size="3" class="ml-1 inline-block" />
           </button>
-          </div>
         </div>
 
         <!-- Product style and arrangement topology -->
@@ -512,7 +522,7 @@ function clearLayout() {
             </span>
             <AppIcon name="arrowRight" size="3.5" class="flex-none text-[#aa8a6a]" />
           </button>
-          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-2">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
+          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">当前家具支持的排布<span class="ml-2 font-normal text-[9px] text-muted">已默认选中推荐排布，可直接点「应用当前方案」</span></div><p v-if="isWorkstation" class="text-[10px] text-muted mb-2">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
           <div class="grid grid-cols-2 gap-2">
             <button
               v-for="preset in availablePresets"
@@ -523,6 +533,7 @@ function clearLayout() {
               @click="selectPreset(preset.id)"
             >
               <span class="font-semibold">{{ preset.label }}</span>
+              <span v-if="preset.id === recommendedPresetId" class="ml-1 rounded bg-[#e6f5ee] px-1 py-0.5 text-[9px] text-green">推荐</span>
               <span class="block mt-0.5 opacity-75 leading-tight">{{ preset.description }}</span>
             </button>
           </div>
@@ -601,6 +612,7 @@ function clearLayout() {
             <button :class="['px-2.5 py-2 rounded-xl text-[11px] border font-semibold', store.furniturePlacement ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line hover:bg-[#f9f7f4]']" @click="addToCanvas">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
             <button class="px-2.5 py-2 rounded-xl text-[11px] border border-line text-[#746d65] hover:bg-[#fff5f3] hover:text-red-500" @click="clearLayout">清空排版</button>
           </div>
+          <p v-if="confirmProblem" data-testid="confirm-problem" class="text-[10px] text-amber-600 leading-relaxed">暂不能确认：{{ confirmProblem }}</p>
           <button
             v-if="store.furnitureForZone(zone.id).length > 0 && !layoutConfirmed"
             class="w-full px-3 py-2 rounded-xl text-[11px] font-semibold bg-[#e6f5ee] text-green border border-[#d0ead9] hover:bg-[#d8f0e3] flex items-center justify-center gap-1.5"

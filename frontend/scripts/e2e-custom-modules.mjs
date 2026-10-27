@@ -109,9 +109,10 @@ try {
   await clickWorld(room.x + 1500, room.y + 1500)
   assert.equal((await placed()).length, 1, '重叠不得新增或替换旧家具')
   await page.getByRole('status').filter({ hasText: '重叠' }).waitFor()
+  // 占地出轮廓仍是硬拦截；座椅净空不足已降级为提示（确认排版时才拦截），此处用真正越界的点位
   await clickWorld(room.x + 100, room.y + 100)
-  assert.equal((await placed()).length, 1, '越界和离墙距离不足不得放置')
-  await page.getByRole('status').filter({ hasText: '离墙' }).waitFor()
+  assert.equal((await placed()).length, 1, '占地超出空间边界不得放置')
+  await page.getByRole('status').filter({ hasText: '超出空间边界' }).waitFor()
   await page.keyboard.press('r')
   await clickWorld(room.x + 4500, room.y + 1500)
   const two = await placed()

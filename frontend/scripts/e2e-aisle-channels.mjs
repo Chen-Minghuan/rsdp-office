@@ -76,6 +76,7 @@ try {
   assert.ok(baseline > 10, `基线容量异常: ${baseline}`)
 
   // 1. 添加纵向通道：预览容量下降，画布出现通道条带，参数落到 layoutPreferences。
+  await page.getByTestId('advanced-options').locator('summary').first().click()
   await page.getByTestId('channel-panel').locator('summary').click()
   await page.getByTestId('add-channel-vertical').click()
   await page.waitForFunction(() => {
@@ -369,7 +370,7 @@ try {
   await page.getByRole('button', { name: '确认当前排版', exact: true }).waitFor()
   assert.ok((await furnitureState()).every(item => !item.layoutConfirmed), '通道变化应使排版确认失效')
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
-  await page.getByText('当前家具存在越界、重叠、禁放区冲突或目标不足，请检查后确认').waitFor()
+  await page.locator('[role="status"]').filter({ hasText: '家具压占通道，请调整家具或通道位置' }).waitFor()
   assert.ok((await furnitureState()).every(item => !item.layoutConfirmed), '压占通道时不应确认成功')
   await secondPanel.getByRole('button', { name: '移除纵向通道', exact: true }).click()
   await page.waitForFunction(() => {
@@ -457,7 +458,7 @@ try {
   const epReloadBox = await epStrip.first().boundingBox()
   assert.ok(epReloadBox && Math.abs(epReloadBox.height - epFullBox.height / 2) < epFullBox.height * 0.06, '刷新后条带应保持留断跨度')
   // 起点 > 终点：无有效禁放带，条带消失（validateChannels 同步给出问题文案，单测覆盖）。
-  await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+  await page.getByTestId('advanced-options').evaluate(node => { node.open = true }); await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
   await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').fill(String(Math.round(epSpanY * 0.1)))
   await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').press('Enter')
   await page.waitForFunction((id) => !document.querySelector(`[data-channel-id="${id}"]`), epChannelId)
@@ -484,7 +485,7 @@ try {
   })
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('unit-module-catalog').waitFor()
-  await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+  await page.getByTestId('advanced-options').evaluate(node => { node.open = true }); await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
   // 纵向通道默认在包围盒中轴（x 落入缺口范围）：应只剩缺口下方一段，高度 ≈ 0.6 倍空间进深。
   await page.getByTestId('add-channel-vertical').click()
   await page.waitForFunction(() => {
@@ -548,7 +549,7 @@ try {
     }, mode)
     await page.reload({ waitUntil: 'networkidle' })
     await page.getByTestId('unit-module-catalog').waitFor()
-    await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+    await page.getByTestId('advanced-options').evaluate(node => { node.open = true }); await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
     return page.locator('[data-testid="channel-egress-hint"]')
   }
   let egressHints = await setupEgress('unmarked')
@@ -562,6 +563,57 @@ try {
   egressHints = await setupEgress('far')
   assert.equal(await egressHints.count(), 1, '门远离通道应给出未衔接提示')
   assert.match(await egressHints.first().textContent(), /未衔接/)
+
+  // 12. 确认排版阻塞的具体原因：目标人数不足 / 家具压占通道分别给出明确文案，解除后可确认。
+  await page.evaluate(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const zone = draft.objects.find(object => object.id === 'CHANNEL-ROOM')
+    zone.layoutPreferences.channels = []
+    zone.layoutPreferences.targetSeats = 0
+    draft.objects = draft.objects.filter(object => object.kind !== 'furniture')
+    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('unit-module-catalog').waitFor()
+  await page.getByTestId('apply-layout').click()
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return draft.objects.some(object => object.kind === 'furniture' && object.zoneId === 'CHANNEL-ROOM')
+  })
+  const seatCount = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'CHANNEL-ROOM' && (object.furnitureTemplateId || '').startsWith('desk-')).length)
+  // 目标人数超出实际座位：提示具体差距，点击确认也显示同一文案且不生效
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const zone = store.zones.find(item => item.id === 'CHANNEL-ROOM')
+    zone.layoutPreferences = { ...zone.layoutPreferences, targetSeats: 500 }
+    store.schedulePersist()
+  })
+  await page.getByTestId('confirm-problem').waitFor()
+  assert.match(await page.getByTestId('confirm-problem').innerText(), new RegExp(`目标 500 人，当前仅 ${seatCount} 座`), '目标人数不足给出具体座数')
+  await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
+  assert.match(await page.getByTestId('confirm-problem').innerText(), /目标 500 人/)
+  assert.ok(!(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.filter(object => object.kind === 'furniture').every(object => object.layoutConfirmed))), '目标不足时不得确认')
+  // 家具压占通道：通道移到已放置家具上
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const zone = store.zones.find(item => item.id === 'CHANNEL-ROOM')
+    zone.layoutPreferences = { ...zone.layoutPreferences, targetSeats: 0 }
+    const desk = store.objects.find(object => object.kind === 'furniture' && object.zoneId === 'CHANNEL-ROOM' && object.layoutRole !== 'seat')
+    store.updateZoneChannels('CHANNEL-ROOM', [{ id: 'CH-CONFIRM', orientation: 'vertical', offsetMm: desk.x + 10, widthMm: 900, clearanceMm: 0 }])
+  })
+  await page.getByTestId('confirm-problem').waitFor()
+  assert.match(await page.getByTestId('confirm-problem').innerText(), /压占通道/, '压占通道给出明确文案')
+  // 解除通道后可正常确认
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.updateZoneChannels('CHANNEL-ROOM', [])
+  })
+  await page.waitForFunction(() => !document.querySelector('[data-testid="confirm-problem"]'))
+  await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return draft.objects.filter(object => object.kind === 'furniture').every(object => object.layoutConfirmed)
+  })
 
   assert.deepEqual(errors, [], '页面运行时不应有未捕获异常')
   console.log('e2e-aisle-channels: 全部断言通过')

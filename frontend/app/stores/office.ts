@@ -29,7 +29,7 @@ import { createTemplateFurniture } from '~/utils/officeFurniture'
 import type { CustomOfficeModule, OfficeModuleInput } from '~/types/officeModule'
 import type { OfficeLayoutSettingsMeta } from '~/types/officeArrangement'
 import { customModuleDefinition, moduleInputProblem, restoreCustomModules } from '~/utils/officeModules'
-import { manualOfficeFurniture, officePlacementProblem, officeFurnitureMoveProblem, identifyManualFurniture } from '~/utils/officeManualPlacement'
+import { manualOfficeFurniture, officePlacementHardProblem, officePlacementSoftWarning, officeFurnitureMoveProblem, officeFurnitureMoveWarning, identifyManualFurniture } from '~/utils/officeManualPlacement'
 import type { OfficeFurniturePlacement } from '~/utils/officeManualPlacement'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
@@ -540,7 +540,8 @@ export const useOfficeStore = defineStore('office', {
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null
       })
-      return null
+      const moveWarning = officeFurnitureMoveWarning(zone, items)
+      return moveWarning ? `已移动；提示：${moveWarning}，确认排版时会被拦截` : null
     },
 
     rotateFurnitureGroup(ids: string[], zoneId: string): string | null {
@@ -549,7 +550,7 @@ export const useOfficeStore = defineStore('office', {
       const current = this.furnitureForZone(zoneId)
       const items = current.filter(item => selected.has(item.id))
       if (!zone || !items.length || items.length !== selected.size) return '所选家具无效'
-      // Rotation swaps the footprint of non-square modules; revalidate bounds and overlaps.
+      // Rotation swaps the footprint of non-square modules; revalidate bounds and overlaps.（560mm 座椅净空降级为提示，不再拦截旋转）
       const candidates = items.map(item => ({ ...item, rotation: ((item.rotation + 90) % 360 + 360) % 360 }))
       const problem = officeFurnitureMoveProblem(zone, candidates, current)
       if (problem) return problem
@@ -559,7 +560,8 @@ export const useOfficeStore = defineStore('office', {
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null
       })
-      return null
+      const rotateWarning = officeFurnitureMoveWarning(zone, items)
+      return rotateWarning ? `已旋转；提示：${rotateWarning}，确认排版时会被拦截` : null
     },
 
     mirrorFurnitureGroup(ids: string[], zoneId: string): string | null {
@@ -794,6 +796,22 @@ export const useOfficeStore = defineStore('office', {
         this.designZoneId = null
         this.blank = false
       })
+    },
+
+    /** 确认排版前的具体阻塞原因（越界/压占通道/椅子活动区/目标人数等）；null 表示可确认。 */
+    layoutConfirmProblem(zoneId: string): string | null {
+      const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
+      const zone = this.zones.find(zone => zone.id === zoneId)
+      if (!zone) return '空间不存在'
+      if (!this.canEnterLayout) return this.layoutBlocker
+      if (!items.length) return '当前空间还没有已放置家具'
+      const problem = confirmedLayoutProblem(zone, items)
+      if (problem) return problem
+      const target = zone.layoutPreferences?.targetSeats || 0
+      const primary = items.find(item => item.layoutRole === 'primary')
+      const seats = primary?.layoutSettings?.layoutContext === 'other' ? items.filter(item => item.furnitureTemplateId === primary.furnitureTemplateId).length : furnitureSeatCount(items, items.some(item => item.layoutSettings?.layoutContext === 'meeting'))
+      if (target && seats < target) return `目标 ${target} 人，当前仅 ${seats} 座，请增加工位或调整目标人数`
+      return null
     },
 
     confirmLayout(zoneId: string) {
@@ -1175,7 +1193,7 @@ export const useOfficeStore = defineStore('office', {
       if (!draft || !zone || this.designZoneId !== zone.id || this.canvasMode !== 'design' || !this.canEnterLayout) return '请重新选择当前空间的模块'
       if (!this.spaceTemplateCurrent) return '空间已修改，请重新开始添加'
       const candidate = manualOfficeFurniture(draft, xMm, yMm)
-      const problem = officePlacementProblem(zone, candidate, this.furnitureForZone(zone.id), draft.spacing)
+      const problem = officePlacementHardProblem(zone, candidate, this.furnitureForZone(zone.id), draft.spacing)
       if (problem) return problem
       const item = identifyManualFurniture(candidate)
       item.spaceTemplateId = this.spaceTemplate!.templateId
@@ -1186,7 +1204,8 @@ export const useOfficeStore = defineStore('office', {
         this.submitted = null
         this.objects.push(item)
       })
-      return null
+      const placeWarning = officePlacementSoftWarning(zone, item, draft.spacing)
+      return placeWarning ? `已放置；提示：${placeWarning}，确认排版时会被拦截` : null
     },
 
     clearFurniture(zoneId: string) {

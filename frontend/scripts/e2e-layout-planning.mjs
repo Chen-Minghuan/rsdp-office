@@ -170,6 +170,17 @@ try {
   assert.equal(await page.getByRole('spinbutton', { name: '目标人数', exact: true }).inputValue(), '0')
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   await page.getByRole('button', { name: '一字对坐', exact: true }).click()
+  // LAYOUT-038：手动调小对坐净距低于椅背通行策略值 → 黄级提示（参考排布不自动加宽）；调回达标消失。
+  await page.getByRole('tab', { name: '调整参数', exact: true }).click()
+  await page.getByTestId('advanced-spacing').evaluate(node => { node.open = true })
+  await page.getByRole('spinbutton', { name: '图例组间净距（毫米）', exact: true }).fill('800')
+  const chairBackWarning = page.locator('[data-warning-id="chair-back-gap"]')
+  await chairBackWarning.waitFor()
+  assert.equal(await chairBackWarning.getAttribute('data-level'), 'warning')
+  assert.match(await chairBackWarning.innerText(), /未自动加宽/)
+  await page.getByRole('spinbutton', { name: '图例组间净距（毫米）', exact: true }).fill('1600')
+  await page.waitForFunction(() => !document.querySelector('[data-warning-id="chair-back-gap"]'))
+  await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('12')
   await page.getByTestId('apply-layout').click()
   assert.equal((await state()).objects.filter(item => item.layoutGroupId === 'auto:OPEN-ROOM').length, 12)
@@ -183,7 +194,7 @@ try {
     assert.ok(box.y >= 0 && box.y + box.height <= 900, 'main action visible in 900px viewport')
   }
   assert.deepEqual(errors, [])
-  console.log('PASS: meeting module compatibility, real table/chair seats, preview/application equality, no draft persistence, manual retention, undo, refresh, exclusion and shortfall feedback, candidate cards compare/switch/apply (LAYOUT-034), unified warning levels & advice (LAYOUT-035)')
+  console.log('PASS: meeting module compatibility, real table/chair seats, preview/application equality, no draft persistence, manual retention, undo, refresh, exclusion and shortfall feedback, candidate cards compare/switch/apply (LAYOUT-034), unified warning levels & advice (LAYOUT-035), chair-back passage hint (LAYOUT-038)')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

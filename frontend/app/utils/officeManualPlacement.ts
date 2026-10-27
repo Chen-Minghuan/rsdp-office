@@ -33,22 +33,13 @@ export function manualOfficeFurniture(draft: OfficeFurniturePlacement, xMm: numb
   }
 }
 
-export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObject, existing: FurnitureObject[], spacing: OfficeLayoutSpacing): string | null {
+/** 手动摆放/移动/旋转的硬校验：占地在轮廓内、不与他人重叠、不占入口/禁放区。座椅净空等设计建议不在这里拦截。 */
+export function officePlacementHardProblem(zone: ZoneObject, candidate: FurnitureObject, existing: FurnitureObject[], spacing: OfficeLayoutSpacing): string | null {
   if (zone.reviewUnit !== 'mm' || candidate.zoneId !== zone.id) return '请在当前已校准空间内放置'
   if (![candidate.x, candidate.y, candidate.w, candidate.h, candidate.rotation, spacing.wallMm, spacing.gapMm].every(Number.isFinite)
     || candidate.w < 10 || candidate.h < 10 || spacing.wallMm < 0 || spacing.gapMm < 0) return '家具尺寸或间距无效'
   const footprint = officeFurnitureFootprint(candidate)
-  // Chairs (meeting seats) keep the clearance on all sides; desks and other
-  // modules only owe the wall clearance on the seat side — panel sides may
-  // touch the wall.
-  const kind = candidate.moduleSnapshot?.kind || furnitureById.get(candidate.furnitureTemplateId || '')?.kind
-  const corner = !!kind && ['l-desk', 'rounded-l-desk', 'u-desk'].includes(kind)
-  // Manual placement and confirmation only owe the configured wall distance on the seat side; the stricter seat aisle is enforced by the auto planner.
-  const seatWall = Math.max(spacing.wallMm, kind === 'desk' ? 560 : 0)
-  const wallChecked = candidate.layoutRole === 'seat'
-    ? { x: footprint.x - spacing.wallMm, y: footprint.y - spacing.wallMm, w: footprint.w + spacing.wallMm * 2, h: footprint.h + spacing.wallMm * 2 }
-    : seatSideRect({ ...footprint, rotation: candidate.rotation, mirrorX: candidate.mirrorX }, seatWall, corner)
-  if (!layoutRectInsideRing(wallChecked, zone.polygon || [])) return '此位置超出空间或离墙距离不足'
+  if (!layoutRectInsideRing(footprint, zone.polygon || [])) return '此位置超出空间边界'
   for (const item of existing) {
     if (item.zoneId !== zone.id) continue
     const other = officeFurnitureFootprint(item), gap = spacing.gapMm, eps = 0.001
@@ -61,6 +52,31 @@ export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObj
   return null
 }
 
+/** 座椅净空软提示：桌子座椅侧净空（默认 560mm）延伸出轮廓时返回提示文案；不阻断手动操作，确认排版时仍会拦截。 */
+export function officePlacementSoftWarning(zone: ZoneObject, candidate: FurnitureObject, spacing: OfficeLayoutSpacing): string | null {
+  const footprint = officeFurnitureFootprint(candidate)
+  // Chairs (meeting seats) keep the clearance on all sides; desks and other
+  // modules only owe the wall clearance on the seat side — panel sides may
+  // touch the wall.
+  const kind = candidate.moduleSnapshot?.kind || furnitureById.get(candidate.furnitureTemplateId || '')?.kind
+  const corner = !!kind && ['l-desk', 'rounded-l-desk', 'u-desk'].includes(kind)
+  // Manual placement and confirmation only owe the configured wall distance on the seat side; the stricter seat aisle is enforced by the auto planner.
+  const seatWall = Math.max(spacing.wallMm, kind === 'desk' ? 560 : 0)
+  const wallChecked = candidate.layoutRole === 'seat'
+    ? { x: footprint.x - spacing.wallMm, y: footprint.y - spacing.wallMm, w: footprint.w + spacing.wallMm * 2, h: footprint.h + spacing.wallMm * 2 }
+    : seatSideRect({ ...footprint, rotation: candidate.rotation, mirrorX: candidate.mirrorX }, seatWall, corner)
+  if (!layoutRectInsideRing(wallChecked, zone.polygon || [])) return '座椅一侧离墙净空不足 560mm'
+  return null
+}
+
+/** 严格校验（确认排版/方案复核用）：硬校验 + 座椅净空，保持原有拒绝语义与文案。 */
+export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObject, existing: FurnitureObject[], spacing: OfficeLayoutSpacing): string | null {
+  const hard = officePlacementHardProblem(zone, candidate, existing, spacing)
+  if (hard) return hard === '此位置超出空间边界' ? '此位置超出空间或离墙距离不足' : hard
+  if (officePlacementSoftWarning(zone, candidate, spacing)) return '此位置超出空间或离墙距离不足'
+  return null
+}
+
 /** Validate a translated selection against the room and furniture outside the selection. */
 export function officeFurnitureMoveProblem(zone: ZoneObject, candidates: FurnitureObject[], existing: FurnitureObject[]): string | null {
   if (!candidates.length || candidates.some(item => item.zoneId !== zone.id)) return '只能移动当前空间的家具'
@@ -68,8 +84,18 @@ export function officeFurnitureMoveProblem(zone: ZoneObject, candidates: Furnitu
   const others = existing.filter(item => !movingIds.has(item.id))
   const spacing: OfficeLayoutSpacing = { wallMm: 0, gapMm: 0, aisleMm: 0 }
   for (const candidate of candidates) {
-    const problem = officePlacementProblem(zone, candidate, others, spacing)
+    const problem = officePlacementHardProblem(zone, candidate, others, spacing)
     if (problem) return problem
+  }
+  return null
+}
+
+/** 移动/旋转生效后的软提示（座椅净空不足等），仅用于展示，不影响操作结果。 */
+export function officeFurnitureMoveWarning(zone: ZoneObject, items: FurnitureObject[]): string | null {
+  const spacing: OfficeLayoutSpacing = { wallMm: 0, gapMm: 0, aisleMm: 0 }
+  for (const item of items) {
+    const warning = officePlacementSoftWarning(zone, item, spacing)
+    if (warning) return warning
   }
   return null
 }
