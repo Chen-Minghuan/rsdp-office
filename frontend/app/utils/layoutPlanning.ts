@@ -198,7 +198,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   } else {
     // LAYOUT-034：课桌式网格把 auto 内部评估过的其他有效变体（朝向/对齐）也作为候选；首个仍是既有默认方案。
     const primary = general
-      ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing, channels)
+      ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing, channels, prefs.seatClearanceMm)
       : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)
     const plans = [primary, ...(primary.alternates || [])]
     for (const plan of plans) {

@@ -22,6 +22,15 @@ export interface OfficeLayoutSpacing {
   staggerOffsetMm?: number
 }
 export const OFFICE_LAYOUT_SPACING: OfficeLayoutSpacing = { wallMm: 300, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
+/** LAYOUT-038：椅背相对时椅子占位之外的通行量（毫米，策略值，非建筑规范）。 */
+export const CHAIR_BACK_PASSAGE_MM = 500
+/**
+ * 椅背相对间隔的最小值：两侧椅子占位（拉椅预留）+ 通行量。
+ * 适用：backToBack 组间排距（椅背跨排距相对）、faceToFace 组内对坐间隔（椅背在组内相对）。
+ */
+export function chairBackMinGapMm(seatClearanceMm = 400): number {
+  return 2 * seatClearanceMm + CHAIR_BACK_PASSAGE_MM
+}
 export interface OfficeLayoutPlan { slots: LayoutRect[]; rows: number; columns: number; rotated: boolean; problem: string | null; presetId?: OfficeArrangementPresetId; productStyleId?: OfficeProductStyleId; firstBlockDepthMm?: number; /** LAYOUT-034：auto 网格内部评估过的其他有效变体（不含 best 本身），供候选方案对比；仅网格路径产出。 */ alternates?: OfficeLayoutPlan[] }
 const EPS = 0.0001 // millimetres; boundary arithmetic only
 const MAX_CELLS = 2000
@@ -98,10 +107,16 @@ function overlaps(a: Rect, b: Rect, gap = 0) {
   return a.x < b.x + b.w + gap - EPS && b.x < a.x + a.w + gap - EPS && a.y < b.y + b.h + gap - EPS && b.y < a.y + a.h + gap - EPS
 }
 
-export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: number, mode: OfficeLayoutMode, spacing: OfficeLayoutSpacing = OFFICE_LAYOUT_SPACING, channels: LayoutChannel[] = []): OfficeLayoutPlan {
+export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: number, mode: OfficeLayoutMode, spacing: OfficeLayoutSpacing = OFFICE_LAYOUT_SPACING, channels: LayoutChannel[] = [], seatClearanceMm = 400): OfficeLayoutPlan {
   const empty = (problem: string | null): OfficeLayoutPlan => ({ slots: [], rows: 0, columns: 0, rotated: false, problem })
   if (zone.reviewUnit !== 'mm' || ![widthMm, depthMm].every(value => Number.isFinite(value) && value >= 10)) return empty('请填写有效的家具毫米尺寸')
-  const pairGap = mode === 'faceToFace' ? spacing.faceGapMm ?? spacing.pairMm ?? 900 : spacing.backGapMm ?? spacing.pairMm ?? 0
+  // LAYOUT-038：椅背相对间隔自动加宽——faceToFace 组内间隔、backToBack 组间排距不足净宽时提升到
+  // 2×拉椅预留+通行量；加宽后放不下的排由 fit() 自然减少（减排说明由上层提示，见 layoutWarnings）。
+  const chairBackGap = chairBackMinGapMm(seatClearanceMm)
+  const pairGap = mode === 'faceToFace'
+    ? Math.max(spacing.faceGapMm ?? spacing.pairMm ?? 900, chairBackGap)
+    : spacing.backGapMm ?? spacing.pairMm ?? 0
+  const rowAisleMm = mode === 'backToBack' ? Math.max(spacing.aisleMm, chairBackGap) : spacing.aisleMm
   if (![spacing.wallMm, spacing.aisleMm, spacing.gapMm, pairGap].every(value => Number.isFinite(value) && value >= 0)) return empty('间距必须为有效的非负毫米数')
   const bounds = polygonBoundsMm(zone.polygon)
   if (!bounds || !Object.values(bounds).every(Number.isFinite)) return empty('空间缺少有效轮廓')
@@ -198,16 +213,16 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
       const steadyColSegments = steadyColCuts.length ? axisSegments(0, localW, spacing.wallMm, steadyColCuts) : fullCol
       const deferredColSegments = deferredColCuts.length ? axisSegments(0, localW, spacing.wallMm, [...steadyColCuts, ...deferredColCuts]) : steadyColSegments
       if (!rowSegments.length || !steadyColSegments.length || !deferredColSegments.length) return empty('通道占满可用空间，请调整通道位置或宽度')
-      const totalBlocks = rowSegments.reduce((sum, segment) => sum + fit(segment.length, channelBlockH, spacing.aisleMm), 0)
+      const totalBlocks = rowSegments.reduce((sum, segment) => sum + fit(segment.length, channelBlockH, rowAisleMm), 0)
       const maxFitCols = Math.max(...steadyColSegments.map(segment => fit(segment.length, widthMm, spacing.gapMm)))
       if (totalBlocks * maxFitCols * (pairedChannelMode ? 2 : 1) > MAX_CELLS) return empty('预计数量过多，请增大家具尺寸或间距')
       const slots: LayoutRect[] = [], rows = new Set<number>()
       let globalRow = 0, maxRowCols = 0, firstBlockDepthMm: number | undefined, firstBlockEmitted = false
       rowSegments.forEach((rowSegment, segmentIndex) => {
-        let blocks = fit(rowSegment.length, channelBlockH, spacing.aisleMm)
+        let blocks = fit(rowSegment.length, channelBlockH, rowAisleMm)
         if (mode === 'row') blocks = segmentIndex === 0 ? Math.min(1, blocks) : 0
         if (!blocks) return
-        const usedH = blocks * channelBlockH + (blocks - 1) * spacing.aisleMm
+        const usedH = blocks * channelBlockH + (blocks - 1) * rowAisleMm
         const y0 = rowSegment.start + (rowSegment.length - usedH) / 2
         for (let block = 0; block < blocks; block++) {
           const isFirstBlock = !firstBlockEmitted
@@ -216,7 +231,7 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
           if (isFirstBlock && deferredColCuts.length && !rotated) firstBlockDepthMm = y0 + block * (channelBlockH + spacing.aisleMm) + channelBlockH
           const colSegments = isFirstBlock ? steadyColSegments : deferredColSegments
           for (let sub = 0; sub < (pairedChannelMode ? 2 : 1); sub++) {
-            const y = y0 + block * (channelBlockH + spacing.aisleMm) + sub * (depthMm + pairGap)
+            const y = y0 + block * (channelBlockH + rowAisleMm) + sub * (depthMm + pairGap)
             const rotationRow = pairedChannelMode ? sub : globalRow
             let rowCols = 0
             for (const colSegment of colSegments) {
@@ -254,11 +269,11 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
     const cols = fit(localW - 2 * spacing.wallMm, widthMm, spacing.gapMm)
     const paired = mode === 'backToBack' || mode === 'faceToFace'
     const blockH = paired ? depthMm * 2 + pairGap : depthMm
-    const blocks = mode === 'row' ? Math.min(1, fit(localH - 2 * spacing.wallMm, blockH, spacing.aisleMm)) : fit(localH - 2 * spacing.wallMm, blockH, spacing.aisleMm)
+    const blocks = mode === 'row' ? Math.min(1, fit(localH - 2 * spacing.wallMm, blockH, rowAisleMm)) : fit(localH - 2 * spacing.wallMm, blockH, rowAisleMm)
     if (!cols || !blocks) continue
     if (cols * blocks * (paired ? 2 : 1) > MAX_CELLS) { exceeded = true; continue }
     const usedW = cols * widthMm + (cols - 1) * spacing.gapMm
-    const usedH = blocks * blockH + (blocks - 1) * spacing.aisleMm
+    const usedH = blocks * blockH + (blocks - 1) * rowAisleMm
     // Center first; edge-aligned alternatives help retain slots in concave rooms.
     for (const align of zone.polygon!.length > 4 ? [0.5, 0, 1] : [0.5]) {
       const slots: LayoutRect[] = [], rows = new Set<number>(), columns = new Set<number>()
@@ -267,7 +282,7 @@ export function planOfficeFurniture(zone: ZoneObject, widthMm: number, depthMm: 
       for (let row = 0; row < blocks * (paired ? 2 : 1); row++) for (let col = 0; col < cols; col++) {
         const x = x0 + col * (widthMm + spacing.gapMm)
           + (mode === 'staggered' && row % 2 === 1 && cols > 1 ? (widthMm + spacing.gapMm) / 2 : 0)
-        const y = y0 + (paired ? Math.floor(row / 2) * (blockH + spacing.aisleMm) + (row % 2) * (depthMm + pairGap) : row * (depthMm + spacing.aisleMm))
+        const y = y0 + (paired ? Math.floor(row / 2) * (blockH + rowAisleMm) + (row % 2) * (depthMm + pairGap) : row * (depthMm + spacing.aisleMm))
         const slot = rotated
           ? { x: bounds.maxX - y - depthMm, y: bounds.minY + x, w: depthMm, h: widthMm, rotation: 90 }
           : { x: bounds.minX + x, y: bounds.minY + y, w: widthMm, h: depthMm, rotation: ((mode === 'faceToFace' && row % 2 === 0) || (mode === 'backToBack' && row % 2 === 1)) ? 180 : 0 }

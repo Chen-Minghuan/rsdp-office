@@ -1,5 +1,9 @@
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutProposal } from '~/types/layoutPlanning'
+import type { OfficeLayoutSpacing } from './officeAutoLayout'
+import { CHAIR_BACK_PASSAGE_MM, chairBackMinGapMm } from './officeAutoLayout'
+import { officeArrangementPreset } from './officeArrangementPresets'
+import type { OfficeArrangementPresetId } from '~/types/officeArrangement'
 import { CHANNEL_WIDTH_HINT_MM } from './layoutChannels'
 import { channelEgressIssues } from './channelEgress'
 import { zoneLayoutExclusions } from './spatial/obstacles'
@@ -34,7 +38,7 @@ export function zoneNetAreaMm2(zone: ZoneObject): number {
  * 排版面板统一预警。proposal 为当前激活方案（含用户选中的候选）；channels 为空间已保存通道；
  * furniture 为当前已放置家具（供入口联动走廊挤占计算）；firstBlockDepthMm 取已保存排版记录。
  */
-export function layoutPanelWarnings(args: { zone: ZoneObject; channels: LayoutChannel[]; furniture: FurnitureObject[]; proposal: LayoutProposal | null; firstBlockDepthMm?: number }): LayoutWarning[] {
+export function layoutPanelWarnings(args: { zone: ZoneObject; channels: LayoutChannel[]; furniture: FurnitureObject[]; proposal: LayoutProposal | null; firstBlockDepthMm?: number; spacing?: OfficeLayoutSpacing; presetId?: OfficeArrangementPresetId; seatClearanceMm?: number }): LayoutWarning[] {
   const { zone, channels, furniture, proposal } = args
   const warnings: LayoutWarning[] = []
   if (proposal?.problem) {
@@ -80,6 +84,28 @@ export function layoutPanelWarnings(args: { zone: ZoneObject; channels: LayoutCh
     else if (issue.kind === 'unlinked') warnings.push({ id: `channel-egress-unlinked-${index}`, level: 'warning', text: issue.text, advice: '拖动通道端头至入口附近，或在空间核对页调整门洞净空标注' })
     else warnings.push({ id: `channel-egress-blocked-${index}`, level: 'warning', text: issue.text, advice: '移开衔接路径上的家具或禁放区，或调整通道位置' })
   })
+  // LAYOUT-038：椅背相对间隔低于净宽（2×拉椅预留+500 通行，策略值）。
+  // generic-* 配对排布走 planOfficeFurniture，引擎已自动加宽（说明原因与数值）；样式参考排布（adaptive）
+  // 的间距按素材固定，不加宽、只提示。手动拖小间距（同一份 spacing）触发同级提示。
+  const preset = args.presetId ? officeArrangementPreset(args.presetId) : undefined
+  if (args.spacing && preset && (preset.baseMode === 'backToBack' || preset.baseMode === 'faceToFace')) {
+    const clearance = args.seatClearanceMm ?? 400
+    const minGap = chairBackMinGapMm(clearance)
+    const current = preset.baseMode === 'backToBack' ? args.spacing.aisleMm : (args.spacing.faceGapMm ?? 900)
+    if (current < minGap) {
+      const where = preset.baseMode === 'backToBack' ? '相邻组之间的排距' : '对坐两组之间的间隔'
+      const generic = args.presetId!.startsWith('generic-')
+      warnings.push({
+        id: 'chair-back-gap', level: 'warning',
+        text: generic
+          ? `椅背相对：${where} ${Math.round(current)}mm 低于净宽 ${minGap}mm（2×拉椅预留 ${Math.round(clearance)}mm + ${CHAIR_BACK_PASSAGE_MM}mm 通行，策略值），排版时已自动加宽到 ${minGap}mm，排数可能因此减少`
+          : `椅背相对：${where} ${Math.round(current)}mm 低于净宽 ${minGap}mm（2×拉椅预留 ${Math.round(clearance)}mm + ${CHAIR_BACK_PASSAGE_MM}mm 通行，策略值）；参考排布间距按素材固定，未自动加宽`,
+        advice: generic
+          ? '如需更多排数可换浅桌型；如确认现场不需要该通行量，可在确认前逐件微调（确认校验不含此策略项）'
+          : '可参考提示调大净距参数（会偏离参考排布），或保持素材间距并现场复核通行',
+      })
+    }
+  }
   const order: Record<LayoutWarningLevel, number> = { error: 0, warning: 1, info: 2 }
   return warnings.sort((a, b) => order[a.level] - order[b.level])
 }

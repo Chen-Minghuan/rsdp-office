@@ -1256,7 +1256,7 @@ export const useOfficeStore = defineStore('office', {
       const zone = this.zones.find(zone => zone.id === zoneId)
       const template = this.customModules.find(module => module.id === templateId) || furnitureById.get(templateId)
       if (!zone || !template) return false
-      const placed = createTemplateFurniture(zone, template, widthMm, depthMm, arrangement, spacing, meta)
+      const placed = createTemplateFurniture(zone, template, widthMm, depthMm, arrangement, spacing, meta, zone.layoutPreferences?.seatClearanceMm)
       if (!placed.length) return false
       this.cancelFurniturePlacement()
       if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false

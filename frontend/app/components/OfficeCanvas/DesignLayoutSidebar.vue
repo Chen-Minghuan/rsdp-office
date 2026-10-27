@@ -211,7 +211,7 @@ const panelWarnings = computed(() => {
   if (!z) return []
   const items = currentFurniture.value
   const firstBlockDepthMm = items.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
-  return layoutPanelWarnings({ zone: z, channels: channels.value, furniture: items, proposal: proposal.value, firstBlockDepthMm })
+  return layoutPanelWarnings({ zone: z, channels: channels.value, furniture: items, proposal: proposal.value, firstBlockDepthMm, spacing: { ...spacing }, presetId: effectivePresetId.value, seatClearanceMm: preferences.seatClearanceMm })
 })
 const warningLevelClass: Record<LayoutWarningLevel, string> = { error: 'text-[#a65e4c]', warning: 'text-amber-600', info: 'text-muted' }
 const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
