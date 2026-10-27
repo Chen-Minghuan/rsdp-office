@@ -44,9 +44,13 @@ public class SchemaInitializer {
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
             Resource userAuth = new ClassPathResource("db/migrations/20261019_user_auth.sql");
             ScriptUtils.executeSqlScript(connection, userAuth);
+            Resource projectFloorMigration = new ClassPathResource("db/migrations/20261026_office_project_floor.sql");
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(projectFloorMigration), false, false, "--",
+                ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");
+            log.info("项目楼层结构及默认工作区映射初始化完成");
         } catch (Exception e) {
             throw new IllegalStateException("数据库结构更新失败", e);
         }

@@ -106,6 +106,7 @@
 2026-10-20 Jenkins 启动追修：[DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md) 已定位 `No such DSL method 'pipeline'` 为声明式插件缺失 `joda-time-api` 依赖。补装官方插件、校验 SHA256 并重启后，实际第 3 次 Jenkins 构建（main `956c411`）为 SUCCESS：预检、180 项测试（177 通过、3 跳过）、JUnit 报告发布及三个镜像构建通过。`DEPLOY=false`，部署阶段 skipped；SCM 轮询和默认参数保留。未修改流水线代码或正式应用，正式发布与 HTTPS 仍待验证。
 
 2026-10-20 追加：[DEPLOY-001](tasks/DEPLOY-001-jenkins-server-env.md) 的 Jenkinsfile 与云服务器 `.env` 配置已交付。独立生产 Compose、前端容器及持久目录/数据库备份/显式 Spatial 迁移入口已编码；服务器 `.env` 为 `root:jenkins 0640`，Jenkins 用户预检通过。前端 build/同源静态生成、本地 clean Java 与 Linux 镜像 Java（各 163 通过、3 跳过）、三个服务器镜像构建、隔离 mock 后端的容器代理核对及文档/差异检查通过。Docker Hub 超时通过导入官方基础镜像缓存完成本轮构建，未更改全局网络配置；尚未推送、运行实际 SCM 流水线、部署正式服务或切换公网 HTTPS。
+2026-10-26：[WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md) 已实现创建项目、楼层规划与添加、项目/楼层改名、项目/楼层折叠切换、客户需求备注及分层上传/草稿/识别隔离；顶部项目创建直接打开弹窗。前端构建、项目楼层专项、上传入口、空间核对、MOCK 冒烟及完整 UI 工作流通过；Java 161 项中 158 通过、3 项可选数据库集成跳过。真实数据库迁移和真实两层上传集成尚未执行，详见任务记录。
 
 2026-10-17 提交前复核：当前识别/上传/空间核对版本的 `pnpm build`、`pnpm test:design-corrections`、`pnpm e2e:recognition-progress`、`pnpm e2e:drawing-entry`、`pnpm e2e:space-review` 全部通过；三项 UI 使用隔离预览与模拟 API。后端沿用本轮 RECOG-015 的 clean test 149 通过/3 跳过记录。未新增真实模型调用，不扩大识别边界精度或业务验收结论。
 
@@ -140,7 +141,8 @@
 | --- | --- | --- | --- | --- |
 | UPLOAD-001 | 单张图纸上传与更换 | 已实现并通过专项验证；构建、单图上传/空间回归/冒烟 mock、Java 115 项通过；补充旧 store 实例下的真实 Nuxt 热更新上传回归通过，见[任务记录](tasks/UPLOAD-001-single-drawing.md) | 后端校验待用户启动新版 Java 生效；真实上传识别完整集成待验收 | P1 |
 | UPLOAD-002 | 当前图纸进入对应空间 | 已实现；上传 ID/分析关联、未识别/后台/失败入口隔离、新图模板与家具隔离、编辑/空稿恢复，构建及专项 UI 模拟通过，见[任务记录](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 当前 7.png 的真实识别与用户业务复核待验证；无新表，本次未重启服务或修改真实稿 | P0 |
-| WORKSPACE-001 | 删除项目信息及专用存储 | 已编码并通过专项验证；前端构建、空间/模板/识别/效果预览 UI mock 和 Java 114 项（含隔离 PostgreSQL 迁移/锁测试）通过，见[任务记录](tasks/WORKSPACE-001-remove-project-info.md) | 用户下次启动新版后端执行删表；本轮未重启 8082，当前使用库尚未迁移 | P1 |
+| WORKSPACE-001 | 删除项目信息及专用存储 | 历史任务已编码并通过专项验证；2026-10-26 最新需求由 WORKSPACE-003 重新引入面向流程的项目/楼层，见[历史记录](tasks/WORKSPACE-001-remove-project-info.md) | 保留历史删表迁移，不恢复旧 office_project；当前模型见 WORKSPACE-003 | — |
+| WORKSPACE-003 | 创建项目与多楼层工作区 | 已实现项目/需求/楼层规划、添加楼层、项目与楼层改名、折叠切换、分层上传及草稿/识别/文件隔离；构建、专项与相关 UI mock、Java 161 项（3 跳过）通过，见[任务记录](tasks/WORKSPACE-003-project-floors.md) | 真实 PostgreSQL 迁移、真实两层上传识别与业务复核待验证 | P0 |
 | DOC-001 | 需求、规则、规范与进度基线 | 已验收（文档）；本轮新增文档及 README 同步 | 文档检查通过；后续业务任务按对应标准另行验收 | P0 |
 | DOC-002 | PDF/PNG 空间编辑首期文档调整 | 已验收（文档）；三份 Spatial 目标文档及项目基线已调整，见 [任务记录](tasks/DOC-002-spatial-canvas-first-phase.md) | 本地链接、JSON 示例、契约一致性及差异检查通过；不代表功能实现 | P0 |
 | DOC-003 | 几何、接口/存储、确认失效和真实样本附件 | 已验收（文档/契约结构）；四份附件、API schema/报文及待填样本清单，见 [任务记录](tasks/DOC-003-spatial-contract-attachments.md) | 文档链接、schema 正反用例、一致性检查通过；真实识别/SQL/业务代码未实施 | P0 |

@@ -169,7 +169,7 @@ export function reviewScene(zones: ZoneObject[], plan: FloorPlanAnalysisResponse
   const scale = calibrated ? zones[0]?.mmPerSourceUnit ?? 1 : 1
   const evidenceKind = zones[0]?.evidenceKind ?? 'ESTIMATED'
   return {
-    schemaVersion: '1.2', sceneId: plan?.analysisId ?? 'LOCAL-DRAFT', projectId: 'OFFICE-PROJECT-001',
+    schemaVersion: '1.2', sceneId: plan?.analysisId ?? 'LOCAL-DRAFT', projectId: useWorkspaceStore().currentFloorId,
     revision: 1, scopeRevision: 1, geometryPolicyVersion: 'GEOM-P1-1', sourcePageId: plan?.imageId ?? 'PAGE',
     sourceSceneId: plan?.analysisId ?? null, failedRunId: null,
     workingCoordinateSystem: calibrated ? 'WORLD_MM' : 'SOURCE_PAGE',
