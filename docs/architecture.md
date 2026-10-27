@@ -169,7 +169,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 本轮 `/canvas` 的空间核对使用 `SpaceReview` / `SpatialCanvas`：来源范围和设计多边形共用相机，矩形毫米编辑与异形顶点拖动更新 polygon，面积从几何派生。旧 `CanvasBoard` 保留给单空间排版，仅渲染当前 designZoneId 的空间、家具及显式归属的局部内容，单空间不绘制整层底图。视图范围取当前多边形，内容偏移、指针逆变换与适屏共用世界原点；负坐标与远坐标不需平移设计数据。整层底图及全部空间仍在核对总览展示，旧 px 草稿不会被猜测为已校准。
 
-设计页 `DesignSpaceSwitcher` 提供下拉与前后空间选择，通过既有 `enterDesign` 更新 designZoneId/activeZoneId 并同步 URL，画布按目标重新适屏；仅清除选择、工具、逐件放置预览与当前弹窗，保留各空间家具和确认。排版状态从现有家具/确认数据派生，无新后端接口，见 [LAYOUT-009](tasks/LAYOUT-009-design-space-switcher.md)。
+`DesignSpaceSwitcher` 作为当前楼层下的空间列表提供直接选择与前后切换，通过既有 `enterDesign` 更新 designZoneId/activeZoneId 并同步 URL，画布按目标重新适屏；仅清除选择、工具、逐件放置预览与当前弹窗，保留各空间家具和确认。每个楼层的空间折叠状态随工作区选择本地持久化；排版状态从现有家具/确认数据派生，无新后端接口，见 [LAYOUT-009](tasks/LAYOUT-009-design-space-switcher.md)。
 空间核对的自由变换以设计顶点为输入，八点框只提供变换控制，不替换凹多边形。平移、缩放和单边推拉经 `contourTransform` 计算，同一 `updateZonePolygon` 校验及保存；拖动预览与抬起提交分开，视图缩放仅更新相机，见 [GEOM-007](tasks/GEOM-007-free-contour-transform.md)。
 兼容数据仍通过 `ZoneObject` 的可选 `reviewUnit/sourceAnalysisId/sourceYAxis/sourcePolygon/mmPerSourceUnit/evidenceKind` 和 Office Canvas JSON 保存。图像坐标 Y 向下；CAD 原始范围 Y 向上，导入时把设计副本转为 Y 向下并记录 sourceYAxis，原始 FloorPlan 不改方向。渲染适配到 WORLD_MM 时统一翻转 Y。
 当前单位模块共享 `manualFurniture` 可见目录与 `ManualFurnitureGlyph`；新实例使用 `furnitureTemplateId` 记录家具图例，`productId` 保留兼容字段，未绑定商品时为空串。模块规格及实例宽深采用毫米，沿边旋转的占地与物件实际宽深分别处理；旧商品绑定实例只做显示适配，不重写保存数据。

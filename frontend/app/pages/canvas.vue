@@ -118,10 +118,6 @@ watch(() => store.designZoneId, (id, oldId) => {
   }
 })
 
-function switchDesignSpace(zoneId: string) {
-  if (zoneId !== store.designZoneId) store.enterDesign(zoneId)
-}
-
 function openSubmit() {
   store.submitCanvas()
   showSubmit.value = true
@@ -135,15 +131,10 @@ watch(() => store.canEnterLayout, (confirmed) => {
   if (!confirmed && store.canvasMode === 'design') store.setCanvasMode('overview')
 })
 
-
-const title = computed(() => mode.value === 'design' ? '无限画布 · 单空间设计' : '无限画布 · 空间核对')
-const subtitle = computed(() => mode.value === 'design'
-  ? '选择要排版的空间，分别完成家具布局与选品；切换空间会保留已有排版。'
-  : '校准尺寸、划分办公功能区、标注整体需求，完成后进入单空间设计。')
 </script>
 
 <template>
-  <section v-if="entryBlocked" class="flex h-full flex-col gap-4 overflow-auto rounded-2xl border border-line bg-white p-6" data-testid="drawing-entry">
+  <section v-if="entryBlocked" class="flex h-full flex-col gap-4 overflow-auto rounded-none border border-line bg-white p-6" data-testid="drawing-entry">
     <h1 class="text-xl font-bold">当前图纸：{{ drawing?.name || entryResult?.sourceName || '图纸' }}</h1>
     <p v-if="entryError" role="alert" class="text-sm text-red-700">{{ entryError }}</p>
     <p v-else-if="entryLoading" class="text-sm text-muted">正在准备当前图纸的空间，识别完成后进入编辑。</p>
@@ -151,34 +142,19 @@ const subtitle = computed(() => mode.value === 'design'
     <RecognitionProgress v-if="entryLoading || entryResult?.processing" :progress="entryResult?.processing" :pending="entryLoading" />
     <img v-if="entryResult?.previewUrl" :src="sameOriginAssetUrl(entryResult.previewUrl)" alt="当前图纸预览" class="min-h-0 max-h-[60vh] w-full object-contain">
     <div class="flex gap-3">
-      <NuxtLink to="/" class="rounded-lg border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
-      <button v-if="entryError && targetAnalysisId" class="rounded-lg border border-line px-4 py-2 text-sm" @click="entryRetry++">重试查询当前图纸</button>
+      <NuxtLink to="/" class="rounded-none border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
+      <button v-if="entryError && targetAnalysisId" class="rounded-none border border-line px-4 py-2 text-sm" @click="entryRetry++">重试查询当前图纸</button>
     </div>
   </section>
   <OfficeCanvasSpaceReview v-else-if="mode === 'overview'" />
-  <div v-else class="flex flex-col h-full gap-4">
-    <div class="flex flex-wrap items-start justify-between gap-3 flex-none">
-      <div>
-        <h1 class="text-[25px] font-bold tracking-tight mb-2">{{ title }}</h1>
-        <p class="text-xs text-muted">{{ subtitle }}</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <button v-if="mode === 'design'" class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#f7f3ef]" @click="store.setCanvasMode('overview')">
-          <AppIcon name="arrowLeft" size="3.5" />
-          <span>返回空间总览</span>
-        </button>
-      </div>
-    </div>
-
-    <OfficeCanvasDesignSpaceSwitcher :zone-id="designZoneId" @select="switchDesignSpace" />
-
-    <div class="flex-1 min-h-0 flex gap-3">
+  <div v-else class="flex h-full flex-col">
+    <div class="flex-1 min-h-0 flex">
       <!-- Left sidebar -->
       <OfficeCanvasOverviewSidebar v-if="mode === 'overview'" v-model="selectedId" />
       <OfficeCanvasDesignLayoutSidebar v-else @preview="layoutPreview = $event" />
 
       <!-- Canvas -->
-      <div class="flex-1 min-w-0 flex flex-col bg-white border border-line rounded-2xl shadow-panel overflow-hidden">
+      <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-y border-r border-line bg-white">
         <OfficeCanvasToolbar
           v-model:tool="tool"
           v-model:show-dimensions="showDimensions"
@@ -201,10 +177,10 @@ const subtitle = computed(() => mode.value === 'design'
             <span class="flex items-center gap-1.5">参考图 <strong class="text-bronze text-sm">{{ store.refCount }}</strong> 张</span>
           </div>
           <div class="flex items-center gap-2">
-            <button v-if="mode === 'overview'" class="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 shadow-sm" @click="openSubmit">
+            <button v-if="mode === 'overview'" class="px-4 py-2 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 shadow-sm" @click="openSubmit">
               整理需求并提交 <AppIcon name="arrowRight" size="3.5" />
             </button>
-            <button v-else class="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 shadow-sm" @click="store.setCanvasMode('overview')">
+            <button v-else class="px-4 py-2 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 shadow-sm" @click="store.setCanvasMode('overview')">
               完成当前空间 <AppIcon name="check" size="3.5" />
             </button>
           </div>
@@ -213,14 +189,14 @@ const subtitle = computed(() => mode.value === 'design'
 
       <!-- Right sidebar -->
       <OfficeCanvasDesignSidebar v-if="mode === 'design'" :selected-id="selectedId" />
-      <aside v-else :class="['flex-none bg-white border border-line rounded-2xl shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
+      <aside v-else :class="['flex-none bg-white border border-line rounded-none shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
         <div v-show="!overviewCollapsed" class="w-72 h-full p-4 flex flex-col gap-4">
           <div class="relative flex items-center justify-between">
             <div class="flex items-center gap-2 text-[15px] font-bold">
               <AppIcon name="documentText" size="4" />
               <span>结构化需求</span>
             </div>
-            <button class="absolute top-0 right-0 p-1 rounded hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="overviewCollapsed = true">
+            <button class="absolute top-0 right-0 p-1 rounded-none hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="overviewCollapsed = true">
               <AppIcon name="arrowRight" size="4" />
             </button>
           </div>
@@ -242,7 +218,7 @@ const subtitle = computed(() => mode.value === 'design'
           </div>
         </div>
         <div v-show="overviewCollapsed" class="w-12 h-full flex flex-col items-center py-3">
-          <button class="p-1.5 rounded-lg hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="overviewCollapsed = false">
+          <button class="p-1.5 rounded-none hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="overviewCollapsed = false">
             <AppIcon name="arrowLeft" size="5" />
           </button>
           <div class="text-[10px] text-muted tracking-widest" style="writing-mode: vertical-rl;">

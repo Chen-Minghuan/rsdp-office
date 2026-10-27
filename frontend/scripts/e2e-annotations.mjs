@@ -48,7 +48,7 @@ try {
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
-    await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+    await page.getByTestId('apply-layout').waitFor()
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     await assertFit(id)
   }
@@ -77,9 +77,9 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
   await enter('ROOM-L')
-  const spaceSelect = page.getByRole('combobox', { name: '选择排版空间', exact: true })
-  assert.equal(await spaceSelect.inputValue(), 'ROOM-L')
-  assert.deepEqual(await spaceSelect.locator('option').allTextContents(), ['独立 L 形办公室 · 待确认 · 1 件', '其他会议室 · 待确认 · 1 件'])
+  const spaceSelect = page.getByTestId('design-space-switcher')
+  assert.equal(await spaceSelect.locator('[data-space-id="ROOM-L"]').getAttribute('aria-current'), 'page')
+  assert.deepEqual(await spaceSelect.locator('[data-space-id]').evaluateAll(nodes => nodes.map(node => [node.getAttribute('data-space-id'), node.textContent.replace(/\s+/g, ' ').trim()])), [['ROOM-L', '独立 L 形办公室待确认 · 1 件'], ['ROOM-B', '其他会议室待确认 · 1 件']])
   assert.equal(await page.getByRole('button', { name: '上一个空间', exact: true }).isDisabled(), true)
   const initial = await state()
   assert.equal(await canvas().locator('polygon.board-element').count(), 1)
@@ -107,6 +107,7 @@ try {
   assert.deepEqual((await state()).objects, initial.objects, '缩放、适屏、调整视口均不改动几何')
 
   // Pointer coordinates must stay in world mm even with a negative world origin.
+  await page.getByRole('button', { name: '家具吸附', exact: true }).click()
   const furniture = canvas().locator('[data-id="F-L"]')
   const from = await furniture.boundingBox()
   const zoom = from.width / 1200
@@ -168,7 +169,7 @@ try {
     { id: note.id, text: '靠窗预留 600 mm\n第二行说明' })
   assert.equal((await state()).objects.find(object => object.id === note.id).text, '靠窗预留 600 mm\n第二行说明')
   // Local annotations stay with their room and survive refresh.
-  await spaceSelect.selectOption('ROOM-B')
+  await spaceSelect.locator('[data-space-id="ROOM-B"]').click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-B')
   await assertFit('ROOM-B')
   assert.equal(await noteLocator.count(), 0)

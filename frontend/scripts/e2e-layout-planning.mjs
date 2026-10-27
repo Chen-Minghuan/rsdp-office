@@ -129,7 +129,7 @@ try {
   await page.getByRole('button', { name: '自动推荐', exact: true }).click()
   await page.screenshot({ path: (process.env.OUT_DIR || 'C:/Users/cmh/AppData/Local/Temp') + '/rsdp-layout-planning.png' })
   const savedMeeting = (await state()).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'MEETING-ROOM')
-  await page.getByRole('combobox', { name: '选择排版空间', exact: true }).selectOption('OPEN-ROOM')
+  await page.locator('[data-space-id="OPEN-ROOM"]').click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'OPEN-ROOM')
   assert.equal(await page.getByRole('spinbutton', { name: '目标人数', exact: true }).inputValue(), '0')
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()

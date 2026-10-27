@@ -48,7 +48,7 @@ try {
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
-    await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+    await page.getByTestId('apply-layout').waitFor()
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     await assertFit(id)
   }
@@ -77,16 +77,22 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
   await enter('ROOM-L')
-  const spaceSelect = page.getByRole('combobox', { name: '选择排版空间', exact: true })
-  assert.equal(await spaceSelect.inputValue(), 'ROOM-L')
-  assert.deepEqual(await spaceSelect.locator('option').allTextContents(), ['独立 L 形办公室 · 待确认 · 1 件', '其他会议室 · 待确认 · 1 件'])
+  const spaceSelect = page.getByTestId('design-space-switcher')
+  assert.equal(await spaceSelect.locator('[data-space-id="ROOM-L"]').getAttribute('aria-current'), 'page')
+  assert.deepEqual(await spaceSelect.locator('[data-space-id]').evaluateAll(nodes => nodes.map(node => [node.getAttribute('data-space-id'), node.textContent.replace(/\s+/g, ' ').trim()])), [['ROOM-L', '独立 L 形办公室待确认 · 1 件'], ['ROOM-B', '其他会议室待确认 · 1 件']])
   assert.equal(await page.getByRole('button', { name: '上一个空间', exact: true }).isDisabled(), true)
+  await page.getByRole('button', { name: '折叠默认楼层空间', exact: true }).click()
+  assert.equal(await spaceSelect.isVisible(), false)
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal(await spaceSelect.isVisible(), false)
+  await page.getByRole('button', { name: '展开默认楼层空间', exact: true }).click()
+  assert.equal(await spaceSelect.locator('[data-space-id="ROOM-L"]').getAttribute('aria-current'), 'page')
   const initial = await state()
   assert.equal(await canvas().locator('polygon.board-element').count(), 1)
   assert.equal((await canvas().locator('polygon.board-element').getAttribute('points')).split(' ').length, 6, 'L 形不能变成包围盒')
   assert.equal(await canvas().locator('img').count(), 0, '不绘制整层底图')
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-L','ROOM-L'])
-  assert.equal(await canvas().locator('line').count(), 0)
+  assert.equal(await canvas().locator('line[marker-end="url(#arrowHead)"]').count(), 0)
   await page.getByText('尺寸（毫米）', { exact: true }).waitFor()
   await page.screenshot({ path: outDir + '/01-single-room.png' })
 
@@ -107,6 +113,7 @@ try {
   assert.deepEqual((await state()).objects, initial.objects, '缩放、适屏、调整视口均不改动几何')
 
   // Pointer coordinates must stay in world mm even with a negative world origin.
+  await page.getByRole('button', { name: '家具吸附', exact: true }).click()
   const furniture = canvas().locator('[data-id="F-L"]')
   const from = await furniture.boundingBox()
   const zoom = from.width / 1200
@@ -130,16 +137,18 @@ try {
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   const confirmedFurniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L')
   assert.ok(confirmedFurniture.every(object => object.layoutConfirmed))
-  assert.match(await spaceSelect.locator('option[value="ROOM-L"]').textContent(), /已确认 · 1 件/)
+  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 1 件/)
 
   // Switch through the visible selector without leaving the design page.
-  await spaceSelect.selectOption('ROOM-B')
+  await spaceSelect.locator('[data-space-id="ROOM-B"]').click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-B')
   await assertFit('ROOM-B')
   assert.equal(await page.getByRole('button', { name: '下一个空间', exact: true }).isDisabled(), true)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   assert.equal(await canvas().locator('img').count(), 0)
   // Applying a layout in the newly selected room never replaces the previous room's furniture.
+  await page.getByTestId('unit-module-catalog').locator('summary').filter({ hasText: /^职员桌/ }).click()
+  await page.getByTestId('unit-module-catalog').locator('[data-module-id="desk-l"]').click()
   await page.getByTestId('apply-layout').click()
   assert.ok((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-B').length > 1)
   assert.deepEqual((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L'), confirmedFurniture)
@@ -147,12 +156,12 @@ try {
   assert.deepEqual((await state()).objects.find(object => object.id === 'F-B'), initial.objects.find(object => object.id === 'F-B'))
 
   // An unfinished placement must not carry across rooms; previous/next retain saved layouts.
-  await page.getByRole('button', { name: '添加到画布', exact: true }).click()
+  await page.getByRole('button', { name: '逐件添加', exact: true }).click()
   await page.getByRole('button', { name: '结束逐件添加', exact: true }).waitFor()
   await page.getByRole('button', { name: '上一个空间', exact: true }).click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-L')
   await assertFit('ROOM-L')
-  await page.getByRole('button', { name: '添加到画布', exact: true }).waitFor()
+  await page.getByRole('button', { name: '逐件添加', exact: true }).waitFor()
   assert.equal(await page.getByTestId('furniture-placement-preview').count(), 0)
   await page.getByRole('button').filter({ has: page.getByText('重新调整排版', { exact: true }) }).waitFor()
   assert.deepEqual((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L'), confirmedFurniture)
@@ -164,11 +173,11 @@ try {
   await page.screenshot({ path: outDir + '/02-switched-room.png' })
   await page.reload({ waitUntil: 'networkidle' })
   await assertFit('ROOM-B')
-  assert.equal(await spaceSelect.inputValue(), 'ROOM-B')
-  assert.match(await spaceSelect.locator('option[value="ROOM-L"]').textContent(), /已确认 · 1 件/)
+  assert.equal(await spaceSelect.locator('[data-space-id="ROOM-B"]').getAttribute('aria-current'), 'page')
+  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 1 件/)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.equal(await page.locator('[data-layer="design"]>g').count(), 2)
   assert.equal(await page.locator('[data-layer="underlay"] image').count(), 1)
   const final = await state()
@@ -177,7 +186,7 @@ try {
   assert.deepEqual(final.objects.find(object => object.id === 'F-B'), initial.objects.find(object => object.id === 'F-B'))
   assert.equal(final.floorPlan.previewUrl, source.previewUrl)
   assert.deepEqual(errors, [])
-  console.log('单空间 UI 通过：房间/家具隔离、负坐标 L 形/远坐标适屏、缩放/拖动/局部标注、下拉及前后空间切换、其他空间独立自动排版、确认保留、放置取消、URL/刷新/返回总览及数据保留。全部 API 模拟。')
+  console.log('单空间 UI 通过：房间/家具隔离、负坐标 L 形/远坐标适屏、缩放/拖动/局部标注、楼层树折叠及前后空间切换、其他空间独立自动排版、确认保留、放置取消、URL/刷新/返回总览及数据保留。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

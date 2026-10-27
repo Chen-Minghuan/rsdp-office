@@ -65,7 +65,7 @@ try {
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.getByRole('combobox', { name: '选择排版空间', exact: true }).selectOption('OPEN-ROOM')
+  await page.locator('[data-space-id="OPEN-ROOM"]').click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'OPEN-ROOM')
   const cases = [
     ['一字职员台', '一字单排', 6, 'straight-desk-row'],

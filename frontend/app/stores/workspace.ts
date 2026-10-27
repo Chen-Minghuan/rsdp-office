@@ -10,6 +10,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     currentProjectId: DEFAULT_WORKSPACE_ID,
     currentFloorId: DEFAULT_WORKSPACE_ID,
     collapsedProjectIds: [] as string[],
+    collapsedFloorIds: [] as string[],
     initialized: false,
     loading: false,
     switching: false,
@@ -23,7 +24,7 @@ export const useWorkspaceStore = defineStore('workspace', {
   },
   actions: {
     rememberSelection() {
-      if (import.meta.client) localStorage.setItem(SELECTION_KEY, JSON.stringify({ projectId: this.currentProjectId, floorId: this.currentFloorId, collapsed: this.collapsedProjectIds }))
+      if (import.meta.client) localStorage.setItem(SELECTION_KEY, JSON.stringify({ projectId: this.currentProjectId, floorId: this.currentFloorId, collapsed: this.collapsedProjectIds, collapsedFloors: this.collapsedFloorIds }))
     },
     restoreSelection() {
       if (!import.meta.client) return
@@ -38,6 +39,7 @@ export const useWorkspaceStore = defineStore('workspace', {
           this.currentProjectId = floor.projectId
         }
         if (Array.isArray(saved?.collapsed)) this.collapsedProjectIds = saved.collapsed.filter((id: unknown): id is string => typeof id === 'string')
+        if (Array.isArray(saved?.collapsedFloors)) this.collapsedFloorIds = saved.collapsedFloors.filter((id: unknown): id is string => typeof id === 'string')
       } catch { /* Ignore an invalid local selection and use the first available floor. */ }
     },
     async init() {
@@ -79,6 +81,12 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.collapsedProjectIds = this.collapsedProjectIds.includes(projectId)
         ? this.collapsedProjectIds.filter(id => id !== projectId)
         : [...this.collapsedProjectIds, projectId]
+      this.rememberSelection()
+    },
+    toggleFloorSpaces(floorId: string) {
+      this.collapsedFloorIds = this.collapsedFloorIds.includes(floorId)
+        ? this.collapsedFloorIds.filter(id => id !== floorId)
+        : [...this.collapsedFloorIds, floorId]
       this.rememberSelection()
     },
     async createProject(payload: CreateProjectRequest) {

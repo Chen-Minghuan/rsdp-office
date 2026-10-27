@@ -46,7 +46,7 @@ try {
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   const errors=[]
   page.on('pageerror',error=>errors.push(error.message))
-  await page.getByRole('combobox',{name:'选择排版空间',exact:true}).selectOption('OPEN-ROOM')
+  await page.locator('[data-space-id="OPEN-ROOM"]').click()
   await page.waitForURL(url=>url.searchParams.get('zoneId')==='OPEN-ROOM')
   await catalog.locator('[data-module-id="desk-l"]').click()
   await page.getByRole('tab',{name:'选择排布',exact:true}).click()
