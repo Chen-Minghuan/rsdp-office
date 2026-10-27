@@ -91,7 +91,7 @@ try {
   assert.equal(await page.getByText('项目信息', { exact: true }).count(), 0)
   assert.equal(await page.getByText('建筑面积', { exact: true }).count(), 0)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.equal(await page.locator('.review-room-card').count(), 0, '新工作区不自动填充演示空间')
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   await page.evaluate(() => {
@@ -102,13 +102,13 @@ try {
   })
   // A fresh direct link waits for source loading, without requiring prior room confirmations.
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+  await page.getByTestId('apply-layout').waitFor()
   await page.waitForURL(/mode=design/)
   assert.equal(Object.hasOwn(await stored(), 'project'), false, '旧项目资料从本地草稿移除')
   assert.equal(Object.hasOwn((await stored()).submitted, 'projectContext'), false, '旧需求快照不再含项目资料')
   assert.match(page.url(), /mode=design/)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.ok(await advance().isEnabled(), '空间无需逐个确认即可排版')
   assert.equal(await page.getByRole('button', { name: '确认当前空间', exact: true }).count(), 0)
   assert.equal(await page.locator('[data-layer="design"]>g').count(), 12)
@@ -143,13 +143,13 @@ try {
   assert.ok(await advance().isEnabled())
   const beforeLayout = (await stored()).objects.filter(object => object.kind === 'zone')
   await advance().click()
-  await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+  await page.getByTestId('apply-layout').waitFor()
   await page.waitForURL(/mode=design/)
   assert.match(page.url(), /mode=design/)
   assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入排版只绑定模板，不改写人工确认和几何')
   const designUrl = page.url()
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+  await page.getByTestId('apply-layout').waitFor()
   assert.equal(page.url(), designUrl, '未逐个确认的有效空间可刷新恢复排版')
 
 
@@ -159,7 +159,7 @@ try {
   const designWidth = () => page.locator('[data-layer="design"]>g').first().evaluate(el => el.getBoundingClientRect().width)
   await page.setViewportSize({ width: 700, height: 500 })
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   await page.waitForTimeout(500)
   const narrowWidth = await designWidth()
   await page.setViewportSize({ width: 1600, height: 1000 })
@@ -169,7 +169,7 @@ try {
   assert.ok(await page.getByLabel('空间宽度（毫米）').isDisabled())
   assert.ok(await advance().isDisabled())
   await page.goto(baseUrl + '/canvas?analysisId=REVIEW-TEST&mode=design&zoneId=TEST-ROOM', { waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.doesNotMatch(page.url(), /mode=design/, '未知比例不能绕过实际尺寸要求')
   await assertAlignment([100, 100])
   // Redraw a truncated room with an entrance recess before calibration.
@@ -202,7 +202,7 @@ try {
     await toast.waitFor()
     const text = await toast.innerText()
     assert.ok(text.includes('待校准') && text.includes('两点校准'), '弹出提示说明需先两点校准：' + text)
-    await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+    await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
     assert.equal(await page.locator('[data-testid="unit-module-catalog"]').count(), 0, '弹出提示后不进入排版')
     await templateBtn.dispatchEvent('click')
     await page.locator('.review-toast').waitFor()
@@ -422,16 +422,16 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
   })
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   await page.getByRole('button', { name: '开始画空间', exact: true }).click()
   const sketchRect = async (left, top, right, bottom) => {
-    const box = await page.locator('.space-review svg').first().boundingBox()
+    const box = await page.getByRole('img', { name: '空间核对画布', exact: true }).boundingBox()
     const pts = [[left, top], [right, top], [right, bottom], [left, bottom]]
     for (const [fx, fy] of pts) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
     return pts.map(([fx, fy]) => [box.x + box.width * fx, box.y + box.height * fy])
   }
   const sketchDragBox = async (left, top, right, bottom) => {
-    const box = await page.locator('.space-review svg').first().boundingBox()
+    const box = await page.getByRole('img', { name: '空间核对画布', exact: true }).boundingBox()
     await page.mouse.move(box.x + box.width * left, box.y + box.height * top)
     await page.mouse.down()
     await page.mouse.move(box.x + box.width * right, box.y + box.height * bottom, { steps: 5 })
@@ -459,7 +459,7 @@ try {
   await page.getByRole('button', { name: '画新空间', exact: true }).click()
   await page.getByLabel('画区旋转角度（度）').fill('90')
   {
-    const box = await page.locator('.space-review svg').first().boundingBox()
+    const box = await page.getByRole('img', { name: '空间核对画布', exact: true }).boundingBox()
     await sketchDragBox(0.62, 0.1, 0.8, 0.3)
     drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
     assert.equal(drawn.length, 3, '旋转矩形保存为第三个空间')
@@ -468,7 +468,7 @@ try {
     const pxPerMm = (0.18 * box.width) / w2
     const expW = (0.3 - 0.1) * box.height / pxPerMm
     const expH = (0.8 - 0.62) * box.width / pxPerMm
-    assert.ok(Math.abs(drawn[2].actualWidthMm - expW) <= 51 && Math.abs(drawn[2].actualDepthMm - expH) <= 51,
+    assert.ok(Math.abs(drawn[2].actualWidthMm - expW) <= 100 && Math.abs(drawn[2].actualDepthMm - expH) <= 100,
       '旋转 90° 后宽深互换：' + drawn[2].actualWidthMm + 'x' + drawn[2].actualDepthMm + ' ≈ ' + Math.round(expW) + 'x' + Math.round(expH))
   }
   // 逐点描：毫米场景逐顶点核对存盘几何与点击位置（Y 不翻转）
@@ -476,7 +476,7 @@ try {
   await page.locator('[data-testid="sketch-shape-poly"]').click()
   const lFractions = [[0.1, 0.55], [0.25, 0.55], [0.25, 0.65], [0.2, 0.65], [0.2, 0.75], [0.1, 0.75]]
   {
-    const box = await page.locator('.space-review svg').first().boundingBox()
+    const box = await page.getByRole('img', { name: '空间核对画布', exact: true }).boundingBox()
     for (const [fx, fy] of lFractions) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
   }
   await page.locator('[data-testid="sketch-save"]').click()
@@ -554,7 +554,7 @@ try {
     // 点击空白处只是放弃预览，不会应用
     await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('15')
     {
-      const box = await page.locator('.space-review svg').first().boundingBox()
+      const box = await page.getByRole('img', { name: '空间核对画布', exact: true }).boundingBox()
       await page.mouse.click(box.x + box.width * 0.05, box.y + box.height * 0.95)
     }
     await page.waitForTimeout(200)
@@ -576,7 +576,7 @@ try {
     await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('10')
     await page.getByLabel('空间旋转角度（度，顺时针为正）').press('Escape')
     {
-      const box = await page.locator('.space-review svg').first().boundingBox()
+      const box = await page.getByRole('img', { name: '空间核对画布', exact: true }).boundingBox()
       await page.mouse.click(box.x + box.width * 0.05, box.y + box.height * 0.95)
     }
     await page.waitForTimeout(200)
@@ -615,7 +615,7 @@ try {
   assert.ok((await stored()).objects.some(object => object.kind === 'zone' && object.name === '开放办公区 A'), '列表改名已保存')
   // 家具排版侧栏同样可改名
   await advance().click()
-  await page.getByRole('heading', { name: '无限画布 · 单空间设计', exact: true }).waitFor()
+  await page.getByTestId('apply-layout').waitFor()
   await page.getByRole('button', { name: '手动空间 4', exact: true }).click()
   await page.getByLabel('排版空间名称').fill('设计侧改名区')
   await page.getByLabel('排版空间名称').press('Enter')

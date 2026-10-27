@@ -171,7 +171,6 @@ const originalGeometries = computed(() => !showOriginal.value ? [] : store.zones
 })))
 const scaleWidth = computed(() => 2000 * camera.value.zoom)
 const zoomPercent = computed(() => Math.round(camera.value.zoom / fittedZoom.value * 100))
-const saveLabel = computed(() => store.syncState === 'saving' ? '保存中…' : store.syncState === 'error' ? '保存失败' : '✓ 本地草稿已保存')
 
 watch(tool, () => { labelEditing.value = false })
 watch(selectedId, () => { labelEditing.value = false })
@@ -669,27 +668,12 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
 
 <template>
   <div class="space-review">
-    <header class="review-topbar">
-      <NuxtLink to="/" class="review-brand"><b>R</b><strong>RSDP</strong><i></i><span>办公空间设计</span></NuxtLink>
-      <div class="review-topbar-right"><NuxtLink to="/">项目工作台 / 办公空间</NuxtLink><span class="local-save" :class="{ error: store.syncState === 'error', saving: store.syncState === 'saving' }" :title="store.syncError || undefined">{{ saveLabel }}</span><NuxtLink to="/products" class="designer-avatar" title="商品资源">设计</NuxtLink></div>
-    </header>
-    <section class="review-intro">
-      <div><h1>无限画布 · 空间核对</h1><p>空间可直接用于家具排版；需复核处会提示，发现不符可随时修改。</p></div>
-      <nav aria-label="项目设计步骤" class="review-steps">
-        <NuxtLink to="/" class="done"><b>✓</b><span>图纸识别</span></NuxtLink><i></i>
-        <span class="current" aria-current="step"><b>2</b><span>空间编辑</span></span><i></i>
-        <button :disabled="!store.canEnterLayout || !!tracing" @click="advance"><b>3</b><span>家具排版</span></button><i></i>
-        <span><b>4</b><span>商品推荐</span></span><i></i><span><b>5</b><span>方案与效果图</span></span>
-      </nav>
-    </section>
     <div v-if="store.floorPlanError" class="review-error" role="alert">{{ store.floorPlanError }}</div>
     <div class="review-columns">
       <aside class="review-project review-panel">
         <div class="project-section">
           <div class="section-heading"><h2>项目与空间</h2><small>{{ workspace.currentFloorName }}</small></div>
           <ProjectFloorTree compact />
-          <div class="review-project-card"><h3>{{ store.floorPlan?.sourceName || store.drawingName }}</h3><p>{{ calibrated ? '图纸比例已校准，尺寸单位 mm' : '比例待校准，可先核对空间轮廓' }}</p></div>
-          <div class="review-source-file"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板' : store.floorPlan?.inputMode === 'pdf' ? 'PDF' : store.floorPlan?.inputMode === 'cad' ? 'CAD' : isExample ? 'SVG' : 'PNG' }}</span><div><strong>{{ store.floorPlan?.sourceName || '待关联原始图纸' }}</strong><small>{{ isExample ? '演示底图 · 示例几何' : store.floorPlan?.inputMode === 'manual' ? '空间模板 · 布局设计副本' : '原始底图 · 当前识别页' }}</small></div></div>
         </div>
         <div class="review-room-list">
           <div class="section-heading"><h4>识别空间</h4><small>{{ zones.length }} 个</small></div>
@@ -714,7 +698,6 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         <button class="review-example-button" :disabled="!!tracing" @click="loadExample">加载工装示例（可撤销）</button>
       </aside>
       <section class="review-canvas-panel review-panel">
-        <div v-if="store.spaceTemplate" class="template-layout-link"><span>{{ store.spaceTemplate.name }} · {{ store.spaceTemplateCurrent ? store.spaceTemplate.storage === 'SAVED' ? '模板已保存' : '本地模板' : '空间已修改，模板需更新' }}</span><button @click="showTemplate = true">查看模板</button></div>
         <div class="review-toolbar">
           <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留">← 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
@@ -835,7 +818,6 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       </SpatialInspector>
     </div>
     <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
-    <footer class="review-page-footer"><span>空间编辑 / 原图对照 → 比例校准 → 按需修正 → 家具排版</span><span>{{ isExample ? '交互示例 · 非真实识别结果' : '滚轮缩放 · 中键平移 · Delete 删除选中空间' }}</span></footer>
   </div>
 </template>
 

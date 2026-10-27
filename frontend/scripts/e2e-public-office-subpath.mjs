@@ -50,7 +50,7 @@ try {
   // 工作区时进入空间核对，空工作区显示图纸进入守卫，两者均为有效落地。
   await page.goto(baseUrl + 'canvas', { waitUntil: 'networkidle' })
   assert.match(new URL(page.url()).pathname, /^\/office\/canvas/)
-  await page.getByTestId('drawing-entry').or(page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true })).first().waitFor()
+  await page.getByTestId('drawing-entry').or(page.getByRole('img', { name: '空间核对画布', exact: true })).first().waitFor()
   // 云端场景经 /office/api 加载成功即证明子路径 API 前缀生效；底图链接须落在子路径。
   // 底图来自识别时后端按请求地址写入的绝对 URL：旧数据指向 8081 入口，
   // 经域名新识别的数据会因 X-Forwarded-Prefix 落在 /office/ 下；两者都应可取。

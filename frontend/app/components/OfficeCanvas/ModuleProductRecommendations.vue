@@ -97,16 +97,16 @@ async function choose(candidate: ModuleProductCandidate) {
     <div class="p-3 border-b border-line space-y-2 flex-none">
       <div class="flex items-center justify-between"><h3 class="text-sm font-bold">按模块尺寸推荐</h3><button class="text-xs text-bronze" :disabled="loading || applying" @click="refresh">重新匹配</button></div>
       <label class="block text-[11px] text-muted">匹配模块
-        <select aria-label="匹配单位模块" :value="group?.item.id" :disabled="applying" class="mt-1 w-full rounded-lg border border-line bg-white px-2 py-2 text-xs" @change="moduleId = ($event.target as HTMLSelectElement).value">
+        <select aria-label="匹配单位模块" :value="group?.item.id" :disabled="applying" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="moduleId = ($event.target as HTMLSelectElement).value">
           <option v-for="entry in groups" :key="entry.key" :value="entry.item.id">{{ entry.item.label || '单位模块' }} · {{ number(entry.item.w) }} × {{ number(entry.item.h) }} mm · {{ entry.ids.length }} 件</option>
         </select>
       </label>
-      <div v-if="module" class="rounded-lg bg-[#f7f3ee] p-2 text-xs leading-relaxed">商品宽 ≤ {{ number(module.w) }} mm，深 ≤ {{ number(module.h) }} mm<br><span class="text-[10px] text-muted">按实际毫米尺寸向下兼容，不按面积代替宽深比较</span></div>
+      <div v-if="module" class="rounded-none bg-[#f7f3ee] p-2 text-xs leading-relaxed">商品宽 ≤ {{ number(module.w) }} mm，深 ≤ {{ number(module.h) }} mm<br><span class="text-[10px] text-muted">按实际毫米尺寸向下兼容，不按面积代替宽深比较</span></div>
       <div class="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
         <label><input v-model="allowRotation" type="checkbox" :disabled="applying"> 允许旋转 90°</label>
         <label v-if="(group?.ids.length || 0) > 1"><input v-model="applyToSameModules" type="checkbox" :disabled="applying"> 同步 {{ group?.ids.length }} 个同规格模块</label>
       </div>
-      <div class="flex gap-1 flex-wrap"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key">{{ entry.name }}<span v-if="result"> ({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
+      <div class="flex gap-1 flex-wrap"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key">{{ entry.name }}<span v-if="result"> ({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
       <p class="text-[10px] text-muted">贴合度取宽、深占比中较低值；档位仅供排序；仅查询上架且审核通过的规格。高度、结构与家具用途请结合商品详情核对。</p>
     </div>
     <div class="flex-1 overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
@@ -116,14 +116,14 @@ async function choose(candidate: ModuleProductCandidate) {
       <p v-if="feedback" role="status" class="text-xs text-green-700 p-2 bg-green-50 rounded">{{ feedback }}</p>
       <template v-if="result && !loading">
         <p v-if="result.missingDimensions" class="text-[10px] text-muted">{{ result.missingDimensions }} 个在售规格缺少可靠宽深，待核对后参与匹配。</p>
-        <article v-for="candidate in candidates" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-xl p-2.5 space-y-1.5">
+        <article v-for="candidate in candidates" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-none p-2.5 space-y-1.5">
           <div class="flex gap-2">
-            <img v-if="candidate.product.imageUrl" :src="sameOriginAssetUrl(candidate.product.imageUrl)" alt="" class="w-14 h-14 object-contain rounded bg-[#f7f4f0]">
+            <img v-if="candidate.product.imageUrl" :src="sameOriginAssetUrl(candidate.product.imageUrl)" alt="" class="w-14 h-14 object-contain rounded-none bg-[#f7f4f0]">
             <div class="min-w-0"><div class="text-xs font-bold">{{ candidate.product.name }}</div><div class="text-[10px] text-muted">{{ candidate.product.variant }}</div><div class="text-xs mt-1">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</div></div>
           </div>
           <div class="text-[10px] text-bronze">{{ Math.floor(candidate.fitRatio * 100) }}% 贴合<span v-if="candidate.rotationDeg"> · 需旋转 90°</span> · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</div>
           <div class="text-[10px] text-muted">剩余宽 {{ number(candidate.remainingWidthMm) }} / 深 {{ number(candidate.remainingDepthMm) }} mm<span v-if="candidate.product.heightMm"> · 商品高 {{ number(candidate.product.heightMm) }} mm</span></div>
-          <div class="flex items-center justify-between gap-1"><strong class="text-sm text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</strong><NuxtLink :to="'/products/' + candidate.product.rspuId" class="text-[10px] text-muted hover:underline">详情</NuxtLink><button :disabled="applying || candidate.product.price <= 0" class="text-[10px] px-2 py-1.5 rounded bg-bronze text-white disabled:opacity-50" @click="choose(candidate)">{{ candidate.product.price <= 0 ? '待补报价' : applying ? '保存中…' : applyToSameModules && (group?.ids.length || 0) > 1 ? `应用到 ${group?.ids.length} 个模块` : '加入该模块方案' }}</button></div>
+          <div class="flex items-center justify-between gap-1"><strong class="text-sm text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</strong><NuxtLink :to="'/products/' + candidate.product.rspuId" class="text-[10px] text-muted hover:underline">详情</NuxtLink><button :disabled="applying || candidate.product.price <= 0" class="text-[10px] px-2 py-1.5 rounded-none bg-bronze text-white disabled:opacity-50" @click="choose(candidate)">{{ candidate.product.price <= 0 ? '待补报价' : applying ? '保存中…' : applyToSameModules && (group?.ids.length || 0) > 1 ? `应用到 ${group?.ids.length} 个模块` : '加入该模块方案' }}</button></div>
         </article>
         <div v-if="!candidates.length" class="text-xs text-muted py-5 space-y-2">
           <template v-if="result.eligibleVariantCount === 0"><p>暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。</p><NuxtLink to="/products/audit" class="text-bronze underline">前往商品审核</NuxtLink></template>

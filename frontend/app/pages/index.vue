@@ -486,7 +486,7 @@ async function startHandDrawing() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 h-full">
+  <div class="flex h-full flex-col">
     <div class="flex items-start justify-between gap-5 flex-none">
       <div>
         <h1 class="text-[25px] font-bold tracking-tight mb-2">{{ workspace.currentFloorName }} · 上传办公图纸</h1>
@@ -494,7 +494,7 @@ async function startHandDrawing() {
       </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col gap-4">
+    <div class="flex-1 min-h-0 flex flex-col">
       <!-- 上传与识别结果 -->
       <div class="flex-1 min-h-0 bg-white border border-line rounded-2xl p-6 shadow-panel flex flex-col gap-5 overflow-auto">
         <div class="flex items-center justify-between flex-none">

@@ -79,7 +79,7 @@ try {
     await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor()
   }
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X', { waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 单空间设计' }).waitFor()
+  await page.getByTestId('apply-layout').waitFor()
   await open()
   await page.getByText('尚无效果预览', { exact: true }).waitFor()
   await page.getByLabel('效果图风格', { exact: true }).fill('浅木色现代办公室')

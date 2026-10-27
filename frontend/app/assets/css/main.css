@@ -33,3 +33,10 @@ select:not(:disabled) {
   outline: 2px solid var(--color-bronze);
   outline-offset: 3px;
 }
+
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}

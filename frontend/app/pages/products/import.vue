@@ -340,7 +340,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-5 overflow-y-auto">
+  <div class="flex h-full min-h-0 flex-col overflow-y-auto">
     <div class="flex-none">
       <div class="mb-3 text-xs text-muted">
         <NuxtLink to="/products" class="hover:text-bronze-dark">商品资源 / 商品库</NuxtLink> / 批量导入
@@ -381,7 +381,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
     </div>
 
     <!-- 步骤 1：上传文件 -->
-    <div v-if="currentStep === 0" class="grid flex-none gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+    <div v-if="currentStep === 0" class="grid flex-none gap-0 xl:grid-cols-[minmax(0,1fr)_280px]">
       <section class="rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6" aria-label="上传商品文件">
         <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-base font-semibold">上传数据文件</h2>
@@ -502,7 +502,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 
           <div v-if="expandedGroups.has(group.groupKey)" class="space-y-5 p-4 sm:p-5">
             <p v-if="updateIfExists && group.rows.some(row => !row.skipped)" class="text-xs text-muted">更新已有商品会同步此处填写的商品资料、规格报价和已选图片；如只需补图，请先核对这些字段。</p>
-            <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_220px]">
+            <div class="grid gap-0 xl:grid-cols-[minmax(0,1fr)_220px]">
               <div>
                 <h3 class="mb-3 text-sm font-semibold">商品资料</h3>
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

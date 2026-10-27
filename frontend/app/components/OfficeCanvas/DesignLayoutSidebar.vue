@@ -21,9 +21,7 @@ const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
 // Off by default: entering a space shows only actually placed furniture. Selecting a module/preset or the checkbox enables the proposal preview.
 const showPreview = ref(false)
 const store = useOfficeStore()
-const templateRouter = useRouter()
 const collapsed = ref(false)
-const showTemplate = ref(false)
 const applicationMessage = ref('')
 type LayoutPanelStep = 'module' | 'settings' | 'style'
 const activeStep = ref<LayoutPanelStep>('module')
@@ -304,118 +302,116 @@ function clearLayout() {
 
 <template>
   <OfficeCanvasCustomModuleDialog v-if="showModuleDialog" :module="editingModule" :source-id="moduleGlyphId(selectedModule)" :width-mm="unitW" :depth-mm="unitD" @close="showModuleDialog = false" @saved="moduleSaved" />
-  <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => templateRouter.replace({ path: '/canvas', query: { mode: 'design', zoneId } })" />
-  <div :class="['flex-none bg-white border border-line rounded-2xl shadow-panel flex flex-col overflow-hidden transition-all duration-300', collapsed ? 'w-12' : 'w-80']">
+  <div :class="['flex-none bg-white border border-line rounded-none flex flex-col overflow-hidden transition-all duration-300', collapsed ? 'w-12' : 'w-80']">
     <div v-show="!collapsed" class="w-80 h-full flex flex-col">
       <!-- Header -->
-      <div class="relative px-4 py-3 border-b border-line flex-none bg-gradient-to-br from-white to-[#fbf8f4]">
-        <button class="absolute top-3 right-3 p-1 rounded hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="collapsed = true">
+      <div class="relative px-3 py-2 border-b border-line flex-none bg-white">
+        <button class="absolute top-2 right-2 rounded-none p-1 hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="collapsed = true">
           <AppIcon name="arrowLeft" size="4" />
         </button>
-        <div class="flex items-center gap-2 text-[15px] font-bold text-[#4f493f]">
+        <div class="flex items-center gap-1.5 text-[15px] font-bold text-[#4f493f]">
           <AppIcon name="cube" size="4" />
           <span>家具选择与排版</span>
         </div>
-        <p class="text-[10px] text-muted mt-1 pr-6 truncate" @click.stop>
+        <p class="text-[10px] text-muted mt-0.5 pr-6 truncate" @click.stop>
           <input v-if="editingZoneName && zone" ref="zoneNameInput" v-model="zoneNameDraft" aria-label="排版空间名称" maxlength="40"
-            class="w-full rounded border border-line bg-white px-1.5 py-0.5 text-[10px] font-normal text-[#4f493f]"
+            class="w-full rounded-none border border-line bg-white px-1.5 py-0.5 text-[10px] font-normal text-[#4f493f]"
             @keydown.enter.prevent="commitZoneName" @keydown.esc.prevent="editingZoneName = false" @blur="commitZoneName">
           <button v-else-if="zone" type="button" class="underline decoration-dotted underline-offset-2 hover:text-bronze-dark" title="点击重命名空间" @click="startZoneNameEdit">{{ zone.name }}</button>
           <template v-else>未选择空间</template>
         </p>
-        <div v-if="zone" class="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-[#f2ede7] p-1" role="tablist" aria-label="排版步骤">
+        <div v-if="zone" class="mt-2 grid grid-cols-3 border-y border-line" role="tablist" aria-label="排版步骤">
           <button
             v-for="(step, index) in layoutPanelSteps"
             :key="step.id"
-            :class="['rounded-lg px-1.5 py-1.5 text-[10px] transition', activeStep === step.id ? 'bg-white text-bronze shadow-sm font-semibold' : 'text-[#847a70] hover:text-[#5f574f]']"
+            :class="['border-r border-line px-1.5 py-1 text-[10px] transition last:border-r-0', activeStep === step.id ? 'bg-cream text-bronze font-semibold' : 'bg-white text-[#847a70] hover:text-[#5f574f]']"
             :aria-label="step.label"
             :aria-selected="activeStep === step.id"
             role="tab"
             @click="goToStep(step.id)"
           >
-            <span :class="['mr-0.5 inline-grid h-4 w-4 place-items-center rounded-full text-[9px]', activeStep === step.id ? 'bg-[#f0e2d3] text-bronze' : 'bg-white/70 text-[#9c9186]']">{{ index + 1 }}</span>
+            <span :class="['mr-0.5 inline-grid h-4 w-4 place-items-center text-[9px]', activeStep === step.id ? 'text-bronze' : 'text-[#9c9186]']">{{ index + 1 }}</span>
             {{ step.shortLabel }}
           </button>
         </div>
-        <div v-if="zone" class="mt-2 flex items-center gap-1.5 text-[10px] text-[#81766b]">
+        <div v-if="zone" class="mt-1.5 flex items-center gap-1.5 text-[10px] text-[#81766b]">
           <span class="truncate">{{ selectedModule.name }}</span>
           <span class="text-[#c8b9aa]">·</span>
           <span class="truncate">{{ selectedStyleLabel }}</span>
-          <span class="ml-auto flex-none rounded-full bg-[#f0e2d3] px-1.5 py-0.5 text-[9px] text-bronze">{{ activeStepIndex }}/3</span>
+          <span class="ml-auto flex-none px-1 text-[9px] text-bronze">{{ activeStepIndex }}/3</span>
         </div>
       </div>
 
-      <div v-if="store.spaceTemplate" class="template-layout-link"><span>{{ store.spaceTemplateCurrent ? '基于空间模板' : '空间已修改，模板需更新' }} · {{ store.spaceTemplate.name }}</span><button @click="showTemplate = true">查看</button></div>
       <!-- No zone -->
       <div v-if="!zone" class="flex-1 flex flex-col items-center justify-center text-center p-6 text-xs text-muted">
-        <AppIcon name="zone" size="8" class="text-[#ddd8d2] mb-2" />
+        <AppIcon name="zone" size="8" class="text-[#ddd8d2] mb-1.5" />
         <p>请在总览中选择一个功能区后进入设计</p>
       </div>
 
       <template v-else>
         <div class="flex-1 min-h-0 overflow-y-auto">
         <!-- Same catalog and glyphs as the manual layout workspace. -->
-        <div v-if="activeStep === 'module'" class="px-3 py-3 border-b border-line" data-testid="unit-module-catalog">
-          <div class="flex items-center justify-between text-[11px] font-semibold text-[#5b5751] mb-2"><span>单位模块 · 办公家具图例</span><span class="text-muted">{{ modules.length }} 种</span></div>
-          <button class="w-full border border-dashed border-bronze text-bronze rounded-lg py-2 text-xs mb-2" @click="openModuleDialog()">＋ 新增单位模块</button>
-          <div v-if="lastDeletedModule" role="status" class="text-[10px] text-muted mb-2 flex items-center justify-between gap-2"><span>已删除 {{ lastDeletedModule.name }}</span><button class="text-bronze underline flex-none" @click="undoModuleDeletion">撤销删除目录模块</button></div>
-          <details v-if="store.customModules.length" open class="mb-2">
+        <div v-if="activeStep === 'module'" class="px-3 py-2 border-b border-line" data-testid="unit-module-catalog">
+          <div class="flex items-center justify-between text-[11px] font-semibold text-[#5b5751] mb-1.5"><span>单位模块 · 办公家具图例</span><span class="text-muted">{{ modules.length }} 种</span></div>
+          <button class="w-full border border-dashed border-bronze text-bronze rounded-none py-2 text-xs mb-1.5" @click="openModuleDialog()">＋ 新增单位模块</button>
+          <div v-if="lastDeletedModule" role="status" class="text-[10px] text-muted mb-1.5 flex items-center justify-between gap-1.5"><span>已删除 {{ lastDeletedModule.name }}</span><button class="text-bronze underline flex-none" @click="undoModuleDeletion">撤销删除目录模块</button></div>
+          <details v-if="store.customModules.length" open class="mb-1.5">
             <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">我的模块 · 本机 {{ store.customModules.length }} 款</summary>
-            <div class="grid grid-cols-2 gap-2 mt-1">
-              <div v-for="module in store.customModules" :key="module.id" class="min-w-0 border border-line rounded-xl overflow-hidden">
+            <div class="grid grid-cols-2 gap-1.5 mt-1">
+              <div v-for="module in store.customModules" :key="module.id" class="min-w-0 border border-line rounded-none overflow-hidden">
                 <button :data-module-id="module.id" :aria-label="module.name" :aria-pressed="selectedModule.id === module.id" :class="['w-full text-left p-2', selectedModule.id === module.id ? 'bg-[#f7f0e8]' : 'bg-white']" @click="selectModule(module)">
-                  <div class="h-12 mb-1.5"><OfficeCanvasFurniturePreview :template-id="module.glyphTemplateId" :width-mm="module.widthMm" :depth-mm="module.depthMm" thumbnail /></div>
+                  <div class="h-10 mb-1.5"><OfficeCanvasFurniturePreview :template-id="module.glyphTemplateId" :width-mm="module.widthMm" :depth-mm="module.depthMm" thumbnail /></div>
                   <div class="text-[10px] font-bold break-words">{{ module.name }}</div><div class="text-[9px] text-muted">{{ module.widthMm }} × {{ module.depthMm }} mm</div>
                 </button>
                 <div class="flex border-t border-line text-[10px]"><button class="flex-1 py-1.5 hover:bg-[#f9f7f4]" :aria-label="'编辑模块 ' + module.name" @click="openModuleDialog(module)">编辑</button><button class="flex-1 py-1.5 text-muted hover:bg-[#fff0f0]" :aria-label="'删除目录模块 ' + module.name" @click="removeModule(module)">删除</button></div>
               </div>
             </div>
           </details>
-          <details v-for="category in catalogCategories" :key="category" :open="category === catalogCategories[0]" class="mb-2">
+          <details v-for="category in catalogCategories" :key="category" :open="category === catalogCategories[0]" class="mb-1.5">
             <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">{{ category }} <span class="text-muted">{{ builtInModules.filter(module => module.category === category).length }} 款</span></summary>
-            <div class="grid grid-cols-2 gap-2 mt-1">
+            <div class="grid grid-cols-2 gap-1.5 mt-1">
               <button v-for="module in builtInModules.filter(module => module.category === category)" :key="module.id"
                 :data-module-id="module.id" :aria-label="module.name" :aria-pressed="selectedModule.id === module.id"
-                :class="['min-w-0 p-2 rounded-xl border text-left transition', selectedModule.id === module.id ? 'bg-[#f7f0e8] border-bronze' : 'bg-white border-line hover:bg-[#f9f7f4]']"
+                :class="['min-w-0 p-2 rounded-none border text-left transition', selectedModule.id === module.id ? 'bg-[#f7f0e8] border-bronze' : 'bg-white border-line hover:bg-[#f9f7f4]']"
                 @click="selectModule(module)">
-                <div class="h-12 w-full mb-1.5"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></div>
+                <div class="h-10 w-full mb-1.5"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></div>
                 <div class="text-[10px] font-bold">{{ module.name }}</div>
                 <div class="text-[9px] text-muted">{{ module.widthMm }} × {{ module.depthMm }} mm</div>
               </button>
             </div>
           </details>
-          <button class="mt-1 w-full rounded-lg border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" @click="goToStep('settings')">
+          <button class="mt-1 w-full rounded-none border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" @click="goToStep('settings')">
             下一步：设置尺寸和间距
             <AppIcon name="arrowRight" size="3" class="ml-1 inline-block" />
           </button>
         </div>
 
-        <div class="px-3 py-3 border-b border-line text-[11px] space-y-2">
+        <div class="px-3 py-2 border-b border-line text-[11px] space-y-2">
           <div class="font-semibold">方案需求</div>
-          <div v-if="isMeetingLayout" class="flex gap-2"><button type="button" :aria-pressed="preferences.strategy === 'template'" class="flex-1 rounded border border-line py-2" @click="preferences.strategy = 'template'">{{ isMeetingLayout ? '单桌居中' : '按场地排布' }}</button><button v-if="isMeetingLayout" type="button" :aria-pressed="preferences.strategy === 'recommended'" class="flex-1 rounded border border-line py-2" @click="preferences.strategy = 'recommended'">自动推荐</button></div>
-          <label class="flex items-center justify-between gap-2">{{ isGeneral ? '目标数量' : '目标人数' }}<input v-model.number="preferences.targetSeats" :aria-label="isGeneral ? '目标数量' : '目标人数'" type="number" min="0" max="500" class="w-24 rounded border border-line px-2 py-1"></label>
+          <div v-if="isMeetingLayout" class="flex gap-1.5"><button type="button" :aria-pressed="preferences.strategy === 'template'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'template'">{{ isMeetingLayout ? '单桌居中' : '按场地排布' }}</button><button v-if="isMeetingLayout" type="button" :aria-pressed="preferences.strategy === 'recommended'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'recommended'">自动推荐</button></div>
+          <label class="flex items-center justify-between gap-1.5">{{ isGeneral ? '目标数量' : '目标人数' }}<input v-model.number="preferences.targetSeats" :aria-label="isGeneral ? '目标数量' : '目标人数'" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
           <p class="text-[10px] text-muted">{{ isGeneral ? '0 表示未指定数量；多件请选择按场地排布。' : '0 表示未指定；房名中的人数需确认后使用。' }}</p>
           <button v-if="!isGeneral && nameSeatSuggestion && nameSeatSuggestion <= 500 && !preferences.targetSeats" class="text-bronze underline" @click="preferences.targetSeats = nameSeatSuggestion">采用房名建议 {{ nameSeatSuggestion }} 人</button>
           <template v-if="isMeetingLayout">
             <label class="block"><input v-model="preferences.includeChairs" type="checkbox" aria-label="生成会议椅"> 同时生成会议椅</label>
             <label class="block"><input v-model="preferences.resizeMeetingTable" type="checkbox" aria-label="按人数调整桌长"> 按目标人数调整桌长（预览实际尺寸）</label>
-            <label class="flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded border border-line px-2 py-1"></label>
+            <label class="flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded-none border border-line px-2 py-1"></label>
           </template>
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
           <p v-if="!showPreview" class="text-[10px] text-muted mt-1">预览已关闭：画布只显示实际已放置的家具；选择模块/排布或勾选后查看方案预览，删除或清空排版会自动关闭预览。</p>
           <details data-testid="constraints-panel"><summary class="cursor-pointer">入口与禁放区 · {{ buildingConstraints.length }}</summary>
             <p class="mt-2 text-[10px] text-muted">柱、门洞净空和禁放区是不可摆放的建筑约束；画布上以红/蓝虚线常显，自动排版与逐件添加都会避让。</p>
-            <div v-for="area in buildingConstraints" :key="area.id" class="mt-1.5 flex items-center justify-between gap-2 rounded border border-line px-2 py-1.5 text-[10px]">
+            <div v-for="area in buildingConstraints" :key="area.id" class="mt-1.5 flex items-center justify-between gap-1.5 rounded-none border border-line px-2 py-1.5 text-[10px]">
               <span class="truncate" :title="area.label">{{ area.label }}</span>
               <span class="flex-none text-muted">{{ Math.round(area.w) }}×{{ Math.round(area.h) }} mm</span>
             </div>
             <p v-if="!buildingConstraints.length" class="mt-2 text-[10px] text-muted">尚未标注；门口、柱子或固定设施需要避让时，请先返回空间核对标注。</p>
-            <button class="mt-2 w-full rounded-lg border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" data-testid="back-to-review-annotate" @click="backToReviewAnnotate">返回空间核对标注</button>
+            <button class="mt-2 w-full rounded-none border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" data-testid="back-to-review-annotate" @click="backToReviewAnnotate">返回空间核对标注</button>
           </details>
           <details data-testid="channel-panel"><summary class="cursor-pointer">通道 · {{ channels.length }}</summary>
             <p class="mt-2 text-[10px] text-muted">通道是排版约束：自动排版绕开通道、确认时家具不得压占；位置可直接在画布上拖动。两侧净距会在宽度之外再留出空档。宽度数值为当前策略，非规范要求。</p>
-            <div v-for="channel in channels" :key="channel.id" class="mt-2 rounded border border-line p-2" :data-testid="'channel-' + channel.orientation">
+            <div v-for="channel in channels" :key="channel.id" class="mt-2 rounded-none border border-line p-2" :data-testid="'channel-' + channel.orientation">
               <div class="flex items-center justify-between text-[10px] font-semibold text-[#5b5751]">
                 <span>{{ channel.orientation === 'vertical' ? '纵向通道' : '横向通道' }}</span>
                 <button class="font-normal text-bronze underline" :aria-label="'移除' + (channel.orientation === 'vertical' ? '纵向' : '横向') + '通道'" @click="removeChannel(channel.id)">移除</button>
@@ -439,42 +435,42 @@ function clearLayout() {
         </div>
 
         <!-- Dimensions -->
-        <div v-if="activeStep === 'settings'" class="px-4 py-3 border-b border-line flex-none">
-          <div class="text-[11px] font-semibold text-[#5b5751] mb-2">{{ selectedModule.name }} · 模块尺寸</div>
-          <select v-if="selectedModule.sizeOptions?.length" aria-label="模块常用规格" class="mb-2 w-full h-8 px-2 border border-line rounded-lg text-xs" :value="selectedSize" @change="[unitW, unitD] = ($event.target as HTMLSelectElement).value.split(',').map(Number)">
+        <div v-if="activeStep === 'settings'" class="px-3 py-2 border-b border-line flex-none">
+          <div class="text-[11px] font-semibold text-[#5b5751] mb-1.5">{{ selectedModule.name }} · 模块尺寸</div>
+          <select v-if="selectedModule.sizeOptions?.length" aria-label="模块常用规格" class="mb-1.5 w-full h-8 px-2 border border-line rounded-none text-xs" :value="selectedSize" @change="[unitW, unitD] = ($event.target as HTMLSelectElement).value.split(',').map(Number)">
             <option value="" disabled>自定义规格</option>
             <option v-for="size in selectedModule.sizeOptions" :key="size.join(',')" :value="size.join(',')">{{ size[0] }} × {{ size[1] }} mm</option>
           </select>
-          <div class="flex gap-2">
+          <div class="flex gap-1.5">
             <label class="flex-1">
               <span class="text-[10px] text-muted">宽 (mm)</span>
-              <input v-model.number="unitW" aria-label="模块宽度（毫米）" type="number" min="10" class="w-full h-8 px-2 border border-line rounded-lg text-xs outline-none focus:border-bronze">
+              <input v-model.number="unitW" aria-label="模块宽度（毫米）" type="number" min="10" class="w-full h-8 px-2 border border-line rounded-none text-xs outline-none focus:border-bronze">
             </label>
             <label class="flex-1">
               <span class="text-[10px] text-muted">深 (mm)</span>
-              <input v-model.number="unitD" aria-label="模块进深（毫米）" type="number" min="10" class="w-full h-8 px-2 border border-line rounded-lg text-xs outline-none focus:border-bronze">
+              <input v-model.number="unitD" aria-label="模块进深（毫米）" type="number" min="10" class="w-full h-8 px-2 border border-line rounded-none text-xs outline-none focus:border-bronze">
             </label>
           </div>
           <p class="text-[9px] text-muted mt-1.5">图例来自共享家具模板目录，按实际毫米尺寸排版</p>
           <div class="mt-4 border-t border-[#eee7df] pt-3">
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-1.5">
               <span class="text-[11px] font-semibold text-[#5b5751]">空间间距</span>
               <span class="text-[9px] text-muted">单位：mm</span>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-[10px] text-muted">
-              <label v-if="!isWorkstation">{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
-              <label v-if="isWorkstation">图例组间净距<input v-model.number="spacing.faceGapMm" aria-label="图例组间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
-              <label>离墙距离（座位侧）<input v-model.number="spacing.wallMm" aria-label="离墙距离（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+            <div class="grid grid-cols-2 gap-1.5 text-[10px] text-muted">
+              <label v-if="!isWorkstation">{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
+              <label v-if="isWorkstation">图例组间净距<input v-model.number="spacing.faceGapMm" aria-label="图例组间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
+              <label>离墙距离（座位侧）<input v-model.number="spacing.wallMm" aria-label="离墙距离（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
               <p class="text-[10px] text-muted -mt-1">屏风/桌板侧可靠墙；座位朝墙时按组间过道留出入位通道。</p>
-              <label v-if="!isWorkstation">同排间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
-              <label v-if="isMeetingLayout && (arrangement === 'backToBack' || arrangement === 'faceToFace')">{{ arrangement === 'faceToFace' ? '面对净距' : '背靠中缝' }}<input v-model.number="pairGap" aria-label="对排中缝（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-lg text-xs text-[#5b5751]"></label>
+              <label v-if="!isWorkstation">同排间距<input v-model.number="spacing.gapMm" aria-label="同排间距（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
+              <label v-if="isMeetingLayout && (arrangement === 'backToBack' || arrangement === 'faceToFace')">{{ arrangement === 'faceToFace' ? '面对净距' : '背靠中缝' }}<input v-model.number="pairGap" aria-label="对排中缝（毫米）" type="number" min="0" step="50" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
             </div>
-            <label v-if="isMeetingLayout" class="mt-2 flex items-center gap-2 rounded-lg bg-[#faf7f3] px-2 py-1.5 text-[10px] text-muted"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">启用同排留缝</label>
+            <label v-if="isMeetingLayout" class="mt-2 flex items-center gap-1.5 rounded-none bg-[#faf7f3] px-2 py-1.5 text-[10px] text-muted"><input type="checkbox" aria-label="左右桌子留缝" :checked="spacing.gapMm > 0" @change="spacing.gapMm = ($event.target as HTMLInputElement).checked ? 100 : 0">启用同排留缝</label>
             <p class="mt-2 text-[9px] leading-relaxed text-muted">{{ isWorkstation ? '保持参考图的朝向、镜像和紧贴关系，按空间大小自动增加排数、列数或组合；横纵方向自动比较。' : '按当前家具实际尺寸及间距检查方案，已放置的其他家具会保留并避让。' }}</p>
-          <p v-if="currentFurniture.length && !draftApplied" class="mt-3 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2.5 py-2 text-[10px] leading-relaxed text-[#8a6a2c]">
+          <p v-if="currentFurniture.length && !draftApplied" class="mt-2 rounded-none border border-[#f0d9b3] bg-[#fff8e8] px-2.5 py-2 text-[10px] leading-relaxed text-[#8a6a2c]">
             {{ differenceText }}。画布虚线为待应用预览，原排版保留。
           </p>
-          <button class="mt-3 w-full rounded-lg border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" @click="goToStep('style')">
+          <button class="mt-2 w-full rounded-none border border-[#eadfd3] bg-[#fcfaf7] px-3 py-2 text-[11px] font-semibold text-[#705a43] hover:border-bronze" @click="goToStep('style')">
             下一步：选择排布
             <AppIcon name="arrowRight" size="3" class="ml-1 inline-block" />
           </button>
@@ -482,9 +478,9 @@ function clearLayout() {
         </div>
 
         <!-- Product style and arrangement topology -->
-        <div v-if="activeStep === 'style'" class="px-4 py-3 border-b border-line flex-none">
-          <button class="mb-3 flex w-full items-center gap-2 rounded-xl border border-[#eadfd3] bg-[#fcfaf7] px-2.5 py-2 text-left transition hover:border-bronze" aria-label="修改单位模块" @click="goToStep('module')">
-            <span class="grid h-9 w-9 flex-none place-items-center rounded-lg bg-white border border-[#eee5dc]">
+        <div v-if="activeStep === 'style'" class="px-3 py-2 border-b border-line flex-none">
+          <button class="mb-3 flex w-full items-center gap-1.5 rounded-none border border-[#eadfd3] bg-[#fcfaf7] px-2.5 py-2 text-left transition hover:border-bronze" aria-label="修改单位模块" @click="goToStep('module')">
+            <span class="grid h-9 w-9 flex-none place-items-center rounded-none bg-white border border-[#eee5dc]">
               <OfficeCanvasFurniturePreview :template-id="moduleGlyphId(selectedModule)" :width-mm="unitW" :depth-mm="unitD" thumbnail />
             </span>
             <span class="min-w-0 flex-1">
@@ -493,12 +489,12 @@ function clearLayout() {
             </span>
             <AppIcon name="arrowRight" size="3.5" class="flex-none text-[#aa8a6a]" />
           </button>
-          <div class="text-[11px] font-semibold text-[#5b5751] mt-3 mb-2">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-2">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="text-[11px] font-semibold text-[#5b5751] mt-2 mb-1.5">当前家具支持的排布</div><p v-if="isWorkstation" class="text-[10px] text-muted mb-1.5">数量由实际空间决定。0 人表示尽量排满；指定人数后优先满足目标，对坐、T/C/十字保持完整单元。完整单元放不下的边缘余量会以单件沿墙补位，座位朝内。座椅为座席示意，可另行选配。</p>
+          <div class="grid grid-cols-2 gap-1.5">
             <button
               v-for="preset in availablePresets"
               :key="preset.id"
-              :class="['px-2 py-1.5 rounded-lg text-[10px] border text-left transition', presetId === preset.id ? 'bg-bronze text-white border-bronze' : 'bg-white border-line hover:bg-[#f9f7f4]']"
+              :class="['px-2 py-1.5 rounded-none text-[10px] border text-left transition', presetId === preset.id ? 'bg-bronze text-white border-bronze' : 'bg-white border-line hover:bg-[#f9f7f4]']"
               :aria-label="preset.label"
               :aria-pressed="presetId === preset.id"
               @click="selectPreset(preset.id)"
@@ -512,19 +508,19 @@ function clearLayout() {
 
         </div>
         <!-- Preview stats -->
-        <div class="px-3 py-2.5 bg-[#f9f7f4] flex-none">
-          <div class="grid grid-cols-2 gap-2">
-            <div class="rounded-xl border border-[#eee5dc] bg-white px-2.5 py-2">
+        <div class="border-y border-line bg-white px-3 py-2 flex-none">
+          <div class="grid grid-cols-2 divide-x divide-line">
+            <div class="px-2 py-1">
               <div class="text-[9px] text-[#8a8178]">当前已放置</div>
               <strong data-testid="current-furniture-count" class="mt-0.5 block text-sm text-[#5d554c]">{{ currentFurniture.length }} <span class="text-[10px] font-normal">件</span></strong>
             </div>
-            <div class="rounded-xl border border-[#eadacb] bg-[#fffaf5] px-2.5 py-2">
+            <div class="px-2 py-1">
               <div class="text-[9px] text-[#8a8178]">当前方案预估</div>
               <strong data-testid="module-capacity" class="mt-0.5 block text-sm text-bronze">{{ capacity }} <span class="text-[10px] font-normal">件</span></strong>
             </div>
           </div>
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
-          <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-lg border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
+          <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-none border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
           <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}<span v-if="proposal.shortfall" class="text-[#a65e4c]"> · 尚缺 {{ proposal.shortfall }} {{ isGeneral ? '件' : '人' }}</span></p>
           <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>
           <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
@@ -534,28 +530,28 @@ function clearLayout() {
         </div>
 
         <!-- Actions -->
-        <div class="px-3 py-3 mt-auto border-t border-line flex flex-col gap-2 flex-none bg-white">
+        <div class="px-3 py-2 mt-auto border-t border-line flex flex-col gap-1.5 flex-none bg-white">
           <div v-if="store.furniturePlacement" class="text-[10px] text-muted">点击空间内放置，R 旋转，Esc 结束。<button class="ml-1 text-bronze underline" @click="store.rotateFurniturePlacement()">旋转 90°</button></div>
-          <div v-if="autoPlan?.slots.length" class="flex items-center justify-between rounded-lg bg-[#faf7f3] px-2.5 py-1.5 text-[10px] text-muted">
+          <div v-if="autoPlan?.slots.length" class="flex items-center justify-between rounded-none bg-[#faf7f3] px-2.5 py-1.5 text-[10px] text-muted">
             <span>{{ proposal?.label || '当前方案' }}</span>
             <strong data-testid="auto-layout-capacity" class="text-[#5d554c]">{{ autoPlan.slots.length }} 件</strong>
           </div>
           <button
             data-testid="apply-layout"
-            class="w-full px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            class="w-full px-4 py-2 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="!autoPlan?.slots.length || !!proposal?.problem || draftApplied"
             @click="applyAutoLayout"
           >
             <AppIcon name="cube" size="3.5" />
             <span>{{ draftApplied ? '与当前布局一致' : isMeetingLayout && preferences.strategy === 'recommended' ? '应用自动推荐方案' : '应用当前方案' }}</span>
           </button>
-          <div class="grid grid-cols-2 gap-2">
-            <button :class="['px-2.5 py-2 rounded-xl text-[11px] border font-semibold', store.furniturePlacement ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line hover:bg-[#f9f7f4]']" @click="addToCanvas">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
-            <button class="px-2.5 py-2 rounded-xl text-[11px] border border-line text-[#746d65] hover:bg-[#fff5f3] hover:text-red-500" @click="clearLayout">清空排版</button>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button :class="['px-2.5 py-2 rounded-none text-[11px] border font-semibold', store.furniturePlacement ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line hover:bg-[#f9f7f4]']" @click="addToCanvas">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
+            <button class="px-2.5 py-2 rounded-none text-[11px] border border-line text-[#746d65] hover:bg-[#fff5f3] hover:text-red-500" @click="clearLayout">清空排版</button>
           </div>
           <button
             v-if="store.furnitureForZone(zone.id).length > 0 && !layoutConfirmed"
-            class="w-full px-3 py-2 rounded-xl text-[11px] font-semibold bg-[#e6f5ee] text-green border border-[#d0ead9] hover:bg-[#d8f0e3] flex items-center justify-center gap-1.5"
+            class="w-full px-3 py-2 rounded-none text-[11px] font-semibold bg-[#e6f5ee] text-green border border-[#d0ead9] hover:bg-[#d8f0e3] flex items-center justify-center gap-1.5"
             @click="confirmLayout"
           >
             <AppIcon name="check" size="3.5" />
@@ -563,7 +559,7 @@ function clearLayout() {
           </button>
           <button
             v-else-if="layoutConfirmed"
-            class="w-full px-3 py-2 rounded-xl text-[11px] font-semibold border border-line hover:bg-[#fff0f0] hover:text-red-500 flex items-center justify-center gap-1.5"
+            class="w-full px-3 py-2 rounded-none text-[11px] font-semibold border border-line hover:bg-[#fff0f0] hover:text-red-500 flex items-center justify-center gap-1.5"
             @click="unconfirmLayout"
           >
             <AppIcon name="reset" size="3.5" />
@@ -575,7 +571,7 @@ function clearLayout() {
 
     <!-- Collapsed strip -->
     <div v-show="collapsed" class="w-12 h-full flex flex-col items-center py-3">
-      <button class="p-1.5 rounded-lg hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="collapsed = false">
+      <button class="p-1.5 rounded-none hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="collapsed = false">
         <AppIcon name="arrowRight" size="5" />
       </button>
       <div class="text-[10px] text-muted tracking-widest" style="writing-mode: vertical-rl;">

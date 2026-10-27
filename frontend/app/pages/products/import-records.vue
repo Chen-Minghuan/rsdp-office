@@ -19,7 +19,7 @@ function formatDate(date: string) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-5 overflow-y-auto">
+  <div class="flex h-full min-h-0 flex-col overflow-y-auto">
     <div class="flex-none"><div class="mb-3 text-xs text-muted">商品资源 / 导入记录</div><div class="flex flex-wrap items-start justify-between gap-4"><div><h1 class="mb-2 text-[25px] font-bold tracking-tight">导入记录</h1><p class="text-xs leading-relaxed text-muted">仅展示当前浏览器发起的最近 30 次导入，不是服务器完整历史。</p></div><NuxtLink to="/products/import" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-4 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark"><AppIcon name="import" size="4" />新建导入</NuxtLink></div></div>
     <p v-if="!storageAvailable" class="flex-none rounded-lg bg-cream p-3 text-xs text-bronze-dark" role="status">本地记录存储不可用，当前会话记录可能在刷新后丢失。</p>
     <section class="flex-none overflow-hidden rounded-xl border border-line bg-white shadow-panel" aria-label="导入记录列表">

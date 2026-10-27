@@ -86,7 +86,7 @@ async function submitForm() {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-5 overflow-y-auto">
+  <div class="flex h-full min-h-0 flex-col overflow-y-auto">
     <div class="flex-none">
       <div class="mb-3 text-xs text-muted">
         <NuxtLink to="/products" class="hover:text-bronze-dark">商品资源 / 商品库</NuxtLink> / 手工录入

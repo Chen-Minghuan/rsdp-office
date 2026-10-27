@@ -36,7 +36,7 @@ await shot('01-upload')
 // 2. 空间总览
 console.log('Step 2: overview')
 await page.goto(`${baseUrl}/canvas`, { waitUntil: 'networkidle' })
-await page.waitForSelector('h1:has-text("空间核对")', { timeout: 10000 })
+await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor({ timeout: 10000 })
 await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
 await shot('02-overview')
 
@@ -44,7 +44,7 @@ await shot('02-overview')
 console.log('Step 3: enter design')
 await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
 await page.waitForURL(/mode=design/, { timeout: 10000 })
-await page.waitForSelector('h1:has-text("单空间设计")', { timeout: 10000 })
+await page.getByTestId('apply-layout').waitFor({ timeout: 10000 })
 await shot('03-design')
 
 // 4. 选择单位模块、一键排版、确认排版并加入方案

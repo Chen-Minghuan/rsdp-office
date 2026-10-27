@@ -1,4 +1,4 @@
-.space-review { height:100dvh; min-height:650px; display:flex; flex-direction:column; overflow:hidden; background:#f8f7f4; color:#39403b; font-size:13px; }
+.space-review { height:100%; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:#f8f7f4; color:#39403b; font-size:13px; }
 .space-review button, .space-review input, .space-review select { font:inherit; }
 .review-topbar { height:72px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 30px; border-bottom:1px solid #e9e5de; background:#fff; }
 .review-brand { display:flex; align-items:center; gap:14px; text-decoration:none; color:inherit; }
@@ -207,7 +207,7 @@
   .review-canvas-footer>button { padding:11px 8px; font-size:10px; }
 }
 @media(max-width:1000px) {
-  .space-review { overflow:auto; height:auto; min-height:100dvh; }
+  .space-review { overflow:auto; height:100%; min-height:100%; }
   .review-columns { grid-template-columns:210px minmax(0,1fr); min-height:800px; flex:none; }
   .review-inspector { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; column-gap:25px; }
   .review-inspector>* { grid-column:1/-1; }
@@ -267,3 +267,5 @@
 .contour-edit-bar .rotate-form input { width:60px; border:1px solid #b7cde0; border-radius:5px; padding:4px 5px; background:#fff; }
 .contour-edit-bar .rotate-form span { flex:none; min-width:0; }
 .contour-edit-bar .sketch-angle input { width:60px; border:1px solid #b7cde0; border-radius:5px; padding:4px 5px; background:#fff; }
+
+.review-columns { gap:0; padding:0; }

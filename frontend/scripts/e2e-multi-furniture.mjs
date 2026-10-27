@@ -37,7 +37,7 @@ try {
     await page.mouse.up()
   }
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
-  await page.getByRole('heading', { name: '无限画布 · 空间核对', exact: true }).waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
     const zone = (id, x) => ({ id, kind: 'zone', x, y: 0, w: 6000, h: 4000, name: id, zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[x,0],[x+6000,0],[x+6000,4000],[x,4000]] })

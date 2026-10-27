@@ -155,7 +155,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto flex h-full min-h-0 w-full max-w-[1480px] flex-col gap-5 overflow-y-auto">
+  <div class="mx-auto flex h-full min-h-0 w-full max-w-[1480px] flex-col overflow-y-auto">
     <div class="flex-none">
       <div class="mb-3 text-xs text-muted">
         <NuxtLink to="/products" class="hover:text-bronze-dark">商品资源 / 商品库</NuxtLink> / 商品详情

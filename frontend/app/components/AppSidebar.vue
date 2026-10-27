@@ -1,6 +1,5 @@
 <script setup lang="ts">
 const route = useRoute()
-const store = useOfficeStore()
 const { isProjectWorkflow, lastProjectRoute } = useWorkspaceNavigation()
 const productLinks = [
   { icon: 'cube', label: '商品库', to: '/products' },
@@ -14,38 +13,34 @@ function isActive(to: string) {
 </script>
 
 <template>
-  <aside class="flex-none overflow-y-auto bg-white border-b border-line p-3 md:w-60 md:border-b-0 md:border-r md:flex md:flex-col md:p-4 md:pb-4">
-    <div class="hidden items-center gap-2 mb-9 px-3 md:flex">
+  <aside class="max-h-[45dvh] flex-none overflow-y-auto border-b border-line bg-white p-3 md:max-h-none md:w-60 md:border-b-0 md:border-r md:flex md:flex-col md:p-3">
+    <div class="hidden items-center gap-2 mb-6 px-2 md:flex">
       <span class="text-2xl font-extrabold tracking-tight text-ink">RSDP</span>
       <span class="text-[10px] text-muted leading-tight">办公空间<br>智能设计平台</span>
     </div>
-    <ProjectFloorTree class="mb-5" />
-    <nav class="grid grid-cols-2 gap-3 md:grid-cols-1 md:gap-5" aria-label="工作区导航">
+    <ProjectFloorTree class="mb-3" />
+    <nav class="grid grid-cols-2 gap-2 md:grid-cols-1 md:gap-3" aria-label="工作区导航">
       <div>
-        <div class="px-3 mb-2 text-[11px] font-medium tracking-wider text-muted">项目工作台</div>
+        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">项目工作台</div>
         <NuxtLink
           :to="lastProjectRoute"
           :aria-current="isProjectWorkflow ? 'page' : undefined"
-          class="flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition"
+          class="flex items-center gap-2 rounded-none px-2.5 py-2 text-sm transition"
           :class="isProjectWorkflow ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-cream'"
         >
           <AppIcon name="map" />
           <span>空间设计</span>
         </NuxtLink>
-        <div class="hidden px-3 mt-3 text-xs leading-relaxed text-muted md:block">
-          <div class="text-[10px] mb-1">当前图纸</div>
-          <div class="line-clamp-2">{{ store.drawingName }}</div>
-        </div>
       </div>
-      <div class="grid content-start gap-1.5">
-        <div class="px-3 mb-0.5 text-[11px] font-medium tracking-wider text-muted">商品资源</div>
+      <div class="grid content-start gap-1">
+        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">商品资源</div>
       <NuxtLink
         v-for="link in productLinks"
         :key="link.to"
         :to="link.to"
         :aria-current="isActive(link.to) ? 'page' : undefined"
         :class="[
-          'flex items-center gap-3 w-full px-3 py-3 rounded-xl text-sm transition',
+          'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
           isActive(link.to) ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
         ]"
       >
