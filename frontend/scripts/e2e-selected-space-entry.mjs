@@ -24,6 +24,7 @@ try {
   await mkdir(outDir, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const page = await context.newPage(), errors = []
   debugPage = page
   page.on('pageerror', error => errors.push(error.message))
@@ -63,10 +64,10 @@ try {
     }, id)
   }
   await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
   // Overview selection must determine the destination, even after another room was designed.
   for (const [id, name] of [['ROOM-B', '其他会议室'], ['ROOM-L', '独立 L 形办公室'], ['ROOM-B', '其他会议室']]) {
-    await page.getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
     await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
     await page.getByTestId('apply-layout').waitFor()
     assert.equal(new URL(page.url()).searchParams.get('zoneId'), id, '进入排版必须使用核对页当前选中的空间')
@@ -76,7 +77,7 @@ try {
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     assert.equal(new URL(page.url()).searchParams.get('zoneId'), id, '刷新后保留选择的排版空间')
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE', { waitUntil: 'networkidle' })
-    await page.getByRole('button', { name: '选择空间 ' + name, exact: true }).waitFor()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 ' + name, exact: true }).waitFor()
   }
   assert.deepEqual(errors, [])
   console.log('选择空间进入排版 UI mock 通过：会议室→办公区→会议室；URL、当前设计 ID、画布空间与刷新保持一致。')

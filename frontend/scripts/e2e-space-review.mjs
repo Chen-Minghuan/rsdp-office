@@ -66,8 +66,17 @@ try {
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
   const advance = () => page.getByRole('button', { name: '进入家具排版 →', exact: true })
-  const choose = name => page.getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
+  const choose = name => page.locator('.review-rooms').getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
   const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  // 右栏属性面板已移除：选中空间面积读左侧列表（1 位小数），数值尺寸改画布标签内联编辑
+  const selectedArea = () => page.locator('.review-room-item.selected .review-room-area').innerText()
+  const labelResize = async (width) => {
+    await page.locator('.space-label-editable').click()
+    const form = page.locator('[data-testid="label-inline"]')
+    await form.waitFor()
+    await form.getByLabel('画布空间宽度（毫米）').fill(String(width))
+    await form.getByRole('button', { name: '保存', exact: true }).click()
+  }
   async function assertAlignment(sourcePoint) {
     const coordinates = await page.locator('[data-layer="underlay"]').evaluate((group, sourcePoint) => {
       const point = new DOMPoint(sourcePoint[0], sourcePoint[1]).matrixTransform(group.getCTM())
@@ -114,12 +123,7 @@ try {
   assert.equal(await page.locator('[data-layer="design"]>g').count(), 12)
   await page.getByRole('button', { name: '编辑轮廓', exact: true }).click()
   assert.equal(await page.locator('[data-vertex-id]').count(), 4, '只有选中空间展示顶点')
-  assert.equal(await page.getByTestId('selected-area').innerText(), '43.20 m²')
-  assert.equal(await page.locator('.review-columns > .review-project').count(), 0, '空间总览不再渲染独立空间栏')
-  await choose('总经办二')
-  await page.locator('.review-inspector .selected-title h3').getByText('总经办二', { exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: '选择空间 总经办二', exact: true }).getAttribute('aria-pressed'), 'true', '项目树与右侧属性使用同一选中空间')
-  await choose('总经办一')
+  assert.equal(await selectedArea(), '43.2 m²')
   await assertAlignment([1000, 1000])
   await page.setViewportSize({ width: 1952, height: 1278 })
   await page.setViewportSize({ width: 1600, height: 1000 })
@@ -128,21 +132,22 @@ try {
   await assertAlignment([1000, 1000])
   assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone'), beforeZoom)
   await page.getByRole('button', { name: '适屏', exact: true }).click()
-  await page.getByRole('switch', { name: '原始图纸', exact: true }).uncheck()
+  const layerSwitches = page.locator('[data-testid="canvas-layers"]')
+  await layerSwitches.getByRole('switch', { name: '原始图纸', exact: true }).uncheck()
   assert.equal(await page.locator('[data-layer="underlay"]').count(), 0)
-  await page.getByRole('switch', { name: '原始图纸', exact: true }).check()
-  await page.getByRole('switch', { name: '实际尺寸标注', exact: true }).uncheck()
+  await layerSwitches.getByRole('switch', { name: '原始图纸', exact: true }).check()
+  await layerSwitches.getByRole('switch', { name: '实际尺寸标注', exact: true }).uncheck()
   assert.equal(await page.locator('[data-layer="dimensions"]').count(), 0)
-  await page.getByRole('switch', { name: '实际尺寸标注', exact: true }).check()
-  await page.getByLabel('空间宽度（毫米）').fill('5000')
-  await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '36.00 m²')
+  await layerSwitches.getByRole('switch', { name: '实际尺寸标注', exact: true }).check()
+  // 数值尺寸：点画布标签内联编辑（右栏属性面板已移除）
+  await page.getByRole('button', { name: '选择 / 缩放', exact: true }).click()
+  await labelResize(5000)
+  assert.equal(await selectedArea(), '36.0 m²')
   assert.equal((await stored()).objects.find(object => object.id === 'ROOM-001').confirmed, false)
   await page.getByRole('button', { name: '撤销', exact: true }).click()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '43.20 m²')
-  await page.getByLabel('空间宽度（毫米）').fill('8000')
-  await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
-  assert.match(await page.getByRole('status').filter({ hasText: '边界重叠' }).innerText(), /重叠/)
+  assert.equal(await selectedArea(), '43.2 m²')
+  await labelResize(8000)
+  assert.equal(await page.locator('.review-room-item.selected .review-badge').innerText(), '需复核', '边界重叠在空间列表标记需复核')
   assert.ok(await advance().isEnabled(), '边界重叠只提示复核，不强制处理')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.ok(await advance().isEnabled())
@@ -170,8 +175,12 @@ try {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.waitForTimeout(500)
   assert.ok((await designWidth()) > narrowWidth * 1.5, '小窗口初次适屏后放大窗口会自动重新适屏')
-  await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
-  assert.ok(await page.getByLabel('空间宽度（毫米）').isDisabled())
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
+  await page.locator('.space-label-editable').click()
+  const uncalibratedForm = page.locator('[data-testid="label-inline"]')
+  await uncalibratedForm.waitFor()
+  assert.equal(await uncalibratedForm.getByLabel('画布空间宽度（毫米）').count(), 0, '未校准不提供数值尺寸编辑')
+  await uncalibratedForm.getByRole('button', { name: '取消', exact: true }).click()
   assert.ok(await advance().isDisabled())
   await page.goto(baseUrl + '/canvas?analysisId=REVIEW-TEST&mode=design&zoneId=TEST-ROOM', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
@@ -213,36 +222,38 @@ try {
     await page.locator('.review-toast').waitFor()
     assert.equal(await page.locator('.space-template-dialog, [role="dialog"]').count(), 0, '弹出提示后不打开模板工作台')
   }
-  await page.getByRole('button', { name: /两点校准图纸比例/ }).click()
+  await page.getByRole('button', { name: '两点校准', exact: true }).click()
   for (const point of [[100, 100], [700, 100]]) {
     const screen = await sourceScreenPoint(point)
     await page.mouse.click(screen.x, screen.y)
   }
   await page.locator('.calibration-inline').waitFor()
-  assert.equal(await page.locator('.review-inspector').getByLabel('校准参考长度（毫米）').count(), 0, '两点校准在画布两点旁输入，右侧面板不再重复输入框')
+  assert.equal(await page.getByLabel('校准参考长度（毫米）').count(), 1, '两点校准仅在画布两点旁输入，页面无重复输入框')
   await page.getByLabel('校准参考长度（毫米）').fill('6000')
   await page.getByRole('button', { name: '应用校准', exact: true }).click()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '24.00 m²')
+  assert.equal(await selectedArea(), '24.0 m²')
   await assertAlignment([100, 100])
+  // 画布左上角用途下拉：直接保存到当前选中空间
+  await page.getByTestId('canvas-space-category').selectOption('OPEN_OFFICE')
+  assert.equal((await stored()).objects.find(o => o.id === 'TEST-ROOM').zoneType, 'OPEN_OFFICE', '画布左上角用途下拉直接保存')
+  await page.getByTestId('canvas-space-category').selectOption('MEETING_ROOM')
   const originalPolygon = (await stored()).objects.find(object => object.id === 'TEST-ROOM').sourcePolygon
-  await page.getByLabel('空间宽度（毫米）').fill('5000')
-  await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '20.00 m²')
+  const beforeResize = (await stored()).objects
+  await labelResize(5000)
+  assert.equal(await selectedArea(), '20.0 m²')
   assert.deepEqual((await stored()).objects.find(object => object.id === 'TEST-ROOM').sourcePolygon, originalPolygon)
-  const beforeRestore = (await stored()).objects
-  await page.getByRole('button', { name: '恢复本次识别轮廓', exact: true }).click()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '24.00 m²')
-  assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-ROOM').sourcePolygon, originalPolygon)
-  assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-L'), beforeRestore.find(o => o.id === 'TEST-L'))
+  assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-L'), beforeResize.find(o => o.id === 'TEST-L'), '数值改尺寸不影响其他空间')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
-  assert.deepEqual((await stored()).objects, beforeRestore, '毫米恢复可完整撤销')
+  assert.deepEqual((await stored()).objects, beforeResize, '数值改尺寸可完整撤销')
+  await labelResize(5000)
+  assert.equal(await selectedArea(), '20.0 m²', '撤销后再次应用数值尺寸')
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '20.00 m²', '刷新不得重导入而覆盖设计副本')
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
+  assert.equal(await selectedArea(), '20.0 m²', '刷新不得重导入而覆盖设计副本')
   await choose('L 形办公区')
   await page.getByRole('button', { name: '编辑轮廓', exact: true }).click()
   assert.equal(await page.locator('[data-vertex-id]').count(), 6)
-  assert.equal(await page.getByTestId('selected-area').innerText(), '5.50 m²')
+  assert.equal(await selectedArea(), '5.5 m²')
   const vertex = page.locator('[data-vertex-id="TEST-L-V-2"]')
   const beforeDrag = (await stored()).objects.find(object => object.id === 'TEST-L').polygon
   const vertexBox = await vertex.boundingBox()
@@ -282,7 +293,7 @@ try {
   traced = (await stored()).objects.find(o => o.id === 'TEST-L')
   assert.equal(traced.polygon.length, millimetreOutline.length, JSON.stringify(traced.polygon))
   for (let i = 0; i < millimetreOutline.length; i++) for (let axis = 0; axis < 2; axis++) assert.ok(Math.abs(traced.polygon[i][axis] - millimetreOutline[i][axis] * 10) < 0.1)
-  assert.equal(await page.getByTestId('selected-area').innerText(), '7.50 m²')
+  assert.equal(await selectedArea(), '7.5 m²')
   await page.reload({ waitUntil: 'networkidle' })
   await choose('L 形办公区')
   assert.deepEqual((await stored()).objects.find(o => o.id === 'TEST-L').polygon, traced.polygon)
@@ -361,8 +372,8 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto(baseUrl + '/canvas?analysisId=CAD-TEST', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 CAD 会议室', exact: true }).waitFor()
-  assert.equal(await page.getByTestId('selected-area').innerText(), '24.00 m²')
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 CAD 会议室', exact: true }).waitFor()
+  assert.equal(await selectedArea(), '24.0 m²')
   await assertAlignment([1000, 1000])
   await page.getByRole('button', { name: '放大画布' }).click()
   await assertAlignment([1000, 1000])
@@ -380,24 +391,19 @@ try {
     assert.equal(imported.contourCorrection.sourceAnalysisId, 'PREVIOUS-ANALYSIS')
     assert.deepEqual((await stored()).objects.find(o => o.id === id + '-TEST-ROOM').polygon, source.rooms[0].polygon, '旧错位框不覆盖新定位的封闭房间')
     await choose('测试会议室')
-    await page.getByRole('status').filter({ hasText: '历史编辑与本次墙线轮廓不一致' }).waitFor()
+    assert.equal(await page.locator('.review-room-item.selected .review-badge').innerText(), '需复核', '历史编辑与本次墙线轮廓不一致在空间列表标记需复核')
     await choose('L 形办公区')
-    const beforeRestore = (await stored()).objects
-    await page.getByRole('button', { name: '恢复本次识别轮廓', exact: true }).click()
-    assert.deepEqual((await stored()).objects.find(o => o.id === imported.id).polygon, source.rooms[1].polygon, '未校准恢复沿用来源像素')
-    await page.getByRole('button', { name: '撤销', exact: true }).click()
-    assert.deepEqual((await stored()).objects, beforeRestore)
     await page.reload({ waitUntil: 'networkidle' })
     assert.deepEqual((await stored()).objects.find(o => o.id === imported.id).polygon, correctedOutline)
   }
   // Removing an unused space excludes it from the current layout/template and remains undoable.
   await choose('L 形办公区')
-  await page.getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
+  await page.locator('.review-rooms').getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
   assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, '空间列表删除按钮同步移除空间')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), true, '删除空间可撤销恢复')
-  // The inspector no longer hosts a delete button; the Delete key removes the selected space and stays undoable.
-  assert.equal(await page.locator('.review-inspector').getByRole('button', { name: '删除空间', exact: true }).count(), 0, '右侧属性面板不再提供删除按钮')
+  // 右侧空间属性面板已整体移除；Delete 键删除选中空间并可撤销
+  assert.equal(await page.locator('.review-inspector').count(), 0, '右侧空间属性面板已整体移除')
   await choose('L 形办公区')
   await page.keyboard.press('Delete')
   assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), false, 'Delete 键删除当前选中空间')
@@ -405,10 +411,10 @@ try {
   assert.equal((await stored()).objects.some(object => object.id === 'CORRECTION-TEST-2-TEST-L'), true, 'Delete 键删除可撤销恢复')
   // Deleting the last remaining space keeps the canvas intentionally empty
   // even when the route reloads and tries to auto-import the source analysis.
-  await page.getByRole('button', { name: '选择空间 L 形办公区', exact: true }).click()
-  await page.getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
-  await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).click()
-  await page.getByRole('button', { name: '删除空间 测试会议室', exact: true }).click()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 L 形办公区', exact: true }).click()
+  await page.locator('.review-rooms').getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).click()
+  await page.locator('.review-rooms').getByRole('button', { name: '删除空间 测试会议室', exact: true }).click()
   assert.equal(await page.locator('[data-review-space-id]').count(), 0, '删除最后空间后列表为空')
   assert.equal((await stored()).blank, true, '最后空间删除后保存空画布标记')
   assert.deepEqual(dialogs, [], '删除空间不再弹出确认框')
@@ -450,10 +456,11 @@ try {
   assert.equal(drawn[0].reviewUnit, 'mm', '空白画布画区直接为毫米单位')
   assert.equal(drawn[0].evidenceKind, 'MANUAL', '手画空间标记人工来源')
   assert.ok(drawn[0].actualWidthMm % 100 === 0 && drawn[0].actualWidthMm > 1000, '毫米场景画区取整到 100mm')
-  await page.getByRole('button', { name: '编辑空间名称', exact: true }).click()
-  await page.getByRole('textbox', { name: '空间名称', exact: true }).fill('手画开放办公区')
-  await page.getByRole('textbox', { name: '空间名称', exact: true }).press('Enter')
-  await page.locator('.selected-title h3').click()
+  // 空间改名：点击列表中的空间名就地改名（无独立改名按钮）
+  await page.locator('.review-room-item .review-room-name').first().click()
+  const manualRename = page.getByRole('textbox', { name: /^重命名空间/ })
+  await manualRename.fill('手画开放办公区')
+  await manualRename.press('Enter')
   await page.getByText('手画开放办公区', { exact: true }).first().waitFor()
   // L 形模块：拖包围盒生成六顶点轮廓
   await page.getByRole('button', { name: '画新空间', exact: true }).click()
@@ -538,7 +545,7 @@ try {
       const c = centroid(ring), rad = angleDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad)
       return ring.map(([x, y]) => [c.x + (x - c.x) * cos - (y - c.y) * sin, c.y + (x - c.x) * sin + (y - c.y) * cos])
     }
-    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
     await page.locator('[data-testid="rotate-form"]').waitFor()
     const before = drawn[3].polygon
     assert.equal(before.length, 6, '以六顶点 L 形验证任意多边形旋转')
@@ -586,7 +593,7 @@ try {
       assert.ok(Math.abs(px - before[i][0]) < 1e-9 && Math.abs(py - before[i][1]) < 1e-9, '点击空白处不应用旋转')
     })
     // 预览放弃后「应用」仍按当前角度提交
-    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
     await page.locator('[data-testid="apply-rotation"]').click()
     await page.waitForTimeout(200)
     rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
@@ -595,7 +602,7 @@ try {
       assert.ok(Math.abs(px - expected15[i][0]) < 1e-6 && Math.abs(py - expected15[i][1]) < 1e-6, '点「应用」提交 15° 旋转')
     })
     // Esc 取消预览：之后点击画布同样不应用
-    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
     await page.getByLabel('空间旋转角度（度，顺时针为正）').fill('10')
     await page.getByLabel('空间旋转角度（度，顺时针为正）').press('Escape')
     {
@@ -614,7 +621,7 @@ try {
       assert.ok(Math.abs(px - before[i][0]) < 1e-6 && Math.abs(py - before[i][1]) < 1e-6, '撤销已应用的旋转')
     })
     // 一键旋转 90°：点击即应用，无需输入角度
-    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
     await page.locator('[data-testid="rotate-90"]').click()
     await page.waitForTimeout(200)
     rotated = (await stored()).objects.find(object => object.id === drawn[3].id)
@@ -741,7 +748,7 @@ try {
     await page.waitForTimeout(200)
     assert.equal(await zoneCount(), before + 2, '刀具空间已删除')
     // 恢复后续段落依赖的选中空间
-    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
   }
   // 窗标注（GEOM-015）：单空间焦点内沿墙拖出窗矩形；仅标注——不扣面积、不改轮廓、可撤销
   {
@@ -784,10 +791,10 @@ try {
     await page.waitForTimeout(200)
     assert.equal((await zoneById(zone4.id)).obstacles?.length || 0, 0, '撤销移除窗标注')
     await page.getByRole('button', { name: '返回全图', exact: true }).click()
-    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
   }
-  // 空间列表双击改名
-  await page.getByRole('button', { name: '选择空间 手画开放办公区', exact: true }).dblclick()
+  // 空间列表点名字直接改名
+  await page.locator('.review-room-item', { hasText: '手画开放办公区' }).locator('.review-room-name').click()
   const renameInput = page.getByRole('textbox', { name: '重命名空间 手画开放办公区', exact: true })
   await renameInput.fill('开放办公区 A')
   await renameInput.press('Enter')
@@ -804,7 +811,7 @@ try {
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
   await page.getByText('设计侧改名区', { exact: true }).first().waitFor()
   // 画布上点选中空间的名称标签：就地改名称/用途/矩形尺寸
-  await page.getByRole('button', { name: '选择空间 开放办公区 A', exact: true }).click()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 开放办公区 A', exact: true }).click()
   await page.locator('.space-label-editable').click()
   const inline = page.locator('[data-testid="label-inline"]')
   await inline.waitFor()
@@ -818,7 +825,7 @@ try {
   assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
   assert.ok(profileRequests.every(url => new URL(url).pathname === '/api/v1/office/projects'), '只调用新项目树接口，不调用已删除的项目资料详情接口')
   assert.deepEqual(errors, [])
-  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消、逐点描 Enter 快捷保存与撤销、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除））。使用模拟 API。')
+  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层（画布右下角图层面板）、画布左上角用途下拉、毫米编辑与撤销（画布标签内联尺寸）、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消、逐点描 Enter 快捷保存与撤销、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除）、右栏空间属性面板整体移除）。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

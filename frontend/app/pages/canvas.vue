@@ -3,6 +3,7 @@ import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -21,7 +22,7 @@ const mode = computed<'overview' | 'design'>(() => store.canvasMode)
 const designZoneId = computed(() => store.designZoneId)
 
 // Sync URL query -> store (browser back/forward, direct links)
-watch([() => route.query, () => store.initialized], ([q, initialized]) => {
+watch([() => route.query, () => store.initialized, () => workspace.loading], ([q, initialized]) => {
   if (!initialized) return
   const urlMode = q.mode === 'design' && store.canEnterLayout ? 'design' : 'overview'
   const urlZoneId = q.zoneId as string | undefined
@@ -29,7 +30,8 @@ watch([() => route.query, () => store.initialized], ([q, initialized]) => {
     if (urlMode === 'design') store.enterDesign(store.zones.some(zone => zone.id === urlZoneId) ? urlZoneId! : store.zones[0]?.id || '')
     else { store.canvasMode = 'overview'; store.designZoneId = null }
   }
-  if (q.mode === 'design' && !store.canEnterLayout) {
+  // 楼层数据加载途中 canEnterLayout 会短暂为 false，等加载结束再决定是否剥离设计入口参数，避免误丢 zoneId
+  if (q.mode === 'design' && !store.canEnterLayout && !workspace.loading) {
     const { mode, zoneId, ...query } = q
     router.replace({ path: '/canvas', query })
   }

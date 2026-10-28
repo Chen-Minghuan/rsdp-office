@@ -1,5 +1,5 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ compact?: boolean }>(), { compact: false })
+withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
 const office = useOfficeStore()
 const route = useRoute()
@@ -11,12 +11,6 @@ const addingFloor = ref(false)
 const floorName = ref('')
 const actionError = ref('')
 const savingFloor = ref(false)
-const editingRequirements = ref(false)
-const requirementsValue = ref('')
-const requirementsOriginal = ref('')
-const requirementsProjectId = ref('')
-const savingRequirements = ref(false)
-const requirementsInput = ref<HTMLTextAreaElement | null>(null)
 const editingKey = ref('')
 const editingName = ref('')
 const editingOriginal = ref('')
@@ -62,37 +56,6 @@ async function saveEdit() {
     nextTick(() => focusNameInput())
   } finally {
     savingEdit.value = false
-  }
-}
-
-function startRequirementsEdit() {
-  if (!workspace.currentProject || savingRequirements.value) return
-  actionError.value = ''
-  requirementsProjectId.value = workspace.currentProject.projectId
-  requirementsValue.value = workspace.currentProject.customerRequirements
-  requirementsOriginal.value = requirementsValue.value
-  editingRequirements.value = true
-  nextTick(() => requirementsInput.value?.focus())
-}
-
-function cancelRequirementsEdit() {
-  if (!savingRequirements.value) editingRequirements.value = false
-}
-
-async function saveRequirementsEdit() {
-  if (!editingRequirements.value || savingRequirements.value) return
-  const value = requirementsValue.value.trim()
-  if (value === requirementsOriginal.value.trim()) { editingRequirements.value = false; return }
-  savingRequirements.value = true
-  actionError.value = ''
-  try {
-    await workspace.updateRequirements(value, requirementsProjectId.value)
-    editingRequirements.value = false
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : '客户需求保存失败'
-    nextTick(() => requirementsInput.value?.focus())
-  } finally {
-    savingRequirements.value = false
   }
 }
 
@@ -169,12 +132,7 @@ async function selectSpace(zoneId: string) {
       <button class="rounded-none bg-bronze px-2 text-xs text-white disabled:opacity-50" :disabled="savingFloor">添加</button>
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
-    <div v-if="workspace.currentProject" class="mt-2 w-full border-t border-line px-2 py-2 text-left hover:bg-cream" title="双击直接填写客户需求" @dblclick="startRequirementsEdit">
-      <div class="flex items-center justify-between text-[11px] font-semibold"><span>客户需求</span><button class="rounded-none px-1 text-bronze-dark hover:bg-white" @click="showRequirements = true" @dblclick.stop>编辑</button></div>
-      <textarea v-if="editingRequirements" ref="requirementsInput" v-model="requirementsValue" rows="4" maxlength="4000" class="mt-1.5 w-full resize-y rounded-none border border-bronze bg-white px-2 py-1.5 text-[11px] leading-5" aria-label="双击填写客户需求" :disabled="savingRequirements" placeholder="填写客户需求与注意事项" @dblclick.stop @keydown.ctrl.enter.prevent="saveRequirementsEdit" @keydown.meta.enter.prevent="saveRequirementsEdit" @keydown.esc.prevent="cancelRequirementsEdit" @blur="saveRequirementsEdit" />
-      <template v-if="editingRequirements"><p class="mt-1 text-[9px] text-muted">Ctrl+Enter 保存 · Esc 取消</p></template>
-      <p v-else class="mt-1 line-clamp-2 text-[10px] leading-4 text-muted">{{ workspace.currentProject.customerRequirements || '暂无需求备注，双击填写' }}</p>
-    </div>
+    <CustomerRequirementsBlock v-if="requirements" class="mt-2 border-t border-line px-2 py-2 hover:bg-cream" />
     <ProjectCreateDialog v-if="showCreate" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
     <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />

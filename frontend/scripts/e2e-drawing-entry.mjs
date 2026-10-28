@@ -104,7 +104,7 @@ try {
   assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0)
   assert.match(await page.getByAltText('当前图纸预览').getAttribute('src'), /^data:image\/svg/)
   complete = true
-  await page.getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
   const current = () => page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     return { plan: store.floorPlan, files: store.files, objects: store.objects, template: store.spaceTemplate, undo: store.undoStack }
@@ -123,7 +123,7 @@ try {
     store.updateObject('ROOM-7', { name: '7图已编辑空间' })
   })
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 7图已编辑空间', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 7图已编辑空间', exact: true }).waitFor()
   assert.equal(posts, 1, '进入空间和刷新只查询同一任务，不重复识别')
   // 远端/本地空稿恢复只有任务绑定时，只补来源，不重新填回用户已删除的空间。
   await page.evaluate(() => {
@@ -142,7 +142,7 @@ try {
   assert.notEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).files[0].drawingId), firstUploadId)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByTestId('drawing-entry').waitFor()
-  assert.equal(await page.getByRole('button', { name: '选择空间 7图已编辑空间', exact: true }).count(), 0)
+  assert.equal(await page.locator('.review-rooms').getByRole('button', { name: '选择空间 7图已编辑空间', exact: true }).count(), 0)
   await page.getByRole('link', { name: '返回图纸识别', exact: true }).click()
   fail = true
   await page.getByRole('button', { name: '识别图纸', exact: true }).click()
@@ -192,7 +192,7 @@ try {
   await page.getByRole('button', { name: '识别图纸', exact: true }).click()
   await page.getByText('新图7办公区', { exact: true }).waitFor()
   await page.getByRole('button', { name: '进入空间总览', exact: true }).click()
-  await page.getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
   assert.equal((await current()).plan.analysisId, 'DRAWING-7-4')
   // 手动画图入口：有内容时需确认，取消保留原稿；确认后清空图纸与空间进入空白毫米画布，原稿进撤销快照。
   await page.goto(baseUrl, { waitUntil: 'networkidle' })

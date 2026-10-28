@@ -64,7 +64,7 @@ try {
     }, id)
   }
   await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
     for (const [id, zoneId] of [['F-L','ROOM-L'],['F-B','ROOM-B']]) {

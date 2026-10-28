@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
-import SpatialInspector from './SpatialInspector.vue'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
-import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
+import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
 import type { CameraTransform } from '~/utils/spatial/camera'
 import type { FloorPlanDrawingBounds } from '~/types/floorPlan'
 import type { ZoneObject } from '~/types/office'
 import { transformContour } from '~/utils/spatial/contourTransform'
 import type { ContourOperation, ContourPoint } from '~/utils/spatial/contourTransform'
-import { canRestoreSourceContour, sourceContour } from '~/utils/spatial/designCorrections'
 import { polygonBounds, polygonCentroid, rotateRing, sketchShapePolygon } from '~/utils/spatial/geometry'
 import { ZONE_TYPES } from '~/utils/sample'
 import type { SketchShapeKind } from '~/utils/spatial/geometry'
@@ -23,7 +21,7 @@ const focusedZoneId = ref<string | null>(null), selectedObstacleId = ref<string 
 const obstacleDraft = ref<{ spaceId: string; kind: SpatialObstacleKind; start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
 const obstacleManipulation = ref<{ spaceId: string; obstacleId: string; handle: string; start: { x: number; y: number }; original: SpatialObstacle; current: SpatialObstacle; snapped: boolean } | null>(null)
 const snapToEdges = ref(true)
-const tool = ref('select')
+const tool = ref('select'), showAllSpaces = ref(false)
 /** GEOM-014 合并/剔除两步点选：第一项为保留/被裁剪空间。 */
 const booleanPicks = ref<string[]>([])
 const showUnderlay = ref(true), showOutline = ref(true), showDimensions = ref(true), showOriginal = ref(false)
@@ -50,6 +48,7 @@ const shiftPressed = ref(false)
 const message = ref('')
 const tracing = ref<{ zoneId: string; points: Array<{ x: number; y: number }> } | null>(null)
 const sketching = ref<{ points: Array<{ x: number; y: number }> } | null>(null)
+const renamingId = ref<string | null>(null), renameDraft = ref('')
 const labelEditing = ref(false)
 const labelName = ref(''), labelCategory = ref<ZoneObject['zoneType']>('OPEN_OFFICE')
 const labelWidth = ref<number | null>(null), labelDepth = ref<number | null>(null)
@@ -112,11 +111,9 @@ const draftObstaclePreview = computed(() => {
   return obstacle ? withEdgeSnap(obstacleDraft.value.spaceId, obstacle) : null
 })
 const draftObstacleGeometry = computed(() => draftObstaclePreview.value?.obstacle.geometry || null)
-const selectedIssue = computed(() => selected.value ? zoneReviewMessage(selected.value, zones.value) : null)
-const selectedBlocking = computed(() => !!selected.value && !!zoneLayoutProblem(selected.value))
-const restorable = computed(() => !!selected.value && store.floorPlan?.inputMode !== 'manual'
-  && selected.value.sourceAnalysisId === store.floorPlan?.analysisId && canRestoreSourceContour(selected.value))
 const calibrated = computed(() => scene.value.workingCoordinateSystem === 'WORLD_MM')
+/** 画布采点/标注期间（逐点描、重描、校准、合并剔除、障碍拖画）收起浮层，避免遮挡画布点击。 */
+const pointCollecting = computed(() => !!tracing.value || !!sketching.value || calibrating.value || tool.value === 'merge' || tool.value === 'subtract' || tool.value.startsWith('obstacle-'))
 function withEdgeSnap(zoneId: string, obstacle: SpatialObstacle) {
   const zone = store.zones.find(item => item.id === zoneId)
   if (!zone || !snapToEdges.value) return { obstacle, snapped: false, edgeIndex: null }
@@ -159,6 +156,19 @@ const footerBlocker = computed(() => {
   if (!blocker) return null
   return blocker.includes('待校准') ? blocker + '，请先用工具条「两点校准」确认图纸尺寸比例' : blocker
 })
+const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
+function status(zone: ZoneObject) {
+  return zoneReviewMessage(zone, zones.value) ? '需复核' : '可用'
+}
+/** 用途区域标签（开放办公区/会议室等），未知类型回退原始值。 */
+function zoneTypeLabel(type: string | undefined) {
+  return ZONE_TYPES.find(([value]) => value === type)?.[1] || type || '未设置用途'
+}
+function dimensions(zone: ZoneObject) {
+  if (zone.reviewUnit !== 'mm') return '尺寸待校准'
+  const metrics = zoneMeasurements(zone)
+  return metrics.width && metrics.depth ? Math.round(metrics.width).toLocaleString() + ' × ' + Math.round(metrics.depth).toLocaleString() + ' mm' : '轮廓待补充'
+}
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
 const imageUrl = computed(() => sameOriginAssetUrl(store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || ''))
@@ -362,23 +372,6 @@ function rotateSelectedDoor() {
   const problem = next ? store.saveZoneObstacle(obstacle.spaceId!, next) : '开启方向无效'
   if (problem) notify('方向未保存：' + problem)
 }
-function restoreSelectedSource() {
-  const zone = selected.value
-  if (!zone || !restorable.value || tracing.value || calibrating.value || drag.value) return
-  const polygon = sourceContour(zone)
-  if (!polygon) return
-  const xs = polygon.map(p => p[0]), ys = polygon.map(p => p[1])
-  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys)
-  const room = store.floorPlan?.rooms.find(room => room.roomId === zone.id)
-  store.updateObject(zone.id, {
-    polygon, x: Math.min(...xs), y: Math.min(...ys), w, h,
-    actualWidthMm: zone.reviewUnit === 'mm' ? w : undefined,
-    actualDepthMm: zone.reviewUnit === 'mm' ? h : undefined,
-    geometrySource: room?.geometrySource || store.floorPlan?.geometrySource,
-    source: 'recognition', evidenceKind: store.floorPlan?.evidenceKind || 'ESTIMATED', contourCorrection: undefined,
-  } as Partial<ZoneObject>)
-  notify('已恢复本次识别轮廓，可撤销；关联排版需重新核验')
-}
 function deleteSpace(zoneId: string) {
   if (tracing.value || calibrating.value || drag.value) return
   const zone = store.zones.find(item => item.id === zoneId)
@@ -397,11 +390,6 @@ function notify(value: string) {
 }
 function category(value: string) {
   if (selectedId.value) store.updateObject(selectedId.value, { zoneType: value as ZoneObject['zoneType'] })
-}
-function resize(width: number, depth: number) {
-  if (!selectedId.value) return
-  store.resizeZoneByMm(selectedId.value, width, depth)
-  notify('空间轮廓与面积已更新，关联排版需更新')
 }
 function startCalibration() {
   cancelTrace()
@@ -532,8 +520,16 @@ function applySketch() {
   if (points.length > 3 && Math.hypot(points[0].x - points.at(-1)!.x, points[0].y - points.at(-1)!.y) * camera.value.zoom < 8) points.pop()
   saveSketchRing(points.map((point): [number, number] => [point.x, point.y]), false)
 }
-function renameSpace(name: string) {
-  const zone = selected.value, trimmed = name.trim()
+function startRoomRename(zone: ZoneObject) {
+  if (tracing.value || calibrating.value || sketching.value) return
+  renamingId.value = zone.id
+  renameDraft.value = zone.name
+  nextTick(() => (document.querySelector('.review-room-rename-form input') as HTMLInputElement | null)?.focus())
+}
+function commitRoomRename(zoneId: string) {
+  if (renamingId.value !== zoneId) return
+  renamingId.value = null
+  const zone = store.zones.find(item => item.id === zoneId), trimmed = renameDraft.value.trim()
   if (!zone || !trimmed || trimmed === zone.name) return
   store.updateObject(zone.id, { name: trimmed } as Partial<ZoneObject>)
   notify(`已重命名为「${trimmed}」`)
@@ -771,7 +767,17 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           </template>
         </div>
         <div class="review-canvas">
-          <div class="review-alignment-status"><b :class="{ unknown: !calibrated }"></b><span>{{ calibrated ? '比例已校准' : '实际尺寸待校准' }}</span><i></i><span>{{ imageReady ? '底图与轮廓共用坐标' : '底图定位待补充' }}</span></div>
+          <div class="review-canvas-top">
+            <div class="review-alignment-status"><b :class="{ unknown: !calibrated }"></b><span>{{ calibrated ? '比例已校准' : '实际尺寸待校准' }}</span><i></i><span>{{ imageReady ? '底图与轮廓共用坐标' : '底图定位待补充' }}</span></div>
+            <div v-if="selectedSpace && !pointCollecting" class="canvas-space-props" data-testid="canvas-space-props">
+              <strong :title="selectedSpace.name">{{ selectedSpace.name }}</strong>
+              <label>用途
+                <select :value="selectedSpace.category" aria-label="空间用途" data-testid="canvas-space-category" @change="category(($event.target as HTMLSelectElement).value)">
+                  <option v-for="[value, text] in ZONE_TYPES" :key="value" :value="value">{{ text }}</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <span v-if="isExample" class="example-label">界面示例 · 演示几何</span>
           <SpatialCanvas :scene="sceneForView" :camera="camera" :selected-space-id="selectedId" :selected-obstacle-id="selectedObstacleId" :obstacle-draft="draftObstacleGeometry" :obstacle-draft-kind="obstacleDraft?.kind" :tool="tool" :interaction-active="!!drag || !!obstacleManipulation"
             :pointer-in-source-coordinates="calibrating || !!tracing || !!sketching" :calibration-points="calibrationPoints" :trace-points="tracing?.points || sketchPreview"
@@ -809,17 +815,41 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           </form>
           <div class="review-legend"><span><i class="outline"></i>空间轮廓</span><span><i class="selected"></i>当前选中</span><span v-if="scene.obstacles.length"><i class="obstacle"></i>固定障碍</span><span v-if="scene.obstacles.some(item => item.kind === 'DOOR_CLEARANCE')"><i class="door"></i>门洞净空</span></div>
           <div class="review-scale" v-if="calibrated && scaleWidth > 20 && scaleWidth < viewport.width / 2" :style="{ width: scaleWidth + 'px' }"><span>0</span><span>2 m</span><i :style="{ width: scaleWidth + 'px' }"></i></div>
+          <div v-if="!pointCollecting" class="canvas-layers" data-testid="canvas-layers">
+            <h4>图层与对照</h4>
+            <label class="layer-toggle"><span>原始图纸</span><input v-model="showUnderlay" type="checkbox" role="switch"></label>
+            <label class="opacity-label"><span>底图透明度</span><span>{{ Math.round(underlayOpacity * 100) }}%</span></label>
+            <input v-model.number="underlayOpacity" aria-label="底图透明度" type="range" min="0.1" max="1" step="0.05" class="opacity-slider">
+            <label class="layer-toggle"><span>设计空间轮廓</span><input v-model="showOutline" type="checkbox" role="switch"></label>
+            <label class="layer-toggle"><span>实际尺寸标注</span><input v-model="showDimensions" type="checkbox" role="switch"></label>
+            <label class="layer-toggle"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板原始轮廓' : '原始识别轮廓' }}</span><input v-model="showOriginal" type="checkbox" role="switch"></label>
+          </div>
           <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button :disabled="!selectedId" @click="focusSelectedSpace">{{ focusedZoneId ? '返回全图' : '放大核对当前空间' }}</button><button @click="showEverySpace">显示全部空间</button></div>
           <div v-if="message" class="review-toast" role="status">{{ message }}</div>
         </div>
         <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 需复核</span></div><button class="template-workbench-button" :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="template-workbench" @click="onTemplateWorkbench">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button><button :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="advance-layout" @click="onAdvanceLayout">进入家具排版 →</button></footer>
       </section>
-      <SpatialInspector :inert="!!tracing" :space="selectedSpace" :is-calibrated="calibrated" :pending-count="pendingCount" :issue="selectedIssue" :issue-blocking="selectedBlocking" :needs-review="!!selectedId && reviewSpaceIds.includes(selectedId)" :layout-blocker="store.layoutBlocker" :template-source="store.floorPlan?.inputMode === 'manual'"
-        :source-note="selected?.note" :can-restore-source="restorable && !calibrating && !drag"
-        :calibration-active="calibrating"
-        v-model:show-underlay="showUnderlay" v-model:show-outline="showOutline" v-model:show-dimensions="showDimensions" v-model:show-original="showOriginal" v-model:underlay-opacity="underlayOpacity"
-        @resize="resize" @category="category" @rename="renameSpace" @start-calibration="startCalibration" @restore-source="restoreSelectedSource">
-      </SpatialInspector>
+      <aside class="review-rooms review-panel">
+        <div class="review-requirements"><CustomerRequirementsBlock /></div>
+        <div class="review-room-list">
+          <div class="section-heading"><h4>识别空间</h4><small>{{ zones.length }} 个</small></div>
+          <div v-for="zone in displayedZones" :key="zone.id" class="review-room-item" :class="{ selected: zone.id === selectedId }">
+            <form v-if="renamingId === zone.id" class="review-room-rename-form" @submit.prevent="commitRoomRename(zone.id)">
+              <input v-model="renameDraft" :aria-label="'重命名空间 ' + zone.name" maxlength="40" @blur="commitRoomRename(zone.id)" @keydown.esc.prevent="renamingId = null">
+            </form>
+            <div v-else class="review-room-card" :class="{ selected: zone.id === selectedId }" role="button" tabindex="0" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)" @keydown.enter.prevent="selectSpace(zone.id)" @keydown.space.prevent="selectSpace(zone.id)">
+              <div><strong class="review-room-name" :title="'点击改名：' + zone.name" @click.stop="startRoomRename(zone)">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
+              <div><small class="review-room-use">{{ zoneTypeLabel(zone.zoneType) }}</small><small class="review-room-dims" :title="dimensions(zone)">{{ dimensions(zone) }}</small><small class="review-room-area">{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
+              <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" data-tip="删除空间" @click.stop="deleteSpace(zone.id)"><AppIcon name="close" size="3" /></button>
+            </div>
+          </div>
+          <button v-if="zones.length > 6" class="show-more-rooms" @click="showAllSpaces = !showAllSpaces">{{ showAllSpaces ? '收起空间列表 ↑' : '查看其余 ' + (zones.length - 6) + ' 个空间 ↓' }}</button>
+          <template v-if="!zones.length">
+            <p class="inspector-hint">暂无空间：上传图纸识别，或直接手动画区。</p>
+            <button class="review-example-button" type="button" data-testid="sketch-start" @click="startSketch">手动画新空间</button>
+          </template>
+        </div>
+      </aside>
     </div>
     <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
   </div>
