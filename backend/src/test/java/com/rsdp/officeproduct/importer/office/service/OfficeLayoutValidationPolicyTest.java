@@ -88,6 +88,18 @@ class OfficeLayoutValidationPolicyTest {
         ((ObjectNode) objects.get(1)).put("layoutConfirmed", false);
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
     }
+    @Test void acceptsConfirmedFurnitureOverlappingWindowAnnotation() throws Exception {
+        // 窗为标注型约束（GEOM-015）：与柱同位置同尺寸也不参与排布避让，已确认排版可保存
+        ArrayNode objects = scene();
+        ObjectNode obstacle = ((ObjectNode) objects.get(0)).putArray("obstacles").addObject();
+        obstacle.put("obstacleId", "WIN-1").put("kind", "WINDOW").put("spaceId", "R").put("excludesFloorArea", false);
+        ObjectNode geometry = obstacle.putObject("geometry").put("type", "POLYGON").put("coordinateSystem", "WORLD_MM");
+        geometry.putArray("outer").addArray().add(2200).add(-2200);
+        geometry.withArray("outer").addArray().add(2600).add(-2200);
+        geometry.withArray("outer").addArray().add(2600).add(-2600);
+        geometry.withArray("outer").addArray().add(2200).add(-2600);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
     @Test void validatesDoorSectorInsteadOfItsBoundingBox() throws Exception {
         ArrayNode objects = scene();
         ObjectNode obstacle = ((ObjectNode) objects.get(0)).putArray("obstacles").addObject();

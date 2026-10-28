@@ -122,7 +122,7 @@ export interface SpatialSceneSnapshot {
   confirmedSceneId: string | null
 }
 
-export type SpatialObstacleKind = 'COLUMN' | 'SHAFT' | 'NO_PLACEMENT' | 'DOOR_CLEARANCE' | 'OTHER'
+export type SpatialObstacleKind = 'COLUMN' | 'SHAFT' | 'NO_PLACEMENT' | 'DOOR_CLEARANCE' | 'WINDOW' | 'OTHER'
 
 export interface SpatialObstacle {
   obstacleId: string

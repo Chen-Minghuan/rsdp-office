@@ -6,6 +6,13 @@
 
 2026-10-27 全局直角与无缝布局：按用户反馈在 `main.css` 对所有元素及伪元素统一取消圆角和阴影，覆盖空间树、排版、画布、选品、商品、方案、表单和弹窗。空间核对三栏、单空间三栏及普通页面容器去除外圈留白和主要栏间 `gap`；上传、商品库、导入、审核、手工录入、导入记录、商品详情和方案页同步展平，保留表单字段及操作组的必要内部间距。设计页标题/副标题及重复返回区已删除；空间核对也已接入同一项目侧栏、顶部工作区栏和步骤导航，移除独立 RSDP 顶栏、介绍区及底部说明条，两种空间工作区切换时框架保持一致。顶部步骤栏左侧集中展示项目/楼层、空间设计、当前图纸和当前空间模板，模板保留查看入口，侧栏和排版面板的重复摘要已移除。`pnpm build`、空间核对、单空间、完整工作流、MOCK 冒烟和 `git diff --check` 通过；上传、两种空间工作区、方案、商品库桌面及 390px 窄屏截图已人工核对，UI 均为模拟 API。
 
+2026-10-28 逐点描 Enter 保存：按用户要求（保存空间应该可以按 Enter）在回退后的点击描点上补回这一项——逐点描 ≥3 点可按 Enter 落库（输入框聚焦时不拦截），提示条显示「Enter 保存」。验证：`pnpm build`、`pnpm e2e:space-review`（新增 Enter 保存/撤销断言）、`MOCK_API=1 pnpm e2e:smoke`（自建 3001 端口）、`git diff --check` 通过。
+2026-10-27 GEOM-017 逐点描交互探索后按用户决策**完全回退**：曲线/划线/draw.io 画法及橡皮筋、Enter 保存等全部移除，SpaceReview/SpatialCanvas 描点链路恢复 `origin/main` 行为（git diff 核对零残留，[任务记录](tasks/GEOM-017-sketch-curves.md) 存档各轮方案与回退原因）；合并/剔除、窗标注、工具条图标等其余改动不受影响。验证：`pnpm build`、`pnpm e2e:space-review`（GEOM-017 段落移除后旧断言全保持）、`MOCK_API=1 pnpm e2e:smoke`（自建 3001 端口）、`git diff --check` 通过。
+
+2026-10-27 GEOM-015 窗标注：按用户要求（窗与障碍物一样挂在单空间内）实现（[任务记录](tasks/GEOM-015-window-openings.md)）。障碍体系新增 `WINDOW` 类型（前后端契约同步）：单空间焦点内沿墙拖矩形标注，复用障碍移动/角点调整/删除/贴墙吸附/撤销链路；定稿为**标注型约束**——不扣净面积、不进排版避让与通道疏散阻挡、服务端排布校验跳过（仍校验几何有效性），窗台高与窗下矮柜规则待业务确认。标柱/门洞/禁放区按钮同步补图标。验证：`pnpm build`、`pnpm test:obstacle-window`（7 项）、`pnpm e2e:space-review`（新增窗标注断言）、`mvn test` 全量 205 项（新增窗不拦截已确认排版用例）、`MOCK_API=1 pnpm e2e:smoke`、`git diff --check` 通过；真实数据库链路与业务验收未执行。
+
+2026-10-27 GEOM-014 空间合并与剔除：按用户给出的目标画图工具条盘点缺口并立卡——本轮实现合并/剔除（[任务记录](tasks/GEOM-014-space-merge-subtract.md)），窗标注与布局边界分别立卡 [GEOM-015](tasks/GEOM-015-window-openings.md)/[GEOM-016](tasks/GEOM-016-layout-boundary.md) 待启动。空间核对工具条新增「合并空间」「剔除区域」两步点选：布尔引擎用新增依赖 polygon-clipping（`utils/spatial/boolean.ts` 封装，0.01 取整+ringProblem 校验后落库），结果为多块/带孔洞按定稿拒绝并给可操作提示；合并迁移家具/障碍/选品并删除被并入空间，确认与排版失效，单次撤销完整恢复。验证：`pnpm build`、`pnpm test:space-boolean`（10 项）、`pnpm e2e:space-review`（新增合并/剔除/拒绝/撤销断言）、`MOCK_API=1 pnpm e2e:smoke`（自建 3001 端口）、`git diff --check` 通过；随后按用户要求补齐工具条图标（AppIcon 扩展 cursor/scissors/merge/fitScreen，图标在上文字在下，e2e 画布定位改 aria-label），build/space-review/smoke/diff-check 复验通过；真实数据库链路与业务验收未执行。
+
 2026-10-27 服务端确认校验对齐方向性座椅净空：按用户反馈（已确认排版被后端以「已确认家具离墙或通行预留不足」拒存，后续编辑保存不上、刷新后回退，表现为"删除没反应"），定位为 7b3dcd2 前端改方向性规则（桌子只留座椅侧、屏风/桌板侧可靠墙）后服务端 `OfficeLayoutValidationPolicy` 仍四边整体外扩。后端移植 `seatSideRect` 语义：非座椅按 kind（desk 含 560 默认、L/U 卡位转角两边含镜像）只校验座椅侧，椅子四边保留 max（离墙，组间过道）；内建模板 kind 表+自定义模块快照读取。新增 3 个用例并更新 1 个旧语义用例，`mvn test` 全量 204 项通过（0 失败）。
 
 2026-10-27 合并 origin/main 多楼层项目工作区：merge-tree 预检无冲突，stash→merge→pop 落地，重叠文件（office.ts/status.md/architecture.md）自动合并成功；修复远程 `e2e-project-floors.mjs` 缺 `/api/auth/me` mock（本地 VITE_AUTH_ENABLED=1 下跳登录页超时），合并干净构建上 floors/space-review/drawing-entry/aisle-channels/smoke 全通过。用户环境 404 系 IDEA 旧后端进程未重启，重启即加载新接口。
@@ -200,6 +207,10 @@
 | GEOM-006 | 沿墙轮廓修正 | 已实现，构建、Java 97 项及空间核对 UI mock 通过；完整墙线提示、补转角及重描/退点/取消/撤销见[任务记录](tasks/GEOM-006-wall-contour-correction.md) | 截图中真实房间边界未代替用户修改，真实识别质量待验收 | P1 |
 | GEOM-010 | 删除不参与排版的空间 | 已实现并通过构建、专项 UI mock；删除关联内容、撤销、末空间删除后刷新保持空稿及保存状态，见[任务记录](tasks/GEOM-010-delete-spaces.md) | 真实数据库删除链路与用户业务验收待补充 | P1 |
 | GEOM-011 | 单空间建筑约束标注与避障 | 已实现人工几何标注首版；单空间聚焦、柱/门洞扇形净空/禁放区、净面积、模板、前后端实际轮廓避障及专项 UI mock 通过，见[任务记录](tasks/GEOM-011-space-obstacles.md) | 不含自动识别和任意多边形；真实数据库与用户原图业务验收待补充 | P1 |
+| GEOM-014 | 空间合并与剔除（轮廓布尔） | 已实现并通过构建、布尔纯函数测试与专项 UI mock（合并/剔除/拒绝/撤销），见[任务记录](tasks/GEOM-014-space-merge-subtract.md) | 结果为孔洞/多块按定稿拒绝；真实数据库链路与用户业务验收待补充 | P1 |
+| GEOM-015 | 窗与开口标注 | 已实现并通过构建、纯函数测试、专项 UI mock 与后端校验用例，见[任务记录](tasks/GEOM-015-window-openings.md) | 定稿为标注型约束（不扣面积/不避让）；窗台高与窗下品类规则待业务确认；真实数据库链路与用户业务验收待补充 | P1 |
+| GEOM-017 | 逐点描交互探索（已完全回退） | 全部改动按用户决策回退至 origin/main 描点行为，见[任务记录](tasks/GEOM-017-sketch-curves.md) | 曲线/橡皮筋需求若重提可参考卡内方案存档 | P3 |
+| GEOM-016 | 排版布局边界（绘制/调整/删除） | 待开始，见[任务记录](tasks/GEOM-016-layout-boundary.md) | 正向排布有效区对象、排版引擎接入与服务端核验待定稿 | P1 |
 | LAYOUT-002 | 单位模块复用办公家具图例 | 已实现并通过专项验证；28 个图例/9 类同源、毫米规格、画布线稿、构建及专项/模板/单空间 UI mock 和冒烟通过，见[任务记录](tasks/LAYOUT-002-shared-furniture-legend.md) | 图例布局可不绑定商品；复杂约束排版和正式商品匹配独立推进 | P1 |
 | LAYOUT-003 | 一键多排与空间利用 | 已实现并通过专项验证；默认横纵多排、可调间距、轮廓/防重叠与参数恢复；构建/算法/专项及模拟回归通过，见[任务记录](tasks/LAYOUT-003-auto-multi-row.md) | 启发式排布不保证全局最优；门窗/通达性与完整服务端方案核验独立推进 | P1 |
 | LAYOUT-004 | 自动排版入口与结果反馈 | 已实现并通过专项验证；旧 row/3件恢复后主按钮直接自动多排，当前/预估/实际反馈；构建、专项/图例与 MOCK 冒烟通过，见[任务记录](tasks/LAYOUT-004-apply-auto-layout.md) | 本轮入口与反馈修正；复杂方案与真实业务验收仍独立推进 | P1 |

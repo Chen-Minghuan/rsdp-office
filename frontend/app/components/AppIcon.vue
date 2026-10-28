@@ -47,6 +47,12 @@ import {
   DocumentArrowUpIcon,
   TagIcon,
   InboxArrowDownIcon,
+  CursorArrowRaysIcon,
+  ScissorsIcon,
+  SquaresPlusIcon,
+  ViewfinderCircleIcon,
+  WindowIcon,
+  ArrowRightOnRectangleIcon,
 } from '@heroicons/vue/24/outline'
 
 const icons: Record<string, any> = {
@@ -98,6 +104,12 @@ const icons: Record<string, any> = {
   import: DocumentArrowUpIcon,
   tag: TagIcon,
   inbox: InboxArrowDownIcon,
+  cursor: CursorArrowRaysIcon,
+  scissors: ScissorsIcon,
+  merge: SquaresPlusIcon,
+  fitScreen: ViewfinderCircleIcon,
+  window: WindowIcon,
+  door: ArrowRightOnRectangleIcon,
 }
 
 const props = defineProps<{

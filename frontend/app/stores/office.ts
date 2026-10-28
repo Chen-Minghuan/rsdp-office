@@ -35,6 +35,7 @@ import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
 import { geometryForZone, ringProblem, ringsOverlap, zoneProblem, zoneRing, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { inferRectangleFrame, resizeRectangle, rotateRing } from '~/utils/spatial/geometry'
+import { subtractRings, unionRings } from '~/utils/spatial/boolean'
 import type { SpaceTemplate } from '~/types/spaceTemplate'
 import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFromTemplate, templatePlan } from '~/utils/spatial/spaceTemplate'
 import { officeReviewExample } from '~/utils/spatial/example'
@@ -509,6 +510,80 @@ export const useOfficeStore = defineStore('office', {
         }
       })
       return true
+    },
+
+    /** GEOM-014 合并空间：dropId 并入 keepId（轮廓取并集）。家具/便签/箭头和障碍（保留稳定 ID）改挂保留空间，
+     *  选品清单同步改挂；两侧确认与排版失效、模板需更新；一次撤销完整恢复。 */
+    mergeZones(keepId: string, dropId: string): string | null {
+      const keep = this.zones.find(zone => zone.id === keepId)
+      const drop = this.zones.find(zone => zone.id === dropId)
+      if (!keep || !drop || keepId === dropId) return '请选择两个不同的空间'
+      if (keep.reviewUnit !== drop.reviewUnit) return '两个空间的单位基准不一致，请先完成两点校准'
+      const result = unionRings(zoneRing(keep), zoneRing(drop))
+      if ('problem' in result) return result.problem
+      const ring = result.ring
+      const bounds = polygonBoundsMm(ring)
+      if (!bounds) return '合并结果无效'
+      this.objectUpdate(() => {
+        keep.polygon = ring
+        keep.x = bounds.minX
+        keep.y = bounds.minY
+        keep.w = bounds.maxX - bounds.minX
+        keep.h = bounds.maxY - bounds.minY
+        keep.actualWidthMm = keep.reviewUnit === 'mm' ? keep.w : undefined
+        keep.actualDepthMm = keep.reviewUnit === 'mm' ? keep.h : undefined
+        keep.geometrySource = 'manual_geometry'
+        keep.confirmed = false
+        keep.confirmedAt = undefined
+        keep.obstacles = [...(keep.obstacles || []), ...(drop.obstacles || []).map(obstacle => ({ ...obstacle, spaceId: keep.id }))]
+        this.objects.forEach(object => {
+          if (object.kind !== 'zone' && object.zoneId === dropId) {
+            object.zoneId = keepId
+            if (object.kind === 'furniture') object.layoutConfirmed = false
+          }
+        })
+        this.cart.forEach(item => { if (item.zoneId === dropId) item.zoneId = keepId })
+        this.objects = this.objects.filter(object => !(object.kind === 'zone' && object.id === dropId))
+        this.spaceTemplate = null
+        if (this.activeZoneId === dropId) this.activeZoneId = keepId
+        this.invalidateZoneLayout(keepId)
+        this.zones.filter(other => other.id !== keepId && ringsOverlap(ring, zoneRing(other))).forEach(other => {
+          other.confirmed = false
+          other.confirmedAt = undefined
+          this.invalidateZoneLayout(other.id)
+        })
+      })
+      return null
+    },
+
+    /** GEOM-014 剔除：targetId 轮廓减去 cutterId 轮廓（cutter 保持不动）。
+     *  结果必须仍是单环无孔洞，否则拒绝且不改动数据；目标空间确认与排版失效，越界家具由排版校验提示。 */
+    subtractZone(targetId: string, cutterId: string): string | null {
+      const target = this.zones.find(zone => zone.id === targetId)
+      const cutter = this.zones.find(zone => zone.id === cutterId)
+      if (!target || !cutter || targetId === cutterId) return '请选择两个不同的空间'
+      if (target.reviewUnit !== cutter.reviewUnit) return '两个空间的单位基准不一致，请先完成两点校准'
+      if (!ringsOverlap(zoneRing(target), zoneRing(cutter))) return '两个空间没有重叠区域，无需剔除'
+      const result = subtractRings(zoneRing(target), zoneRing(cutter))
+      if ('problem' in result) return result.problem
+      const ring = result.ring
+      const bounds = polygonBoundsMm(ring)
+      if (!bounds) return '剔除结果无效'
+      this.objectUpdate(() => {
+        target.polygon = ring
+        target.x = bounds.minX
+        target.y = bounds.minY
+        target.w = bounds.maxX - bounds.minX
+        target.h = bounds.maxY - bounds.minY
+        target.actualWidthMm = target.reviewUnit === 'mm' ? target.w : undefined
+        target.actualDepthMm = target.reviewUnit === 'mm' ? target.h : undefined
+        target.geometrySource = 'manual_geometry'
+        target.confirmed = false
+        target.confirmedAt = undefined
+        this.spaceTemplate = null
+        this.invalidateZoneLayout(targetId)
+      })
+      return null
     },
 
     deleteFurnitureGroup(ids: string[], zoneId: string) {

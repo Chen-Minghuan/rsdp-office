@@ -66,7 +66,7 @@ export interface ChannelEgressIssue { kind: 'unmarked' | 'unlinked' | 'blocked';
  * 规则 1：通道带走向两端头（含 028 端点留断后的实际跨度、027 多边形裁剪后的分段包围范围）至少一端在
  *         DOOR_LINK_BUFFER_MM 缓冲内接到门洞净空，否则提示未衔接入口。
  * 规则 2：已衔接端头到对应门洞的走廊（端头边缘与门洞包围盒的并集包围盒）被家具占地/禁放区/柱等挤占后
- *         剩余净宽低于 MIN_PASSAGE_MM，提示衔接路径被截断。门洞净空自身不算阻挡。
+ *         剩余净宽低于 MIN_PASSAGE_MM，提示衔接路径被截断。门洞净空自身不算阻挡；窗为标注型约束（GEOM-015），也不算阻挡。
  */
 export function channelEgressIssues(zone: ZoneObject, channels: LayoutChannel[], furniture: FurnitureObject[], firstBlockDepthMm?: number): ChannelEgressIssue[] {
   if (!channels.length) return []
@@ -77,7 +77,7 @@ export function channelEgressIssues(zone: ZoneObject, channels: LayoutChannel[],
   const blockers: Rect[] = [
     ...furniture.map(item => officeFurnitureFootprint(item)),
     ...(zone.layoutPreferences?.exclusions || []).map(area => ({ x: area.x, y: area.y, w: area.w, h: area.h })),
-    ...(zone.obstacles || []).filter(obstacle => obstacle.kind !== 'DOOR_CLEARANCE')
+    ...(zone.obstacles || []).filter(obstacle => obstacle.kind !== 'DOOR_CLEARANCE' && obstacle.kind !== 'WINDOW')
       .map(obstacle => obstacleExclusion(zone, obstacle)).filter((area): area is NonNullable<typeof area> => !!area)
       .map(area => ({ x: area.x, y: area.y, w: area.w, h: area.h })),
   ]

@@ -39,9 +39,11 @@
 .review-canvas-panel { display:flex; flex-direction:column; }
 .review-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid #e9e7e1; min-height:57px; gap:8px; flex:none; }
 .review-tools { display:flex; align-items:center; gap:4px; }
-.review-back { display:flex; align-items:center; padding:9px 10px; color:#7f857a; border-radius:6px; font-size:11px; white-space:nowrap; flex:none; }
+/* 图标在上、文字在下：贴近目标画图工具条形态，也避免按钮换行溢出。 */
+.review-tools button { flex-direction:column; gap:2px; padding:6px 8px; }
+.review-back { display:flex; align-items:center; gap:5px; padding:9px 10px; color:#7f857a; border-radius:6px; font-size:11px; white-space:nowrap; flex:none; }
 .review-back:hover { background:#f7f5ef; }
-.review-toolbar button { padding:9px 10px; color:#7f857a; border:0; border-radius:6px; font-size:11px; white-space:nowrap; }
+.review-toolbar button { display:inline-flex; align-items:center; gap:5px; padding:9px 10px; color:#7f857a; border:0; border-radius:6px; font-size:11px; white-space:nowrap; }
 .review-toolbar button:hover { background:#f7f5ef; }
 .review-toolbar button.active { color:#a5825c; background:#f1e8dc; font-weight:600; }
 .review-toolbar button:disabled { opacity:.4; cursor:not-allowed; }
