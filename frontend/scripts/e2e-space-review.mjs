@@ -92,7 +92,7 @@ try {
   assert.equal(await page.getByText('建筑面积', { exact: true }).count(), 0)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
-  assert.equal(await page.locator('.review-room-card').count(), 0, '新工作区不自动填充演示空间')
+  assert.equal(await page.locator('[data-review-space-id]').count(), 0, '新工作区不自动填充演示空间')
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
@@ -115,6 +115,11 @@ try {
   await page.getByRole('button', { name: '编辑轮廓', exact: true }).click()
   assert.equal(await page.locator('[data-vertex-id]').count(), 4, '只有选中空间展示顶点')
   assert.equal(await page.getByTestId('selected-area').innerText(), '43.20 m²')
+  assert.equal(await page.locator('.review-columns > .review-project').count(), 0, '空间总览不再渲染独立空间栏')
+  await choose('总经办二')
+  await page.locator('.review-inspector .selected-title h3').getByText('总经办二', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '选择空间 总经办二', exact: true }).getAttribute('aria-pressed'), 'true', '项目树与右侧属性使用同一选中空间')
+  await choose('总经办一')
   await assertAlignment([1000, 1000])
   await page.setViewportSize({ width: 1952, height: 1278 })
   await page.setViewportSize({ width: 1600, height: 1000 })
@@ -404,7 +409,7 @@ try {
   await page.getByRole('button', { name: '删除空间 L 形办公区', exact: true }).click()
   await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).click()
   await page.getByRole('button', { name: '删除空间 测试会议室', exact: true }).click()
-  assert.equal(await page.locator('.review-room-card').count(), 0, '删除最后空间后列表为空')
+  assert.equal(await page.locator('[data-review-space-id]').count(), 0, '删除最后空间后列表为空')
   assert.equal((await stored()).blank, true, '最后空间删除后保存空画布标记')
   assert.deepEqual(dialogs, [], '删除空间不再弹出确认框')
   await page.evaluate(() => {
@@ -413,7 +418,7 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
   })
   await page.reload({ waitUntil: 'networkidle' })
-  assert.equal(await page.locator('.review-room-card').count(), 0, '刷新不会自动恢复已删除空间')
+  assert.equal(await page.locator('[data-review-space-id]').count(), 0, '刷新不会自动恢复已删除空间')
   // 空白画布（无图纸）手动画区：形状模块拖出毫米空间
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
@@ -445,7 +450,9 @@ try {
   assert.equal(drawn[0].reviewUnit, 'mm', '空白画布画区直接为毫米单位')
   assert.equal(drawn[0].evidenceKind, 'MANUAL', '手画空间标记人工来源')
   assert.ok(drawn[0].actualWidthMm % 100 === 0 && drawn[0].actualWidthMm > 1000, '毫米场景画区取整到 100mm')
-  await page.getByLabel('空间名称').fill('手画开放办公区')
+  await page.getByRole('button', { name: '编辑空间名称', exact: true }).click()
+  await page.getByRole('textbox', { name: '空间名称', exact: true }).fill('手画开放办公区')
+  await page.getByRole('textbox', { name: '空间名称', exact: true }).press('Enter')
   await page.locator('.selected-title h3').click()
   await page.getByText('手画开放办公区', { exact: true }).first().waitFor()
   // L 形模块：拖包围盒生成六顶点轮廓
@@ -779,13 +786,14 @@ try {
     await page.getByRole('button', { name: '返回全图', exact: true }).click()
     await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
   }
-  // 空间列表直接改名
-  await page.getByRole('button', { name: '重命名空间 手画开放办公区', exact: true }).click()
+  // 空间列表双击改名
+  await page.getByRole('button', { name: '选择空间 手画开放办公区', exact: true }).dblclick()
   const renameInput = page.getByRole('textbox', { name: '重命名空间 手画开放办公区', exact: true })
   await renameInput.fill('开放办公区 A')
   await renameInput.press('Enter')
   await page.getByText('开放办公区 A', { exact: true }).first().waitFor()
   assert.ok((await stored()).objects.some(object => object.kind === 'zone' && object.name === '开放办公区 A'), '列表改名已保存')
+  await choose('手动空间 4')
   // 家具排版侧栏同样可改名
   await advance().click()
   await page.getByTestId('apply-layout').waitFor()

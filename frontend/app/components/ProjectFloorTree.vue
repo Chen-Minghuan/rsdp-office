@@ -112,6 +112,10 @@ async function addFloor() {
 }
 
 async function selectSpace(zoneId: string) {
+  if (route.path === '/canvas' && office.canvasMode === 'overview') {
+    office.setActiveZone(zoneId)
+    return
+  }
   if (!office.enterDesign(zoneId)) return
   if (route.path !== '/canvas') {
     await router.push({ path: '/canvas', query: { floorId: workspace.currentFloorId, mode: 'design', zoneId } })
@@ -148,7 +152,13 @@ async function selectSpace(zoneId: string) {
                 {{ workspace.collapsedFloorIds.includes(floor.floorId) ? '▶' : '▼' }}
               </button>
             </div>
-            <OfficeCanvasDesignSpaceSwitcher v-if="floor.floorId === workspace.currentFloorId" v-show="!workspace.collapsedFloorIds.includes(floor.floorId)" :zone-id="office.designZoneId" @select="selectSpace" />
+            <OfficeCanvasDesignSpaceSwitcher
+              v-if="floor.floorId === workspace.currentFloorId"
+              v-show="!workspace.collapsedFloorIds.includes(floor.floorId)"
+              :mode="route.path === '/canvas' && office.canvasMode === 'overview' ? 'review' : 'design'"
+              :zone-id="route.path === '/canvas' && office.canvasMode === 'overview' ? office.activeZoneId : office.designZoneId"
+              @select="selectSpace"
+            />
           </template>
           <button v-if="project.projectId === workspace.currentProjectId" class="rounded-none px-2 py-1 text-left text-[11px] text-bronze-dark hover:bg-bg" @click="addingFloor = !addingFloor">＋ 添加新楼层</button>
         </div>

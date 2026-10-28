@@ -28,8 +28,24 @@ const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const showOriginal = defineModel<boolean>('showOriginal', { default: false })
 const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
 const width = ref<number | null>(null), depth = ref<number | null>(null)
-const nameDraft = ref('')
+const nameDraft = ref(''), editingName = ref(false)
+const nameInput = ref<HTMLInputElement | null>(null)
 watch(() => [props.space?.spaceId, props.space?.name], () => { nameDraft.value = props.space?.name ?? '' }, { immediate: true })
+watch(() => props.space?.spaceId, () => { editingName.value = false })
+function startNameEdit() {
+  nameDraft.value = props.space?.name ?? ''
+  editingName.value = true
+  nextTick(() => { nameInput.value?.focus(); nameInput.value?.select() })
+}
+function saveName() {
+  const name = nameDraft.value.trim()
+  if (name && name !== props.space?.name) emit('rename', name)
+  editingName.value = false
+}
+function cancelNameEdit() {
+  nameDraft.value = props.space?.name ?? ''
+  editingName.value = false
+}
 watch(() => [props.space?.spaceId, props.space?.derived.rectangleDimensions?.widthMm, props.space?.derived.rectangleDimensions?.depthMm], () => {
   width.value = Math.round(props.space?.derived.rectangleDimensions?.widthMm || 0) || null
   depth.value = Math.round(props.space?.derived.rectangleDimensions?.depthMm || 0) || null
@@ -44,7 +60,17 @@ const sourceLabel = computed(() => props.space?.evidenceKind === 'DEMO' ? '演�
     <template v-if="space">
       <div class="selected-title"><h3>{{ space.name }}</h3><span class="review-badge" :class="needsReview ? 'pending' : 'verified'">{{ needsReview ? '需复核' : '可用' }}</span></div>
       <p class="room-id">空间 ID · {{ space.spaceId }}</p>
-      <div class="property-row"><span>空间名称</span><input v-model="nameDraft" aria-label="空间名称" maxlength="40" @change="emit('rename', nameDraft)"></div>
+      <div class="property-row">
+        <span>空间名称</span>
+        <form v-if="editingName" class="flex min-w-0 items-center gap-1" @submit.prevent="saveName">
+          <input ref="nameInput" v-model="nameDraft" aria-label="空间名称" maxlength="40" @blur="saveName" @keydown.esc.prevent.stop="cancelNameEdit">
+          <button type="submit" class="shrink-0 text-[10px] text-bronze-dark hover:underline" aria-label="保存空间名称">保存</button>
+        </form>
+        <div v-else class="flex min-w-0 items-center gap-2">
+          <strong class="max-w-[120px] truncate" :title="space.name">{{ space.name }}</strong>
+          <button type="button" class="shrink-0 text-[10px] text-bronze-dark hover:underline" aria-label="编辑空间名称" @click="startNameEdit">编辑</button>
+        </div>
+      </div>
       <div class="property-row"><span>空间用途</span><select :value="space.category" aria-label="空间用途" @change="emit('category', ($event.target as HTMLSelectElement).value)"><option v-for="[value, label] in ZONE_TYPES" :key="value" :value="value">{{ label }}</option></select></div>
       <div class="property-row"><span>几何来源</span><strong>{{ sourceLabel }}</strong></div>
       <p v-if="sourceNote" class="inspector-hint" role="status">{{ sourceNote }}</p>

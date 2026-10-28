@@ -17,13 +17,13 @@ import type { SketchShapeKind } from '~/utils/spatial/geometry'
 import { doorClearanceObstacle, moveObstacle, obstacleLabel, rectangleObstacle, reshapeObstacle, snapObstacleToZone } from '~/utils/spatial/obstacles'
 import type { SpatialObstacle, SpatialObstacleKind } from '~/types/spatial'
 
-const store = useOfficeStore(), workspace = useWorkspaceStore(), router = useRouter(), route = useRoute()
-const selectedId = ref<string | null>(null)
+const store = useOfficeStore(), router = useRouter(), route = useRoute()
+const selectedId = ref<string | null>(store.activeZoneId)
 const focusedZoneId = ref<string | null>(null), selectedObstacleId = ref<string | null>(null)
 const obstacleDraft = ref<{ spaceId: string; kind: SpatialObstacleKind; start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
 const obstacleManipulation = ref<{ spaceId: string; obstacleId: string; handle: string; start: { x: number; y: number }; original: SpatialObstacle; current: SpatialObstacle; snapped: boolean } | null>(null)
 const snapToEdges = ref(true)
-const tool = ref('select'), showAllSpaces = ref(false)
+const tool = ref('select')
 /** GEOM-014 合并/剔除两步点选：第一项为保留/被裁剪空间。 */
 const booleanPicks = ref<string[]>([])
 const showUnderlay = ref(true), showOutline = ref(true), showDimensions = ref(true), showOriginal = ref(false)
@@ -50,7 +50,6 @@ const shiftPressed = ref(false)
 const message = ref('')
 const tracing = ref<{ zoneId: string; points: Array<{ x: number; y: number }> } | null>(null)
 const sketching = ref<{ points: Array<{ x: number; y: number }> } | null>(null)
-const renamingId = ref<string | null>(null), renameDraft = ref('')
 const labelEditing = ref(false)
 const labelName = ref(''), labelCategory = ref<ZoneObject['zoneType']>('OPEN_OFFICE')
 const labelWidth = ref<number | null>(null), labelDepth = ref<number | null>(null)
@@ -162,7 +161,6 @@ const footerBlocker = computed(() => {
 })
 const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
 const pendingCount = computed(() => reviewSpaceIds.value.length)
-const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
 const imageUrl = computed(() => sameOriginAssetUrl(store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || ''))
 const isExample = computed(() => store.zones.some(zone => zone.evidenceKind === 'DEMO'))
 
@@ -175,9 +173,17 @@ const scaleWidth = computed(() => 2000 * camera.value.zoom)
 const zoomPercent = computed(() => Math.round(camera.value.zoom / fittedZoom.value * 100))
 
 watch(tool, () => { labelEditing.value = false; booleanPicks.value = [] })
-watch(selectedId, () => { labelEditing.value = false })
+watch(selectedId, id => {
+  labelEditing.value = false
+  if (id && store.activeZoneId !== id) store.setActiveZone(id)
+})
+watch(() => store.activeZoneId, id => {
+  if (id && id !== selectedId.value && store.zones.some(zone => zone.id === id)) selectSpace(id)
+})
 watch(() => store.zones.map(zone => zone.id).join(','), () => {
-  if (!store.zones.some(zone => zone.id === selectedId.value)) selectedId.value = store.zones[0]?.id || null
+  if (!store.zones.some(zone => zone.id === selectedId.value)) selectedId.value = store.zones.find(zone => zone.id === store.activeZoneId)?.id || store.zones[0]?.id || null
+  if (focusedZoneId.value && !store.zones.some(zone => zone.id === focusedZoneId.value)) focusedZoneId.value = null
+  if (tracing.value && !store.zones.some(zone => zone.id === tracing.value?.zoneId)) cancelTrace()
 }, { immediate: true })
 watch(() => store.floorPlan?.analysisId, () => {
   cancelTrace()
@@ -237,7 +243,6 @@ function selectSpace(id: string) {
   discardRotatePreview()
   selectedId.value = id
   selectedObstacleId.value = null
-  if (!zones.value.slice(0, 6).some(zone => zone.id === id)) showAllSpaces.value = true
 }
 /** GEOM-014 合并/剔除：两次点选两个空间后调用 store 布尔动作，失败给出具体原因且不改动数据。 */
 function startBoolean(mode: 'merge' | 'subtract') {
@@ -385,14 +390,6 @@ function deleteSpace(zoneId: string) {
 function deleteSelectedSpace() {
   if (selectedId.value) deleteSpace(selectedId.value)
 }
-function dimensions(zone: ZoneObject) {
-  if (zone.reviewUnit !== 'mm') return '尺寸待校准'
-  const metrics = zoneMeasurements(zone)
-  return metrics.width && metrics.depth ? Math.round(metrics.width).toLocaleString() + ' × ' + Math.round(metrics.depth).toLocaleString() + ' mm' : '轮廓待补充'
-}
-function status(zone: ZoneObject) {
-  return zoneReviewMessage(zone, zones.value) ? '需复核' : '可用'
-}
 function notify(value: string) {
   message.value = value
   if (messageTimer) clearTimeout(messageTimer)
@@ -537,19 +534,6 @@ function applySketch() {
 }
 function renameSpace(name: string) {
   const zone = selected.value, trimmed = name.trim()
-  if (!zone || !trimmed || trimmed === zone.name) return
-  store.updateObject(zone.id, { name: trimmed } as Partial<ZoneObject>)
-  notify(`已重命名为「${trimmed}」`)
-}
-function startRoomRename(zone: ZoneObject) {
-  renamingId.value = zone.id
-  renameDraft.value = zone.name
-  nextTick(() => (document.querySelector('.review-room-rename-form input') as HTMLInputElement | null)?.focus())
-}
-function commitRoomRename(zoneId: string) {
-  if (renamingId.value !== zoneId) return
-  renamingId.value = null
-  const zone = store.zones.find(item => item.id === zoneId), trimmed = renameDraft.value.trim()
   if (!zone || !trimmed || trimmed === zone.name) return
   store.updateObject(zone.id, { name: trimmed } as Partial<ZoneObject>)
   notify(`已重命名为「${trimmed}」`)
@@ -700,14 +684,6 @@ function advance() {
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
   if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id } })
 }
-function loadExample() {
-  store.loadReviewExample()
-  selectedId.value = store.zones[0]?.id ?? null
-  showAllSpaces.value = false
-  focusedZoneId.value = null
-  selectedObstacleId.value = null
-  nextTick(fit)
-}
 onMounted(() => { window.addEventListener('keydown', traceKey); window.addEventListener('keyup', keyUp); window.addEventListener('blur', cancelInteraction) })
 onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
 </script>
@@ -716,33 +692,6 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
   <div class="space-review">
     <div v-if="store.floorPlanError" class="review-error" role="alert">{{ store.floorPlanError }}</div>
     <div class="review-columns">
-      <aside class="review-project review-panel">
-        <div class="project-section">
-          <div class="section-heading"><h2>项目与空间</h2><small>{{ workspace.currentFloorName }}</small></div>
-          <ProjectFloorTree compact />
-        </div>
-        <div class="review-room-list">
-          <div class="section-heading"><h4>识别空间</h4><small>{{ zones.length }} 个</small></div>
-          <div v-for="zone in displayedZones" :key="zone.id" class="review-room-item" :class="{ selected: zone.id === selectedId }">
-            <form v-if="renamingId === zone.id" class="review-room-rename-form" @submit.prevent="commitRoomRename(zone.id)">
-              <input v-model="renameDraft" :aria-label="'重命名空间 ' + zone.name" maxlength="40" @blur="commitRoomRename(zone.id)" @keydown.esc.prevent="renamingId = null">
-            </form>
-            <button v-else class="review-room-card" :class="{ selected: zone.id === selectedId }" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)">
-              <div><strong :title="zone.name">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
-              <div><small class="review-room-dims" :title="dimensions(zone)">{{ dimensions(zone) }}</small><small class="review-room-area">{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
-            </button>
-            <button class="review-room-rename" type="button" :disabled="!!tracing || calibrating || !!sketching" :aria-label="'重命名空间 ' + zone.name" title="重命名空间" @click="startRoomRename(zone)">改名</button>
-            <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" title="删除空间（选中后也可按 Delete 键）" @click="deleteSpace(zone.id)">删除</button>
-          </div>
-          <button v-if="zones.length > 6" class="show-more-rooms" @click="showAllSpaces = !showAllSpaces">{{ showAllSpaces ? '收起空间列表 ↑' : '查看其余 ' + (zones.length - 6) + ' 个空间 ↓' }}</button>
-          <template v-if="!zones.length">
-            <p class="inspector-hint">暂无空间：上传图纸识别，或直接手动画区。</p>
-            <button class="review-example-button" type="button" data-testid="sketch-start" @click="startSketch">手动画新空间</button>
-          </template>
-        </div>
-        <div class="review-project-note"><p>✓ 底图与轮廓共用同一坐标变换</p><p>✓ 原始识别与编辑副本分别保留</p></div>
-        <button class="review-example-button" :disabled="!!tracing" @click="loadExample">加载工装示例（可撤销）</button>
-      </aside>
       <section class="review-canvas-panel review-panel">
         <div class="review-toolbar">
           <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
