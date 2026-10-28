@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { ZoneObject } from '~/types/office'
+import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
+/** 用途区域标签（开放办公区/会议室等），未知类型回退原始值。 */
+const zoneTypeLabel = (type: string | undefined) => ZONE_TYPES.find(([value]) => value === type)?.[1] || type || '未设置用途'
 const props = withDefaults(defineProps<{ zoneId: string | null; mode?: 'review' | 'design' }>(), { mode: 'design' })
 const emit = defineEmits<{ select: [zoneId: string] }>()
 
@@ -86,6 +89,7 @@ function loadExample() {
             <span class="flex items-center gap-1">
               <AppIcon name="zone" size="3" class="shrink-0" />
               <span class="min-w-0 flex-1 truncate text-[11px]">{{ zone.name }}</span>
+              <span class="shrink-0 truncate text-[9px] font-normal text-muted">{{ zoneTypeLabel(zone.zoneType) }}</span>
             </span>
           </button>
           <button v-if="renamingId !== zone.id" type="button" class="mr-1 shrink-0 rounded-none px-1 py-0.5 text-[9px] font-normal text-muted hover:bg-white" :aria-label="'删除空间 ' + zone.name" title="删除空间（选中后也可按 Delete 键）" @click="store.deleteZone(zone.id)">删除</button>
