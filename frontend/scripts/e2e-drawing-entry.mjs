@@ -92,7 +92,7 @@ try {
   await page.goto(baseUrl + '/canvas?analysisId=DRAWING-5&mode=design&zoneId=ROOM-5', { waitUntil: 'networkidle' })
   await page.getByTestId('drawing-entry').waitFor()
   await page.getByRole('heading', { name: '当前图纸：7.png', exact: true }).waitFor()
-  assert.equal(await page.locator('.review-room-card').count(), 0)
+  assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0)
   assert.equal(await page.locator('[data-layer="underlay"]').count(), 0)
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).floorPlan.analysisId), 'DRAWING-5')
   await page.getByRole('link', { name: '返回图纸识别', exact: true }).click()
@@ -101,7 +101,7 @@ try {
   await page.getByRole('button', { name: '进入空间总览', exact: true }).click()
   await page.getByTestId('drawing-entry').waitFor()
   await page.getByAltText('当前图纸预览').waitFor()
-  assert.equal(await page.locator('.review-room-card').count(), 0)
+  assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0)
   assert.match(await page.getByAltText('当前图纸预览').getAttribute('src'), /^data:image\/svg/)
   complete = true
   await page.getByRole('button', { name: '选择空间 新图7办公区', exact: true }).waitFor()
@@ -117,7 +117,7 @@ try {
   assert.deepEqual(state.objects.map(object => object.id), ['ROOM-7'])
   assert.ok(state.undo.some(snapshot => JSON.parse(snapshot).floorPlan?.analysisId === 'DRAWING-5'), '导入前的旧稿进入撤销快照')
   assert.equal(await page.getByText('5.png · 空间模板', { exact: true }).count(), 0)
-  assert.equal(await page.locator('.review-source-file strong').innerText(), '7.png')
+  await page.getByTitle('当前图纸：7.png', { exact: true }).waitFor()
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     store.updateObject('ROOM-7', { name: '7图已编辑空间' })
@@ -133,8 +133,8 @@ try {
     store.saveLocal()
   })
   await page.reload({ waitUntil: 'networkidle' })
-  await page.locator('.review-source-file strong').filter({ hasText: '7.png' }).waitFor()
-  assert.equal(await page.locator('.review-room-card').count(), 0, '已清空的图纸刷新不得自动重填空间')
+  await page.getByTitle('当前图纸：7.png', { exact: true }).waitFor()
+  assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0, '已清空的图纸刷新不得自动重填空间')
   assert.equal((await current()).plan.analysisId, 'DRAWING-7-1')
   // 同文件名、同大小再次上传仍是新上传，不能误用上一次空间。
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
@@ -151,7 +151,7 @@ try {
   await page.getByTestId('drawing-entry').waitFor()
   await page.getByRole('alert').filter({ hasText: '当前7.png识别失败' }).waitFor()
   assert.ok(await page.getByAltText('当前图纸预览').isVisible())
-  assert.equal(await page.locator('.review-room-card').count(), 0)
+  assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0)
   assert.equal((await current()).plan.analysisId, 'DRAWING-7-1', '失败不清空旧稿，也不能展示为当前图纸')
   // 旧任务查询在途时换图，迟到结果不能覆盖当前上传和原设计。
   fail = false
@@ -167,7 +167,7 @@ try {
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '当前图纸：9.png', exact: true }).waitFor()
   assert.equal((await current()).plan.analysisId, 'DRAWING-7-1')
-  assert.equal(await page.locator('.review-room-card').count(), 0)
+  assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0)
   // 上传页“进入空间”也须检查离开/换图：延迟应用响应不能覆盖新的上传。
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   await replace()

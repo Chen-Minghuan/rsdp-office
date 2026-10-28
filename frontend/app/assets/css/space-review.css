@@ -22,35 +22,13 @@
 .review-steps .done { color:#57917c; font-weight:600; }
 .review-steps .done b { color:#4c927a; background:#e5f1eb; border-color:#e5f1eb; }
 .review-steps>button:disabled { cursor:not-allowed; }
-.review-columns { display:grid; grid-template-columns:250px minmax(0,1fr) 286px; gap:16px; padding:0 24px; flex:1; min-height:0; }
+.review-columns { display:grid; grid-template-columns:minmax(0,1fr) 286px; gap:16px; padding:0 24px; flex:1; min-height:0; }
 .review-panel { background:#fff; border:1px solid #e7e5de; border-radius:15px; min-height:0; overflow:hidden; }
-.review-project { display:flex; flex-direction:column; }
-.project-section { padding:20px 16px 16px; border-bottom:1px solid #ece9e2; }
 .space-review h2 { font-size:15px; font-weight:650; margin:0; }
 .space-review h3 { font-weight:650; }
 .space-review h4 { font-size:12px; font-weight:650; margin:0; }
 .section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .section-heading small, .inspector-heading small { color:#999c93; font-size:11px; }
-.review-project-card { background:#f7f6f3; padding:14px; margin:16px 0; border-radius:10px; }
-.review-project-card h3 { margin:0 0 12px; font-size:13px; line-height:1.5; }
-.review-project-card p { color:#96998f; font-size:12px; margin:4px 0 0; line-height:1.6; }
-.review-source-file { display:flex; align-items:center; gap:10px; border:1px solid #e7e5de; border-radius:9px; padding:12px 10px; }
-.review-source-file>span { width:32px; height:34px; display:grid; place-items:center; border-radius:5px; background:#f2eee6; font-size:10px; color:#aa865c; }
-.review-source-file>div { min-width:0; }
-.review-source-file strong { display:block; font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px; }
-.review-source-file small { display:block; margin-top:6px; color:#9b9f94; font-size:10px; }
-.review-room-list { padding:18px 10px 10px; flex:1; min-height:0; overflow:auto; scrollbar-width:thin; scrollbar-color:#dedfd6 transparent; }
-.review-room-list>.section-heading { margin:0 8px 12px; }
-.review-room-card { display:block; width:100%; padding:12px 10px; border:1px solid transparent; border-radius:8px; background:#fff; text-align:left; margin-bottom:2px; }
-.review-room-card.selected { border-color:#a7c5e5; background:#f4f8fc; }
-.review-room-card:hover { background:#f6f8f5; }
-.review-room-card>div { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:2px 5px; }
-.review-room-card>div+div { margin-top:10px; color:#95998e; }
-.review-room-card strong { font-size:12px; font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.review-room-card small { font-size:10px; }
-.review-room-card .review-badge { flex:none; }
-.review-room-card .review-room-dims { min-width:0; overflow-wrap:anywhere; }
-.review-room-card .review-room-area { flex:none; white-space:nowrap; }
 .review-badge { padding:3px 6px; border-radius:4px; white-space:nowrap; font-size:10px; line-height:1.2; }
 .review-badge.verified { background:#e9f3ee; color:#55957c; }
 .review-badge.pending { background:#fcf0d9; color:#b08a48; }
@@ -129,16 +107,6 @@
 .confirm-space { display:block; width:100%; padding:11px 5px; border:1px solid #c9e1d2; background:#edf6ef; color:#5b967a; border-radius:7px; font-size:12px!important; font-weight:500!important; margin:15px 0 0; }
 .confirm-space:disabled { background:#f5f3ed; border-color:#e6e0d4; color:#b5ac98; cursor:not-allowed; }
 .geometry-issue { margin:10px 0; color:#b68a50; font-size:10px; line-height:1.6; }
-.review-room-item { display:flex; align-items:center; gap:4px; margin-bottom:2px; }
-.review-room-item .review-room-card { flex:1; min-width:0; margin-bottom:0; }
-.review-room-rename { flex:none; padding:5px 7px; border:1px solid #dfe4ea; border-radius:5px; color:#7a8ba0; background:transparent; font-size:10px; }
-.review-room-rename:hover:not(:disabled) { color:#4b6b8c; background:#eef4fa; border-color:#b9cadd; }
-.review-room-rename:disabled { opacity:.4; cursor:not-allowed; }
-.review-room-rename-form { flex:1; min-width:0; }
-.review-room-rename-form input { width:100%; padding:10px; border:1px solid #a7c5e5; border-radius:8px; font-size:12px; font-weight:650; color:#3f4a42; outline:none; }
-.review-room-delete { flex:none; padding:5px 7px; border:1px solid #eadfdf; border-radius:5px; color:#b98a8a; background:transparent; font-size:10px; }
-.review-room-delete:hover:not(:disabled) { color:#ae6262; background:#fff0f0; border-color:#dca7a7; }
-.review-room-delete:disabled { opacity:.4; cursor:not-allowed; }
 .local-save.error { color:#ae6262; }
 .local-save.saving { color:#b28b4c; }
 .calibration-state { color:#b28b4c; font-size:10px; }
@@ -175,21 +143,17 @@
 .missing-source-note a { color:#9e7348; }
 .review-error { padding:10px 30px; background:#fcf1e8; color:#a7754b; font-size:12px; }
 @media(min-width:1700px) {
-  .review-columns { grid-template-columns:280px minmax(0,1fr) 320px; gap:20px; padding:0 30px; }
+  .review-columns { grid-template-columns:minmax(0,1fr) 320px; gap:20px; padding:0 30px; }
   .review-intro { min-height:126px; padding:28px 36px; }
   .review-topbar { height:80px; padding:0 36px; }
-  .review-room-card { padding:15px 13px; margin-bottom:5px; }
-  .review-room-card strong { font-size:13px; }
-  .review-room-card small { font-size:11px; }
   .review-inspector { padding:24px 21px; }
-  .review-source-file strong { max-width:190px; }
   .review-toolbar { min-height:64px; }
   .review-tools button { font-size:12px; padding:10px 14px; }
   .review-legend { bottom:80px; font-size:10px; }
   .review-steps { gap:17px; font-size:13px; }
 }
 @media(max-width:1350px) {
-  .review-columns { grid-template-columns:214px minmax(0,1fr) 260px; padding:0 16px; gap:12px; }
+  .review-columns { grid-template-columns:minmax(0,1fr) 260px; padding:0 16px; gap:12px; }
   .review-intro { padding:20px; }
   .review-intro h1 { font-size:23px; }
   .review-steps { gap:8px; }
@@ -198,7 +162,6 @@
   .review-toolbar { padding:8px; }
   .review-toolbar button { font-size:10px; padding:8px; }
   .review-toolbar i { margin:0 4px; }
-  .review-room-card small { font-size:9px; }
   .review-inspector { padding:20px 14px; }
   .review-alignment-status { font-size:9px; gap:7px; }
   .example-label { top:57px; }
@@ -208,7 +171,7 @@
 }
 @media(max-width:1000px) {
   .space-review { overflow:auto; height:100%; min-height:100%; }
-  .review-columns { grid-template-columns:210px minmax(0,1fr); min-height:800px; flex:none; }
+  .review-columns { grid-template-columns:minmax(0,1fr); min-height:800px; flex:none; }
   .review-inspector { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; column-gap:25px; }
   .review-inspector>* { grid-column:1/-1; }
   .review-intro { flex-direction:column; align-items:flex-start; }
@@ -229,14 +192,7 @@
   .review-steps b { width:21px; height:21px; font-size:10px; }
   .review-steps>a, .review-steps>span, .review-steps>button { flex-direction:column; gap:7px; font-size:9px; }
   .review-columns { grid-template-columns:minmax(0,1fr); padding:0 10px; gap:12px; }
-  .review-project { max-height:330px; }
-  .project-section { padding:13px; }
-  .review-project-card { margin:10px 0; padding:10px; }
-  .review-project-card h3 { margin-bottom:5px; }
-  .review-source-file, .review-project-note, .review-example-button { display:none; }
-  .review-room-list { padding-top:10px; }
-  .review-room-card { padding:8px; }
-  .review-room-card>div+div { margin-top:5px; }
+  .review-project-note, .review-example-button { display:none; }
   .review-toolbar { flex-wrap:wrap; min-height:55px; }
   .review-tools { width:100%; justify-content:space-between; }
   .review-canvas { min-height:480px; }
