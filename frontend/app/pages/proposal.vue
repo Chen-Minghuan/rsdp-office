@@ -187,10 +187,6 @@ function renderJobsFor(space: ProposalSpace) {
   return (renderJobs.value[space.zoneId] || []).slice(0, 3)
 }
 
-function renderAt(space: ProposalSpace, index: number) {
-  return renderJobsFor(space)[index] || null
-}
-
 function rotateTransform(item: { rotation: number; x: number; y: number; w: number; h: number }) {
   return `rotate(${item.rotation} ${item.x + item.w / 2} ${item.y + item.h / 2})`
 }
@@ -339,12 +335,12 @@ function detailTitle(detail: Detail | null) {
                     <div v-else class="product-grid-empty">当前空间还没有绑定商品</div>
                     <div class="preset-panel-foot"><span>{{ activeSpace(group)?.modules.reduce((sum, item) => sum + item.qty, 0) }} 件 · {{ money(activeSpace(group)?.total || 0) }}</span><small>点击商品查看详情</small></div>
                   </div>
-                  <div class="preset-panel render-panel">
+                  <div v-if="renderJobsFor(activeSpace(group)!).length" class="preset-panel render-panel">
                     <div class="preset-panel-title"><span>效果图</span><AppIcon name="arrowRight" size="3" /></div>
                     <div class="render-stack">
-                      <button v-for="index in 3" :key="index" type="button" class="render-slot" @click="openDetail({ kind: 'render', space: activeSpace(group)! })">
-                        <img v-if="renderAt(activeSpace(group)!, index - 1)?.status === 'SUCCEEDED' && renderAt(activeSpace(group)!, index - 1)?.imageUrl" :src="assetUrl(renderAt(activeSpace(group)!, index - 1)?.imageUrl)" :alt="activeSpace(group)?.name + '效果图' + index">
-                        <span v-else>效果图{{ index }}<small>{{ renderStatus(renderAt(activeSpace(group)!, index - 1)) }}</small></span>
+                      <button v-for="(job, index) in renderJobsFor(activeSpace(group)!)" :key="job.previewId" type="button" class="render-slot" @click="openDetail({ kind: 'render', space: activeSpace(group)! })">
+                        <img v-if="job.status === 'SUCCEEDED' && job.imageUrl" :src="assetUrl(job.imageUrl)" :alt="activeSpace(group)?.name + '效果图' + (index + 1)">
+                        <span v-else>效果图{{ index + 1 }}<small>{{ renderStatus(job) }}</small></span>
                       </button>
                     </div>
                     <div class="preset-panel-foot"><span>{{ renderJobsFor(activeSpace(group)!).length }} 张真实效果图</span><small>查看生成状态</small></div>
