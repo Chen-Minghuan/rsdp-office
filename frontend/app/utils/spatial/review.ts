@@ -139,7 +139,7 @@ export function zoneLayoutProblem(zone: ZoneObject): string | null {
   if (problem) return problem
   if (zone.reviewUnit !== 'mm') return '图纸比例待校准'
   for (const obstacle of zone.obstacles || []) {
-    if (!['COLUMN', 'SHAFT', 'NO_PLACEMENT', 'DOOR_CLEARANCE', 'OTHER'].includes(obstacle.kind)) return '建筑约束类型无效'
+    if (!['COLUMN', 'SHAFT', 'NO_PLACEMENT', 'DOOR_CLEARANCE', 'WINDOW', 'OTHER'].includes(obstacle.kind)) return '建筑约束类型无效'
     if (obstacle.spaceId !== zone.id || obstacle.geometry?.coordinateSystem !== 'WORLD_MM') return '建筑约束归属或坐标无效'
     const ring = obstacleRing(zone, obstacle)
     if (ringProblem(ring)) return '柱或禁放区轮廓无效'

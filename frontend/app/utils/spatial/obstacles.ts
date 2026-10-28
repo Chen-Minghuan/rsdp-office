@@ -5,7 +5,7 @@ import { createUuid } from '~/utils/uuid'
 import { polygonBounds } from './geometry'
 
 export function obstacleLabel(kind: SpatialObstacleKind) {
-  return ({ COLUMN: '柱', SHAFT: '井道', NO_PLACEMENT: '禁放区', DOOR_CLEARANCE: '门洞净空', OTHER: '固定障碍' } as const)[kind]
+  return ({ COLUMN: '柱', SHAFT: '井道', NO_PLACEMENT: '禁放区', DOOR_CLEARANCE: '门洞净空', WINDOW: '窗', OTHER: '固定障碍' } as const)[kind]
 }
 
 export function rectangleObstacle(spaceId: string, kind: SpatialObstacleKind, start: { x: number; y: number }, end: { x: number; y: number }, obstacleId = createUuid()): SpatialObstacle | null {
@@ -49,9 +49,9 @@ export function obstacleExclusion(zone: ZoneObject, obstacle: SpatialObstacle): 
   return { id: obstacle.obstacleId, label: obstacle.label || obstacleLabel(obstacle.kind), x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY, polygon }
 }
 
-/** 排版避障只认建筑约束（GEOM-013）；旧 layoutPreferences.exclusions 由 migrateLayoutExclusions 迁移。 */
+/** 排版避障只认建筑约束（GEOM-013）；窗为标注型约束（GEOM-015），不扣面积也不参与排版避让；旧 layoutPreferences.exclusions 由 migrateLayoutExclusions 迁移。 */
 export function zoneLayoutExclusions(zone: ZoneObject): LayoutExclusion[] {
-  return (zone.obstacles || []).map(obstacle => obstacleExclusion(zone, obstacle)).filter((area): area is LayoutExclusion => !!area)
+  return (zone.obstacles || []).filter(obstacle => obstacle.kind !== 'WINDOW').map(obstacle => obstacleExclusion(zone, obstacle)).filter((area): area is LayoutExclusion => !!area)
 }
 
 /** 旧排版面板预留区域（layoutPreferences.exclusions）迁移为 NO_PLACEMENT 建筑约束；返回发生实际几何迁移的空间 ID。 */
@@ -120,7 +120,7 @@ export function moveObstacle(obstacle: SpatialObstacle, dx: number, dy: number):
 
 export function snapObstacleToZone(zone: ZoneObject, obstacle: SpatialObstacle, toleranceMm: number) {
   const unchanged = { obstacle, snapped: false, edgeIndex: null as number | null }
-  if (!['COLUMN', 'SHAFT'].includes(obstacle.kind) || obstacle.geometry.outer.length !== 4 || zone.reviewUnit !== 'mm' || !Number.isFinite(toleranceMm) || toleranceMm <= 0) return unchanged
+  if (!['COLUMN', 'SHAFT', 'WINDOW'].includes(obstacle.kind) || obstacle.geometry.outer.length !== 4 || zone.reviewUnit !== 'mm' || !Number.isFinite(toleranceMm) || toleranceMm <= 0) return unchanged
   const bounds = polygonBounds(obstacle.geometry), ring = zone.polygon?.map(([x, y]): [number, number] => [x, -y])
   if (!bounds || !ring?.length) return unchanged
   let candidate: { distance: number; dx: number; dy: number; edgeIndex: number } | null = null

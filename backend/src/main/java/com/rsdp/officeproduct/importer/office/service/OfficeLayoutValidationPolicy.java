@@ -35,7 +35,9 @@ public final class OfficeLayoutValidationPolicy {
             for (JsonNode area : preferences.path("exclusions")) exclusions.add(new Area(rectangle(area)));
             for (JsonNode obstacle : zone.path("obstacles")) {
                 if (!zone.path("id").asText().equals(obstacle.path("spaceId").asText())) throw new BusinessException("建筑约束归属无效");
-                exclusions.add(obstacleArea(obstacle));
+                // 窗为标注型约束（GEOM-015）：仍校验几何有效性，但不参与排布避让
+                Area obstacleArea = obstacleArea(obstacle);
+                if (!"WINDOW".equals(obstacle.path("kind").asText())) exclusions.add(obstacleArea);
             }
             // 通道禁放带：语义对齐前端 channelRects（宽度+2×净距、包围盒裁剪、「仅从二排起」按 firstBlockDepthMm 豁免首排）。
             List<Rectangle2D.Double> channelBands = channelBands(points, preferences, furniture);

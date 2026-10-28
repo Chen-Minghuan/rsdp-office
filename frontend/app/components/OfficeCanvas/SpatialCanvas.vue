@@ -105,7 +105,7 @@ function geometryPath(geometry: SpatialGeometry): string {
   }).join(' ') + 'Z').join(' ')
 }
 function obstacleColor(kind: SpatialObstacleKind) {
-  return kind === 'DOOR_CLEARANCE' ? '#2586a0' : kind === 'NO_PLACEMENT' ? '#b07b38' : '#b44f45'
+  return kind === 'DOOR_CLEARANCE' ? '#2586a0' : kind === 'NO_PLACEMENT' ? '#b07b38' : kind === 'WINDOW' ? '#4a7fbf' : '#b44f45'
 }
 function obstacleSize(geometry: SpatialGeometry, kind?: SpatialObstacleKind) {
   const bounds = polygonBounds(geometry)

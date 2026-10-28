@@ -24,6 +24,8 @@ const obstacleDraft = ref<{ spaceId: string; kind: SpatialObstacleKind; start: {
 const obstacleManipulation = ref<{ spaceId: string; obstacleId: string; handle: string; start: { x: number; y: number }; original: SpatialObstacle; current: SpatialObstacle; snapped: boolean } | null>(null)
 const snapToEdges = ref(true)
 const tool = ref('select'), showAllSpaces = ref(false)
+/** GEOM-014 合并/剔除两步点选：第一项为保留/被裁剪空间。 */
+const booleanPicks = ref<string[]>([])
 const showUnderlay = ref(true), showOutline = ref(true), showDimensions = ref(true), showOriginal = ref(false)
 const comparingOriginal = ref(false)
 const underlayOpacity = ref(0.75)
@@ -172,7 +174,7 @@ const originalGeometries = computed(() => !showOriginal.value ? [] : store.zones
 const scaleWidth = computed(() => 2000 * camera.value.zoom)
 const zoomPercent = computed(() => Math.round(camera.value.zoom / fittedZoom.value * 100))
 
-watch(tool, () => { labelEditing.value = false })
+watch(tool, () => { labelEditing.value = false; booleanPicks.value = [] })
 watch(selectedId, () => { labelEditing.value = false })
 watch(() => store.zones.map(zone => zone.id).join(','), () => {
   if (!store.zones.some(zone => zone.id === selectedId.value)) selectedId.value = store.zones[0]?.id || null
@@ -231,10 +233,48 @@ function zoom(factor: number) {
 }
 function selectSpace(id: string) {
   if (tracing.value) return
+  if (tool.value === 'merge' || tool.value === 'subtract') { pickBooleanZone(id); return }
   discardRotatePreview()
   selectedId.value = id
   selectedObstacleId.value = null
   if (!zones.value.slice(0, 6).some(zone => zone.id === id)) showAllSpaces.value = true
+}
+/** GEOM-014 合并/剔除：两次点选两个空间后调用 store 布尔动作，失败给出具体原因且不改动数据。 */
+function startBoolean(mode: 'merge' | 'subtract') {
+  message.value = ''
+  cancelCalibration()
+  cancelTrace()
+  if (sketching.value) cancelSketch()
+  drag.value = null
+  selectedObstacleId.value = null
+  booleanPicks.value = []
+  tool.value = mode
+}
+function cancelBoolean() {
+  booleanPicks.value = []
+  if (tool.value === 'merge' || tool.value === 'subtract') tool.value = 'select'
+}
+function booleanZoneName(id: string) {
+  return store.zones.find(zone => zone.id === id)?.name || ''
+}
+function pickBooleanZone(id: string) {
+  const first = booleanPicks.value[0]
+  if (!first) {
+    booleanPicks.value = [id]
+    selectedId.value = id
+    return
+  }
+  if (first === id) { notify('请点击另一个空间'); return }
+  const firstName = booleanZoneName(first), secondName = booleanZoneName(id)
+  const merging = tool.value === 'merge'
+  const problem = merging ? store.mergeZones(first, id) : store.subtractZone(first, id)
+  booleanPicks.value = []
+  if (problem) { notify((merging ? '合并未应用：' : '剔除未应用：') + problem); return }
+  tool.value = 'select'
+  selectedId.value = first
+  notify(merging
+    ? `已把「${secondName}」并入「${firstName}」，家具与建筑约束一并迁移；确认与排版需重新核验，可撤销`
+    : `已从「${firstName}」剔除与「${secondName}」重叠的区域；确认与排版需重新核验，可撤销`)
 }
 function focusSelectedSpace() {
   if (!selectedId.value) return
@@ -558,6 +598,8 @@ function traceKey(event: KeyboardEvent) {
   if (event.key === 'Escape' && obstacleDraft.value) { event.preventDefault(); obstacleDraft.value = null }
   if (event.key === 'Escape' && obstacleManipulation.value) { event.preventDefault(); obstacleManipulation.value = null; notify('已取消本次约束调整') }
   else if (event.key === 'Escape' && tool.value.startsWith('obstacle-')) { event.preventDefault(); tool.value = 'select' }
+  if (event.key === 'Escape' && booleanPicks.value.length) { event.preventDefault(); booleanPicks.value = [] }
+  else if (event.key === 'Escape' && (tool.value === 'merge' || tool.value === 'subtract')) { event.preventDefault(); tool.value = 'select' }
   if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat && !tracing.value && !sketching.value && !calibrating.value && !drag.value && !obstacleManipulation.value && selectedId.value) {
     const target = event.target as HTMLElement | null
     if (target?.closest('input, textarea, select, [contenteditable]')) return
@@ -584,8 +626,7 @@ function selectVertex(zoneId: string, vertexId: string) {
   if (index >= 0) drag.value = { zoneId, index, polygon: zone.polygon.map(([x, y]) => [x, y]) }
 }
 function pointerMove(point: { x: number; y: number }) {
-  if (sketchDrag.value) { sketchDrag.value.current = point; return }
-  if (obstacleDraft.value) { obstacleDraft.value.current = point; return }
+  if (sketchDrag.value) { sketchDrag.value.current = point; return }  if (obstacleDraft.value) { obstacleDraft.value.current = point; return }
   if (obstacleManipulation.value) {
     const draft = obstacleManipulation.value
     const candidate = draft.handle === 'move' ? moveObstacle(draft.original, point.x - draft.start.x, point.y - draft.start.y) : reshapeObstacle(draft.original, draft.handle, point)
@@ -626,7 +667,7 @@ function pointerUp() {
     if (problem) { notify('约束未保存：' + problem); return }
     selectedObstacleId.value = obstacle.obstacleId
     tool.value = 'select'
-    notify(obstacleLabel(obstacle.kind) + (snapped?.snapped ? '已吸附空间边缘并保存；可撤销' : '已保存，排版将自动避开；可撤销'))
+    notify(obstacleLabel(obstacle.kind) + (snapped?.snapped ? '已吸附空间边缘并保存' : '已保存') + (obstacle.kind === 'WINDOW' ? '（仅标注，不扣面积、不影响排版避让）；可撤销' : '，排版将自动避开；可撤销'))
     return
   }
   if (obstacleManipulation.value) {
@@ -699,26 +740,30 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
       </aside>
       <section class="review-canvas-panel review-panel">
         <div class="review-toolbar">
-          <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留">← 返回上传图纸</NuxtLink><i></i>
+          <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
-            <button :class="{ active: tool === 'select' }" @click="tool = 'select'">选择 / 缩放</button>
-            <button :class="{ active: tool === 'pan' }" @click="tool = 'pan'">拖动画布</button><i></i>
-            <button :class="{ active: tool === 'edit' }" @click="tool = 'edit'">编辑轮廓</button>
-            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" title="在画布上逐点画出新的空间轮廓" @click="startSketch">画新空间</button>
-            <button :class="{ active: calibrating }" @click="startCalibration">两点校准</button>
-            <button :disabled="!store.undoStack.length" @click="store.undo()">撤销</button>
+            <button :class="{ active: tool === 'select' }" @click="tool = 'select'"><AppIcon name="cursor" size="3.5" /> 选择 / 缩放</button>
+            <button :class="{ active: tool === 'pan' }" @click="tool = 'pan'"><AppIcon name="hand" size="3.5" /> 拖动画布</button><i></i>
+            <button :class="{ active: tool === 'edit' }" @click="tool = 'edit'"><AppIcon name="pencil" size="3.5" /> 编辑轮廓</button>
+            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" title="在画布上逐点画出新的空间轮廓" @click="startSketch"><AppIcon name="plus" size="3.5" /> 画新空间</button>
+            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')"><AppIcon name="merge" size="3.5" /> 合并空间</button>
+            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')"><AppIcon name="scissors" size="3.5" /> 剔除区域</button>
+            <button :class="{ active: calibrating }" @click="startCalibration"><AppIcon name="fit" size="3.5" /> 两点校准</button>
+            <button :disabled="!store.undoStack.length" @click="store.undo()"><AppIcon name="undo" size="3.5" /> 撤销</button>
           </div>
-          <div class="review-zoom"><button aria-label="缩小画布" @click="zoom(1 / 1.2)">−</button><span>{{ zoomPercent }}%</span><button aria-label="放大画布" @click="zoom(1.2)">＋</button><i></i><button @click="fit">适屏</button></div>
+          <div class="review-zoom"><button aria-label="缩小画布" @click="zoom(1 / 1.2)"><AppIcon name="zoomOut" size="3.5" /></button><span>{{ zoomPercent }}%</span><button aria-label="放大画布" @click="zoom(1.2)"><AppIcon name="zoomIn" size="3.5" /></button><i></i><button @click="fit"><AppIcon name="fitScreen" size="3.5" /> 适屏</button></div>
         </div>
           <div v-if="focusedZoneId && !calibrating && !tracing" class="constraint-edit-bar">
             <div class="constraint-tool-buttons">
-              <button :class="{ active: tool === 'obstacle-COLUMN' }" @click="startObstacle('COLUMN')">标柱</button>
-              <button :class="{ active: tool === 'obstacle-DOOR_CLEARANCE' }" @click="startObstacle('DOOR_CLEARANCE')">门洞净空</button>
-              <button :class="{ active: tool === 'obstacle-NO_PLACEMENT' }" @click="startObstacle('NO_PLACEMENT')">禁放区</button>
+              <button :class="{ active: tool === 'obstacle-COLUMN' }" @click="startObstacle('COLUMN')"><AppIcon name="cube" size="3.5" /> 标柱</button>
+              <button :class="{ active: tool === 'obstacle-DOOR_CLEARANCE' }" @click="startObstacle('DOOR_CLEARANCE')"><AppIcon name="door" size="3.5" /> 门洞净空</button>
+              <button :class="{ active: tool === 'obstacle-WINDOW' }" data-testid="tool-obstacle-window" @click="startObstacle('WINDOW')"><AppIcon name="window" size="3.5" /> 窗</button>
+              <button :class="{ active: tool === 'obstacle-NO_PLACEMENT' }" @click="startObstacle('NO_PLACEMENT')"><AppIcon name="close" size="3.5" /> 禁放区</button>
             </div>
-            <label class="edge-snap-toggle" title="柱/井在创建、移动或调整时吸附到空间水平/垂直边，最大吸附距离 20mm"><input v-model="snapToEdges" type="checkbox">贴墙吸附</label>
+            <label class="edge-snap-toggle" title="柱/井/窗在创建、移动或调整时吸附到空间水平/垂直边，最大吸附距离 20mm"><input v-model="snapToEdges" type="checkbox">贴墙吸附</label>
             <span v-if="draftObstaclePreview?.snapped || obstacleManipulation?.snapped" class="edge-snap-active">已吸附边缘</span>
             <span v-if="tool === 'obstacle-DOOR_CLEARANCE'">从门扇铰链角拖向开启区域，形成四分之一圆弧，Esc 取消</span>
+            <span v-else-if="tool === 'obstacle-WINDOW'">沿墙拖出矩形标注窗位（仅标注，不扣面积、不影响排版避让），Esc 取消</span>
             <span v-else-if="tool.startsWith('obstacle-')">在当前空间底图上拖出矩形，Esc 取消</span>
             <div v-else-if="selectedObstacle && selectedObstacleBounds" class="selected-obstacle-editor">
               <strong>{{ obstacleLabel(selectedObstacle.kind) }}</strong>
@@ -754,8 +799,13 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           </template>
           <button @click="cancelSketch">取消</button>
         </div>
-        <div v-if="tool === 'edit' || tracing" class="contour-edit-bar">
-          <template v-if="tracing">
+        <div v-if="tool === 'merge' || tool === 'subtract'" class="contour-edit-bar" data-testid="boolean-bar">
+          <span v-if="!booleanPicks.length">{{ tool === 'merge' ? '合并空间：点击要保留的空间，另一个空间将并入它' : '剔除区域：点击被裁剪的空间' }}</span>
+          <span v-else-if="tool === 'merge'">保留「{{ booleanZoneName(booleanPicks[0]) }}」，再点击要并入的空间，Esc 取消</span>
+          <span v-else>裁剪「{{ booleanZoneName(booleanPicks[0]) }}」，再点击用作剔除的空间（该空间保持不变），Esc 取消</span>
+          <button data-testid="boolean-cancel" @click="cancelBoolean">取消</button>
+        </div>
+        <div v-if="tool === 'edit' || tracing" class="contour-edit-bar">          <template v-if="tracing">
             <span>正在重描「{{ selected?.name }}」：沿墙内侧依次点击转角，已选 {{ tracing.points.length }} 点</span>
             <button :disabled="!tracing.points.length" @click="tracing.points.pop()">退回一点</button>
             <button :disabled="tracing.points.length < 3" @click="applyTrace">保存轮廓</button>

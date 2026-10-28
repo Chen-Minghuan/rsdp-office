@@ -606,6 +606,163 @@ try {
       assert.ok(Math.abs(px - before[i][0]) < 1e-6 && Math.abs(py - before[i][1]) < 1e-6, '撤销一键 90° 旋转')
     })
   }
+  // 合并/剔除（GEOM-014）：两个相邻矩形合并为大矩形；重叠剔除收窄轮廓；拒绝分支与撤销
+  {
+    const zoneCount = async () => (await stored()).objects.filter(object => object.kind === 'zone').length
+    const zoneById = async (id) => (await stored()).objects.find(object => object.id === id)
+    const ringBounds = ring => ({ minX: Math.min(...ring.map(p => p[0])), maxX: Math.max(...ring.map(p => p[0])), minY: Math.min(...ring.map(p => p[1])), maxY: Math.max(...ring.map(p => p[1])) })
+    // 存储坐标（环 Y 向下）→ 客户端坐标：每次从任一多边形空间的路径重建映射，免疫相机平移缩放
+    const worldToClient = async (sx, sy) => {
+      const zone = (await stored()).objects.find(object => object.kind === 'zone' && object.polygon?.length >= 3)
+      const d = await page.locator(`[data-space-id="${zone.id}"] path`).first().getAttribute('d')
+      const svgBox = await page.locator('.space-review svg[aria-label="空间核对画布"]').first().boundingBox()
+      const pts = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])])
+      const world = zone.polygon.map(([x, y]) => [x, -y])
+      const sMinX = Math.min(...pts.map(p => p[0])), sMaxX = Math.max(...pts.map(p => p[0]))
+      const sMinY = Math.min(...pts.map(p => p[1])), sMaxY = Math.max(...pts.map(p => p[1]))
+      const wMinX = Math.min(...world.map(p => p[0])), wMaxX = Math.max(...world.map(p => p[0]))
+      const wMinY = Math.min(...world.map(p => p[1])), wMaxY = Math.max(...world.map(p => p[1]))
+      const kx = (sMaxX - sMinX) / (wMaxX - wMinX), ky = (sMaxY - sMinY) / (wMaxY - wMinY)
+      return { x: svgBox.x + sMinX + (sx - wMinX) * kx, y: svgBox.y + sMaxY - (-sy - wMinY) * ky }
+    }
+    const worldClick = async (sx, sy) => { const p = await worldToClient(sx, sy); await page.mouse.click(p.x, p.y) }
+    const worldDrag = async (x1, y1, x2, y2) => {
+      const a = await worldToClient(x1, y1), b = await worldToClient(x2, y2)
+      await page.mouse.move(a.x, a.y)
+      await page.mouse.down()
+      await page.mouse.move(b.x, b.y, { steps: 5 })
+      await page.mouse.up()
+    }
+    const before = await zoneCount()
+    await page.getByRole('button', { name: '画新空间', exact: true }).click()
+    await page.locator('[data-testid="sketch-shape-rect"]').click()
+    await page.getByLabel('画区旋转角度（度）').fill('0')
+    await sketchDragBox(0.35, 0.58, 0.5, 0.75)
+    let zonesNow = (await stored()).objects.filter(object => object.kind === 'zone')
+    const mergeA = zonesNow[zonesNow.length - 1]
+    const boundsA = ringBounds(mergeA.polygon)
+    // 邻接空间 B：贴着 A 右边画出（共享边；世界坐标驱动，免疫相机漂移）
+    await page.getByRole('button', { name: '画新空间', exact: true }).click()
+    await page.locator('[data-testid="sketch-shape-rect"]').click()
+    await worldDrag(boundsA.maxX, boundsA.minY, boundsA.maxX + 600, boundsA.maxY)
+    zonesNow = (await stored()).objects.filter(object => object.kind === 'zone')
+    const mergeB = zonesNow[zonesNow.length - 1]
+    const boundsB = ringBounds(mergeB.polygon)
+    assert.equal(await zoneCount(), before + 2, '合并前画好两个相邻空间')
+    assert.equal(boundsB.minX, boundsA.maxX, 'B 与 A 共享边')
+    const disjointBounds = ringBounds(zonesNow[2].polygon)
+    const midAY = (boundsA.minY + boundsA.maxY) / 2
+    // 拒绝：合并两个不相交空间
+    await page.locator('[data-testid="tool-merge"]').click()
+    await page.locator('[data-testid="boolean-bar"]').waitFor()
+    await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
+    await worldClick((disjointBounds.minX + disjointBounds.maxX) / 2, (disjointBounds.minY + disjointBounds.maxY) / 2)
+    await page.locator('.review-toast').getByText('不相连', { exact: false }).waitFor()
+    assert.equal(await zoneCount(), before + 2, '不相连合并不改动空间')
+    assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '不相连合并不改动轮廓')
+    await page.locator('[data-testid="boolean-cancel"]').click()
+    // Esc 取消第一次点选
+    await page.locator('[data-testid="tool-merge"]').click()
+    await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
+    await page.getByText('再点击要并入的空间', { exact: false }).waitFor()
+    await page.keyboard.press('Escape')
+    await page.getByText('点击要保留的空间', { exact: false }).waitFor()
+    await page.locator('[data-testid="boolean-cancel"]').click()
+    // 成功合并：A 保留，B 并入并删除
+    await page.locator('[data-testid="tool-merge"]').click()
+    await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
+    await worldClick((boundsB.minX + boundsB.maxX) / 2, (boundsB.minY + boundsB.maxY) / 2)
+    await page.locator('.review-toast').getByText('并入', { exact: false }).waitFor()
+    assert.equal(await zoneCount(), before + 1, '合并后只剩一个空间')
+    const merged = await zoneById(mergeA.id)
+    assert.equal(merged.polygon.length, 4, '相邻矩形合并为大矩形')
+    assert.equal(Math.round(merged.actualWidthMm), Math.round(mergeA.actualWidthMm + mergeB.actualWidthMm), '合并宽度为两空间之和')
+    assert.ok(!(await stored()).objects.some(object => object.id === mergeB.id), '被并入空间已删除')
+    // 撤销一次完整恢复两个空间
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.waitForTimeout(200)
+    assert.equal(await zoneCount(), before + 2, '撤销恢复两个空间')
+    assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '撤销恢复保留空间轮廓')
+    assert.ok(await zoneById(mergeB.id), '撤销恢复被并入空间')
+    // 拒绝：剔除不相交空间
+    await page.locator('[data-testid="tool-subtract"]').click()
+    await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
+    await worldClick((disjointBounds.minX + disjointBounds.maxX) / 2, (disjointBounds.minY + disjointBounds.maxY) / 2)
+    await page.locator('.review-toast').getByText('没有重叠区域', { exact: false }).waitFor()
+    assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '不相交剔除不改动轮廓')
+    await page.locator('[data-testid="boolean-cancel"]').click()
+    // 成功剔除：刀具覆盖 A 右半并超出上下边，A 收窄，刀具保持不动
+    await page.getByRole('button', { name: '画新空间', exact: true }).click()
+    await page.locator('[data-testid="sketch-shape-rect"]').click()
+    await worldDrag(boundsA.minX + mergeA.actualWidthMm / 2, boundsA.minY - 400, boundsA.maxX + 600, boundsA.maxY + 400)
+    zonesNow = (await stored()).objects.filter(object => object.kind === 'zone')
+    const cutter = zonesNow[zonesNow.length - 1]
+    const cutterLeft = ringBounds(cutter.polygon).minX
+    await page.locator('[data-testid="tool-subtract"]').click()
+    await worldClick(boundsA.minX + 150, midAY)
+    await worldClick(boundsA.maxX + 300, midAY)
+    await page.locator('.review-toast').getByText('剔除与', { exact: false }).waitFor()
+    assert.equal(await zoneCount(), before + 3, '剔除不删除刀具空间')
+    const trimmed = await zoneById(mergeA.id)
+    assert.equal(trimmed.polygon.length, 4, '剔除后仍为矩形')
+    assert.equal(ringBounds(trimmed.polygon).minX, boundsA.minX, '剔除保留左缘不动')
+    assert.ok(Math.abs(trimmed.actualWidthMm - (cutterLeft - boundsA.minX)) <= 1, '剔除后宽度收窄到刀具左缘')
+    assert.deepEqual((await zoneById(cutter.id)).polygon, cutter.polygon, '刀具空间保持不动')
+    // 撤销恢复剔除前轮廓
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.waitForTimeout(200)
+    assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '撤销恢复剔除前轮廓')
+    // 清理刀具空间，避免与后续段落的空间重叠提示叠加
+    await worldClick(boundsA.maxX + 300, midAY)
+    await page.keyboard.press('Delete')
+    await page.waitForTimeout(200)
+    assert.equal(await zoneCount(), before + 2, '刀具空间已删除')
+    // 恢复后续段落依赖的选中空间
+    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+  }
+  // 窗标注（GEOM-015）：单空间焦点内沿墙拖出窗矩形；仅标注——不扣面积、不改轮廓、可撤销
+  {
+    const zoneById = async (id) => (await stored()).objects.find(object => object.id === id)
+    const ringBounds = ring => ({ minX: Math.min(...ring.map(p => p[0])), maxX: Math.max(...ring.map(p => p[0])), minY: Math.min(...ring.map(p => p[1])), maxY: Math.max(...ring.map(p => p[1])) })
+    const zone4 = (await stored()).objects.find(object => object.kind === 'zone' && object.name === '手动空间 4')
+    const zb = ringBounds(zone4.polygon)
+    const polygonBefore = JSON.stringify(zone4.polygon)
+    // 焦点模式只渲染当前空间，映射固定从手动空间 4 的路径重建
+    const worldToClient = async (sx, sy) => {
+      const d = await page.locator(`[data-space-id="${zone4.id}"] path`).first().getAttribute('d')
+      const svgBox = await page.locator('.space-review svg[aria-label="空间核对画布"]').first().boundingBox()
+      const pts = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])])
+      const world = zone4.polygon.map(([x, y]) => [x, -y])
+      const sMinX = Math.min(...pts.map(p => p[0])), sMaxX = Math.max(...pts.map(p => p[0]))
+      const sMinY = Math.min(...pts.map(p => p[1])), sMaxY = Math.max(...pts.map(p => p[1]))
+      const wMinX = Math.min(...world.map(p => p[0])), wMaxX = Math.max(...world.map(p => p[0]))
+      const wMinY = Math.min(...world.map(p => p[1])), wMaxY = Math.max(...world.map(p => p[1]))
+      const kx = (sMaxX - sMinX) / (wMaxX - wMinX), ky = (sMaxY - sMinY) / (wMaxY - wMinY)
+      return { x: svgBox.x + sMinX + (sx - wMinX) * kx, y: svgBox.y + sMaxY - (-sy - wMinY) * ky }
+    }
+    const worldDrag = async (x1, y1, x2, y2) => {
+      const a = await worldToClient(x1, y1), b = await worldToClient(x2, y2)
+      await page.mouse.move(a.x, a.y)
+      await page.mouse.down()
+      await page.mouse.move(b.x, b.y, { steps: 5 })
+      await page.mouse.up()
+    }
+    await page.getByRole('button', { name: '放大核对当前空间', exact: true }).click()
+    await page.locator('[data-testid="tool-obstacle-window"]').waitFor()
+    await page.locator('[data-testid="tool-obstacle-window"]').click()
+    await worldDrag(zb.minX + 400, zb.minY + 150, zb.minX + 1600, zb.minY + 300)
+    await page.locator('.review-toast').getByText('仅标注', { exact: false }).waitFor()
+    const withWindow = await zoneById(zone4.id)
+    assert.equal(withWindow.obstacles?.length, 1, '窗障碍已保存到当前空间')
+    assert.equal(withWindow.obstacles[0].kind, 'WINDOW', '障碍类型为窗')
+    assert.equal(withWindow.obstacles[0].excludesFloorArea, false, '窗不扣面积')
+    assert.equal(JSON.stringify(withWindow.polygon), polygonBefore, '窗不改变空间轮廓')
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.waitForTimeout(200)
+    assert.equal((await zoneById(zone4.id)).obstacles?.length || 0, 0, '撤销移除窗标注')
+    await page.getByRole('button', { name: '返回全图', exact: true }).click()
+    await page.getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
+  }
   // 空间列表直接改名
   await page.getByRole('button', { name: '重命名空间 手画开放办公区', exact: true }).click()
   const renameInput = page.getByRole('textbox', { name: '重命名空间 手画开放办公区', exact: true })
@@ -637,7 +794,7 @@ try {
   assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
   assert.ok(profileRequests.every(url => new URL(url).pathname === '/api/v1/office/projects'), '只调用新项目树接口，不调用已删除的项目资料详情接口')
   assert.deepEqual(errors, [])
-  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消）。使用模拟 API。')
+  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除））。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }
