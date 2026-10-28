@@ -500,6 +500,22 @@ try {
   await page.mouse.click(20, 20)
   drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
   assert.equal(drawn.length, 4, 'Esc 取消画区不产生空间')
+  // 逐点描 Enter 快捷保存（输入框聚焦时不拦截）
+  await page.getByRole('button', { name: '画新空间', exact: true }).click()
+  await page.locator('[data-testid="sketch-shape-poly"]').click()
+  {
+    const box = await page.locator('.space-review svg[aria-label="空间核对画布"]').first().boundingBox()
+    for (const [fx, fy] of [[0.6, 0.1], [0.75, 0.1], [0.75, 0.25]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
+  }
+  await page.getByText('Enter 保存', { exact: false }).waitFor()
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(200)
+  drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+  assert.equal(drawn.length, 5, 'Enter 保存逐点描空间')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await page.waitForTimeout(200)
+  drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
+  assert.equal(drawn.length, 4, '撤销移除 Enter 保存的空间')
   // 已画空间旋转：绕质心、屏幕顺时针为正（存储环 Y 向下，正角即屏幕顺时针），逐顶点核对
   {
     const centroid = ring => {
@@ -614,7 +630,7 @@ try {
     // 存储坐标（环 Y 向下）→ 客户端坐标：每次从任一多边形空间的路径重建映射，免疫相机平移缩放
     const worldToClient = async (sx, sy) => {
       const zone = (await stored()).objects.find(object => object.kind === 'zone' && object.polygon?.length >= 3)
-      const d = await page.locator(`[data-space-id="${zone.id}"] path`).first().getAttribute('d')
+      const d = await page.locator(`svg[aria-label="空间核对画布"] [data-space-id="${zone.id}"] path`).first().getAttribute('d')
       const svgBox = await page.locator('.space-review svg[aria-label="空间核对画布"]').first().boundingBox()
       const pts = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])])
       const world = zone.polygon.map(([x, y]) => [x, -y])
@@ -729,7 +745,7 @@ try {
     const polygonBefore = JSON.stringify(zone4.polygon)
     // 焦点模式只渲染当前空间，映射固定从手动空间 4 的路径重建
     const worldToClient = async (sx, sy) => {
-      const d = await page.locator(`[data-space-id="${zone4.id}"] path`).first().getAttribute('d')
+      const d = await page.locator(`svg[aria-label="空间核对画布"] [data-space-id="${zone4.id}"] path`).first().getAttribute('d')
       const svgBox = await page.locator('.space-review svg[aria-label="空间核对画布"]').first().boundingBox()
       const pts = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])])
       const world = zone4.polygon.map(([x, y]) => [x, -y])
@@ -794,7 +810,7 @@ try {
   assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
   assert.ok(profileRequests.every(url => new URL(url).pathname === '/api/v1/office/projects'), '只调用新项目树接口，不调用已删除的项目资料详情接口')
   assert.deepEqual(errors, [])
-  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除））。使用模拟 API。')
+  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层、毫米编辑与撤销、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消、逐点描 Enter 快捷保存与撤销、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除））。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

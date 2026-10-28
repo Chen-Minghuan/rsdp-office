@@ -593,6 +593,11 @@ function traceKey(event: KeyboardEvent) {
   shiftPressed.value = event.shiftKey
   if (event.key === 'Escape' && tracing.value) { event.preventDefault(); cancelTrace() }
   if (event.key === 'Escape' && sketching.value) { event.preventDefault(); cancelSketch() }
+  // 逐点描 ≥3 点可按 Enter 保存（输入框聚焦时不拦截）
+  if (event.key === 'Enter' && sketching.value && sketchShape.value === 'poly' && sketching.value.points.length >= 3) {
+    const target = event.target as HTMLElement | null
+    if (!target?.closest('input, textarea, select, [contenteditable]')) { event.preventDefault(); applySketch() }
+  }
   if (event.key === 'Escape' && labelEditing.value) { event.preventDefault(); labelEditing.value = false }
   if (event.key === 'Escape' && drag.value) { event.preventDefault(); drag.value = null; notify('已取消本次轮廓调整') }
   if (event.key === 'Escape' && obstacleDraft.value) { event.preventDefault(); obstacleDraft.value = null }
@@ -791,7 +796,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             <button :class="{ active: sketchShape === 'poly' }" data-testid="sketch-shape-poly" @click="sketchShape = 'poly'">逐点描</button>
           </span>
           <label v-if="sketchShape !== 'poly'" class="sketch-angle">旋转<input v-model.number="sketchAngle" type="number" min="-180" max="180" step="5" aria-label="画区旋转角度（度）"><span>°</span></label>
-          <span v-else>沿墙依次点击转角，已选 {{ sketching.points.length }} 点{{ store.floorPlan ? '' : '（空白画布，单位毫米）' }}</span>
+          <span v-else>沿墙依次点击转角，已选 {{ sketching.points.length }} 点{{ sketching.points.length >= 3 ? '（Enter 保存）' : '' }}{{ store.floorPlan ? '' : '（空白画布，单位毫米）' }}</span>
           <span v-if="sketchShape !== 'poly'">在画布上拖出空间范围，松开即生成{{ sketchShape === 'rect' ? '矩形' : sketchShape === 'L' ? 'L 形' : 'U 形' }}轮廓{{ sketchAngle ? '（顺时针 ' + sketchAngle + '°）' : '' }}{{ calibrated || !store.floorPlan ? '，自动取整 100mm' : '' }}，生成后可用「编辑轮廓」微调</span>
           <template v-if="sketchShape === 'poly'">
             <button :disabled="!sketching.points.length" @click="sketching.points.pop()">退回一点</button>

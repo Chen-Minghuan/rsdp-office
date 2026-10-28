@@ -117,7 +117,7 @@ try {
   assert.deepEqual(state.objects.map(object => object.id), ['ROOM-7'])
   assert.ok(state.undo.some(snapshot => JSON.parse(snapshot).floorPlan?.analysisId === 'DRAWING-5'), '导入前的旧稿进入撤销快照')
   assert.equal(await page.getByText('5.png · 空间模板', { exact: true }).count(), 0)
-  assert.equal(await page.locator('.review-source-file strong').innerText(), '7.png')
+  await page.getByText('当前图纸：7.png', { exact: false }).first().waitFor()
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     store.updateObject('ROOM-7', { name: '7图已编辑空间' })
@@ -133,7 +133,7 @@ try {
     store.saveLocal()
   })
   await page.reload({ waitUntil: 'networkidle' })
-  await page.locator('.review-source-file strong').filter({ hasText: '7.png' }).waitFor()
+  await page.getByText('当前图纸：7.png', { exact: false }).first().waitFor()
   assert.equal(await page.locator('.review-room-card').count(), 0, '已清空的图纸刷新不得自动重填空间')
   assert.equal((await current()).plan.analysisId, 'DRAWING-7-1')
   // 同文件名、同大小再次上传仍是新上传，不能误用上一次空间。
