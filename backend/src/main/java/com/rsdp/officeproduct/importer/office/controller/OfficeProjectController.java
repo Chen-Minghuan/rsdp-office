@@ -5,14 +5,18 @@ import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
+import com.rsdp.officeproduct.importer.office.dto.ProjectMemberDto;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeRequirementsRequest;
+import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
+import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -57,5 +61,22 @@ public class OfficeProjectController {
     public Result<OfficeProjectDto> updateRequirements(@PathVariable String projectId,
                                                         @RequestBody UpdateOfficeRequirementsRequest request) {
         return Result.ok(projectService.updateRequirements(projectId, request));
+    }
+
+    @GetMapping("/{projectId}/members")
+    public Result<List<ProjectMemberDto>> listMembers(@PathVariable String projectId) {
+        return Result.ok(projectService.listMembers(projectId));
+    }
+
+    @PutMapping("/{projectId}/members")
+    public Result<OfficeProjectDto> replaceMembers(@PathVariable String projectId,
+                                                    @RequestBody UpdateProjectMembersRequest request) {
+        return Result.ok(projectService.replaceMembers(projectId, request));
+    }
+
+    @PatchMapping("/{projectId}/references")
+    public Result<OfficeProjectDto> updateReferences(@PathVariable String projectId,
+                                                      @RequestBody UpdateProjectReferencesRequest request) {
+        return Result.ok(projectService.updateReferences(projectId, request));
     }
 }

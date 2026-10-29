@@ -324,7 +324,7 @@ export const useOfficeStore = defineStore('office', {
         return
       }
       try {
-        await api.saveCanvas({
+        const saved = await api.saveCanvas({
           objects: this.objects,
           files: this.files,
           mode: this.canvasMode,
@@ -333,6 +333,7 @@ export const useOfficeStore = defineStore('office', {
           blank: this.blank,
         }, workspaceId)
         if (this.workspaceId !== workspaceId) return
+        if (saved?.objects) this.mergeServerReviewConfirmations(saved.objects)
         this.syncState = 'saved'
         this.syncError = null
       } catch (e) {
@@ -737,6 +738,48 @@ export const useOfficeStore = defineStore('office', {
       if (!zone || zoneProblem(zone, this.zones)) return false
       this.updateObject(id, { confirmed: true, confirmedAt: Date.now() } as Partial<OfficeObject>)
       return true
+    },
+
+    /**
+     * 设计复核确认（SPACE_REVIEW）：先落盘当前画布，再由服务端按当前修订签发凭据。
+     * 与排版确认、客户方案确认相互独立；几何失效由服务端在后续保存时比对快照置 STALE。
+     */
+    async confirmSpaceReview(zoneId: string) {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone) throw new Error('空间不存在或已被删除')
+      const api = useOfficeApi()
+      const workspaceId = this.workspaceId
+      await api.saveCanvas({
+        objects: this.objects,
+        files: this.files,
+        mode: this.canvasMode,
+        designZoneId: this.designZoneId,
+        revision: this.canvasRevision,
+        blank: this.blank,
+      }, workspaceId)
+      const result = await api.confirmSpaceReview(zoneId, this.canvasRevision, workspaceId)
+      if (this.workspaceId !== workspaceId) return
+      const target = this.zones.find(item => item.id === zoneId)
+      if (target) {
+        target.reviewConfirmation = {
+          status: result.status,
+          confirmedCanvasRevision: result.confirmedCanvasRevision,
+          confirmedByUserId: result.confirmedByUserId,
+          confirmedAt: result.confirmedAt,
+        }
+      }
+      if (result.canvasRevision > this.canvasRevision) this.canvasRevision = result.canvasRevision
+      this.saveLocal()
+    },
+
+    /** 保存后把服务端维护的复核确认状态（STALE/CONFIRMED）合并回本地空间。 */
+    mergeServerReviewConfirmations(objects: OfficeObject[]) {
+      const confirmations = new Map(objects.filter(item => item.kind === 'zone').map(item => [item.id, item.reviewConfirmation]))
+      this.objects.forEach(item => {
+        if (item.kind !== 'zone') return
+        const confirmation = confirmations.get(item.id)
+        if (confirmation) item.reviewConfirmation = confirmation
+      })
     },
 
     unconfirmZone(id: string) {

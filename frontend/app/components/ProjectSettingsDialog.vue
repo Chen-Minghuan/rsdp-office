@@ -1,10 +1,25 @@
 <script setup lang="ts">
+import { authEnabled } from '~/composables/useAuth'
+import type { AssignableUser, ProjectReferenceImage } from '~/types/workspace'
+
 const emit = defineEmits<{ close: [] }>()
 const workspace = useWorkspaceStore()
-const projectName = ref(workspace.currentProject?.projectName || '')
-const floors = ref((workspace.currentProject?.floors || []).map(floor => ({ floorId: floor.floorId, floorName: floor.floorName })))
+const { me } = useAuth()
+const project = workspace.currentProject
+const projectName = ref(project?.projectName || '')
+const floors = ref((project?.floors || []).map(floor => ({ floorId: floor.floorId, floorName: floor.floorName })))
+const leader = ref<AssignableUser | null>(project?.leader ? { ...project.leader } : null)
+const collaborators = ref<AssignableUser[]>(project?.collaborators.map(user => ({ ...user })) || [])
+const referenceImages = ref<ProjectReferenceImage[]>(project?.referenceImages.map(image => ({ ...image })) || [])
+const canManageMembers = ref(!authEnabled)
 const saving = ref(false)
 const error = ref('')
+
+onMounted(async () => {
+  if (!authEnabled) return
+  const user = await me()
+  canManageMembers.value = !!user && user.userId === project?.leader?.userId
+})
 
 async function save() {
   error.value = ''
@@ -13,9 +28,19 @@ async function save() {
   if (!name) { error.value = '请输入项目名称'; return }
   if (names.some(floorName => !floorName)) { error.value = '楼层名称不能为空'; return }
   if (new Set(names.map(floorName => floorName.toLowerCase())).size !== names.length) { error.value = '楼层名称不能重复'; return }
+  if (authEnabled && !leader.value) { error.value = '项目负责人不能为空'; return }
   saving.value = true
   try {
+    const projectId = project?.projectId
+    if (!projectId) throw new Error('请先选择项目')
     await workspace.updateProjectDetails(name, floors.value.map(floor => ({ ...floor, floorName: floor.floorName.trim() })))
+    if (leader.value) {
+      const membersChanged = leader.value.userId !== project?.leader?.userId
+        || collaborators.value.map(user => user.userId).join() !== (project?.collaborators || []).map(user => user.userId).join()
+      if (membersChanged) await workspace.updateMembers(projectId, leader.value.userId, collaborators.value.map(user => user.userId))
+    }
+    const imagesChanged = JSON.stringify(referenceImages.value) !== JSON.stringify(project?.referenceImages || [])
+    if (imagesChanged) await workspace.updateReferenceImages(projectId, referenceImages.value)
     emit('close')
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '项目信息保存失败'
@@ -44,6 +69,10 @@ async function save() {
               <input v-model="floor.floorName" maxlength="200" class="min-w-0 flex-1 rounded-xl border border-line px-4 py-2.5 text-sm text-ink outline-none focus:border-bronze" :aria-label="`编辑楼层名称 ${index + 1}`">
             </label>
           </section>
+          <ProjectMemberEditor v-model:leader="leader" v-model:collaborators="collaborators"
+            :leader-optional="!authEnabled" :disabled="!canManageMembers" />
+          <p v-if="authEnabled && !canManageMembers" class="-mt-2 text-xs text-muted">只有项目负责人可以修改成员。</p>
+          <ProjectReferenceImagesEditor v-model:images="referenceImages" />
         </div>
         <p v-if="error" role="alert" class="mt-4 text-xs text-red-700">{{ error }}</p>
         <div class="mt-5 flex justify-end gap-3">

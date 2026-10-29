@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { CreateProjectRequest, WorkspaceProject } from '~/types/workspace'
+import type { CreateProjectRequest, ProjectReferenceImage, WorkspaceProject } from '~/types/workspace'
 import { DEFAULT_WORKSPACE_ID, defaultWorkspaceProject } from '~/types/workspace'
 
 const SELECTION_KEY = 'rsdp-office-workspace-v1'
@@ -131,6 +131,18 @@ export const useWorkspaceStore = defineStore('workspace', {
       const updated = await useWorkspaceApi().updateRequirements(projectId, customerRequirements)
       const index = this.projects.findIndex(item => item.projectId === updated.projectId)
       if (index >= 0) this.projects[index] = { ...updated, floors: updated.floors?.length ? updated.floors : this.projects[index]!.floors }
+      return updated
+    },
+    async updateMembers(projectId: string, leaderUserId: string, collaboratorUserIds: string[]) {
+      const updated = await useWorkspaceApi().replaceMembers(projectId, leaderUserId, collaboratorUserIds)
+      const index = this.projects.findIndex(item => item.projectId === projectId)
+      if (index >= 0) this.projects[index] = { ...updated, floors: this.projects[index]!.floors }
+      return updated
+    },
+    async updateReferenceImages(projectId: string, referenceImages: ProjectReferenceImage[]) {
+      const updated = await useWorkspaceApi().updateReferences(projectId, referenceImages)
+      const index = this.projects.findIndex(item => item.projectId === projectId)
+      if (index >= 0) this.projects[index] = { ...updated, floors: this.projects[index]!.floors }
       return updated
     },
   },

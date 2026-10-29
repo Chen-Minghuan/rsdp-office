@@ -14,6 +14,14 @@ public class GlobalExceptionHandler {
         return Result.fail(e.getMessage());
     }
 
+    @ExceptionHandler(AccessDeniedException.class)
+    public Result<Void> handleAccessDenied(AccessDeniedException e) {
+        log.warn("访问被拒绝: {}", e.getMessage());
+        Result<Void> result = Result.fail(e.getMessage());
+        result.setCode(403);
+        return result;
+    }
+
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
         log.error("系统异常", e);

@@ -1,10 +1,20 @@
 <script setup lang="ts">
+import { authEnabled } from '~/composables/useAuth'
+
 const route = useRoute()
 const { isProjectWorkflow, lastProjectRoute } = useWorkspaceNavigation()
 const productLinks = [
   { icon: 'cube', label: '商品库', to: '/products' },
   { icon: 'documentText', label: '导入记录', to: '/products/import-records' },
 ]
+
+// 用户管理入口只对系统管理员可见；服务端仍逐接口校验 ADMIN
+const isAdmin = ref(false)
+onMounted(async () => {
+  if (!authEnabled) { isAdmin.value = true; return }
+  const user = await useAuth().me()
+  isAdmin.value = user?.role === 'ADMIN'
+})
 
 function isActive(to: string) {
   if (to === '/products') return route.path === '/products' || route.path === '/products/import'
@@ -47,6 +57,20 @@ function isActive(to: string) {
         <AppIcon :name="link.icon" />
         <span>{{ link.label }}</span>
       </NuxtLink>
+      </div>
+      <div v-if="isAdmin" class="grid content-start gap-1">
+        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">系统管理</div>
+        <NuxtLink
+          to="/users"
+          :aria-current="isActive('/users') ? 'page' : undefined"
+          :class="[
+            'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
+            isActive('/users') ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
+          ]"
+        >
+          <AppIcon name="user" />
+          <span>用户管理</span>
+        </NuxtLink>
       </div>
     </nav>
     <div class="hidden mt-auto pt-4 border-t border-line md:block">

@@ -20,6 +20,13 @@ public class OfficeController {
 
     private final OfficeService officeService;
     private final OfficeModuleRecommendationService moduleRecommendations;
+    private final com.rsdp.officeproduct.importer.office.service.OfficeSpaceReviewService spaceReviewService;
+
+    @PostMapping("/floors/{floorId}/spaces/{spaceId}/review-confirm")
+    public Result<SpaceReviewConfirmResult> confirmSpaceReview(@PathVariable String floorId, @PathVariable String spaceId,
+                                                                @RequestBody SpaceReviewConfirmRequest request) {
+        return Result.ok(spaceReviewService.confirm(floorId, spaceId, request));
+    }
 
     @PostMapping("/projects/{projectId}/module-recommendations")
     public Result<ModuleRecommendationDto> recommendModules(@PathVariable String projectId, @RequestBody ModuleRecommendationRequest request) {

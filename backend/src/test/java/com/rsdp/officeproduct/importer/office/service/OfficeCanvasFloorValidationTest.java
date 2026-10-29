@@ -19,8 +19,9 @@ import static org.mockito.Mockito.*;
 class OfficeCanvasFloorValidationTest {
     private final OfficeWorkspaceLockMapper locks = mock(OfficeWorkspaceLockMapper.class);
     private final OfficeProjectService projects = mock(OfficeProjectService.class);
+    private final OfficeProjectAccessService access = mock(OfficeProjectAccessService.class);
     private final OfficeCanvasMapper canvases = mock(OfficeCanvasMapper.class);
-    private final OfficeService service = new OfficeService(locks, projects, canvases, mock(OfficeCartMapper.class),
+    private final OfficeService service = new OfficeService(locks, projects, access, canvases, mock(OfficeCartMapper.class),
         mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
 
     @Test void blankScopeContinuesToUseValidatedLegacyDefaultFloor() {

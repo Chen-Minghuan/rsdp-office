@@ -98,6 +98,7 @@ async function selectSpace(zoneId: string) {
           <input v-if="editingKey === `project:${project.projectId}`" ref="nameInput" v-model="editingName" class="mx-2 min-w-0 flex-1 rounded-none border border-bronze bg-white px-2 py-1 text-xs font-semibold" aria-label="双击编辑项目名称" :disabled="savingEdit" @keydown.enter.prevent="saveEdit" @keydown.esc.prevent="cancelEdit" @blur="saveEdit">
           <button v-else class="min-w-0 flex-1 px-2 py-2 text-left" :aria-expanded="!workspace.collapsedProjectIds.includes(project.projectId)" title="单击折叠，双击修改项目名称" @click="workspace.toggleProject(project.projectId)" @dblclick.stop.prevent="startEdit(`project:${project.projectId}`, project.projectId, '', project.projectName)">
             <span class="flex items-center gap-1.5"><span class="text-[10px] text-muted">{{ workspace.collapsedProjectIds.includes(project.projectId) ? '▶' : '▼' }}</span><strong class="truncate text-xs">{{ project.projectName }}</strong></span>
+            <span v-if="project.leader" class="mt-0.5 block truncate text-[10px] text-muted">负责人 {{ project.leader.displayName || project.leader.username }}<template v-if="project.collaborators.length"> · 协作 {{ project.collaborators.length }} 人</template></span>
           </button>
           <div v-if="project.projectId === workspace.currentProjectId" class="mr-1.5 flex shrink-0 items-center gap-0.5">
             <button class="rounded-none px-1 py-0.5 text-[10px] text-bronze-dark hover:bg-white" title="编辑项目名称和楼层名称" @click="showSettings = true">编辑</button>

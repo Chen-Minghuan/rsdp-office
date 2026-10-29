@@ -160,6 +160,27 @@ const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.
 function status(zone: ZoneObject) {
   return zoneReviewMessage(zone, zones.value) ? '需复核' : '可用'
 }
+/** 设计复核确认（SPACE_REVIEW）状态；与“需复核”提示和排版确认相互独立。 */
+function reviewConfirmStatus(zone: ZoneObject) {
+  const status = zone.reviewConfirmation?.status
+  return status === 'CONFIRMED' ? '已确认复核' : status === 'STALE' ? '复核失效' : null
+}
+function canConfirmReview(zone: ZoneObject) {
+  return zone.reviewUnit === 'mm' && zone.reviewConfirmation?.status !== 'CONFIRMED'
+}
+const confirmingReviewId = ref<string | null>(null)
+async function confirmReview(zone: ZoneObject) {
+  if (confirmingReviewId.value) return
+  confirmingReviewId.value = zone.id
+  try {
+    await store.confirmSpaceReview(zone.id)
+    notify(`已确认「${zone.name}」空间复核`)
+  } catch (cause) {
+    notify(cause instanceof Error ? cause.message : '复核确认失败，请稍后重试')
+  } finally {
+    confirmingReviewId.value = null
+  }
+}
 /** 用途区域标签（开放办公区/会议室等），未知类型回退原始值。 */
 function zoneTypeLabel(type: string | undefined) {
   return ZONE_TYPES.find(([value]) => value === type)?.[1] || type || '未设置用途'
@@ -838,8 +859,9 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
               <input v-model="renameDraft" :aria-label="'重命名空间 ' + zone.name" maxlength="40" @blur="commitRoomRename(zone.id)" @keydown.esc.prevent="renamingId = null">
             </form>
             <div v-else class="review-room-card" :class="{ selected: zone.id === selectedId }" role="button" tabindex="0" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)" @keydown.enter.prevent="selectSpace(zone.id)" @keydown.space.prevent="selectSpace(zone.id)">
-              <div><strong class="review-room-name" :title="'点击改名：' + zone.name" @click.stop="startRoomRename(zone)">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span></div>
+              <div><strong class="review-room-name" :title="'点击改名：' + zone.name" @click.stop="startRoomRename(zone)">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span><span v-if="reviewConfirmStatus(zone)" class="review-badge" :class="zone.reviewConfirmation?.status === 'CONFIRMED' ? 'verified' : 'pending'" :data-review-confirm="zone.reviewConfirmation?.status">{{ reviewConfirmStatus(zone) }}</span></div>
               <div><small class="review-room-use">{{ zoneTypeLabel(zone.zoneType) }}</small><small class="review-room-dims" :title="dimensions(zone)">{{ dimensions(zone) }}</small><small class="review-room-area">{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
+              <button v-if="canConfirmReview(zone)" class="review-confirm-button" type="button" :disabled="confirmingReviewId === zone.id" :aria-label="(zone.reviewConfirmation?.status === 'STALE' ? '重新确认复核 ' : '确认复核 ') + zone.name" :data-tip="confirmingReviewId === zone.id ? '确认中…' : '确认该空间轮廓、尺寸与比例已人工核对'" :data-testid="'confirm-review-' + zone.id" @click.stop="confirmReview(zone)"><AppIcon name="check" size="3" /></button>
               <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" data-tip="删除空间" @click.stop="deleteSpace(zone.id)"><AppIcon name="close" size="3" /></button>
             </div>
           </div>

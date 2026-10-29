@@ -10,6 +10,14 @@ export type ZoneType =
   | 'COLLABORATION'
   | 'OTHER'
 
+/** 设计复核确认（SPACE_REVIEW）；凭据由服务端签发，普通保存不能伪造。 */
+export interface SpaceReviewConfirmation {
+  status: 'UNCONFIRMED' | 'CONFIRMED' | 'STALE'
+  confirmedCanvasRevision?: number
+  confirmedByUserId?: string
+  confirmedAt?: string
+}
+
 export interface ZoneObject {
   id: string
   kind: 'zone'
@@ -31,6 +39,8 @@ export interface ZoneObject {
   source?: 'recognition' | 'user_annotation'
   /** 几何来源：cad_geometry / ai_vision / manual_geometry。 */
   geometrySource?: 'cad_geometry' | 'ai_vision' | 'manual_geometry'
+  /** 设计复核确认状态；与排版确认、客户方案确认相互独立。 */
+  reviewConfirmation?: SpaceReviewConfirmation
   /** 空间是否已确认（纳入方案）。 */
   confirmed?: boolean
   /** 确认时间戳。 */

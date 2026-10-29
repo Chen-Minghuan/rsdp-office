@@ -22,6 +22,16 @@ interface CanvasDto {
   blank: boolean
 }
 
+interface AdminUserItem {
+  userId: string
+  username: string
+  displayName: string
+  role: string
+  status: string
+  lastLoginAt: string | null
+  createdAt: string | null
+}
+
 interface ProductDto {
   id: string
   name: string
@@ -80,8 +90,8 @@ export function useOfficeApi() {
     designZoneId: string | null
     revision: number
     blank: boolean
-  }, workspaceId = currentProjectId()): Promise<void> {
-    await request<void>('PUT', `/api/v1/office/projects/${workspaceId}/canvas`, {
+  }, workspaceId = currentProjectId()): Promise<CanvasDto | null> {
+    return await request<CanvasDto>('PUT', `/api/v1/office/projects/${workspaceId}/canvas`, {
       projectId: workspaceId,
       revision: payload.revision,
       mode: payload.mode,
@@ -90,6 +100,18 @@ export function useOfficeApi() {
       files: payload.files,
       blank: payload.blank,
     })
+  }
+
+  /** 设计复核确认（SPACE_REVIEW）：服务端基于当前画布签发凭据，baseCanvasRevision 必须等于服务端当前修订。 */
+  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId = currentProjectId()): Promise<{
+    spaceId: string
+    canvasRevision: number
+    status: 'UNCONFIRMED' | 'CONFIRMED' | 'STALE'
+    confirmedCanvasRevision?: number
+    confirmedByUserId?: string
+    confirmedAt?: string
+  }> {
+    return await request('POST', `/api/v1/office/floors/${workspaceId}/spaces/${zoneId}/review-confirm`, { baseCanvasRevision })
   }
 
   async function loadCart(): Promise<CartItem[]> {
@@ -296,6 +318,28 @@ export function useOfficeApi() {
     return await request<DictItem[]>('GET', `/api/v1/dicts/${type}`)
   }
 
+  /** 系统管理员用户管理；服务端逐接口校验 ADMIN，前端入口只是展示层。 */
+  async function listAdminUsers(): Promise<AdminUserItem[]> {
+    return await request<AdminUserItem[]>('GET', '/api/v1/office/admin/users')
+  }
+
+  async function createAdminUser(payload: { username: string; displayName: string; password: string; role?: string }): Promise<AdminUserItem> {
+    return await request<AdminUserItem>('POST', '/api/v1/office/admin/users', payload)
+  }
+
+  async function updateAdminUserStatus(userId: string, status: 'active' | 'disabled'): Promise<AdminUserItem> {
+    return await request<AdminUserItem>('PATCH', `/api/v1/office/admin/users/${userId}/status`, { status })
+  }
+
+  async function resetAdminUserPassword(userId: string, password: string): Promise<AdminUserItem> {
+    return await request<AdminUserItem>('POST', `/api/v1/office/admin/users/${userId}/password`, { password })
+  }
+
+  /** 删除账号；仍是项目负责人的账号会被服务端拒绝。 */
+  async function deleteAdminUser(userId: string): Promise<void> {
+    await request<void>('DELETE', `/api/v1/office/admin/users/${userId}`)
+  }
+
   async function createManualProduct(request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
     return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', request)
   }
@@ -338,6 +382,7 @@ export function useOfficeApi() {
     get projectId() { return currentProjectId() },
     loadCanvas,
     saveCanvas,
+    confirmSpaceReview,
     loadCart,
     addCartItem,
     updateCartItemQty,
@@ -366,6 +411,11 @@ export function useOfficeApi() {
     confirmImport,
     uploadImages,
     loadDicts,
+    listAdminUsers,
+    createAdminUser,
+    updateAdminUserStatus,
+    resetAdminUserPassword,
+    deleteAdminUser,
     createManualProduct,
     getProduct,
     updateProduct,

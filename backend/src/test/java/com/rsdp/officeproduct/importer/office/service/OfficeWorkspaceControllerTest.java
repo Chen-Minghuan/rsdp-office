@@ -16,7 +16,7 @@ class OfficeWorkspaceControllerTest {
     @Test
     void legacyProjectProfileRoutesAreRemoved() throws Exception {
         var office = mock(OfficeService.class);
-        var mvc = MockMvcBuilders.standaloneSetup(new OfficeController(office, mock(OfficeModuleRecommendationService.class))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeController(office, mock(OfficeModuleRecommendationService.class), mock(OfficeSpaceReviewService.class))).build();
         mvc.perform(get("/api/v1/office/projects/P")).andExpect(status().isNotFound());
         mvc.perform(put("/api/v1/office/projects/P").contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isNotFound());
         verifyNoInteractions(office);
@@ -27,7 +27,7 @@ class OfficeWorkspaceControllerTest {
         var office = mock(OfficeService.class);
         var saved = new CanvasDto(); saved.setProjectId("P"); saved.setRevision(1);
         when(office.saveCanvas(any())).thenReturn(saved);
-        var mvc = MockMvcBuilders.standaloneSetup(new OfficeController(office, mock(OfficeModuleRecommendationService.class))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeController(office, mock(OfficeModuleRecommendationService.class), mock(OfficeSpaceReviewService.class))).build();
         mvc.perform(put("/api/v1/office/projects/P/canvas").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"revision\":1,\"mode\":\"overview\",\"objects\":[],\"files\":[],\"blank\":true}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.projectId").value("P"));

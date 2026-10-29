@@ -1,14 +1,26 @@
 <script setup lang="ts">
+import { authEnabled } from '~/composables/useAuth'
+import type { AssignableUser, ProjectReferenceImage } from '~/types/workspace'
 import { parseFloorNames } from '~/utils/workspaceFloors'
 
 const emit = defineEmits<{ close: []; created: [] }>()
 const workspace = useWorkspaceStore()
+const { me } = useAuth()
 const projectName = ref('')
 const customerRequirements = ref('')
 const floorNames = ref(['1F'])
 const floorInput = ref('')
+const leader = ref<AssignableUser | null>(null)
+const collaborators = ref<AssignableUser[]>([])
+const referenceImages = ref<ProjectReferenceImage[]>([])
 const submitting = ref(false)
 const error = ref('')
+
+onMounted(async () => {
+  if (!authEnabled) return
+  const user = await me()
+  if (user) leader.value = { userId: user.userId, username: user.username, displayName: user.displayName }
+})
 
 function addFloors() {
   error.value = ''
@@ -33,9 +45,20 @@ async function submit() {
   if (!name) { error.value = '请输入项目名称'; return }
   if (!floors.length) { error.value = '请至少保留一个楼层'; return }
   if (new Set(floors).size !== floors.length) { error.value = '楼层名称不能重复'; return }
+  if (authEnabled && !leader.value) { error.value = '请选择项目负责人'; return }
+  if (leader.value && collaborators.value.some(user => user.userId === leader.value!.userId)) {
+    error.value = '负责人不能同时是协作者'; return
+  }
   submitting.value = true
   try {
-    await workspace.createProject({ projectName: name, customerRequirements: customerRequirements.value.trim(), floors: floors.map((floorName, index) => ({ floorName, sortOrder: index + 1 })) })
+    await workspace.createProject({
+      projectName: name,
+      customerRequirements: customerRequirements.value.trim(),
+      floors: floors.map((floorName, index) => ({ floorName, sortOrder: index + 1 })),
+      leaderUserId: leader.value?.userId,
+      collaboratorUserIds: collaborators.value.map(user => user.userId),
+      referenceImages: referenceImages.value,
+    })
     emit('created')
     emit('close')
   } catch (cause) {
@@ -61,6 +84,8 @@ async function submit() {
           <label class="grid gap-2 text-sm font-semibold">客户需求 <span class="text-xs font-normal text-muted">全流程备注，可在过程中修改</span>
             <textarea v-model="customerRequirements" maxlength="4000" rows="4" class="resize-none rounded-xl border border-line px-4 py-3 text-sm font-normal leading-6 outline-none focus:border-bronze" placeholder="记录客户偏好、工位数量、预算或其他需要持续提醒的事项" />
           </label>
+          <ProjectMemberEditor v-model:leader="leader" v-model:collaborators="collaborators" :leader-optional="!authEnabled" />
+          <ProjectReferenceImagesEditor v-model:images="referenceImages" />
           <section class="grid gap-3">
             <div><h3 class="text-sm font-semibold">楼层规划</h3><p class="mt-1 text-xs text-muted">支持 1F、B1F 等名称；连续楼层可输入 7~9F，多个楼层用逗号分隔。</p></div>
             <div class="flex gap-2">

@@ -57,6 +57,12 @@
 .review-room-card .review-room-dims { min-width:0; overflow-wrap:anywhere; }
 .review-room-card .review-room-area { flex:none; white-space:nowrap; }
 .review-badge { padding:3px 6px; border-radius:4px; white-space:nowrap; font-size:10px; line-height:1.2; }
+.review-confirm-button { position:absolute; right:8px; top:calc(50% - 24px); width:22px; height:22px; display:grid; place-items:center; border:1px solid #d8e3d4; border-radius:7px; color:#4c7a63; background:#fff; opacity:0; transition:opacity .15s, color .15s, background .15s, border-color .15s; box-shadow:0 1px 4px rgba(80,80,60,.14); cursor:pointer; }
+.review-room-item:hover .review-confirm-button, .review-room-item:focus-within .review-confirm-button, .review-confirm-button:disabled { opacity:1; }
+.review-confirm-button:hover:not(:disabled) { color:#2f5d45; background:#e7f1e4; border-color:#bcd8c2; }
+.review-confirm-button:disabled { cursor:not-allowed; }
+.review-confirm-button::after { content:attr(data-tip); position:absolute; right:calc(100% + 8px); top:50%; transform:translateY(-50%); padding:4px 8px; border-radius:5px; background:#43564c; color:#fff; font-size:10px; line-height:1.2; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .15s; }
+.review-confirm-button:hover::after, .review-confirm-button:focus-visible::after { opacity:1; }
 .review-badge.verified { background:#e9f3ee; color:#55957c; }
 .review-badge.pending { background:#fcf0d9; color:#b08a48; }
 .show-more-rooms { display:block; width:100%; padding:14px 0; font-size:11px!important; color:#a5a99d; }
@@ -131,7 +137,7 @@
 .review-room-rename-form { flex:1; min-width:0; }
 .review-room-rename-form input { width:100%; padding:10px; border:1px solid #a7c5e5; border-radius:8px; font-size:12px; font-weight:650; color:#3f4a42; outline:none; }
 /* 删除按钮：收进卡片右缘垂直居中，平时收起、悬浮整行浮现；自带气泡提示。 */
-.review-room-delete { position:absolute; right:8px; top:50%; transform:translateY(-50%); width:22px; height:22px; display:grid; place-items:center; border:1px solid #e6e3da; border-radius:7px; color:#98a191; background:#fff; opacity:0; transition:opacity .15s, color .15s, background .15s, border-color .15s; box-shadow:0 1px 4px rgba(80,80,60,.14); }
+.review-room-delete { position:absolute; right:8px; top:calc(50% + 1px); width:22px; height:22px; display:grid; place-items:center; border:1px solid #e6e3da; border-radius:7px; color:#98a191; background:#fff; opacity:0; transition:opacity .15s, color .15s, background .15s, border-color .15s; box-shadow:0 1px 4px rgba(80,80,60,.14); }
 .review-room-item:hover .review-room-delete, .review-room-item:focus-within .review-room-delete { opacity:1; }
 .review-room-delete:hover:not(:disabled) { color:#b44f45; background:#fdf1f0; border-color:#ecc9c6; }
 .review-room-delete:disabled { opacity:0; cursor:not-allowed; }

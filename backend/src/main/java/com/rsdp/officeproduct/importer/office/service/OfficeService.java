@@ -3,7 +3,9 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.entity.RspuMaster;
 import com.rsdp.officeproduct.importer.entity.RspuVariant;
@@ -35,6 +37,7 @@ public class OfficeService {
 
     private final OfficeWorkspaceLockMapper workspaceLocks;
     private final OfficeProjectService projectService;
+    private final OfficeProjectAccessService accessService;
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeCartMapper cartMapper;
     private final OfficeAgentMessageMapper messageMapper;
@@ -48,6 +51,7 @@ public class OfficeService {
         if (!StringUtils.hasText(projectId)) {
             projectId = DEFAULT_PROJECT_ID;
         }
+        accessService.requireFloorAccess(projectId);
         List<OfficeCanvas> list = canvasMapper.selectList(
             new QueryWrapper<OfficeCanvas>().eq("project_id", projectId).orderByDesc("created_at").orderByDesc("canvas_id").last("limit 1"));
         if (list.isEmpty()) {
@@ -67,6 +71,7 @@ public class OfficeService {
         }
         String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
         projectService.requireFloor(projectId);
+        accessService.requireFloorAccess(projectId);
         workspaceLocks.lockWorkspace(projectId);
         CanvasDto latest = getCanvas(projectId);
         int revision = request.getRevision() != null ? request.getRevision() : 1;
@@ -74,12 +79,15 @@ public class OfficeService {
             throw new BusinessException("画布版本已过期，请刷新后重新操作");
         }
 
+        JsonNode objects = objectMapper.valueToTree(request.getObjects());
+        maintainSpaceReviewConfirmations(objects, latest);
+
         OfficeCanvas canvas = new OfficeCanvas();
         canvas.setProjectId(projectId);
         canvas.setRevision(request.getRevision() != null ? request.getRevision() : 1);
         canvas.setMode(StringUtils.hasText(request.getMode()) ? request.getMode() : "overview");
         canvas.setDesignZoneId(request.getDesignZoneId());
-        canvas.setObjectsJson(writeJson(request.getObjects()));
+        canvas.setObjectsJson(writeJson(objects));
         canvas.setFilesJson(writeJson(request.getFiles()));
         canvas.setBlank(request.getBlank() != null ? request.getBlank() : false);
         canvas.setCreatedAt(LocalDateTime.now());
@@ -87,10 +95,56 @@ public class OfficeService {
         return toCanvasDto(canvas);
     }
 
+    /**
+     * 设计复核确认状态由服务端维护：普通保存不得携带伪造的“已确认”；
+     * 与已确认几何快照逐字段比对，变化置 STALE，恢复吻合则回到 CONFIRMED。
+     */
+    private void maintainSpaceReviewConfirmations(JsonNode objects, CanvasDto latest) {
+        if (objects == null || !objects.isArray()) {
+            return;
+        }
+        Map<String, JsonNode> previousZones = new HashMap<>();
+        JsonNode previous = objectMapper.valueToTree(latest != null && latest.getObjects() != null ? latest.getObjects() : List.of());
+        if (previous.isArray()) {
+            for (JsonNode node : previous) {
+                if ("zone".equals(node.path("kind").asText())) {
+                    previousZones.put(node.path("id").asText(), node);
+                }
+            }
+        }
+        for (JsonNode node : objects) {
+            if (!(node instanceof ObjectNode zone) || !"zone".equals(zone.path("kind").asText())) {
+                continue;
+            }
+            JsonNode previousZone = previousZones.get(zone.path("id").asText());
+            JsonNode previousConfirmation = previousZone != null ? previousZone.path("reviewConfirmation") : null;
+            if (previousConfirmation == null || !previousConfirmation.isObject()) {
+                zone.remove("reviewConfirmation");
+                continue;
+            }
+            String status = previousConfirmation.path("status").asText();
+            if (!"CONFIRMED".equals(status) && !"STALE".equals(status)) {
+                zone.set("reviewConfirmation", previousConfirmation);
+                continue;
+            }
+            boolean unchanged = OfficeSpaceReviewSupport.jsonEquivalent(
+                OfficeSpaceReviewSupport.snapshot(objectMapper, zone), previousConfirmation.path("confirmedGeometry"));
+            if (unchanged) {
+                if ("STALE".equals(status)) {
+                    ((ObjectNode) previousConfirmation).put("status", "CONFIRMED");
+                }
+            } else if ("CONFIRMED".equals(status)) {
+                ((ObjectNode) previousConfirmation).put("status", "STALE");
+            }
+            zone.set("reviewConfirmation", previousConfirmation);
+        }
+    }
+
     public List<CartItemDto> listCart(String projectId) {
         if (!StringUtils.hasText(projectId)) {
             projectId = DEFAULT_PROJECT_ID;
         }
+        accessService.requireFloorAccess(projectId);
         List<OfficeCart> list = cartMapper.selectList(
             new QueryWrapper<OfficeCart>().eq("project_id", projectId).orderByAsc("created_at"));
         return list.stream().map(this::toCartItemDto).collect(Collectors.toList());
@@ -98,6 +152,7 @@ public class OfficeService {
 
     @Transactional
     public CartItemDto addCartItem(String projectId, CartItemDto dto) {
+        accessService.requireFloorAccess(projectId);
         String lineId = StringUtils.hasText(dto.getLineId()) ? dto.getLineId() : UUID.randomUUID().toString().replace("-", "");
         OfficeCart existing = cartMapper.selectById(lineId);
         if (existing != null) {
@@ -121,6 +176,7 @@ public class OfficeService {
 
     @Transactional
     public CartItemDto updateCartItemQty(String projectId, String lineId, Integer qty) {
+        accessService.requireFloorAccess(projectId);
         OfficeCart cart = cartMapper.selectById(lineId);
         if (cart == null || !cart.getProjectId().equals(projectId)) {
             throw new BusinessException("购物车行不存在");
@@ -137,6 +193,7 @@ public class OfficeService {
 
     @Transactional
     public void deleteCartItem(String projectId, String lineId) {
+        accessService.requireFloorAccess(projectId);
         OfficeCart cart = cartMapper.selectById(lineId);
         if (cart != null && cart.getProjectId().equals(projectId)) {
             cartMapper.deleteById(lineId);
@@ -145,6 +202,7 @@ public class OfficeService {
 
     @Transactional
     public void clearCart(String projectId) {
+        accessService.requireFloorAccess(projectId);
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
     }
 
@@ -152,6 +210,7 @@ public class OfficeService {
         if (!StringUtils.hasText(projectId)) {
             projectId = DEFAULT_PROJECT_ID;
         }
+        accessService.requireFloorAccess(projectId);
         List<OfficeAgentMessage> list = messageMapper.selectList(
             new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId).orderByAsc("created_at"));
         return list.stream().map(this::toAgentMessageDto).collect(Collectors.toList());
@@ -159,6 +218,7 @@ public class OfficeService {
 
     @Transactional
     public AgentMessageDto sendMessage(String projectId, SendMessageRequest request) {
+        accessService.requireFloorAccess(projectId);
         OfficeAgentMessage userMsg = new OfficeAgentMessage();
         userMsg.setProjectId(projectId);
         userMsg.setRole("user");
@@ -200,6 +260,7 @@ public class OfficeService {
         if (!StringUtils.hasText(projectId)) {
             projectId = DEFAULT_PROJECT_ID;
         }
+        accessService.requireFloorAccess(projectId);
         canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", projectId));
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
         messageMapper.delete(new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId));
