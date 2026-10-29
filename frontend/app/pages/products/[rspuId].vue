@@ -26,7 +26,7 @@ const galleryImages = computed(() => {
     primary: image.primary,
     label: image.primary ? '主图' : '商品图片',
   }))
-  const primaryWasInAssets = product.value?.images.some(image => image.storageUrl === product.value?.primaryImageUrl)
+  const primaryWasInAssets = (product.value?.images || []).some(image => image.storageUrl === product.value?.primaryImageUrl)
   if (product.value?.primaryImageUrl && !primaryWasInAssets && !images.some(image => image.url === product.value?.primaryImageUrl)) {
     images.unshift({ id: 'primary', url: product.value.primaryImageUrl, primary: true, label: '主图' })
   }
