@@ -24,8 +24,8 @@ const ALL_MEETING: OfficeProductStyleId[] = ['meeting-table']
  * material-defined arrangements below.
  */
 export const OFFICE_ARRANGEMENT_PRESETS: OfficeArrangementPreset[] = [
-  { id: 'general-center', label: '单件居中', description: '按实际尺寸居中放置一件，可继续逐件添加', styleIds: ['general'], baseMode: 'auto', defaults: { wallMm: 300, aisleMm: 900, gapMm: 0 }, topology: 'row' },
-  { id: 'general-auto', label: '按场地排布', description: '按空间尺寸、间距和目标数量生成多排方案', styleIds: ['general'], baseMode: 'auto', defaults: { wallMm: 300, aisleMm: 900, gapMm: 0 }, topology: 'row' },
+  { id: 'general-center', label: '单件居中', description: '按实际尺寸居中放置一件，可继续逐件添加', styleIds: ['general'], baseMode: 'auto', defaults: { wallMm: 0, aisleMm: 900, gapMm: 0 }, topology: 'row' },
+  { id: 'general-auto', label: '按场地排布', description: '按空间尺寸、间距和目标数量生成多排方案', styleIds: ['general'], baseMode: 'auto', defaults: { wallMm: 0, aisleMm: 900, gapMm: 0 }, topology: 'row' },
   { id: 'generic-auto', label: '自动优化', description: '比较横纵朝向，按当前样式布置多排', styleIds: [...ALL_DESK, ...ALL_SCREEN], baseMode: 'auto', defaults: {}, topology: 'row' },
   { id: 'generic-row', label: '单排', description: '沿空间上侧布置一排，保留其余空间', styleIds: [...ALL_DESK, ...ALL_SCREEN], baseMode: 'row', defaults: {}, topology: 'row' },
   { id: 'generic-grid', label: '矩阵', description: '按当前朝向布置多排，保留排间净距', styleIds: [...ALL_DESK, ...ALL_SCREEN], baseMode: 'grid', defaults: {}, topology: 'row' },

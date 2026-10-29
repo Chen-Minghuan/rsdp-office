@@ -21,7 +21,7 @@ export interface OfficeLayoutSpacing {
   cornerGapMm?: number
   staggerOffsetMm?: number
 }
-export const OFFICE_LAYOUT_SPACING: OfficeLayoutSpacing = { wallMm: 300, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
+export const OFFICE_LAYOUT_SPACING: OfficeLayoutSpacing = { wallMm: 0, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
 /** LAYOUT-038：椅背相对时椅子占位之外的通行量（毫米，策略值，非建筑规范）。 */
 export const CHAIR_BACK_PASSAGE_MM = 500
 /**

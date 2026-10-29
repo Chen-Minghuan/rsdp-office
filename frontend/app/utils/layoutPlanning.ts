@@ -2,7 +2,7 @@ import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutCandidate, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
 import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture, seatSideRect, seatWallClearance, workstationSeatCorner, workstationSeatOverhang } from './officeAutoLayout'
 import { planAdaptiveArrangement } from './officeAdaptiveLayout'
-import { officeFurnitureFootprint, officePlacementProblem } from './officeManualPlacement'
+import { officeFurnitureFootprint, officePlacementHardProblem, officePlacementSoftWarning } from './officeManualPlacement'
 import { canvasZoneBounds } from './officeCanvasView'
 import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
 import { zoneLayoutExclusions } from './spatial/obstacles'
@@ -75,7 +75,6 @@ export function chairActivityRect(item: FurnitureObject, clearance: number): Rec
 }
 
 export function confirmedLayoutProblem(zone: ZoneObject, furniture: FurnitureObject[]) {
-  const exclusions = zoneLayoutExclusions(zone)
   // 通道是全空间约束：「仅从二排起」的通道用已保存排版的首排深度豁免首排，没有该记录时按全深校验。
   const savedChannels = zone.layoutPreferences?.channels || []
   const firstBlockDepthMm = furniture.find(item => item.layoutSettings?.firstBlockDepthMm)?.layoutSettings?.firstBlockDepthMm
@@ -83,11 +82,22 @@ export function confirmedLayoutProblem(zone: ZoneObject, furniture: FurnitureObj
   for (const item of furniture) {
     const others = furniture.filter(other => other.id !== item.id)
     const saved = item.layoutGroupId ? item.layoutSettings?.spacing : undefined
-    const problem = officePlacementProblem(zone, item, others, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
+    const problem = officePlacementHardProblem(zone, item, others, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
     if (problem) return problem
     if (channelBlockers.some(rect => rectOverlapsBlocker(officeFurnitureFootprint(item), rect))) return '家具压占通道，请调整家具或通道位置'
+  }
+  return null
+}
+
+export function confirmedLayoutWarning(zone: ZoneObject, furniture: FurnitureObject[]): string | null {
+  const exclusions = zoneLayoutExclusions(zone)
+  for (const item of furniture) {
+    const others = furniture.filter(other => other.id !== item.id)
+    const saved = item.layoutGroupId ? item.layoutSettings?.spacing : undefined
+    const warning = officePlacementSoftWarning(zone, item, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
+    if (warning) return warning + '，请现场复核'
     const activity = chairActivityRect(item, zone.layoutPreferences?.seatClearanceMm || 0)
-    if (activity && (!layoutRectInsideRing(activity, zone.polygon || []) || others.some(other => overlap(activity, officeFurnitureFootprint(other))) || exclusions.some(area => rectOverlapsBlocker(activity, area)))) return '椅子活动区被占用，请调整位置或拉椅预留'
+    if (activity && (!layoutRectInsideRing(activity, zone.polygon || []) || others.some(other => overlap(activity, officeFurnitureFootprint(other))) || exclusions.some(area => rectOverlapsBlocker(activity, area)))) return '椅子活动区可能被占用，请现场复核'
   }
   return null
 }

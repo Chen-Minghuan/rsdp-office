@@ -27,6 +27,8 @@ assert.equal(officeArrangementPreset('screen-t-face-to-face').defaults.faceGapMm
 assert.equal(officeArrangementPreset('straight-screen-face-to-face').defaults.faceGapMm, 1600)
 assert.ok(presetsForProductStyle('l-screen').some(preset => preset.id === 'screen-cross-face-to-face'))
 assert.deepEqual(presetsForProductStyle('general').map(preset => preset.id), ['general-center', 'general-auto'])
+assert.equal(officeArrangementPreset('general-center').defaults.wallMm, 0)
+assert.equal(officeArrangementPreset('general-auto').defaults.wallMm, 0)
 assert.equal(productStyleForTemplate({id:'UMOD-CUSTOM',glyphTemplateId:'desk-screen-l',category:'职员桌',kind:'rounded-l-desk',name:'自定义模块'}),'l-screen')
 assert.equal(productStyleForTemplate({id:'UMOD-DESK',glyphTemplateId:'desk-straight',category:'职员桌',kind:'desk',name:'屏风命名的普通桌'}),'straight-desk')
 assert.equal(productStyleForTemplate({id:'cabinet-mobile',category:'收纳',kind:'cabinet',name:'活动柜'}),'general')

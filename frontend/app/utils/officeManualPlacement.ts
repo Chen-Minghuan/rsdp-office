@@ -52,7 +52,7 @@ export function officePlacementHardProblem(zone: ZoneObject, candidate: Furnitur
   return null
 }
 
-/** 座椅净空软提示：桌子座椅侧净空（默认 560mm）延伸出轮廓时返回提示文案；不阻断手动操作，确认排版时仍会拦截。 */
+/** 座椅净空软提示：桌子座椅侧净空（默认 560mm）延伸出轮廓时返回提示文案；手动操作和确认均不据此拦截。 */
 export function officePlacementSoftWarning(zone: ZoneObject, candidate: FurnitureObject, spacing: OfficeLayoutSpacing): string | null {
   const footprint = officeFurnitureFootprint(candidate)
   // Chairs (meeting seats) keep the clearance on all sides; desks and other
@@ -66,14 +66,6 @@ export function officePlacementSoftWarning(zone: ZoneObject, candidate: Furnitur
     ? { x: footprint.x - spacing.wallMm, y: footprint.y - spacing.wallMm, w: footprint.w + spacing.wallMm * 2, h: footprint.h + spacing.wallMm * 2 }
     : seatSideRect({ ...footprint, rotation: candidate.rotation, mirrorX: candidate.mirrorX }, seatWall, corner)
   if (!layoutRectInsideRing(wallChecked, zone.polygon || [])) return '座椅一侧离墙净空不足 560mm'
-  return null
-}
-
-/** 严格校验（确认排版/方案复核用）：硬校验 + 座椅净空，保持原有拒绝语义与文案。 */
-export function officePlacementProblem(zone: ZoneObject, candidate: FurnitureObject, existing: FurnitureObject[], spacing: OfficeLayoutSpacing): string | null {
-  const hard = officePlacementHardProblem(zone, candidate, existing, spacing)
-  if (hard) return hard === '此位置超出空间边界' ? '此位置超出空间或离墙距离不足' : hard
-  if (officePlacementSoftWarning(zone, candidate, spacing)) return '此位置超出空间或离墙距离不足'
   return null
 }
 
