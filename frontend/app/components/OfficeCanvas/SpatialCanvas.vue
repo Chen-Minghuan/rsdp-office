@@ -26,7 +26,8 @@ const props = withDefaults(defineProps<{
   originalGeometries?: SpatialGeometry[]
   tracePoints?: Array<{ x: number; y: number }>
   interactionActive?: boolean
-}>(), { showUnderlay: true, showOutline: true, showDimensions: true, underlayOpacity: 0.65, tool: 'select' })
+  obstacleEditing?: boolean
+}>(), { showUnderlay: true, showOutline: true, showDimensions: true, underlayOpacity: 0.65, tool: 'select', obstacleEditing: true })
 
 const emit = defineEmits<{
   (e: 'selectSpace', id: string): void
@@ -52,7 +53,7 @@ const selected = computed(() => props.scene?.spaces.find(space => space.spaceId 
 const selectedObstacle = computed(() => props.scene?.obstacles.find(obstacle => obstacle.obstacleId === props.selectedObstacleId))
 const obstacleHandles = computed(() => {
   const obstacle = selectedObstacle.value
-  if (!obstacle || props.tool !== 'select' || props.pointerInSourceCoordinates || props.interactionActive) return []
+  if (!obstacle || !props.obstacleEditing || props.tool !== 'select' || props.pointerInSourceCoordinates || props.interactionActive) return []
   if (obstacle.kind === 'DOOR_CLEARANCE') return [{ handle: 'radius', point: obstacle.geometry.outer[Math.floor(obstacle.geometry.outer.length / 2)] }]
   return obstacle.geometry.outer.slice(0, 4).map((point, index) => ({ handle: String(index), point }))
 })
@@ -157,7 +158,7 @@ function onPointerDown(event: PointerEvent) {
   const edgeIndex = element.getAttribute('data-edge-index')
   const handle = element.getAttribute('data-resize-handle') as ResizeHandle | null
   const boundaryEdge = element.getAttribute('data-boundary-edge')
-  const obstacleId = element.closest('[data-obstacle-id]')?.getAttribute('data-obstacle-id')
+  const obstacleId = props.obstacleEditing ? element.closest('[data-obstacle-id]')?.getAttribute('data-obstacle-id') : null
   if (obstacleId) {
     emit('selectObstacle', obstacleId)
     if (props.tool === 'select') emit('obstacleTransformStart', obstacleId, element.getAttribute('data-obstacle-handle') || 'move', svgToPoint(screen))
@@ -271,7 +272,7 @@ onBeforeUnmount(() => observer?.disconnect())
         </g>
       </g>
       <g v-if="scene?.obstacles?.length" data-layer="obstacles">
-        <g v-for="obstacle in scene.obstacles" :key="obstacle.obstacleId" :data-obstacle-id="obstacle.obstacleId" class="cursor-pointer">
+        <g v-for="obstacle in scene.obstacles" :key="obstacle.obstacleId" :data-obstacle-id="obstacle.obstacleId" :class="obstacleEditing ? 'cursor-pointer' : 'pointer-events-none'">
           <path :d="geometryPath(obstacle.geometry)" :fill="obstacleColor(obstacle.kind)" fill-opacity="0.24" :stroke="obstacleColor(obstacle.kind)" :stroke-width="selectedObstacleId === obstacle.obstacleId ? 3 : 1.8" stroke-dasharray="6 3" />
           <text v-if="obstacleLabelVisible(obstacle.geometry)" :x="pointToSvg(polygonCentroid(obstacle.geometry)!).x" :y="pointToSvg(polygonCentroid(obstacle.geometry)!).y" text-anchor="middle" dominant-baseline="middle" :fill="obstacleColor(obstacle.kind)" font-size="11" font-weight="600" pointer-events="none">{{ obstacleLabel(obstacle.kind) }} · {{ obstacleSize(obstacle.geometry, obstacle.kind) }}</text>
           <title>{{ obstacleLabel(obstacle.kind) }} · {{ obstacleSize(obstacle.geometry, obstacle.kind) }}</title>

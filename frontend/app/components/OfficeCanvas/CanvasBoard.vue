@@ -10,21 +10,27 @@ import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitu
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld, rotateCanvasVector } from '~/utils/officeCanvasView'
-import { zoneLayoutExclusions } from '~/utils/spatial/obstacles'
+import { rectangleObstacle, moveObstacle, reshapeObstacle, obstacleExclusion, obstacleLabel, snapObstacleToZone } from '~/utils/spatial/obstacles'
+import type { SpatialObstacle, SpatialObstacleKind } from '~/types/spatial'
 import type { LayoutChannel, LayoutExclusion } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
 import { channelRects, channelOffsetRange, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 
 
 const store = useOfficeStore()
-const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null; showDimensions?: boolean }>()
+const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
 const activePreview = computed(() => props.layoutPreview?.zoneId === store.designZoneId ? props.layoutPreview : null)
 const viewRotation = defineModel<number>('viewRotation', { default: 0 })
+const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const tool = defineModel<string>('tool', { default: 'select' })
 const selectedId = defineModel<string | null>('selectedId')
 const showSubmit = defineModel<boolean>('showSubmit')
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
 const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
+const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
+const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
+const showOutline = ref(true)
+const showOriginal = ref(false)
 
 const DEFAULT_W = 1540
 const DEFAULT_H = 960
@@ -72,7 +78,9 @@ const hintText = computed(() => {
   if (placing.value) return placementMessage.value || placementProblem.value || '点击空间内逐件放置 · R 旋转 · Esc 结束'
   if (moveProblem.value) return moveProblem.value
   if (deleteFeedback.value) return deleteFeedback.value
+  if (constraintMessage.value) return constraintMessage.value
   if (mode.value === 'design' && tool.value === 'select') return '点击选中 · Shift/Ctrl 点选多个 · 空白处框选 · 拖动选中家具一起移动'
+  if (isConstraintTool.value) return constraintKind.value === 'DOOR_CLEARANCE' ? '从门扇铰链角拖向开启区域，Esc 取消' : '在当前空间底图上拖出矩形标注，Esc 取消'
   const map: Record<string, string> = {
     select: '选择并拖动画布对象，右侧可编辑属性',
     pan: '按住并拖动画布，也可以使用滚轮缩放',
@@ -88,7 +96,27 @@ const zones = computed(() => store.objects.filter((o) => o.kind === 'zone') as Z
 const visibleZones = computed(() => visibleObjects.value.filter((o) => o.kind === 'zone') as ZoneObject[])
 const arrows = computed(() => visibleObjects.value.filter((o) => o.kind === 'arrow'))
 const designZone = computed(() => zones.value.find((z) => z.id === store.designZoneId) || null)
-const designObstacles = computed(() => designZone.value ? zoneLayoutExclusions(designZone.value) : [])
+const designObstacles = computed(() => designZone.value?.obstacles?.map(obstacle => obstacleExclusion(designZone.value!, obstacle)).filter((area): area is LayoutExclusion => !!area) || [])
+const constraintKind = computed<SpatialObstacleKind>(() => tool.value.startsWith('constraints-') ? tool.value.slice('constraints-'.length) as SpatialObstacleKind : 'NO_PLACEMENT')
+const isConstraintTool = computed(() => tool.value.startsWith('constraints'))
+const selectedConstraintId = ref<string | null>(null)
+const constraintEditPreview = ref<SpatialObstacle | null>(null)
+const constraintMessage = ref('')
+const displayedDesignObstacles = computed(() => designObstacles.value.map(area => {
+  if (constraintEditPreview.value?.obstacleId !== area.id || !designZone.value) return area
+  return obstacleExclusion(designZone.value, constraintEditPreview.value) || area
+}))
+const selectedConstraint = computed(() => designZone.value?.obstacles?.find(obstacle => obstacle.obstacleId === selectedConstraintId.value) || null)
+const selectedConstraintArea = computed(() => displayedDesignObstacles.value.find(area => area.id === selectedConstraintId.value) || null)
+const constraintCreateArea = computed<LayoutExclusion | null>(() => {
+  const current = drag.value
+  if (current?.mode !== 'constraints' || constraintKind.value !== 'DOOR_CLEARANCE' || !designZone.value || current.lastX === undefined || current.lastY === undefined) return null
+  const obstacle = rectangleObstacle(designZone.value.id, 'DOOR_CLEARANCE', { x: current.x || 0, y: -(current.y || 0) }, { x: current.lastX, y: -current.lastY }, 'DOOR_DRAFT')
+  return obstacle ? obstacleExclusion(designZone.value, obstacle) : null
+})
+function isEditableConstraint(area: LayoutExclusion) {
+  return designZone.value?.obstacles?.some(obstacle => obstacle.obstacleId === area.id) || false
+}
 /** 通道条带：渲染和拖动预览基于多边形裁剪后的分段矩形（凹形空间一条通道可能多段）；标签与拖柄挂在最大分段上。 */
 const designChannels = computed(() => {
   const zone = designZone.value
@@ -196,6 +224,15 @@ function obstaclePoints(area: LayoutExclusion) {
   const polygon = area.polygon || [[area.x, area.y], [area.x + area.w, area.y], [area.x + area.w, area.y + area.h], [area.x, area.y + area.h]]
   return polygon.map(([x, y]) => `${x - area.x},${y - area.y}`).join(' ')
 }
+function constraintHandles(area: LayoutExclusion) {
+  const polygon = area.polygon || []
+  const kind = designZone.value?.obstacles?.find(obstacle => obstacle.obstacleId === area.id)?.kind
+  if (kind === 'DOOR_CLEARANCE') {
+    const point = polygon[Math.floor(polygon.length / 2)]
+    return point ? [{ handle: 'radius', point }] : []
+  }
+  return polygon.slice(0, 4).map((point, index) => ({ handle: String(index), point }))
+}
 const furniture = computed(() => {
   if (mode.value !== 'design') return []
   return visibleObjects.value.filter((o) => o.kind === 'furniture') as FurnitureObject[]
@@ -238,7 +275,13 @@ watch(() => store.furniturePlacement, draft => {
   placementMessage.value = ''
   if (draft) { tool.value = 'select'; selectedId.value = null; selectedFurnitureIds.value = []; selectedChannelId.value = null }
 })
-watch(tool, value => { selectedFurnitureIds.value = []; selectedChannelId.value = null; if (!['select', 'pan'].includes(value)) store.cancelFurniturePlacement() })
+watch(tool, value => {
+  selectedFurnitureIds.value = []
+  selectedChannelId.value = null
+  if (value !== 'select') selectedConstraintId.value = null
+  constraintEditPreview.value = null
+  if (!['select', 'pan'].includes(value)) store.cancelFurniturePlacement()
+})
 
 // 识别图层：底图 + 多边形
 const floorPlan = computed<FloorPlanAnalysisResponse | null>(() => store.floorPlan)
@@ -336,7 +379,7 @@ function rotateView(degrees: number) {
 }
 
 interface DragState {
-  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width'
+  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width' | 'constraints' | 'constraint'
   cx?: number
   cy?: number
   px?: number
@@ -356,6 +399,7 @@ interface DragState {
   channelId?: string
   orientation?: 'vertical' | 'horizontal'
   edge?: 'min' | 'max'
+  constraintHandle?: string
 }
 
 const drag = ref<DragState | null>(null)
@@ -492,6 +536,65 @@ function onChannelEdgePointerDown(channel: LayoutChannel, edge: 'min' | 'max', e
   e.preventDefault()
 }
 
+function onConstraintPointerDown(area: LayoutExclusion, handle: string, e: PointerEvent) {
+  if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || placing.value || !canvasWindow.value || !isEditableConstraint(area)) return
+  const obstacle = designZone.value?.obstacles?.find(item => item.obstacleId === area.id)
+  if (!obstacle) return
+  const p = point(e)
+  selectedId.value = null
+  selectedFurnitureIds.value = []
+  selectedChannelId.value = null
+  selectedConstraintId.value = area.id
+  constraintMessage.value = ''
+  constraintEditPreview.value = JSON.parse(JSON.stringify(obstacle)) as SpatialObstacle
+  drag.value = { mode: 'constraint', id: area.id, constraintHandle: handle, cx: p.x, cy: p.y }
+  canvasWindow.value.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+
+function removeSelectedConstraint() {
+  if (!designZone.value || !selectedConstraintId.value) return
+  const label = obstacleLabel(selectedConstraint.value?.kind || 'NO_PLACEMENT')
+  if (store.removeZoneObstacle(designZone.value.id, selectedConstraintId.value)) constraintMessage.value = `已删除${label}，可撤销`
+  selectedConstraintId.value = null
+  constraintEditPreview.value = null
+}
+
+function resizeSelectedConstraint(key: 'width' | 'depth' | 'radius', event: Event) {
+  const area = selectedConstraintArea.value, obstacle = selectedConstraint.value
+  const value = Number((event.target as HTMLInputElement).value)
+  if (!area || !obstacle || !Number.isFinite(value) || value < 1) return
+  let next: SpatialObstacle | null = null
+  if (obstacle.kind === 'DOOR_CLEARANCE') {
+    const hinge = obstacle.geometry.outer[0], first = obstacle.geometry.outer[1], last = obstacle.geometry.outer.at(-1)
+    if (!hinge || !first || !last || key !== 'radius') return
+    next = rectangleObstacle(obstacle.spaceId!, obstacle.kind, { x: hinge[0], y: hinge[1] }, { x: hinge[0] + Math.sign(first[0] - hinge[0]) * value, y: hinge[1] + Math.sign(last[1] - hinge[1]) * value }, obstacle.obstacleId)
+  } else {
+    const width = key === 'width' ? value : area.w, depth = key === 'depth' ? value : area.h
+    const center = { x: area.x + area.w / 2, y: area.y + area.h / 2 }
+    next = rectangleObstacle(obstacle.spaceId!, obstacle.kind, { x: center.x - width / 2, y: -center.y - depth / 2 }, { x: center.x + width / 2, y: -center.y + depth / 2 }, obstacle.obstacleId)
+  }
+  if (!next) { constraintMessage.value = '标注尺寸无效'; return }
+  const snapped = designZone.value && snapEnabled.value ? snapObstacleToZone(designZone.value, next, Math.min(8 / store.zoom, 20)).obstacle : next
+  const problem = store.saveZoneObstacle(obstacle.spaceId!, snapped)
+  constraintMessage.value = problem || '标注尺寸已更新，可撤销'
+}
+
+function rotateSelectedConstraintDoor() {
+  const obstacle = selectedConstraint.value, area = selectedConstraintArea.value
+  if (!obstacle || obstacle.kind !== 'DOOR_CLEARANCE' || !area) return
+  const hinge = obstacle.geometry.outer[0], first = obstacle.geometry.outer[1], last = obstacle.geometry.outer.at(-1)
+  if (!hinge || !first || !last) return
+  const directions = [[1, 1], [-1, 1], [-1, -1], [1, -1]]
+  const signX = Math.sign(first[0] - hinge[0]), signY = Math.sign(last[1] - hinge[1])
+  const index = directions.findIndex(([x, y]) => x === signX && y === signY), nextDirection = directions[(index + 1) % directions.length]!
+  const radius = Math.max(area.w, area.h)
+  const next = rectangleObstacle(obstacle.spaceId!, obstacle.kind, { x: hinge[0], y: hinge[1] }, { x: hinge[0] + nextDirection[0]! * radius, y: hinge[1] + nextDirection[1]! * radius }, obstacle.obstacleId)
+  if (!next) { constraintMessage.value = '开启方向无效'; return }
+  const problem = store.saveZoneObstacle(obstacle.spaceId!, next)
+  constraintMessage.value = problem || '门洞开启方向已更新，可撤销'
+}
+
 function clampChannelWidthDelta(d: DragState, rawDx: number): number {
   const zone = designZone.value
   if (!zone) return rawDx
@@ -529,8 +632,21 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
+  if (isConstraintTool.value && designZone.value) {
+    selectedConstraintId.value = null
+    constraintEditPreview.value = null
+    constraintMessage.value = ''
+    drag.value = { mode: 'constraints', x: p.x, y: p.y }
+    canvasWindow.value.setPointerCapture(e.pointerId)
+    if (drawPreview.value) { drawPreview.value.style.display = 'block'; updatePreview(p, p) }
+    e.preventDefault()
+    return
+  }
+
   if (tool.value === 'select') {
     selectedChannelId.value = null
+    selectedConstraintId.value = null
+    constraintEditPreview.value = null
     if (hit) {
       const id = hit.dataset.id!
       const o = store.objects.find((x) => x.id === id)!
@@ -666,6 +782,19 @@ function onPointerMove(e: PointerEvent) {
     const p = point(e)
     const rawDx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
     d.dx = clampChannelWidthDelta(d, rawDx)
+  } else if (d.mode === 'constraints') {
+    const p = point(e)
+    d.lastX = p.x
+    d.lastY = p.y
+    if (constraintKind.value === 'DOOR_CLEARANCE' && drawPreview.value) drawPreview.value.style.display = 'none'
+    else updatePreview(d, p)
+  } else if (d.mode === 'constraint' && d.id && designZone.value) {
+    const original = designZone.value.obstacles?.find(obstacle => obstacle.obstacleId === d.id)
+    if (!original) return
+    const p = point(e)
+    constraintEditPreview.value = d.constraintHandle === 'move'
+      ? moveObstacle(original, p.x - (d.cx || 0), -(p.y - (d.cy || 0)))
+      : reshapeObstacle(original, d.constraintHandle || '', { x: p.x, y: -p.y })
   } else if (d.mode === 'marquee') {
     const p = point(e)
     d.lastX = p.x
@@ -735,6 +864,26 @@ function onPointerUp(e: PointerEvent) {
       selectedId.value = store.objects[store.objects.length - 1].id
       tool.value = 'select'
     }
+  } else if (d.mode === 'constraints' && designZone.value) {
+    drawPreview.value.style.display = 'none'
+    const p = point(e)
+    const raw = rectangleObstacle(designZone.value.id, constraintKind.value, { x: d.x || 0, y: -(d.y || 0) }, { x: p.x, y: -p.y })
+    if (!raw) { constraintMessage.value = constraintKind.value === 'DOOR_CLEARANCE' ? '请从铰链角拖出清晰的开启区域' : '请拖出清晰的矩形区域'; return }
+    const obstacle = snapEnabled.value ? snapObstacleToZone(designZone.value, raw, Math.min(8 / store.zoom, 20)).obstacle : raw
+    const problem = store.saveZoneObstacle(designZone.value.id, obstacle)
+    if (problem) { constraintMessage.value = problem; return }
+    selectedConstraintId.value = obstacle.obstacleId
+    tool.value = 'select'
+    constraintMessage.value = obstacleLabel(obstacle.kind) + '已保存，可继续拖动或调整尺寸'
+  } else if (d.mode === 'constraint' && d.id && designZone.value) {
+    const next = constraintEditPreview.value
+    constraintEditPreview.value = null
+    if (!next) return
+    const original = designZone.value.obstacles?.find(obstacle => obstacle.obstacleId === d.id)
+    if (JSON.stringify(original?.geometry) === JSON.stringify(next.geometry)) return
+    const snapped = snapEnabled.value ? snapObstacleToZone(designZone.value, next, Math.min(8 / store.zoom, 20)).obstacle : next
+    const problem = store.saveZoneObstacle(designZone.value.id, snapped)
+    constraintMessage.value = problem || obstacleLabel(snapped.kind) + '已更新，可撤销'
   } else if (d.mode === 'marquee') {
     drawPreview.value.style.display = 'none'
     if (d.moved) {
@@ -796,6 +945,7 @@ function onPointerCancel() {
     }
   }
   if (drawPreview.value) drawPreview.value.style.display = 'none'
+  constraintEditPreview.value = null
   drag.value = null
   moveProblem.value = ''
 }
@@ -808,6 +958,9 @@ function onKeydown(e: KeyboardEvent) {
     selectedId.value = null
     selectedFurnitureIds.value = []
     selectedChannelId.value = null
+    selectedConstraintId.value = null
+    constraintEditPreview.value = null
+    if (isConstraintTool.value) tool.value = 'select'
     moveProblem.value = ''
     showSubmit.value = false
     return
@@ -818,9 +971,10 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key.toLowerCase() === 'r' && mode.value === 'design' && selectedFurnitureIds.value.length) { e.preventDefault(); rotateSelection(); return }
-  if (['Delete', 'Backspace'].includes(e.key) && (selectedId.value || selectedFurnitureIds.value.length || selectedChannelId.value)) {
+  if (['Delete', 'Backspace'].includes(e.key) && (selectedId.value || selectedFurnitureIds.value.length || selectedChannelId.value || selectedConstraintId.value)) {
     e.preventDefault()
-    if (selectedChannelId.value) removeSelectedChannel()
+    if (selectedConstraintId.value) removeSelectedConstraint()
+    else if (selectedChannelId.value) removeSelectedChannel()
     else deleteSelection()
     return
   }
@@ -856,6 +1010,8 @@ watch([mode, designZone], () => {
   if (store.furniturePlacement && store.furniturePlacement.zoneId !== store.designZoneId) store.cancelFurniturePlacement()
   selectedId.value = null
   selectedFurnitureIds.value = []
+  selectedConstraintId.value = null
+  constraintEditPreview.value = null
   moveProblem.value = ''
   nextTick(() => fitBoard())
 }, { immediate: true })
@@ -926,7 +1082,29 @@ function furnitureProduct(o: FurnitureObject) {
     @pointercancel="onPointerCancel"
     @pointerleave="placementPointer = null"
   >
-    <div v-if="mode === 'design' && props.showDimensions !== false" class="absolute right-3 bottom-12 z-10 rounded-lg border border-[#e8dfd5] bg-white/90 px-2 py-1 text-[10px] text-[#786b5d] pointer-events-none">绿色：离墙 · 棕色：组间净距<br>按家具外包占地测量，椅子为座席示意</div>
+    <div v-if="mode === 'design' && floorPlanImageUrl" class="canvas-layers" data-testid="design-underlay-controls" @pointerdown.stop>
+      <h4>图层与对照</h4>
+      <label class="layer-toggle"><span>原始图纸</span><input v-model="showUnderlay" data-testid="design-underlay-toggle" type="checkbox" role="switch" aria-label="显示原始图纸"></label>
+      <label class="opacity-label"><span>底图透明度</span><span>{{ Math.round(underlayOpacity * 100) }}%</span></label>
+      <input :value="underlayOpacity * 100" data-testid="design-underlay-opacity" type="range" min="0" max="100" step="5" aria-label="底图透明度" class="opacity-slider" @input="underlayOpacity = Number(($event.target as HTMLInputElement).value) / 100">
+      <label class="layer-toggle"><span>设计空间轮廓</span><input v-model="showOutline" type="checkbox" role="switch" aria-label="设计空间轮廓"></label>
+      <label class="layer-toggle"><span>实际尺寸标注</span><input v-model="showDimensions" type="checkbox" role="switch" aria-label="实际尺寸标注"></label>
+      <label class="layer-toggle"><span>原始识别轮廓</span><input v-model="showOriginal" type="checkbox" role="switch" aria-label="原始识别轮廓"></label>
+    </div>
+    <div v-if="selectedConstraintArea" class="absolute bottom-12 left-3 z-20 w-56 border border-line bg-white/95 p-2.5 text-[11px] text-[#5b5751]" data-testid="design-constraint-editor" @pointerdown.stop>
+      <div class="mb-2 flex items-center justify-between"><strong>{{ obstacleLabel(selectedConstraint?.kind || 'NO_PLACEMENT') }}</strong><button class="text-[#a65e4c]" :aria-label="'删除' + obstacleLabel(selectedConstraint?.kind || 'NO_PLACEMENT')" @click="removeSelectedConstraint">删除</button></div>
+      <label v-if="selectedConstraint?.kind === 'DOOR_CLEARANCE'" class="block text-[10px] text-muted">半径 mm<input :value="Math.round(Math.max(selectedConstraintArea.w, selectedConstraintArea.h))" aria-label="门洞半径（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('radius', $event)"></label>
+      <div v-else class="grid grid-cols-2 gap-2">
+        <label class="text-[10px] text-muted">宽度 mm<input :value="Math.round(selectedConstraintArea.w)" aria-label="标注宽度（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('width', $event)"></label>
+        <label class="text-[10px] text-muted">深度 mm<input :value="Math.round(selectedConstraintArea.h)" aria-label="标注深度（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('depth', $event)"></label>
+      </div>
+      <div class="mt-1.5 flex items-center justify-between text-[10px] text-muted">
+        <button v-if="selectedConstraint?.kind === 'DOOR_CLEARANCE'" class="text-[#596252]" @click="rotateSelectedConstraintDoor">换向</button>
+        <label v-if="['COLUMN', 'SHAFT', 'WINDOW'].includes(selectedConstraint?.kind || '')"><input v-model="snapEnabled" type="checkbox" aria-label="建筑标注贴墙吸附"> 贴墙吸附</label>
+      </div>
+      <p class="mt-1.5 text-[9px] text-muted">拖动移动，拖角点或弧线手柄调整，Delete 删除。</p>
+    </div>
+    <div v-if="mode === 'design' && showDimensions !== false" class="absolute right-3 bottom-12 z-10 rounded-lg border border-[#e8dfd5] bg-white/90 px-2 py-1 text-[10px] text-[#786b5d] pointer-events-none">绿色：离墙 · 棕色：组间净距<br>按家具外包占地测量，椅子为座席示意</div>
     <!-- 选中通道浮动编辑卡：屏幕坐标系，不随画布缩放；编辑走 updateZoneChannels 同一入口 -->
     <div
       v-if="selectedChannel && designZoneBounds"
@@ -965,9 +1143,10 @@ function furnitureProduct(o: FurnitureObject) {
       <div class="absolute inset-0" :style="{ transform: `translate(${-worldBounds.minX}px, ${-worldBounds.minY}px)` }">
       <!-- Floor plan SVG -->
       <div
-        v-if="mode !== 'design'"
+        v-if="mode !== 'design' || (showUnderlay && floorPlanImageUrl)"
         class="absolute pointer-events-none overflow-hidden"
-        :style="{ ...alignedImageStyle, opacity: store.blank ? 0.05 : 0.75 }"
+        :style="{ ...alignedImageStyle, opacity: mode === 'design' ? underlayOpacity : store.blank ? 0.05 : 0.75 }"
+        :data-testid="mode === 'design' ? 'design-underlay' : undefined"
       >
         <img
           v-if="floorPlanImageUrl"
@@ -1032,11 +1211,14 @@ function furnitureProduct(o: FurnitureObject) {
         </svg>
       </div>
 
-      <svg v-if="canonicalPlan" :width="worldBounds.width" :height="worldBounds.height" class="absolute inset-0 pointer-events-none overflow-visible">
+      <svg v-if="canonicalPlan && showOutline" :width="worldBounds.width" :height="worldBounds.height" class="absolute inset-0 pointer-events-none overflow-visible">
         <g v-for="zone in visibleZones" :key="zone.id">
           <polygon :points="zone.polygon?.map(point => point.join(',')).join(' ')" :data-id="zone.id"
             class="board-element pointer-events-auto cursor-pointer" fill="#79ac94" fill-opacity="0.07" stroke="#749c86" :stroke-width="1.5 / store.zoom" @pointerdown.stop="onPointerDown" />
         </g>
+      </svg>
+      <svg v-if="canonicalPlan && showOriginal" :width="worldBounds.width" :height="worldBounds.height" class="absolute inset-0 pointer-events-none overflow-visible" data-testid="original-recognition">
+        <polygon v-for="zone in visibleZones.filter(zone => zone.sourcePolygon?.length)" :key="zone.id" :points="zone.sourcePolygon!.map(point => point.join(',')).join(' ')" fill="none" stroke="#8d8a80" :stroke-width="1.5 / store.zoom" stroke-dasharray="3 4" />
       </svg>
 
       <!-- Arrows -->
@@ -1131,11 +1313,40 @@ function furnitureProduct(o: FurnitureObject) {
           </div>
         </template>
 
-        <div v-if="mode === 'design' && designObstacles.length" class="absolute inset-0 pointer-events-none" data-testid="design-obstacles">
-          <div v-for="area in designObstacles" :key="area.id" :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px' }">
+        <div v-if="constraintCreateArea" class="absolute pointer-events-none" data-testid="door-clearance-draft" :style="{ left: constraintCreateArea.x + 'px', top: constraintCreateArea.y + 'px', width: constraintCreateArea.w + 'px', height: constraintCreateArea.h + 'px' }">
+          <svg :viewBox="`0 0 ${constraintCreateArea.w} ${constraintCreateArea.h}`" width="100%" height="100%" style="overflow: visible">
+            <polygon :points="obstaclePoints(constraintCreateArea)" fill="#2586a022" stroke="#2586a0" :stroke-width="2 / store.zoom" stroke-dasharray="6 3" />
+          </svg>
+        </div>
+        <div v-if="mode === 'design' && displayedDesignObstacles.length" class="absolute inset-0 pointer-events-none" data-testid="design-obstacles">
+          <div
+            v-for="area in displayedDesignObstacles"
+            :key="area.id"
+            :data-obstacle-id="area.id"
+            :data-testid="isEditableConstraint(area) ? 'design-constraint' : undefined"
+            :class="isEditableConstraint(area) ? 'pointer-events-auto cursor-move' : ''"
+            :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px' }"
+            @pointerdown.stop="isEditableConstraint(area) && onConstraintPointerDown(area, 'move', $event)"
+          >
             <svg :viewBox="`0 0 ${area.w} ${area.h}`" width="100%" height="100%" style="overflow: visible">
-              <polygon :points="obstaclePoints(area)" :fill="area.label === '门洞净空' ? '#2586a022' : '#b44f4522'" :stroke="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :stroke-width="2 / store.zoom" stroke-dasharray="6 3" />
+              <polygon :points="obstaclePoints(area)" :fill="area.label === '门洞净空' ? '#2586a022' : '#b44f4522'" :stroke="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :stroke-width="(selectedConstraintId === area.id ? 3 : 2) / store.zoom" stroke-dasharray="6 3" />
               <text x="4" y="14" :fill="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :font-size="11 / store.zoom" font-weight="600">{{ area.label }}</text>
+              <template v-if="selectedConstraintId === area.id && isEditableConstraint(area)">
+                <rect
+                  v-for="handle in constraintHandles(area)"
+                  :key="handle.handle"
+                  :data-testid="'constraint-handle-' + handle.handle"
+                  :x="handle.point[0] - area.x - 5 / store.zoom"
+                  :y="handle.point[1] - area.y - 5 / store.zoom"
+                  :width="10 / store.zoom"
+                  :height="10 / store.zoom"
+                  fill="#fff"
+                  stroke="#b44f45"
+                  :stroke-width="2 / store.zoom"
+                  class="pointer-events-auto cursor-nwse-resize"
+                  @pointerdown.stop="onConstraintPointerDown(area, handle.handle, $event)"
+                />
+              </template>
             </svg>
           </div>
         </div>
@@ -1207,7 +1418,7 @@ function furnitureProduct(o: FurnitureObject) {
         </div>
       </div>
 
-      <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && props.showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />
+      <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />
 
       <div v-if="placementShown" data-testid="furniture-placement-preview" class="absolute pointer-events-none opacity-60"
         :data-valid="!placementProblem" :style="{ ...furnitureStyle(placementShown), outline: `${2 / store.zoom}px dashed ${placementProblem ? '#c45c4c' : '#306fcb'}` }">

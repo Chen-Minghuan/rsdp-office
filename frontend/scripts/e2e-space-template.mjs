@@ -68,7 +68,7 @@ try {
   const save = () => dialog().getByRole('button', { name: '保存空间模板', exact: true }).click()
   const close = () => dialog().getByRole('button', { name: '关闭空间模板', exact: true }).click()
   await page.goto(baseUrl + '/canvas?analysisId=TEMPLATE-TEST', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 开放办公区', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 开放办公区', exact: true }).waitFor()
   const initial = (await state()).objects
   await open()
   await dialog().waitFor()
