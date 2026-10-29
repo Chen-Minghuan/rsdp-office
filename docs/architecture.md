@@ -41,6 +41,10 @@ Viewport（平移、缩放）独立于上述物理几何
 
 楼层的 `floorId` 直接作为既有业务表 `project_id` 与路径 `projectId` 的隔离键，复用上传、画布、模板、选品和预览能力。默认 `OFFICE-PROJECT-001` 映射为默认项目/楼层以保留旧数据；上传与画布保存核验楼层存在。前端按楼层隔离 Office localStorage、识别 sessionStorage 和 IndexedDB 原图，切层时保存旧层并完整加载目标层，过期响应不得污染当前层。客户需求只作提醒，不自动使几何变化或替代下游复核。实现见 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md)。
 
+2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换为同事务删除+插入的原子操作且仅负责人可用。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
+
+2026-10-29 系统管理员与用户管理（AUTH-003）：全局角色只用既有 `office_user.role` 的 ADMIN/USER 两档，与项目内 LEADER/COLLABORATOR 无关（负责人不从管理员链路任命）。`/api/v1/office/admin/users` 提供列表/创建/停用启用/重置密码/删除，服务端逐接口 `requireAdmin`（认证关闭放行）；只存 PBKDF2 哈希，接口不返回哈希；停用与删除不能作用于自己、至少保留一位在用管理员，停用与重置密码即删该用户全部会话；删除为硬删除，仍是项目负责人的账号拒绝删除（协作者关系与会话一并清除）。前端 `/users` 页与侧栏入口仅管理员可见。见 [AUTH-003](tasks/AUTH-003-user-admin.md)。
+
 当前上传页和 office_canvas.files_json 使用零或一张当前图纸；后端保存拒绝多文件。旧草稿恢复时优先选择与底图同名的文件，否则保留首个。更换文件只更新上传文件和二进制缓存、清除上传页旧识别预览，不删除已保存几何或历史识别；见 [UPLOAD-001](tasks/UPLOAD-001-single-drawing.md)。
 
 当前上传记录带 drawingId（同名同大小重传也更新）、analysisId、analysisPageNumber、appliedAnalysisId，原样保存在现有 files_json，无新增表。前端 floorPlan.sourceDrawingId 关联本地来源；旧草稿仅保留有限名称兼容。上传页和空间页按当前任务进入；未识别/识别中/失败显示当前图纸提示或预览，不展示旧几何。进入空间明确应用新图，导入前保留撤销快照，跨图替换移除旧坐标对象和模板；同分析恢复只补来源、不覆盖设计编辑，appliedAnalysisId 防止清空后的空间重填。详见 [UPLOAD-002](tasks/UPLOAD-002-drawing-canvas-handoff.md)。
@@ -168,6 +172,8 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 - 原子化保存相关几何、版本与失效状态；版本冲突明确反馈，不能静默覆盖其他版本。
 - 当前工作台不要求逐空间或整体空间确认：canEnterLayout / 后端 requireLayoutReady 只核验可靠单位、ID 和可计算轮廓；识别候选/边界重叠只提示复核。进入排版不填写人工确认记录，比例与排版确认保留。详情见 [FLOW-002](tasks/FLOW-002-advisory-space-review.md)；确认附件的历史逐空间 API 不再定义工作台门槛。
 - 草稿可包含待解决问题，确认快照必须通过阶段校验；后端不能只信任前端按钮是否禁用。
+
+2026-10-29 office_canvas 空间复核确认（SPACE_REVIEW，FLOW-001）：可选确认，不是进入排版门槛。`POST /api/v1/office/floors/{floorId}/spaces/{spaceId}/review-confirm` 以严格 `baseCanvasRevision`（须等于服务端当前修订）+ 项目成员访问 + 空间几何有效（`OfficeCanvasReviewPolicy.requireZoneValid`：毫米单位、≥3 顶点、无退化边/自交、正面积）为前置，由服务端在空间对象写入 `reviewConfirmation` 凭据（`status=CONFIRMED`、`confirmedCanvasRevision`、`confirmedByUserId`、`confirmedAt`）并追加新画布修订；几何未变的重复确认幂等返回、不增修订。确认时服务端保存几何白名单快照（`id/zoneType/reviewUnit/mmPerSourceUnit/actualWidthMm/actualDepthMm/polygon/x/y/w/h/obstacles`，名称/备注/颜色不影响确认）；此后每次 `saveCanvas` 由服务端重建凭据——无服务端记录的一律剥离（客户端不能伪造确认状态）、白名单几何变化转 `STALE`、改回与快照一致恢复 `CONFIRMED`（数字按数值等价比较）。该确认独立于排版确认与方案确认；普通 `saveCanvas` 仍按客户端递增修订，全量保存的严格版本锁留待后续评估。见 [FLOW-001](tasks/FLOW-001-spatial-confirmation.md)。
 
 ## 7. 当前迁移重点
 
