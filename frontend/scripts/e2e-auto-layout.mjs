@@ -39,7 +39,7 @@ try {
   })
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
   await page.goto(`${baseUrl}/canvas?analysisId=STRICT-TEST`, { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 开放办公区', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 开放办公区', exact: true }).waitFor()
   // The mock source is intentionally converted to a calibrated design copy so
   // this UI test exercises the layout stage rather than the review gate.
   await page.evaluate(() => {
@@ -50,8 +50,6 @@ try {
   await page.goto(`${baseUrl}/canvas?analysisId=STRICT-TEST`, { waitUntil: 'networkidle' })
   const enter = page.getByRole('button', { name: '进入家具排版 →', exact: true })
   await enter.click()
-  await page.getByTestId('unit-module-catalog').waitFor()
-
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   assert.equal(await page.getByRole('button', { name: '自动优化', exact: true }).count(), 0)
   assert.equal(await page.getByRole('button', { name: '矩阵', exact: true }).count(), 0)
@@ -74,8 +72,8 @@ try {
   furniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'STRICT-ROOM')
   assert.ok(furniture.some(item => item.rotation === 180 || item.rotation === 270), '对坐应包含朝向相对的桌列')
 
-  await page.getByRole('tab', { name: '选择模块', exact: true }).click()
-  await page.getByRole('button', { name: 'L 型屏风卡位', exact: true }).click()
+  await page.getByTestId('tab-product-selection').click()
+  await page.locator('[data-auto-module-id="desk-screen-l"]').click()
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   for (const label of ['L 型单排', 'L 型对坐', 'F 型单排', 'T 型对坐', 'C 型对坐', '十字型对坐']) assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1)
   assert.equal(await page.getByRole('button', { name: '背靠背', exact: true }).count(), 0)

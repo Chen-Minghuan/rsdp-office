@@ -16,7 +16,7 @@ async function load(path) {
   cache.set(path.href, url)
   return url
 }
-const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, chairActivityRect, layoutCandidateScore, LAYOUT_CANDIDATE_TOP_N } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
+const { planLayoutProposal: plan, defaultLayoutPreferences: defaults, proposalDifference, confirmedLayoutProblem, confirmedLayoutWarning, chairActivityRect, layoutCandidateScore, LAYOUT_CANDIDATE_TOP_N } = await import(await load(new URL('../app/utils/layoutPlanning.ts', import.meta.url)))
 const { layoutPanelWarnings, layoutWarningTestId, zoneNetAreaMm2, AREA_PER_SEAT_HINT_M2 } = await import(await load(new URL('../app/utils/layoutWarnings.ts', import.meta.url)))
 const { planOfficeFurniture, chairBackMinGapMm, CHAIR_BACK_PASSAGE_MM } = await import(await load(new URL('../app/utils/officeAutoLayout.ts', import.meta.url)))
 const { furnitureById } = await import(await load(new URL('../app/utils/manualFurniture.ts', import.meta.url)))
@@ -98,7 +98,8 @@ assert.equal(confirmedLayoutProblem({ ...zone, layoutPreferences: request.prefer
 const chair = meeting.furniture.find(item => item.layoutRole === 'seat')
 const activity = chairActivityRect(chair, 400)
 const obstruction = { ...cabinetForTest(), ...activity, id: 'IN-ACTIVITY', zoneId: zone.id, rotation: 0 }
-assert.match(confirmedLayoutProblem({ ...zone, layoutPreferences: request.preferences }, [...meeting.furniture, obstruction]), /活动区/)
+assert.equal(confirmedLayoutProblem({ ...zone, layoutPreferences: request.preferences }, [...meeting.furniture, obstruction]), null, '椅子活动区不阻止确认')
+assert.match(confirmedLayoutWarning({ ...zone, layoutPreferences: request.preferences }, [...meeting.furniture, obstruction]), /活动区/)
 function cabinetForTest() { return { kind: 'furniture', furnitureTemplateId: 'cabinet-mobile', productId: '' } }
 assert.equal(plan(zone, [], { ...request, module: furnitureById.get('desk-l') }).furniture.length, 0)
 assert.match(plan(zone, [], { ...request, module: furnitureById.get('desk-l') }).problem, /不匹配/)

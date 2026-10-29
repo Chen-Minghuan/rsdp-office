@@ -724,28 +724,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           </div>
           <div class="review-zoom"><button aria-label="缩小画布" @click="zoom(1 / 1.2)"><AppIcon name="zoomOut" size="3.5" /></button><span>{{ zoomPercent }}%</span><button aria-label="放大画布" @click="zoom(1.2)"><AppIcon name="zoomIn" size="3.5" /></button><i></i><button @click="fit"><AppIcon name="fitScreen" size="3.5" /> 适屏</button></div>
         </div>
-          <div v-if="focusedZoneId && !calibrating && !tracing" class="constraint-edit-bar">
-            <div class="constraint-tool-buttons">
-              <button :class="{ active: tool === 'obstacle-COLUMN' }" @click="startObstacle('COLUMN')"><AppIcon name="cube" size="3.5" /> 标柱</button>
-              <button :class="{ active: tool === 'obstacle-DOOR_CLEARANCE' }" @click="startObstacle('DOOR_CLEARANCE')"><AppIcon name="door" size="3.5" /> 门洞净空</button>
-              <button :class="{ active: tool === 'obstacle-WINDOW' }" data-testid="tool-obstacle-window" @click="startObstacle('WINDOW')"><AppIcon name="window" size="3.5" /> 窗</button>
-              <button :class="{ active: tool === 'obstacle-NO_PLACEMENT' }" @click="startObstacle('NO_PLACEMENT')"><AppIcon name="close" size="3.5" /> 禁放区</button>
-            </div>
-            <label class="edge-snap-toggle" title="柱/井/窗在创建、移动或调整时吸附到空间水平/垂直边，最大吸附距离 20mm"><input v-model="snapToEdges" type="checkbox">贴墙吸附</label>
-            <span v-if="draftObstaclePreview?.snapped || obstacleManipulation?.snapped" class="edge-snap-active">已吸附边缘</span>
-            <span v-if="tool === 'obstacle-DOOR_CLEARANCE'">从门扇铰链角拖向开启区域，形成四分之一圆弧，Esc 取消</span>
-            <span v-else-if="tool === 'obstacle-WINDOW'">沿墙拖出矩形标注窗位（仅标注，不扣面积、不影响排版避让），Esc 取消</span>
-            <span v-else-if="tool.startsWith('obstacle-')">在当前空间底图上拖出矩形，Esc 取消</span>
-            <div v-else-if="selectedObstacle && selectedObstacleBounds" class="selected-obstacle-editor">
-              <strong>{{ obstacleLabel(selectedObstacle.kind) }}</strong>
-              <label v-if="selectedObstacle.kind === 'DOOR_CLEARANCE'">半径 mm<input :value="Math.round(Math.max(selectedObstacleBounds.maxX - selectedObstacleBounds.minX, selectedObstacleBounds.maxY - selectedObstacleBounds.minY))" type="number" min="1" @change="resizeObstacle('radius', Number(($event.target as HTMLInputElement).value))"></label>
-              <template v-else><label>宽 mm<input :value="Math.round(selectedObstacleBounds.maxX - selectedObstacleBounds.minX)" type="number" min="1" @change="resizeObstacle('width', Number(($event.target as HTMLInputElement).value))"></label><label>深 mm<input :value="Math.round(selectedObstacleBounds.maxY - selectedObstacleBounds.minY)" type="number" min="1" @change="resizeObstacle('depth', Number(($event.target as HTMLInputElement).value))"></label></template>
-              <button v-if="selectedObstacle.kind === 'DOOR_CLEARANCE'" @click="rotateSelectedDoor">换向</button>
-              <button @click="removeSelectedObstacle">删除</button>
-            </div>
-            <span v-else>拖动标注移动；角点或弧线手柄调整尺寸，柱靠近墙边可自动吸附</span>
-          </div>
-          <div v-else-if="tool === 'select' && !calibrating" class="contour-edit-bar">
+          <div v-if="tool === 'select' && !calibrating" class="contour-edit-bar">
           <span>拖动内部移动；拉边调整宽深，拉角缩放。滚轮缩放视图，中键平移。</span>
           <label><input v-model="keepAspect" type="checkbox"> 锁定比例（角点 / Shift）</label>
           <form v-if="selected?.polygon?.length" class="rotate-form" data-testid="rotate-form" title="调整角度即时预览；仅 Enter 或点「应用」保存，点击其他位置或 Esc 放弃预览" @submit.prevent="applyRotate">
@@ -800,7 +779,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             </div>
           </div>
           <span v-if="isExample" class="example-label">界面示例 · 演示几何</span>
-          <SpatialCanvas :scene="sceneForView" :camera="camera" :selected-space-id="selectedId" :selected-obstacle-id="selectedObstacleId" :obstacle-draft="draftObstacleGeometry" :obstacle-draft-kind="obstacleDraft?.kind" :tool="tool" :interaction-active="!!drag || !!obstacleManipulation"
+          <SpatialCanvas :scene="sceneForView" :camera="camera" :selected-space-id="selectedId" :selected-obstacle-id="selectedObstacleId" :obstacle-draft="draftObstacleGeometry" :obstacle-draft-kind="obstacleDraft?.kind" :tool="tool" :obstacle-editing="false" :interaction-active="!!drag || !!obstacleManipulation"
             :pointer-in-source-coordinates="calibrating || !!tracing || !!sketching" :calibration-points="calibrationPoints" :trace-points="tracing?.points || sketchPreview"
             :fallback-image-url="imageUrl" :show-underlay="showUnderlay || comparingOriginal" :show-outline="showOutline && !comparingOriginal"
             :show-dimensions="showDimensions" :underlay-opacity="underlayOpacity" :original-geometries="comparingOriginal ? [] : originalGeometries"
@@ -845,7 +824,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             <label class="layer-toggle"><span>实际尺寸标注</span><input v-model="showDimensions" type="checkbox" role="switch"></label>
             <label class="layer-toggle"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板原始轮廓' : '原始识别轮廓' }}</span><input v-model="showOriginal" type="checkbox" role="switch"></label>
           </div>
-          <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button :disabled="!selectedId" @click="focusSelectedSpace">{{ focusedZoneId ? '返回全图' : '放大核对当前空间' }}</button><button @click="showEverySpace">显示全部空间</button></div>
+          <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button v-if="!focusedZoneId" :disabled="!selectedId" @click="focusSelectedSpace">放大核对当前空间</button><button @click="showEverySpace">显示全部空间</button></div>
           <div v-if="message" class="review-toast" role="status">{{ message }}</div>
         </div>
         <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 需复核</span></div><button class="template-workbench-button" :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="template-workbench" @click="onTemplateWorkbench">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button><button :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="advance-layout" @click="onAdvanceLayout">进入家具排版 →</button></footer>
@@ -878,4 +857,3 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
 </template>
 
 <style src="~/assets/css/space-review.css"></style>
-<style src="~/assets/css/space-template.css"></style>

@@ -26,7 +26,7 @@ assert.equal(auto.slots[1].x - auto.slots[0].x - 1200, 0, '新布局默认同排
 assert.ok(Math.max(...auto.slots.map(item => item.y + item.h)) > square.h * 0.8, '下部空间也参与布置')
 const singleRow = plan(square, 1200, 600, 'row')
 assert.equal(singleRow.slots.length, 3, '显式单排仍只有一排')
-assert.ok(singleRow.slots.every(item => item.y === 300), '单排应沿房间上侧布置')
+assert.ok(singleRow.slots.every(item => item.y === 0), '默认离墙为 0，单排应沿房间上侧布置')
 assert.ok(plan(square, 1200, 600, 'auto', { wallMm: 300, aisleMm: 1600, gapMm: 100 }).slots.length < auto.slots.length)
 assert.deepEqual(square, before, '计算不得修改空间几何')
 const negative = zone(4358, 4376, -18000, -9000)
@@ -140,9 +140,9 @@ const parts = [{ x: 0, y: 0, w: 7000, h: 2500 }, { x: 0, y: 2500, w: 2500, h: 45
 for (const shape of [square, negative, lShape, zone(2400, 1600)]) for (const mode of ['auto','grid','row','backToBack','faceToFace','staggered','centerAisle','perimeter']) {
   const result = plan(shape, 1200, 600, mode)
   for (const item of result.slots) {
-    const expanded = { x: item.x - 300, y: item.y - 300, w: item.w + 600, h: item.h + 600 }
+    const footprint = { x: item.x, y: item.y, w: item.w, h: item.h }
     const expected = shape === lShape ? parts : [{ x: shape.x, y: shape.y, w: shape.w, h: shape.h }]
-    assert.ok(contained(expanded, expected), mode + ': 独立矩形并集算法核对离墙范围')
+    assert.ok(contained(footprint, expected), mode + ': 默认离墙为 0，独立矩形并集算法核对家具占地不越界')
     assert.deepEqual([item.w, item.h].sort((a,b) => a-b), [600,1200], '不得伸缩家具')
   }
   for (let i = 0; i < result.slots.length; i++) for (let j = i + 1; j < result.slots.length; j++) {

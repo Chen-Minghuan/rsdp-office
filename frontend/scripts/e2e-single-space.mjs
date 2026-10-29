@@ -64,7 +64,7 @@ try {
     }, id)
   }
   await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
     for (const [id, zoneId] of [['F-L','ROOM-L'],['F-B','ROOM-B']]) {
@@ -90,7 +90,7 @@ try {
   const initial = await state()
   assert.equal(await canvas().locator('polygon.board-element').count(), 1)
   assert.equal((await canvas().locator('polygon.board-element').getAttribute('points')).split(' ').length, 6, 'L 形不能变成包围盒')
-  assert.equal(await canvas().locator('img').count(), 0, '不绘制整层底图')
+  assert.equal(await canvas().locator('img').count(), 1, '显示与当前空间对齐的原始图纸')
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-L','ROOM-L'])
   assert.equal(await canvas().locator('line[marker-end="url(#arrowHead)"]').count(), 0)
   await page.getByText('尺寸（毫米）', { exact: true }).waitFor()
@@ -128,7 +128,7 @@ try {
   assert.equal(moved.zoneId, 'ROOM-L')
 
   // New local annotations remain attached to this room instead of appearing in other designs.
-  await page.getByRole('button', { name: '标注', exact: true }).click()
+  await page.getByRole('button', { name: '便签', exact: true }).click()
   const roomBox = await canvas().locator('polygon.board-element').boundingBox()
   await page.mouse.click(roomBox.x + roomBox.width * 0.25, roomBox.y + roomBox.height * 0.6)
   const note = (await state()).objects.find(object => object.kind === 'note' && object.zoneId === 'ROOM-L')
@@ -145,10 +145,12 @@ try {
   await assertFit('ROOM-B')
   assert.equal(await page.getByRole('button', { name: '下一个空间', exact: true }).isDisabled(), true)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
-  assert.equal(await canvas().locator('img').count(), 0)
+  assert.equal(await canvas().locator('img').count(), 1, '显示与当前空间对齐的原始图纸')
   // Applying a layout in the newly selected room never replaces the previous room's furniture.
-  await page.getByTestId('unit-module-catalog').locator('summary').filter({ hasText: /^职员桌/ }).click()
-  await page.getByTestId('unit-module-catalog').locator('[data-module-id="desk-l"]').click()
+  await page.getByTestId('tab-product-selection').click()
+  const staffCatalog = page.getByTestId('unit-module-catalog').locator('details').filter({ hasText: '职员桌' })
+  if (!(await staffCatalog.getAttribute('open'))) await staffCatalog.locator('summary').click()
+  await page.getByTestId('unit-module-catalog').locator('[data-auto-module-id="desk-l"]').click()
   await page.getByTestId('apply-layout').click()
   assert.ok((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-B').length > 1)
   assert.deepEqual((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L'), confirmedFurniture)
@@ -156,11 +158,13 @@ try {
   assert.deepEqual((await state()).objects.find(object => object.id === 'F-B'), initial.objects.find(object => object.id === 'F-B'))
 
   // An unfinished placement must not carry across rooms; previous/next retain saved layouts.
+  await page.getByTestId('tab-product-selection').click()
   await page.getByRole('button', { name: '逐件添加', exact: true }).click()
   await page.getByRole('button', { name: '结束逐件添加', exact: true }).waitFor()
   await page.getByRole('button', { name: '上一个空间', exact: true }).click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-L')
   await assertFit('ROOM-L')
+  await page.getByTestId('tab-product-selection').click()
   await page.getByRole('button', { name: '逐件添加', exact: true }).waitFor()
   assert.equal(await page.getByTestId('furniture-placement-preview').count(), 0)
   await page.getByRole('button').filter({ has: page.getByText('重新调整排版', { exact: true }) }).waitFor()

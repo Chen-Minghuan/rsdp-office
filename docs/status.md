@@ -8,6 +8,28 @@
 
 2026-10-29 FLOW-001 office_canvas 空间复核确认（SPACE_REVIEW，同 V1.1 文档）：新增 `POST /api/v1/office/floors/{floorId}/spaces/{spaceId}/review-confirm`——严格 `baseCanvasRevision` 校验、成员访问、空间几何有效（复用抽取的 `OfficeCanvasReviewPolicy.requireZoneValid`）后由服务端签发 `reviewConfirmation` 凭据（状态/确认修订/确认人/时间）并追加新画布修订；已确认且几何未变的重复确认幂等返回不增修订。`saveCanvas` 由服务端按确认时的几何白名单快照（轮廓/尺寸/障碍/单位等，名称备注颜色除外）重建凭据：客户端伪造一律剥离，几何变更转 STALE，改回与快照一致恢复 CONFIRMED（数字按数值等价比较）。前端核对列表展示「已确认复核/复核失效」徽标与确认按钮（仅毫米单位；按用户反馈按钮平时收起、悬浮该行才浮现，与删除 ✕ 同模式，「确认中…」保持可见），确认前先同步保存冲刷防抖队列，保存返回合并服务端凭据。该确认为可选项，不是进入排版门槛，不改变 FLOW-002 提示语义；普通 saveCanvas 严格版本锁留待后续评估。验证：`mvn test` 同上全量通过（含新增 `OfficeSpaceReviewServiceTest` 签发/严格 base/幂等/伪造剥离/STALE 与恢复用例）、`pnpm build`、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke`、`git diff --check` 通过；真实数据库集成未执行，详见 [FLOW-001](tasks/FLOW-001-spatial-confirmation.md)；代码未提交。
 
+2026-10-29 会议长边座椅居中修正：横排坐标由桌面左缘基准改为桌面中心基准，解决上下各 4 把椅子整体偏左的问题；新增排中心对齐和桌面覆盖范围断言。真实会议室三种候选的上下排中心均与桌中心一致，实际组合预览已人工核查，未覆盖正式家具。`test:mixed-layout`、build、layout-planning 通过；UI 回归使用模拟 API，详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
+2026-10-29 组合布局门洞避让修复：移除对 `zoneLayoutExclusions` 输出的二次 Y 轴翻转，解决门洞被映射到另一侧后右上柜漏判的问题。新增玄关柜不得压占门洞净空断言；真实会议室只读复算三种候选均为桌居中、10 椅围桌，柜与门洞碰撞检查全部为 `false`，未覆盖正式家具。`test:mixed-layout`、build、layout-planning 通过；UI 回归使用模拟 API，详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
+2026-10-29 会议区居中与锚点评分优化：会议场景整体居中，玄关/吧台提供不同沿墙位置；排序先比较会议区中心偏移再比较紧凑度，避免主要家具挤在角落。真实会议室三种候选均为桌居中、柜沿不同墙边，算法、构建、layout-planning 和 `git diff --check` 通过；UI 均为模拟 API，详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
+2026-10-29 自动组合功能包改为真实场景结构：会议桌居中，椅子沿长边两侧及短边相向布置；沙发/会客形成交流区，不再主家具与配件逐行拼接。预览、应用和碰撞共用旋转与毫米几何。真实会议室只读复算生成 11 件会议组合，算法、构建、layout-planning 和 `git diff --check` 通过；UI 均为模拟 API，详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
+2026-10-29 自动组合布局改为先选需求、再生成交互：单模块选择不立即出图，多模块需点击「生成组合预览」，随后选择并应用候选。组合求解提供工位集中、会客优先、沿墙收纳三种整体策略，按目标缺口、跳过品类与紧凑度排序，最多 3 个候选；统一检查轮廓、保留家具、建筑约束和通道，预览与应用按索引共用几何。`test:mixed-layout`、build、layout-planning、module-selection、auto-layout 和 `git diff --check` 通过；UI 均为模拟 API，详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
+2026-10-29 离墙与座椅净空改为提醒不拦截：默认 560mm 和椅子活动区属于策略值，不再阻止确认或保存；推荐区域仅提示现场复核。前后端继续拦截实际越界、重叠、禁放区、通道、无效几何和目标人数不足。Java 全量 205 项（202 通过、3 跳过）、前端构建、layout-planning、auto-layout、module-recommendations 和 `git diff --check` 通过；已重启本地后端并实测真实款式推荐加载 52 个兼容规格，旧离墙错误不再出现，详见 [LAYOUT-035](tasks/LAYOUT-035-warning-levels-and-advice.md)。
+
+2026-10-29 布局选品完整移植「图层与对照」面板：样式与空间总览一致，支持原始图纸、默认 75% 透明度、设计空间轮廓、实际尺寸标注和原始识别轮廓独立开关，不再使用简化透明度面板。`pnpm build`、space-obstacles（含全部图层开关）、layout-planning、single-space 和 `git diff --check` 通过；UI 均为模拟 API。
+
+2026-10-29 门洞预览修正：布局选品绘制门洞净空时，拖动过程中即按最终几何显示四分之一圆弧，不再先显示矩形、松手后才变形。`pnpm build`、space-obstacles（含拖动中弧形断言）和 `git diff --check` 通过；UI 使用模拟 API。
+
+2026-10-29 总览返回按钮去重：未放大时保留「放大核对当前空间」，放大后仅显示「显示全部空间」，移除重复的「返回全图」。构建和 `git diff --check` 通过；space-review 已执行，但在既有「手动空间 4」排版侧栏改名用例处超时，未记为全量通过。
+
+2026-10-29 四类建筑标注迁至布局选品：柱、门洞净空、窗和禁放区统一在单空间设计中创建与编辑，空间总览移除对应按钮和选中/拖动能力；保留既有约束显示与排版避让。支持拖框、移动、角点/弧线缩放、数值尺寸、门洞换向、柱/窗贴墙吸附、删除及刷新恢复，保存失效不再强制跳回总览。单空间设计新增原始图纸对照层，复用来源到毫米变换，支持显示开关和透明度调节，不改变几何。`pnpm build`、space-obstacles、layout-planning、single-space 和 `git diff --check` 通过；UI 均为模拟 API，详见 [GEOM-013](tasks/GEOM-013-unify-exclusions-into-obstacles.md)。
+
+2026-10-29 自动布局与产品选型改为并列排版路径：自动布局按功能模块、实际空间、目标人数和约束生成座位排列与候选方案，应用后可进入产品选型手动调整，或确认排版并直接进入款式推荐。产品选型作为手动排版工作台，支持位置、尺寸、旋转、复制、删除、逐件添加和清空；选中家具后点击新图例可直接替换模块，保留 ID、中心和旋转，校验失败不改旧家具，成功后清除旧选品、确认失效并可一次撤销。图例主卡片不再默认跳回自动布局，独立「自动」按钮保留显式跨路径入口。自动布局页已恢复统一「清空排版」，同时取消全部功能模块选择并清除预览；操作区不再显示黄色/说明性策略提示，只保留阻止应用或确认的红色错误。款式推荐继续要求先确认排版。另修复商品详情缺少 images 时的运行时异常。构建、module-recommendations、module-selection、layout-planning、auto-layout、adaptive-layout、furniture-modules、custom-modules、reference-layouts、layout-references、single-space、delete-modules、workflows、MOCK smoke 和 `git diff --check` 通过；UI 均为模拟 API。通道长专项在确认阶段超时，未记为通过；详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
 2026-10-28 核对页改版与多楼层合并整合：空间核对左侧改内嵌紧凑项目树（后按用户要求删除该面板，回归画布+右栏两栏）、删除独立 SpatialInspector、新增 CustomerRequirementsBlock、识别空间卡片恢复并补用途区域。合并冲突解决遗留的声明丢失（workspace/status/dimensions/displayedZones 等）已补回；图层面板滑块遮挡空间手柄，移到画布右上角；canvas.vue 在楼层加载途中不再误剥 zoneId。验证：`pnpm build`、e2e:space-review、drawing-entry、annotations、project-floors、MOCK smoke 通过。遗留：e2e-selected-space-entry 第二轮迭代 advance 未跳转待跟进（enterDesign 门槛排查中）。
 
 2026-10-28 识别空间与客户需求移到空间核对右侧栏（按用户要求）：页面回到三栏——左栏只留「项目与空间」楼层树（+底图/副本说明、加载示例），右栏为「客户需求」+「识别空间」列表（选择/改名/删除/手动画新空间均随迁）。客户需求块从 ProjectFloorTree 抽为 `CustomerRequirementsBlock.vue`（双击就地编辑 + 编辑对话框行为不变），树组件新增 `requirements` 属性（默认 true，仅空间核对页传 false 避免重复）；AppSidebar 等其他页面不受影响。≤1000px 时右栏整行下折（max-height 340px）。随后按用户反馈简化列表操作：**点击空间名直接就地改名**（移除独立「改名」按钮，hover 名字显示下划线提示；描点/校准/画区期间不响应），**删除改为小 ✕ 图标**（hover 显示「删除空间」提示，Aria 标签不变）；再按用户反馈（✕ 太丑、提示不明显）改为**平时收起、悬浮整行才浮现**的描边小方块（悬浮变红），提示改为左侧深绿气泡（`data-tip` 伪元素，替代慢速原生 title）；空间卡片由 button 改为 role=button 的 div 以支持名字内嵌点击。再按反馈（按钮游离在卡片外很别扭）把 ✕ **收进卡片右缘、垂直居中**悬浮浮现，卡片两行右留 26px 避让，点击带 `.stop` 不触发选中。验证：`pnpm build`、`pnpm e2e:space-review`（改名断言改为点击空间名）、`pnpm e2e:project-floors`、`MOCK_API=1 pnpm e2e:smoke`（自建 3001 端口）、`git diff --check` 通过；代码未提交。
@@ -15,6 +37,17 @@
 2026-10-28 空间核对右栏属性面板整体移除（按用户要求）：「图层与对照」（原始图纸/底图透明度/设计空间轮廓/实际尺寸标注/原始识别轮廓）移到中间画布右下角浮层，「空间用途」下拉移到画布左上角（带当前空间名）；右栏 SpatialInspector 组件删除。名称/宽深编辑走画布点空间标签的内联表单（既有），两点校准走工具条按钮（既有）；「恢复本次识别轮廓」按钮与精确净面积读数随面板一并移除（面积看左侧列表，1 位小数）——取舍经用户确认「全部移除」。浮层在逐点描/重描/校准/合并剔除/障碍标注等画布采点期间自动收起，且图层浮层仅开关与滑杆本身可点（其余区域指针穿透），避免遮挡画布点击与 se 缩放手柄。e2e 适配：面积断言改读列表选中行（43.2/36.0/24.0/20.0/5.5/7.5 m²）、尺寸编辑改画布标签内联表单、「边界重叠/轮廓不一致」提示断言改列表「需复核」徽标、改名改列表行内表单、新增图层开关定位于画布浮层与左上角用途下拉断言。验证：`pnpm build`、`pnpm e2e:space-review`、`MOCK_API=1 pnpm e2e:smoke`（自建 3001 端口）、`git diff --check` 通过；代码未提交。
 
 2026-10-28 方案页需求/批注面板配色柔化：按用户反馈（需求描述亮蓝、客户批注亮黄过于突兀），改为贴合站点暖色调的浅色版——需求描述 `#087dbb` 实蓝 → 浅蓝底 `#eef6fb`+蓝灰文字，滚动条/正文字色同步减淡；客户批注 `#fff36a` 亮黄 → 米黄底 `#fdf9e7`+橄榄文字；均补细边框与 hover 浅一档。验证：`pnpm build`、改版后截图人工核对通过。
+2026-10-28 通道设置移至画布工具栏：在禁放区图标后新增“通道”图标和弹出操作区，支持添加纵/横通道、宽度、位置、起终点、两侧净距及仅从二排起；排版参数区旧通道面板移除，画布拖动与确认避让继续共用 `layoutPreferences.channels`。构建通过，通道新增及后续编辑步骤已跑通，截图人工核查；长专项仍在既有“家具越界/离墙不足”确认约束处失败，未记为全量通过。
+
+2026-10-28 禁放区入口移至画布工具栏：按用户反馈移除排版参数区“入口与禁放区”设置，顶部工具栏在“效果预览”后新增门形禁放区图标，点击携带当前空间返回总览并聚焦标注；排版继续读取总览建筑约束，避让语义不变。layout-planning、space-obstacles 和构建通过，跳转截图已人工核查，均为模拟 API。
+
+2026-10-28 多选功能模块组合布局：按用户澄清将功能品类改为可多选；单选继续原排版，两个及以上进入 `MixedAutoLayoutPanel` 和 `mixedLayout` 组合路径，按钮移到组合数据下方。组合包覆盖办公桌椅、沙发茶几、会议、茶桌、餐厅、玄关、娱乐、吧台和会客，办公桌椅跟随目标人数，其他默认一套，不按空间尽量排满；新增茶桌、餐桌、游戏桌、玄关柜、吧台、吧椅六个真实图例（目录 35 个）。`applyMixedLayoutProposal` 保留手动家具、替换旧自动组并维持撤销/确认失效/持久化。`test:mixed-layout`、build、layout-planning（多选组合、4 件非最大化、应用撤销）、module-selection、auto-layout、module-recommendations、furniture-modules、workflows 和 `git diff --check` 通过；组合界面截图已人工核查，UI 均为模拟 API。
+
+2026-10-28 布局选品职责再划分：按用户反馈将完整家具图例、自定义模块和具体产品调整统一留在「产品选型」；「自动布局」改为房间类型、九类推荐功能品类、自动布局及尺寸/旋转/复制/删除调整。品类只决定初始推荐模块，不限制任何空间后续选品。当前模块 ID 在三页间共享，切换/刷新保持选中；新增 `duplicateFurniture` 复用硬校验及撤销失效链。构建及 single-space、auto-layout、layout-planning、module-selection、module-recommendations、custom-modules、furniture-modules、adaptive-layout、reference-layouts、layout-references、delete-modules、workflows 和 `git diff --check` 通过；新版自动布局/产品选型截图已人工核查，UI 均为模拟 API。
+
+2026-10-28 布局选品三段式右侧工作台第一版：按用户参考图将原左侧排版面板迁入右侧，提供绿色选中的「自动布局 / 产品选型 / 款式推荐」三页签。自动布局保留模块、参数、排布、候选和预览，新增识别房间类型修改且不再强制返回总览；产品选型支持已排家具选择、毫米尺寸调整、旋转、删除、逐件添加与确认；款式推荐沿用真实 SKU 匹配。新增 `updateZoneType` 保留设计上下文、`resizeFurniture` 复用硬校验及撤销失效链，右栏可折叠且 900px 高度主操作可见。`pnpm build`、single-space、auto-layout、layout-planning、module-selection、module-recommendations、workflows 和 `git diff --check` 通过，三页截图已人工核查，UI 均为模拟 API。通道长专项在既有“家具越界/离墙不足”确认约束处未通过，未记为通过；详见 [LAYOUT-013](tasks/LAYOUT-013-layout-panel-ux.md)。
+
+2026-10-28 普通办公排版离墙默认值归零：按用户要求配合过道功能，将 `OFFICE_LAYOUT_SPACING.wallMm` 及 general 单件居中/按场地排布预设从 300 mm 改为 0 mm；旧实例仍恢复已保存参数，座位侧继续按 `max(离墙, 组间过道, 座椅伸出)` 计算，会议桌独立的 1200 mm 默认值不变。同步当前 README/架构默认值及自动排版边界断言。`pnpm build`、`test:auto-layout`、`test:arrangement-presets`、`test:layout-planning`、`test:adaptive-layout`、`e2e:auto-layout`、`e2e:layout-planning` 和 `git diff --check` 通过；UI 使用模拟 API。
 
 2026-10-28 总览与排版共用项目空间树：按用户要求将空间核对页独立“识别空间”栏并入最左侧当前楼层下，移除重复项目/楼层树和独立空间栏。总览空间项按后续反馈恢复紧凑单行样式，不显示“可用”和“改名”按钮，双击名称改名并保留删除、展开及示例加载；右侧空间属性通过“编辑”按钮修改名称，尺寸、面积和复核状态集中在属性面板。总览点击通过 `activeZoneId` 联动画布与右侧属性；排版模式继续通过 `designZoneId`/`enterDesign` 切换空间并保留状态、件数和确认汇总。画布选中靠后空间时项目树自动展开，左侧删除后清理失效聚焦，总览改为画布+属性两栏。`pnpm build`、`pnpm e2e:space-review`、`pnpm e2e:drawing-entry`、`node scripts/e2e-selected-space-entry.mjs`、`pnpm e2e:single-space`、`pnpm e2e:project-floors`、`pnpm e2e:workflows` 和 `git diff --check` 通过；UI 均为模拟 API，未执行真实后端集成，详见 [LAYOUT-009](tasks/LAYOUT-009-design-space-switcher.md)。
 

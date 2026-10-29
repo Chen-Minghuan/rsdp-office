@@ -41,10 +41,10 @@ import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFrom
 import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
-import type { LayoutChannel, LayoutRequest } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
 import type { SpatialObstacle } from '~/types/spatial'
 import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } from '~/utils/spatial/obstacles'
-import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem } from '~/utils/layoutPlanning'
+import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 
 const STORAGE_KEY = 'rsdp-office-v01'
@@ -478,6 +478,15 @@ export const useOfficeStore = defineStore('office', {
       })
     },
 
+    updateZoneType(id: string, zoneType: ZoneObject['zoneType']) {
+      const stayInDesign = this.canvasMode === 'design' && this.designZoneId === id
+      this.updateObject(id, { zoneType } as Partial<ZoneObject>)
+      if (stayInDesign && this.canEnterLayout) {
+        this.canvasMode = 'design'
+        this.designZoneId = id
+      }
+    },
+
     deleteObject(id: string) {
       const target = this.objects.find(object => object.id === id)
       if (!target) return false
@@ -638,6 +647,94 @@ export const useOfficeStore = defineStore('office', {
       })
       const rotateWarning = officeFurnitureMoveWarning(zone, items)
       return rotateWarning ? `已旋转；提示：${rotateWarning}，确认排版时会被拦截` : null
+    },
+
+    resizeFurniture(id: string, widthMm: number, depthMm: number): string | null {
+      const item = this.objects.find((object): object is FurnitureObject => object.kind === 'furniture' && object.id === id)
+      if (!item || !Number.isFinite(widthMm) || !Number.isFinite(depthMm) || widthMm < 10 || depthMm < 10) return '家具尺寸无效'
+      const zone = this.zones.find(zone => zone.id === item.zoneId)
+      if (!zone) return '家具所属空间无效'
+      const current = this.furnitureForZone(zone.id)
+      const candidates = current.map(candidate => candidate.id === id ? { ...candidate, w: widthMm, h: depthMm } : candidate)
+      const problem = officeFurnitureMoveProblem(zone, candidates, current)
+      if (problem) return problem
+      this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
+      this.objectUpdate(() => {
+        item.w = widthMm
+        item.h = depthMm
+        current.forEach(entry => { entry.layoutConfirmed = false })
+        this.submitted = null
+      })
+      const warning = officeFurnitureMoveWarning(zone, current)
+      return warning ? `已调整尺寸；提示：${warning}，确认排版时会被拦截` : null
+    },
+
+    replaceFurnitureModule(id: string, templateId: string): string | null {
+      const item = this.objects.find((object): object is FurnitureObject => object.kind === 'furniture' && object.id === id)
+      const template = this.customModules.find(module => module.id === templateId) || furnitureById.get(templateId)
+      if (!item || !template) return '所选家具或新模块无效'
+      if (item.furnitureTemplateId === template.id && item.w === template.widthMm && item.h === template.depthMm) return null
+      const zone = this.zones.find(zone => zone.id === item.zoneId)
+      if (!zone) return '家具所属空间无效'
+      const current = this.furnitureForZone(zone.id)
+      const replacement: FurnitureObject = {
+        ...item,
+        furnitureTemplateId: template.id,
+        moduleSnapshot: 'custom' in template ? { ...template } : undefined,
+        x: item.x + (item.w - template.widthMm) / 2,
+        y: item.y + (item.h - template.depthMm) / 2,
+        w: template.widthMm,
+        h: template.depthMm,
+        label: template.name,
+        heightMm: template.heightMm,
+        wingWidthMm: 550,
+        productId: '',
+        productSelection: undefined,
+        layoutConfirmed: false,
+      }
+      const candidates = current.map(candidate => candidate.id === id ? replacement : candidate)
+      const problem = officeFurnitureMoveProblem(zone, candidates, current)
+      if (problem) return problem
+      const previousProductId = item.productId
+      this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
+      this.objectUpdate(() => {
+        Object.assign(item, replacement)
+        current.forEach(entry => { entry.layoutConfirmed = false })
+        this.submitted = null
+        if (previousProductId) {
+          let removed = false
+          this.cart = this.cart.flatMap(cartItem => {
+            if (removed || cartItem.zoneId !== zone.id || cartItem.productId !== previousProductId) return [cartItem]
+            removed = true
+            return cartItem.qty > 1 ? [{ ...cartItem, qty: cartItem.qty - 1 }] : []
+          })
+        }
+      })
+      const warning = officeFurnitureMoveWarning(zone, current)
+      return warning ? `已替换模块；提示：${warning}，确认排版时会被拦截` : null
+    },
+
+    duplicateFurniture(id: string): string | null {
+      const item = this.objects.find((object): object is FurnitureObject => object.kind === 'furniture' && object.id === id)
+      if (!item) return '所选家具无效'
+      const zone = this.zones.find(zone => zone.id === item.zoneId)
+      if (!zone) return '家具所属空间无效'
+      const current = this.furnitureForZone(zone.id)
+      const copy: FurnitureObject = {
+        ...item, id: uid('f'), x: item.x + 200, y: item.y + 200,
+        label: `${item.label || '家具'} 副本`, layoutGroupId: undefined, layoutClusterId: undefined,
+        productSelection: undefined, layoutConfirmed: false,
+      }
+      const problem = officeFurnitureMoveProblem(zone, [...current, copy], current)
+      if (problem) return problem
+      this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
+      this.objectUpdate(() => {
+        this.objects.push(copy)
+        current.forEach(entry => { entry.layoutConfirmed = false })
+        this.submitted = null
+      })
+      const warning = officeFurnitureMoveWarning(zone, current)
+      return warning ? `已复制；提示：${warning}，确认排版时会被拦截` : null
     },
 
     mirrorFurnitureGroup(ids: string[], zoneId: string): string | null {
@@ -871,14 +968,24 @@ export const useOfficeStore = defineStore('office', {
         : [...(zone.obstacles || []), obstacle]
       const problem = zoneLayoutProblem({ ...zone, obstacles })
       if (problem) return problem
+      const stayInDesign = this.canvasMode === 'design' && this.designZoneId === zoneId
       this.updateObject(zoneId, { obstacles } as Partial<ZoneObject>)
+      if (stayInDesign && this.canEnterLayout) {
+        this.canvasMode = 'design'
+        this.designZoneId = zoneId
+      }
       return null
     },
 
     removeZoneObstacle(zoneId: string, obstacleId: string) {
       const zone = this.zones.find(item => item.id === zoneId)
       if (!zone || !zone.obstacles?.some(item => item.obstacleId === obstacleId)) return false
+      const stayInDesign = this.canvasMode === 'design' && this.designZoneId === zoneId
       this.updateObject(zoneId, { obstacles: zone.obstacles.filter(item => item.obstacleId !== obstacleId) } as Partial<ZoneObject>)
+      if (stayInDesign && this.canEnterLayout) {
+        this.canvasMode = 'design'
+        this.designZoneId = zoneId
+      }
       return true
     },
 
@@ -916,7 +1023,7 @@ export const useOfficeStore = defineStore('office', {
       })
     },
 
-    /** 确认排版前的具体阻塞原因（越界/压占通道/椅子活动区/目标人数等）；null 表示可确认。 */
+    /** 确认排版前的具体阻塞原因（越界/压占通道/目标人数等）；null 表示可确认。 */
     layoutConfirmProblem(zoneId: string): string | null {
       const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
       const zone = this.zones.find(zone => zone.id === zoneId)
@@ -930,6 +1037,11 @@ export const useOfficeStore = defineStore('office', {
       const seats = primary?.layoutSettings?.layoutContext === 'other' ? items.filter(item => item.furnitureTemplateId === primary.furnitureTemplateId).length : furnitureSeatCount(items, items.some(item => item.layoutSettings?.layoutContext === 'meeting'))
       if (target && seats < target) return `目标 ${target} 人，当前仅 ${seats} 座，请增加工位或调整目标人数`
       return null
+    },
+
+    layoutReviewWarning(zoneId: string): string | null {
+      const zone = this.zones.find(item => item.id === zoneId)
+      return zone ? confirmedLayoutWarning(zone, this.furnitureForZone(zoneId)) : null
     },
 
     confirmLayout(zoneId: string) {
@@ -1367,6 +1479,33 @@ export const useOfficeStore = defineStore('office', {
         this.objects = this.objects.filter(object => !proposal.replaceIds.includes(object.id))
         for (const furniture of chosenFurniture) this.objects.push({ ...furniture, id: uid('f'), spaceTemplateId: this.spaceTemplate!.templateId, templateSpaceId: zoneId })
         zone.layoutPreferences = JSON.parse(JSON.stringify(request.preferences))
+        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
+        this.submitted = null
+        this.cart = this.cart.flatMap(item => {
+          const removed = item.zoneId === zoneId ? removedProducts.get(item.productId) || 0 : 0
+          if (!removed) return [item]
+          const deduction = Math.min(item.qty, removed)
+          removedProducts.set(item.productId, removed - deduction)
+          return item.qty > deduction ? [{ ...item, qty: item.qty - deduction }] : []
+        })
+      })
+      return true
+    },
+
+    applyMixedLayoutProposal(zoneId: string, proposal: LayoutProposal, preferences: LayoutPreferences, candidateIndex = 0) {
+      const zone = this.zones.find(zone => zone.id === zoneId)
+      if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
+      const existing = this.furnitureForZone(zoneId)
+      if (proposal.sourceKey !== layoutSourceKey(zone, existing) || proposal.problem || !proposal.furniture.length) return false
+      const chosenFurniture = candidateIndex > 0 ? proposal.candidates?.[candidateIndex]?.furniture || proposal.furniture : proposal.furniture
+      this.cancelFurniturePlacement()
+      if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
+      this.objectUpdate(() => {
+        const removedProducts = new Map<string, number>()
+        for (const item of existing) if (proposal.replaceIds.includes(item.id) && item.productId) removedProducts.set(item.productId, (removedProducts.get(item.productId) || 0) + 1)
+        this.objects = this.objects.filter(object => !proposal.replaceIds.includes(object.id))
+        for (const furniture of chosenFurniture) this.objects.push({ ...furniture, id: uid('f'), spaceTemplateId: this.spaceTemplate!.templateId, templateSpaceId: zoneId })
+        zone.layoutPreferences = JSON.parse(JSON.stringify(preferences))
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null
         this.cart = this.cart.flatMap(item => {

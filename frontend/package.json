@@ -37,6 +37,7 @@
     "test:layout-channels": "node scripts/test-layout-channels.mjs",
     "test:space-boolean": "node scripts/test-space-boolean.mjs",
     "test:obstacle-window": "node scripts/test-obstacle-window.mjs",
+    "test:mixed-layout": "node scripts/test-mixed-layout.mjs",
     "e2e:layout-planning": "node scripts/e2e-layout-planning.mjs",
     "test:reference-layouts": "node scripts/test-reference-layouts.mjs",
     "e2e:reference-layouts": "node scripts/e2e-reference-layouts.mjs",

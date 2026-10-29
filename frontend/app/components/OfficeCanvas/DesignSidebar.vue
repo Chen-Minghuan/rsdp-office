@@ -7,8 +7,9 @@ const collapsed = ref(false)
 const zone = computed(() => store.zones.find((z) => z.id === store.designZoneId) || null)
 const hasFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
 const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
+const layoutReviewNotice = computed(() => layoutConfirmed.value && zone.value ? store.layoutReviewWarning(zone.value.id) : null)
 
-const props = defineProps<{ selectedId?: string | null }>()
+const props = withDefaults(defineProps<{ selectedId?: string | null; embedded?: boolean }>(), { embedded: false })
 
 function backToOverview() {
   store.setCanvasMode('overview')
@@ -16,10 +17,10 @@ function backToOverview() {
 </script>
 
 <template>
-  <div :class="['flex-none bg-white border-y border-r border-line flex flex-col overflow-hidden transition-all duration-300', collapsed ? 'w-12' : 'w-[360px]']">
-    <div v-show="!collapsed" class="w-[360px] h-full flex flex-col">
+  <div :class="['flex-none bg-white flex flex-col overflow-hidden transition-all duration-300', embedded ? 'w-full flex-1 min-h-0' : collapsed ? 'w-12 border-y border-r border-line' : 'w-[360px] border-y border-r border-line']">
+    <div v-show="!collapsed" :class="[embedded ? 'w-full' : 'w-[360px]', 'h-full flex flex-col']">
       <!-- Header -->
-      <div class="relative px-4 py-4 border-b border-line flex-none">
+      <div v-if="!embedded" class="relative px-4 py-4 border-b border-line flex-none">
         <button class="absolute top-3 right-3 p-1 rounded-none hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="collapsed = true">
           <AppIcon name="arrowRight" size="4" />
         </button>
@@ -71,7 +72,7 @@ function backToOverview() {
         </div>
         <h3 class="text-sm font-bold text-[#5b5751] mb-1">先完成空间排版</h3>
         <p class="text-xs text-muted leading-relaxed">
-          在左侧选择单位模块并设置尺寸和间距，<br>一键自动排版或应用选定方式后生成布局。
+ 在“自动布局”生成方案，或在“产品选型”手动排版，<br>确认后均可按模块尺寸匹配真实商品。
         </p>
       </div>
 
@@ -106,6 +107,7 @@ function backToOverview() {
 
     <!-- Layout confirmed: real SKU recommendations for current module footprints -->
     <template v-else>
+      <p v-if="layoutReviewNotice" class="border-b border-[#f0d9b3] bg-[#fff8e8] px-3 py-2 text-[10px] leading-relaxed text-[#8a6a2c]" data-testid="layout-review-notice">{{ layoutReviewNotice }}</p>
       <OfficeCanvasModuleProductRecommendations :selected-id="props.selectedId" />
 
       <div class="px-4 py-3 border-t border-line bg-[#fefcfb] flex-none">
@@ -126,7 +128,7 @@ function backToOverview() {
     </div>
 
     <!-- Collapsed strip -->
-    <div v-show="collapsed" class="w-12 h-full flex flex-col items-center py-3">
+    <div v-if="!embedded" v-show="collapsed" class="w-12 h-full flex flex-col items-center py-3">
       <button class="p-1.5 rounded-none hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="collapsed = false">
         <AppIcon name="arrowLeft" size="5" />
       </button>

@@ -61,7 +61,7 @@ try {
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
   const catalog = page.getByTestId('unit-module-catalog')
   await page.goto(`${baseUrl}/canvas?analysisId=MEETING-TEST`, { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -85,9 +85,9 @@ try {
     const styleId={'一字职员台':'straight-desk','L 型职员台':'l-desk','一字屏风卡位':'straight-screen','L 型屏风卡位':'l-screen'}[style]
     const count=expectedCapacity(styleId,preset,w,d,gap)
     assert.ok(count>sampleCount,label+': room-sized capacity grows beyond the reference illustration')
-    await page.getByRole('tab', { name: '选择模块', exact: true }).click()
+    await page.getByTestId('tab-product-selection').click()
     const moduleId = {'一字职员台':'desk-straight', 'L 型职员台':'desk-l', '一字屏风卡位':'desk-screen-straight', 'L 型屏风卡位':'desk-screen-l'}[style]
-    await page.locator('[data-module-id="' + moduleId + '"]').click()
+    await page.locator('[data-auto-module-id="' + moduleId + '"]').click()
     await page.getByRole('tab', { name: '选择排布', exact: true }).click()
     await page.getByRole('button', { name: label, exact: true }).click()
     assert.equal(Number((await page.getByTestId('module-capacity').innerText()).replace(/[^0-9]/g,'')), count)

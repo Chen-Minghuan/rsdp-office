@@ -778,10 +778,14 @@ try {
       await page.mouse.up()
     }
     await page.getByRole('button', { name: '放大核对当前空间', exact: true }).click()
-    await page.locator('[data-testid="tool-obstacle-window"]').waitFor()
-    await page.locator('[data-testid="tool-obstacle-window"]').click()
-    await worldDrag(zb.minX + 400, zb.minY + 150, zb.minX + 1600, zb.minY + 300)
-    await page.locator('.review-toast').getByText('仅标注', { exact: false }).waitFor()
+    await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+    await page.getByTestId('toolbar-constraints').click()
+    await page.getByTestId('constraint-tool-WINDOW').click()
+    const designBox = await page.locator(`polygon[data-id="${zone4.id}"]`).boundingBox()
+    await page.mouse.move(designBox.x + 80, designBox.y + 80)
+    await page.mouse.down()
+    await page.mouse.move(designBox.x + 140, designBox.y + 120, { steps: 5 })
+    await page.mouse.up()
     const withWindow = await zoneById(zone4.id)
     assert.equal(withWindow.obstacles?.length, 1, '窗障碍已保存到当前空间')
     assert.equal(withWindow.obstacles[0].kind, 'WINDOW', '障碍类型为窗')
@@ -790,7 +794,8 @@ try {
     await page.getByRole('button', { name: '撤销', exact: true }).click()
     await page.waitForTimeout(200)
     assert.equal((await zoneById(zone4.id)).obstacles?.length || 0, 0, '撤销移除窗标注')
-    await page.getByRole('button', { name: '返回全图', exact: true }).click()
+    await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
+    await page.getByRole('button', { name: '显示全部空间', exact: true }).click()
     await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
   }
   // 空间列表点名字直接改名

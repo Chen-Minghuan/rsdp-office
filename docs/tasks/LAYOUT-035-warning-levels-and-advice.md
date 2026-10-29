@@ -6,6 +6,12 @@
 基线/交付版本：工作区
 关联：[LAYOUT-023](LAYOUT-023-channel-width-threshold-hints.md)；[LAYOUT-029](LAYOUT-029-channel-egress-linkage.md)；[LAYOUT-034](LAYOUT-034-candidate-scheme-comparison.md)（净面积与指标口径复用）；外部参考 [培训空间原型差距分析](../references/kimi-training-layout-tool-gap-analysis.md)（仅背景）
 
+## 2026-10-29 座椅净空改为提醒不拦截
+
+默认 560mm 座椅侧净空和 `seatClearanceMm` 椅子活动区是项目策略值，不是建筑规范硬条件。前端 `confirmedLayoutProblem` 改为仅检查实际越界、重叠、禁放区和通道等硬错误，新增 `confirmedLayoutWarning` 在推荐区域提示现场复核；Java `OfficeLayoutValidationPolicy` 同步移除座椅侧外扩和活动区拒绝逻辑。目标人数不足、无效几何及其他硬冲突仍禁止确认。
+
+验证：Java 全量 205 项（202 通过、3 跳过）、`pnpm build`、`test:layout-planning`、`test:auto-layout`、module-recommendations（净空不足可确认且提醒可见）和 `git diff --check` 通过；UI 使用模拟 API。随后重启本地 Java 后端并刷新真实设计页，款式推荐实际加载 52 个兼容规格，未再出现旧“已确认家具离墙或通行预留不足”错误。
+
 ## 目标与验收
 
 触发：排版参数编辑/预览/确认时。
