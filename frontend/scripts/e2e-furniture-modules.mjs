@@ -50,26 +50,30 @@ try {
   const width = () => page.getByLabel('模块宽度（毫米）')
   const depth = () => page.getByLabel('模块进深（毫米）')
   async function choose(id) {
-    await page.getByRole('tab', { name: '选择模块', exact: true }).click()
-    const card = catalog().locator('[data-module-id="' + id + '"]')
+    await page.getByTestId('tab-product-selection').click()
+    const card = catalog().locator('[data-auto-module-id="' + id + '"]')
     const section = card.locator('xpath=ancestor::details')
     if (!(await section.getAttribute('open') !== null)) await section.locator('summary').click()
     await card.click()
   }
   await page.goto(baseUrl + '/canvas?analysisId=MODULE-TEST', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 办公家具测试空间', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 办公家具测试空间', exact: true }).waitFor()
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-product-selection').click()
   await catalog().waitFor()
   assert.equal(await catalog().locator('[data-module-id="desk-l-rounded"]').count(), 0, '职员圆角 L 桌并入 L 型屏风卡位，不再出现在目录')
   await choose('desk-l')
+  await page.getByTestId('tab-product-selection').click()
   assert.equal(await catalog().locator('[data-module-id="desk-l"]').getAttribute('aria-pressed'), 'true', '选择职员 L 桌模块')
   await choose('desk-screen-l')
+  await page.getByTestId('tab-product-selection').click()
   assert.equal(await catalog().locator('[data-module-id="desk-screen-l"]').getAttribute('aria-pressed'), 'true', '选择 L 型屏风卡位模块')
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   for (const label of ['L 型单排', 'L 型对坐', 'F 型单排', 'T 型对坐', 'C 型对坐', '十字型对坐']) {
     assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1, 'L 型屏风卡位提供' + label)
   }
-  await page.getByRole('tab', { name: '选择模块', exact: true }).click()
+  await page.getByTestId('tab-product-selection').click()
   // 排版目录在座席示意后追加 .layout-seat，断言线稿前先剔除（手动布局沙盒页已删除，目录线稿同源 `furnitureCatalogTemplates`）。
   const modules = await catalog().locator('[data-module-id]').evaluateAll(cards => cards.map(card => {
     const glyph = card.querySelector('.manual-furniture-glyph').cloneNode(true)
@@ -80,7 +84,7 @@ try {
     comments.forEach(node => node.remove())
     return { id: card.dataset.moduleId, name: card.getAttribute('aria-label'), geometry: glyph.innerHTML }
   }))
-  assert.equal(modules.length, 29)
+  assert.equal(modules.length, 35)
   assert.equal(await catalog().locator('details').count(), 9)
   assert.ok(modules.every(module => module.name && module.geometry.includes('<')), '每个目录项都有名称与参数化线稿')
   assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '不暴露隐藏目录项')
@@ -144,9 +148,10 @@ try {
   assert.ok(strictRow.every(item => item.w === 1200 && item.h === 600), '严格排布不能改写家具实际宽深')
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   assert.ok((await furniture()).every(item => item.layoutConfirmed))
+  await page.getByTestId('tab-style-recommendation').click()
   await page.getByText('排版已确认', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('单位模块 UI 通过：29 个可见图例/9 类均带名称与参数化线稿、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
+  console.log('单位模块 UI 通过：35 个可见图例/9 类均带名称与参数化线稿、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

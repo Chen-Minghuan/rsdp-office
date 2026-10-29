@@ -16,7 +16,10 @@ const overviewCollapsed = ref(false)
 const viewRotation = ref(0)
 const showDimensions = ref(true)
 const snapEnabled = ref(true)
+const showUnderlay = ref(true)
+const underlayOpacity = ref(0.75)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
+watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
 
 const mode = computed<'overview' | 'design'>(() => store.canvasMode)
 const designZoneId = computed(() => store.designZoneId)
@@ -153,7 +156,6 @@ watch(() => store.canEnterLayout, (confirmed) => {
     <div class="flex-1 min-h-0 flex">
       <!-- Left sidebar -->
       <OfficeCanvasOverviewSidebar v-if="mode === 'overview'" v-model="selectedId" />
-      <OfficeCanvasDesignLayoutSidebar v-else @preview="layoutPreview = $event" />
 
       <!-- Canvas -->
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-y border-r border-line bg-white">
@@ -170,7 +172,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @render="showRenderPreview = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" :show-dimensions="showDimensions" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" :layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">
@@ -190,7 +192,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
       </div>
 
       <!-- Right sidebar -->
-      <OfficeCanvasDesignSidebar v-if="mode === 'design'" :selected-id="selectedId" />
+      <OfficeCanvasDesignWorkflowSidebar v-if="mode === 'design'" v-model:selected-id="selectedId" @preview="layoutPreview = $event" />
       <aside v-else :class="['flex-none bg-white border border-line rounded-none shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
         <div v-show="!overviewCollapsed" class="w-72 h-full p-4 flex flex-col gap-4">
           <div class="relative flex items-center justify-between">

@@ -41,14 +41,16 @@ try {
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
   const catalog = page.getByTestId('unit-module-catalog')
   await page.goto(`${baseUrl}/canvas?analysisId=MEETING-TEST`, { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-product-selection').click()
   const errors=[]
   page.on('pageerror',error=>errors.push(error.message))
   await page.locator('[data-space-id="OPEN-ROOM"]').click()
   await page.waitForURL(url=>url.searchParams.get('zoneId')==='OPEN-ROOM')
+  await page.getByTestId('tab-product-selection').click()
   for (const id of ['desk-straight','desk-l','desk-screen-straight','desk-screen-l','desk-manager','desk-executive']) assert.equal(await catalog.locator('[data-module-id="'+id+'"] .layout-seat').count(),1,'catalogue chair for '+id)
-  await catalog.locator('[data-module-id="desk-l"]').click()
+  await catalog.locator('[data-auto-module-id="desk-l"]').click()
   const references = page.locator('[aria-label="排版尺寸标注"]')
   await references.locator('[data-clearance-kind="wall"]').first().waitFor()
   assert.equal(await references.locator('[data-clearance-kind="wall"]').count(),4,'pending previews show actual wall clearances')
@@ -92,6 +94,7 @@ try {
     const x=z.x+z.w/2,y=z.y+z.h*0.75
     return {x,y,screenX:rect.left+rect.width/2+store.panX-(y-z.y-z.h/2)*store.zoom,screenY:rect.top+rect.height/2+store.panY+(x-z.x-z.w/2)*store.zoom}
   })
+  await page.getByTestId('tab-product-selection').click()
   await page.getByRole('button',{name:'逐件添加',exact:true}).click()
   await page.mouse.move(target.screenX,target.screenY)
   await page.mouse.click(target.screenX,target.screenY)

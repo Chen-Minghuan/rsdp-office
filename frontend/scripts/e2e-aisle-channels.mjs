@@ -57,7 +57,7 @@ try {
   }
 
   await page.goto(`${baseUrl}/canvas?analysisId=CHANNEL-TEST`, { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '选择空间 培训室', exact: true }).waitFor()
+  await page.locator('.review-rooms').getByRole('button', { name: '选择空间 培训室', exact: true }).waitFor()
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
     for (const zone of draft.objects.filter(object => object.kind === 'zone')) zone.reviewUnit = 'mm'
@@ -65,25 +65,26 @@ try {
   })
   await page.goto(`${baseUrl}/canvas?analysisId=CHANNEL-TEST`, { waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-product-selection').click()
   await page.getByTestId('unit-module-catalog').waitFor()
 
   // 主管直线桌是非职员桌/会议类模块，走课桌式网格排版（原生通道切段）。
   await page.locator('details summary', { hasText: '主管桌' }).first().click()
-  await page.getByRole('button', { name: /主管直线桌/ }).first().click()
+  await page.getByRole('button', { name: '用于自动布局 主管直线桌', exact: true }).click()
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   await page.getByRole('button', { name: '按场地排布', exact: true }).click()
   const baseline = await capacity()
   assert.ok(baseline > 10, `基线容量异常: ${baseline}`)
 
   // 1. 添加纵向通道：预览容量下降，画布出现通道条带，参数落到 layoutPreferences。
-  await page.getByTestId('advanced-options').locator('summary').first().click()
-  await page.getByTestId('channel-panel').locator('summary').click()
+  await page.getByTestId('toolbar-channels').click()
   await page.getByTestId('add-channel-vertical').click()
   await page.waitForFunction(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
     return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).length === 1
   })
   assert.equal((await page.getByTestId('layout-channels').locator('[data-channel-id]').count()), 1)
+  await page.screenshot({ path: 'C:/Users/cmh/AppData/Local/Temp/rsdp-toolbar-channels.png', fullPage: true, animations: 'disabled' })
   const withChannel = await capacity()
   assert.ok(withChannel < baseline, `加通道后容量应下降: ${withChannel} !< ${baseline}`)
 
@@ -458,7 +459,7 @@ try {
   const epReloadBox = await epStrip.first().boundingBox()
   assert.ok(epReloadBox && Math.abs(epReloadBox.height - epFullBox.height / 2) < epFullBox.height * 0.06, '刷新后条带应保持留断跨度')
   // 起点 > 终点：无有效禁放带，条带消失（validateChannels 同步给出问题文案，单测覆盖）。
-  await page.getByTestId('advanced-options').evaluate(node => { node.open = true }); await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+  await page.getByTestId('toolbar-channels').click()
   await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').fill(String(Math.round(epSpanY * 0.1)))
   await page.getByTestId('channel-vertical').getByLabel('通道终点（毫米）').press('Enter')
   await page.waitForFunction((id) => !document.querySelector(`[data-channel-id="${id}"]`), epChannelId)
@@ -484,8 +485,9 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
   await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('tab-product-selection').click()
   await page.getByTestId('unit-module-catalog').waitFor()
-  await page.getByTestId('advanced-options').evaluate(node => { node.open = true }); await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+  await page.getByTestId('toolbar-channels').click()
   // 纵向通道默认在包围盒中轴（x 落入缺口范围）：应只剩缺口下方一段，高度 ≈ 0.6 倍空间进深。
   await page.getByTestId('add-channel-vertical').click()
   await page.waitForFunction(() => {
@@ -548,8 +550,9 @@ try {
       localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
     }, mode)
     await page.reload({ waitUntil: 'networkidle' })
-    await page.getByTestId('unit-module-catalog').waitFor()
-    await page.getByTestId('advanced-options').evaluate(node => { node.open = true }); await page.getByTestId('channel-panel').evaluate(node => { node.open = true })
+    await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('unit-module-catalog').waitFor()
+    await page.getByTestId('toolbar-channels').click()
     return page.locator('[data-testid="channel-egress-hint"]')
   }
   let egressHints = await setupEgress('unmarked')
@@ -574,6 +577,7 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
   await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('tab-product-selection').click()
   await page.getByTestId('unit-module-catalog').waitFor()
   await page.getByTestId('apply-layout').click()
   await page.waitForFunction(() => {

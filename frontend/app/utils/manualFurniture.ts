@@ -45,6 +45,12 @@ export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
   { id: 'sofa-triple', name: '三人沙发', category: '接待休闲', kind: 'sofa', widthMm: 2100, depthMm: 850 },
   { id: 'coffee-rect', name: '长方形茶几', category: '接待休闲', kind: 'table', widthMm: 1100, depthMm: 550 },
   { id: 'coffee-round', name: '圆形茶几', category: '接待休闲', kind: 'round-table', widthMm: 700, depthMm: 700 },
+  { id: 'table-tea-rect', name: '长方形茶桌', category: '接待休闲', kind: 'table', widthMm: 1200, depthMm: 600 },
+  { id: 'table-dining-rect', name: '四人餐桌', category: '接待休闲', kind: 'table', widthMm: 1400, depthMm: 800 },
+  { id: 'table-game', name: '休闲娱乐桌', category: '接待休闲', kind: 'table', widthMm: 1400, depthMm: 700 },
+  { id: 'cabinet-entry', name: '玄关柜', category: '收纳', kind: 'cabinet', widthMm: 1200, depthMm: 350, heightMm: 900 },
+  { id: 'counter-bar', name: '吧台', category: '前台', kind: 'counter', widthMm: 1800, depthMm: 600 },
+  { id: 'chair-bar', name: '吧椅', category: '座椅', kind: 'chair', widthMm: 500, depthMm: 500 },
   { id: 'plant', name: '绿植', category: '设备辅助', kind: 'plant', widthMm: 500, depthMm: 500 },
   { id: 'whiteboard', name: '白板', category: '设备辅助', kind: 'wall', widthMm: 1800, depthMm: 100 },
 ]
