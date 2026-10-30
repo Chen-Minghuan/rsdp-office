@@ -68,10 +68,10 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <line :x1="wing" :y1="wing * 0.45" :x2="w - wing" :y2="wing * 0.45" />
     </template>
     <template v-else-if="template.kind === 'chair'">
-      <rect :x="w * 0.12" :y="d * 0.22" :width="w * 0.76" :height="d * 0.64" :rx="Math.min(w, d) * 0.1" />
-      <path :d="`M ${w * 0.16} ${d * 0.2} Q ${w / 2} ${d * 0.02} ${w * 0.84} ${d * 0.2}`" />
-      <line v-if="item.templateId !== 'chair-meeting'" :x1="w * 0.06" :y1="d * 0.42" :x2="w * 0.06" :y2="d * 0.73" />
-      <line v-if="item.templateId !== 'chair-meeting'" :x1="w * 0.94" :y1="d * 0.42" :x2="w * 0.94" :y2="d * 0.73" />
+      <rect :x="w * 0.12" :y="d * 0.14" :width="w * 0.76" :height="d * 0.64" :rx="Math.min(w, d) * 0.1" />
+      <path :d="`M ${w * 0.16} ${d * 0.8} Q ${w / 2} ${d * 0.98} ${w * 0.84} ${d * 0.8}`" />
+      <line v-if="item.templateId !== 'chair-meeting'" :x1="w * 0.06" :y1="d * 0.27" :x2="w * 0.06" :y2="d * 0.58" />
+      <line v-if="item.templateId !== 'chair-meeting'" :x1="w * 0.94" :y1="d * 0.27" :x2="w * 0.94" :y2="d * 0.58" />
     </template>
     <template v-else-if="template.kind === 'round-table' || template.kind === 'plant'">
       <ellipse :cx="w / 2" :cy="d / 2" :rx="w / 2" :ry="d / 2" />
@@ -84,10 +84,10 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
     </template>
     <template v-else-if="template.kind === 'sofa'">
       <rect :x="0" :y="0" :width="w" :height="d" :rx="Math.min(w, d) * 0.12" />
-      <line :x1="w * 0.08" :y1="d * 0.24" :x2="w * 0.92" :y2="d * 0.24" />
-      <line v-for="index in sofaSeats - 1" :key="index" :x1="w * index / sofaSeats" :y1="d * 0.24" :x2="w * index / sofaSeats" :y2="d * 0.88" />
-      <line :x1="w * 0.08" :y1="d * 0.24" :x2="w * 0.08" :y2="d * 0.88" />
-      <line :x1="w * 0.92" :y1="d * 0.24" :x2="w * 0.92" :y2="d * 0.88" />
+      <line :x1="w * 0.08" :y1="d * 0.76" :x2="w * 0.92" :y2="d * 0.76" />
+      <line v-for="index in sofaSeats - 1" :key="index" :x1="w * index / sofaSeats" :y1="d * 0.12" :x2="w * index / sofaSeats" :y2="d * 0.76" />
+      <line :x1="w * 0.08" :y1="d * 0.12" :x2="w * 0.08" :y2="d * 0.76" />
+      <line :x1="w * 0.92" :y1="d * 0.12" :x2="w * 0.92" :y2="d * 0.76" />
     </template>
     <template v-else-if="template.kind === 'cabinet' && isReferenceCabinet">
       <rect x="0" y="0" :width="w" :height="d" />
