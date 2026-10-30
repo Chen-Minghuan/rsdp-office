@@ -1544,7 +1544,7 @@ export const useOfficeStore = defineStore('office', {
       return true
     },
 
-    applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string, candidateIndex = 0) {
+    applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string, candidateIndex = 0, positionOverrides?: Array<{ id: string; x: number; y: number }>) {
       const zone = this.zones.find(zone => zone.id === zoneId)
       if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
       const existing = this.furnitureForZone(zoneId)
@@ -1555,7 +1555,12 @@ export const useOfficeStore = defineStore('office', {
       if (proposal.problem || !proposal.furniture.length) return false
       // LAYOUT-034：应用用户在面板上选中的候选；索引越界时回落到评分最高的默认方案。
       const chosen = candidateIndex > 0 ? proposal.candidates?.[candidateIndex] : undefined
-      const chosenFurniture = chosen?.furniture || proposal.furniture
+      let chosenFurniture = chosen?.furniture || proposal.furniture
+      // 预览阶段用户在画布上拖动过预览家具时，按预览位置覆盖（生成是确定性的，id 可对上）。
+      if (positionOverrides?.length) {
+        const overrides = new Map(positionOverrides.map(item => [item.id, item] as const))
+        chosenFurniture = chosenFurniture.map(item => overrides.has(item.id) ? { ...item, x: overrides.get(item.id)!.x, y: overrides.get(item.id)!.y } : item)
+      }
       this.cancelFurniturePlacement()
       if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
       this.objectUpdate(() => {

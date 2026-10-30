@@ -12,7 +12,7 @@ import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/of
 import { moduleGlyphId } from '~/utils/officeModules'
 import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
 
-const props = withDefaults(defineProps<{ embedded?: boolean; moduleId?: string }>(), { embedded: false, moduleId: '' })
+const props = withDefaults(defineProps<{ embedded?: boolean; moduleId?: string; currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>(), { embedded: false, moduleId: '', currentPreview: null })
 const emit = defineEmits<{
   preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null]
   confirmed: []
@@ -274,7 +274,12 @@ function addToCanvas() {
 function applyLayout() {
   if (!zone.value || !proposal.value || proposal.value.problem || draftApplied.value) return
   const planned = proposal.value
-  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey, selectedCandidateIndex.value)
+  // 预览可能已在画布上被拖动调整：同空间且家具 id 对得上时，以预览位置覆盖生成位置。
+  const live = props.currentPreview
+  const overrides = live && live.zoneId === zone.value.id && live.furniture.length
+    ? live.furniture.map(({ id, x, y }) => ({ id, x, y }))
+    : undefined
+  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey, selectedCandidateIndex.value, overrides)
   if (!applied) { applicationMessage.value = '空间或家具已变化，请重新预览后应用'; return }
   nextTick(() => { applicationMessage.value = '已应用：' + planned.furniture.length + ' 件，保留 ' + planned.retainedIds.length + ' 件' })
 }

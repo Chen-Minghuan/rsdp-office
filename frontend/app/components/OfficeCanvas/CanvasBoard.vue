@@ -20,8 +20,8 @@ import { channelRects, channelOffsetRange, CHANNEL_WIDTH_HINT_MM } from '~/utils
 
 
 const store = useOfficeStore()
-const props = defineProps<{ layoutPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
-const activePreview = computed(() => props.layoutPreview?.zoneId === store.designZoneId ? props.layoutPreview : null)
+const layoutPreview = defineModel<{ zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null>('layoutPreview', { default: null })
+const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
 const viewRotation = defineModel<number>('viewRotation', { default: 0 })
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const tool = defineModel<string>('tool', { default: 'select' })
@@ -83,7 +83,7 @@ const hintText = computed(() => {
   if (regionMessage.value) return regionMessage.value
   if (facilityMessage.value) return facilityMessage.value
   if (constraintMessage.value) return constraintMessage.value
-  if (mode.value === 'design' && tool.value === 'select') return '点击选中 · Shift/Ctrl 点选多个 · 空白处框选 · 拖动选中家具一起移动'
+  if (mode.value === 'design' && tool.value === 'select') return activePreview.value ? '预览家具可直接拖动调整，应用时按调整后的位置生成 · 空白处框选已排版家具' : '点击选中 · Shift/Ctrl 点选多个 · 空白处框选 · 拖动选中家具一起移动'
   if (isConstraintTool.value) return constraintKind.value === 'DOOR_CLEARANCE' ? '从门扇铰链角拖向开启区域，Esc 取消' : '在当前空间底图上拖出矩形标注，Esc 取消'
   if (tool.value === 'region-rect') return '在当前空间内拖出矩形布置区，Esc 取消'
   if (tool.value === 'region-poly') return sketchPoints.value.length ? `布置区已取 ${sketchPoints.value.length} 点 · Enter/双击结束（≥3 点） · Esc 取消` : '逐点绘制布置区多边形，Enter 或双击结束，Esc 取消'
@@ -329,8 +329,11 @@ const furniture = computed(() => {
 const dimensionFurniture = computed(() => {
   const pending = activePreview.value
   const items = drag.value?.mode !== 'furniture' && pending?.furniture.length ? [...furniture.value.filter(item => !pending.replaceIds.includes(item.id)), ...pending.furniture] : furniture.value
-  return items.map(item => drag.value?.mode === 'furniture' && drag.value.ids?.includes(item.id)
-    ? { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) } : item)
+  return items.map(item => {
+    if (drag.value?.mode === 'furniture' && drag.value.ids?.includes(item.id)) return { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) }
+    if (drag.value?.mode === 'preview-furniture' && drag.value.id === item.id) return { ...item, x: item.x + (drag.value.dx || 0), y: item.y + (drag.value.dy || 0) }
+    return item
+  })
 })
 
 // While a pending proposal preview is shown, hide the auto-group pieces it will
@@ -476,7 +479,7 @@ function rotateView(degrees: number) {
 }
 
 interface DragState {
-  mode: 'pan' | 'move' | 'furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width' | 'constraints' | 'constraint' | 'region-draw' | 'region' | 'region-vertex' | 'facility-draw' | 'facility' | 'facility-vertex'
+  mode: 'pan' | 'move' | 'furniture' | 'preview-furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width' | 'constraints' | 'constraint' | 'region-draw' | 'region' | 'region-vertex' | 'facility-draw' | 'facility' | 'facility-vertex'
   cx?: number
   cy?: number
   px?: number
@@ -913,6 +916,23 @@ function clampChannelWidthDelta(d: DragState, rawDx: number): number {
     : Math.min(Math.max(rawDx, min + clearance - ox), ow - 1)
 }
 
+/** 组合预览未应用前即可拖动预览家具：拖动过程只改显示，松手一次性写回预览模型，应用时使用调整后的位置。 */
+function onPreviewPointerDown(item: FurnitureObject, e: PointerEvent) {
+  if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || !activePreview.value || !canvasWindow.value) return
+  e.preventDefault()
+  const p = point(e)
+  selectedFurnitureIds.value = []
+  selectedId.value = null
+  moveProblem.value = ''
+  drag.value = { mode: 'preview-furniture', id: item.id, cx: p.x, cy: p.y, dx: 0, dy: 0 }
+  canvasWindow.value.setPointerCapture(e.pointerId)
+}
+
+function previewDragItem(item: FurnitureObject): FurnitureObject {
+  const d = drag.value
+  return d?.mode === 'preview-furniture' && d.id === item.id ? { ...item, x: item.x + (d.dx || 0), y: item.y + (d.dy || 0) } : item
+}
+
 function onPointerDown(e: PointerEvent) {
   if (e.button !== 0 || !canvasWindow.value) return
   const target = e.target as HTMLElement
@@ -1083,6 +1103,25 @@ function onPointerMove(e: PointerEvent) {
     } else dragSnapGuides.value = { x: null, y: null }
     const candidates = furniture.value.filter(item => ids.has(item.id)).map(item => ({ ...item, x: item.x + d.dx!, y: item.y + d.dy! }))
     moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, furniture.value) || ''
+  } else if (d.mode === 'preview-furniture' && d.id && activePreview.value && designZone.value) {
+    const p = point(e)
+    d.dx = p.x - (d.cx || 0)
+    d.dy = p.y - (d.cy || 0)
+    const previewAll = activePreview.value.furniture
+    const anchor = previewAll.find(item => item.id === d.id)
+    if (anchor && snapEnabled.value) {
+      const fp = officeFurnitureFootprint(anchor)
+      const others = [
+        ...displayedFurniture.value.map(officeFurnitureFootprint),
+        ...previewAll.filter(item => item.id !== d.id).map(officeFurnitureFootprint),
+      ]
+      const snapped = snapFurnitureEdges({ x: fp.x + d.dx, y: fp.y + d.dy, w: fp.w, h: fp.h }, designZone.value, others, FURNITURE_SNAP_TOLERANCE_MM)
+      d.dx = snapped.x - fp.x
+      d.dy = snapped.y - fp.y
+      dragSnapGuides.value = { x: snapped.guideX, y: snapped.guideY }
+    } else dragSnapGuides.value = { x: null, y: null }
+    const candidates = previewAll.map(item => item.id === d.id ? { ...item, x: item.x + d.dx!, y: item.y + d.dy! } : item)
+    moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, [...displayedFurniture.value, ...previewAll]) || ''
   } else if (d.mode === 'channel' && d.channelId) {
     const p = point(e)
     let dx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
@@ -1282,6 +1321,13 @@ function onPointerUp(e: PointerEvent) {
   } else if (d.mode === 'furniture' && d.ids?.length && store.designZoneId) {
     const dx = d.dx || 0, dy = d.dy || 0
     if (dx || dy) moveProblem.value = store.moveFurnitureGroup(d.ids, store.designZoneId, dx, dy) || ''
+  } else if (d.mode === 'preview-furniture' && d.id && activePreview.value) {
+    // 预览拖动不触碰已排版家具，只把调整后的位置写回预览模型，应用组合时生效。
+    const dx = d.dx || 0, dy = d.dy || 0
+    if (dx || dy) {
+      const preview = activePreview.value
+      layoutPreview.value = { ...preview, furniture: preview.furniture.map(item => item.id === d.id ? { ...item, x: Math.round(item.x + dx), y: Math.round(item.y + dy) } : item) }
+    }
   } else if (d.mode === 'channel' && d.channelId && store.designZoneId) {
     // 拖动只改垂直轴向位置；松手一次性提交，走 store 的失效与撤销路径。
     if (d.dx) {
@@ -1971,9 +2017,12 @@ function furnitureProduct(o: FurnitureObject) {
 
       <div v-if="mode === 'design' && activePreview" class="absolute inset-0 pointer-events-none" data-testid="layout-plan-preview">
         <template v-for="item in activePreview.furniture" :key="'activity-' + item.id">
-          <div v-if="chairActivityRect(item, activePreview.seatClearanceMm)" :style="{ position: 'absolute', left: chairActivityRect(item, activePreview.seatClearanceMm)?.x + 'px', top: chairActivityRect(item, activePreview.seatClearanceMm)?.y + 'px', width: chairActivityRect(item, activePreview.seatClearanceMm)?.w + 'px', height: chairActivityRect(item, activePreview.seatClearanceMm)?.h + 'px', border: `${1 / store.zoom}px dotted #306fcb`, opacity: 0.35 }" />
+          <div v-if="chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)" :style="{ position: 'absolute', left: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.x + 'px', top: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.y + 'px', width: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.w + 'px', height: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.h + 'px', border: `${1 / store.zoom}px dotted #306fcb`, opacity: 0.35 }" />
         </template>
-        <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id" class="absolute opacity-50" :style="{ ...furnitureStyle(item), outline: `${1.5 / store.zoom}px dashed #306fcb` }">
+        <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id" class="absolute opacity-50"
+          :class="tool === 'select' ? 'pointer-events-auto cursor-move' : 'pointer-events-none'"
+          :style="{ ...furnitureStyle(previewDragItem(item)), outline: `${1.5 / store.zoom}px dashed ${drag?.mode === 'preview-furniture' && drag.id === item.id && moveProblem ? '#c45c4c' : '#306fcb'}` }"
+          @pointerdown.stop="onPreviewPointerDown(item, $event)">
           <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(item)!" :width-mm="item.w" :depth-mm="item.h" :wing-width-mm="item.wingWidthMm" :stroke-scale="1 / store.zoom" :show-seat="officeFurnitureShowsSeat(item)" />
         </div>
       </div>

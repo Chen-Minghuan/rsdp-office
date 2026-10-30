@@ -6,6 +6,8 @@ import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
+/** 画布上实时（可能已被用户拖动调整）的组合预览，应用时需以它为准覆盖生成位置。 */
+defineProps<{ currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
 const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void; applyAutoLayout: () => void }
@@ -138,8 +140,8 @@ function clearAutomaticLayout() {
     </template>
 
     <div v-show="!collapsed" class="flex min-h-0 flex-1 flex-col">
-      <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" :category-ids="selectedCategories" @preview="emit('preview', $event)" />
-      <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="selectedCatalogId" @preview="emit('preview', $event)" />
+      <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="emit('preview', $event)" />
+      <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="selectedCatalogId" :current-preview="currentPreview" @preview="emit('preview', $event)" />
       <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @navigate="activePage = 'auto'" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
       <OfficeCanvasDesignSidebar v-else embedded :selected-id="selectedId" />
     </div>

@@ -5,7 +5,7 @@ import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { defaultLayoutPreferences } from '~/utils/layoutPlanning'
 import { planMixedLayout, MIXED_LAYOUT_CATEGORIES, MIXED_CATEGORY_IDS } from '~/utils/mixedLayout'
 
-const props = defineProps<{ categoryIds: string[] }>()
+const props = defineProps<{ categoryIds: string[]; currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
 const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null] }>()
 const store = useOfficeStore()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
@@ -35,10 +35,18 @@ onUnmounted(() => emit('preview', null))
 function generate() {
   previewReady.value = true
 }
+/** 预览在家具 id 不变（未重新生成）时可能已被用户在画布上拖动，应用时以预览位置为准。 */
+function withPreviewPositions<T extends { furniture: FurnitureObject[]; candidates?: Array<{ furniture: FurnitureObject[] }> }>(base: T): T {
+  const live = props.currentPreview
+  if (!live || live.zoneId !== zone.value?.id || !live.furniture.length) return base
+  const positions = new Map(live.furniture.map(item => [item.id, item] as const))
+  const merge = (items: FurnitureObject[]) => items.map(item => positions.has(item.id) ? { ...item, x: positions.get(item.id)!.x, y: positions.get(item.id)!.y } : item)
+  return { ...base, furniture: merge(base.furniture), candidates: base.candidates?.map(candidate => ({ ...candidate, furniture: merge(candidate.furniture) })) }
+}
 function apply() {
   if (!zone.value || !activeProposal.value || activeProposal.value.problem || !previewReady.value) return
   const savedPreferences = { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(zone.value.layoutPreferences?.channels || [])) }
-  if (!store.applyMixedLayoutProposal(zone.value.id, activeProposal.value, savedPreferences, selectedCandidateIndex.value)) { applicationMessage.value = '当前空间或家具已变化，请重新生成组合'; return }
+  if (!store.applyMixedLayoutProposal(zone.value.id, withPreviewPositions(activeProposal.value), savedPreferences, selectedCandidateIndex.value)) { applicationMessage.value = '当前空间或家具已变化，请重新生成组合'; return }
   applicationMessage.value = `已生成 ${activeProposal.value.furniture.length} 件家具的组合布局，可在产品选型中继续调整`
 }
 </script>
