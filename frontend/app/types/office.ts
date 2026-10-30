@@ -8,6 +8,13 @@ export type ZoneType =
   | 'EXECUTIVE_OFFICE'
   | 'RECEPTION'
   | 'COLLABORATION'
+  | 'TRAINING_ROOM'
+  | 'PHONE_BOOTH'
+  | 'PANTRY'
+  | 'PRINT_AREA'
+  | 'STORAGE'
+  | 'SERVER_ROOM'
+  | 'CORRIDOR'
   | 'OTHER'
 
 /** 设计复核确认（SPACE_REVIEW）；凭据由服务端签发，普通保存不能伪造。 */

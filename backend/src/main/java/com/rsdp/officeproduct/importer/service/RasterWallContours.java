@@ -17,7 +17,8 @@ import java.util.*;
 
 /** Conservative, axis-aligned raster wall grounding; never a replacement for CAD parsing or scale calibration. */
 final class RasterWallContours {
-    private static final Set<String> ENCLOSED = Set.of("EXECUTIVE_OFFICE", "MEETING_ROOM", "KITCHEN", "BATHROOM", "STUDY");
+    private static final Set<String> ENCLOSED = Set.of("EXECUTIVE_OFFICE", "MEETING_ROOM", "KITCHEN", "BATHROOM", "STUDY",
+        "TRAINING_ROOM", "PHONE_BOOTH", "STORAGE", "SERVER_ROOM");
     private record Region(int id, int size, List<List<Double>> ring) {}
 
     static ObjectNode refine(JsonNode initial, VisionImagePreparer.PreparedImage page, ObjectMapper mapper, SpatialGeometryService geometry) {

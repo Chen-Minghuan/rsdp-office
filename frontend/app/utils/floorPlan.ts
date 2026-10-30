@@ -52,7 +52,15 @@ export function mapRoomType(roomType: string): ZoneType {
     RECEPTION: 'RECEPTION',
     COLLABORATION: 'COLLABORATION',
     LOUNGE: 'COLLABORATION',
-    HALLWAY: 'OTHER',
+    TRAINING_ROOM: 'TRAINING_ROOM',
+    PHONE_BOOTH: 'PHONE_BOOTH',
+    PANTRY: 'PANTRY',
+    KITCHEN: 'PANTRY',
+    PRINT_AREA: 'PRINT_AREA',
+    STORAGE: 'STORAGE',
+    SERVER_ROOM: 'SERVER_ROOM',
+    CORRIDOR: 'CORRIDOR',
+    HALLWAY: 'CORRIDOR',
     OTHER: 'OTHER',
   }
   return map[roomType] || 'OTHER'

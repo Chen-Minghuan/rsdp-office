@@ -40,7 +40,8 @@ public class QwenVisionClient {
     private final VisionTaskExecutors executors;
 
     private static final Set<String> ROOM_TYPES = Set.of("OPEN_OFFICE", "MEETING_ROOM", "RECEPTION",
-        "EXECUTIVE_OFFICE", "COLLABORATION", "LOUNGE", "KITCHEN", "BATHROOM", "HALLWAY", "STUDY", "OTHER");
+        "EXECUTIVE_OFFICE", "COLLABORATION", "LOUNGE", "KITCHEN", "BATHROOM", "HALLWAY", "STUDY",
+        "TRAINING_ROOM", "PHONE_BOOTH", "PANTRY", "PRINT_AREA", "STORAGE", "SERVER_ROOM", "CORRIDOR", "OTHER");
 
     private void validateConfiguration() {
         if (!StringUtils.hasText(properties.getApiKey())) {
@@ -216,7 +217,7 @@ public class QwenVisionClient {
             开放办公、门厅、走道、吧区和休闲区分别判断可见功能边界，候选confidence为low，不能只在文字周围圈小框，也不能合并为覆盖整层的大框。
             独立隔墙围合的房间分别输出，重复房名逐处输出；未命名但可辨认的空间label为null。家具设备、钢琴、文件柜、展柜、空调外机、门禁和材料做法标注不能单独作为空间。
             polygon的每个元素必须恰好是两个数[x,y]的顶点，禁止输出[x1,y1,x2,y2]线段；至少3个不同顶点，不重复末尾起点，不自交；边界不确定仍保留有依据的初始候选并在warnings指出，不编造可靠墙线。
-            label只逐字读取房间或功能区名称，不能确定则null；roomType为OPEN_OFFICE、MEETING_ROOM、RECEPTION、EXECUTIVE_OFFICE、COLLABORATION、LOUNGE、KITCHEN、BATHROOM、HALLWAY、STUDY或OTHER。
+            label只逐字读取房间或功能区名称，不能确定则null；roomType为OPEN_OFFICE、MEETING_ROOM、RECEPTION、EXECUTIVE_OFFICE、COLLABORATION、LOUNGE、KITCHEN、BATHROOM、HALLWAY、STUDY、TRAINING_ROOM、PHONE_BOOTH、PANTRY、PRINT_AREA、STORAGE、SERVER_ROOM、CORRIDOR或OTHER。
             confidence为high/mid/low；dimensionText只逐字记录清晰印刷的尺寸或面积文字，无法读取则null。
             不猜测物理尺寸、比例或面积；不生成widthMm、depthMm、areaM2。孔洞、柱、分区疑点及未识别区域写入warnings字符串数组。
             图中没有可识别空间时输出rooms空数组并说明原因，禁止编造默认房间。

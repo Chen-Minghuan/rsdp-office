@@ -387,6 +387,14 @@ function roomTypeText(type?: string) {
     RECEPTION: '接待区',
     EXECUTIVE_OFFICE: '高管办公室',
     LOUNGE: '休闲区',
+    COLLABORATION: '协作区',
+    TRAINING_ROOM: '培训室',
+    PHONE_BOOTH: '电话间',
+    PANTRY: '茶水间',
+    PRINT_AREA: '打印区',
+    STORAGE: '储藏室',
+    SERVER_ROOM: '机房',
+    CORRIDOR: '走廊通道',
   }
   return type ? (map[type] || type) : '未命名空间'
 }
@@ -408,6 +416,18 @@ function mapRoomTypeToZoneType(roomType?: string): ZoneType {
     case 'COLLABORATION':
     case 'LOUNGE':
       return 'COLLABORATION'
+    case 'TRAINING_ROOM':
+    case 'PHONE_BOOTH':
+    case 'PANTRY':
+    case 'PRINT_AREA':
+    case 'STORAGE':
+    case 'SERVER_ROOM':
+    case 'CORRIDOR':
+      return roomType
+    case 'KITCHEN':
+      return 'PANTRY'
+    case 'HALLWAY':
+      return 'CORRIDOR'
     default:
       return 'OTHER'
   }
