@@ -118,6 +118,62 @@ class OfficeLayoutValidationPolicyTest {
         ((ObjectNode) objects.get(1)).put("layoutConfirmed", false);
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
     }
+    /** GEOM-016 布置区夹具：canvasRect 为画布坐标（Y 向下），polygonMm 存世界毫米 Y 向上。 */
+    private ObjectNode addLayoutRegion(ArrayNode objects, String id, boolean enabled, double x, double y, double w, double h) {
+        return addLayoutRegionRing(objects, id, enabled, new double[][]{{x, -y}, {x + w, -y}, {x + w, -(y + h)}, {x, -(y + h)}});
+    }
+    private ObjectNode addLayoutRegionRing(ArrayNode objects, String id, boolean enabled, double[][] worldRing) {
+        ObjectNode zone = (ObjectNode) objects.get(0);
+        if (!zone.has("layoutRegions")) zone.putArray("layoutRegions");
+        ObjectNode region = ((ArrayNode) zone.path("layoutRegions")).addObject();
+        region.put("regionId", id).put("spaceId", "R").put("name", id).put("enabled", enabled).put("visible", true);
+        ArrayNode polygon = region.putArray("polygonMm");
+        for (double[] point : worldRing) polygon.addArray().add(point[0]).add(point[1]);
+        return region;
+    }
+    @Test void rejectsConfirmedFurnitureOutsideEnabledLayoutRegions() throws Exception {
+        ArrayNode objects = scene();
+        addLayoutRegion(objects, "RG-1", true, 4000, 4000, 3000, 1500);
+        BusinessException error = assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        assertEquals("已确认家具超出已启用的家具布置区", error.getMessage());
+        ((ObjectNode) objects.get(1)).put("x", 4200).put("y", 4200);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects), "家具移入布置区后可保存");
+    }
+    @Test void disabledLayoutRegionsKeepWholeRoomPlacement() throws Exception {
+        ArrayNode objects = scene();
+        addLayoutRegion(objects, "RG-1", false, 4000, 4000, 3000, 1500);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects), "停用布置区不影响旧的全房间行为");
+    }
+    @Test void layoutRegionsUnionIsPolygonNotBoundingBox() throws Exception {
+        // 两个不相交区域：并集不得合并为矩形包围盒，两区之间的位置必须拒绝。
+        ArrayNode objects = scene();
+        addLayoutRegion(objects, "RG-1", true, 500, 500, 2000, 1500);
+        addLayoutRegion(objects, "RG-2", true, 5500, 4000, 2000, 1500);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects), "两区之间（包围盒内）不可排");
+        ((ObjectNode) objects.get(1)).put("x", 5600).put("y", 4100).put("w", 1400).put("h", 800);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+    @Test void concaveLayoutRegionNotchIsNotPlaceable() throws Exception {
+        // 凹形（L 形）布置区：缺口处不可排（包围盒会错误放行）。
+        ArrayNode objects = scene();
+        addLayoutRegionRing(objects, "RG-L", true, new double[][]{{0, 0}, {4000, 0}, {4000, -2000}, {2000, -2000}, {2000, -4000}, {0, -4000}});
+        ((ObjectNode) objects.get(1)).put("x", 2500).put("y", 2500);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects), "L 形缺口处不可排");
+        ((ObjectNode) objects.get(1)).put("x", 100).put("y", 100);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+    @Test void malformedLayoutRegionsAreSkippedNotRejected() throws Exception {
+        // 畸形启用区（点数不足）被跳过：等效于无布置区，不因标注数据拒绝整稿保存。
+        ArrayNode objects = scene();
+        ObjectNode region = addLayoutRegion(objects, "RG-BAD", true, 4000, 4000, 3000, 1500);
+        ((ArrayNode) region.path("polygonMm")).removeAll();
+        region.putArray("polygonMm").addArray().add(1).add(1);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        // 归属其他空间的区域同样不参与本空间计算。
+        ArrayNode other = scene();
+        addLayoutRegion(other, "RG-X", true, 4000, 4000, 3000, 1500).put("spaceId", "ELSEWHERE");
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(other));
+    }
     @Test void allowsChairActivityAndWallMarginWarnings() throws Exception {
         ArrayNode objects = scene();
         ((ObjectNode) objects.get(0).path("layoutPreferences")).put("seatClearanceMm", 400);

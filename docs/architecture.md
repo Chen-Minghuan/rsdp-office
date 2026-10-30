@@ -1,6 +1,6 @@
 # 架构与空间数据契约
 
-更新日期：2026-10-26。本文区分当前实现与后续目标契约；新增目标字段和模型不代表现有 API 已支持。
+更新日期：2026-10-30。本文区分当前实现与后续目标契约；新增目标字段和模型不代表现有 API 已支持。
 业务依据见 [产品需求](product-requirements.md)，迁移差距见 [进度表](status.md)。
 首期 PDF/PNG 闭环的详细设计见 [Spatial 架构](../Spatial_Canvas_Engine_空间解析编辑与无限画布系统架构设计_V1.1.md)、[数据协议](../Spatial_Scene_数据协议规范_V1.0.md)与[实施方案](../Spatial_Canvas_Engine_前后端开发实施方案_V1.0.md)。
 编码前固定的规则见 [几何](spatial/geometry-rules.md)、[接口/存储](spatial/api-storage-contract.md)、[确认失效](spatial/confirmation-rules.md)和[真实样本](spatial/recognition-validation.md)四份附件。
@@ -161,6 +161,10 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 2026-10-26 校核预警分级（LAYOUT-035）：`layoutPanelWarnings` 统一产出分级提示——红=会被确认/应用拒绝（方案无法排出、座位不足目标），黄=低于策略阈值（通道宽度 900mm、入口衔接/截断 600mm、人均面积 2.0㎡/座、边缘补位），info=未核验/现场核验说明；黄/红附修改建议，全部数值为策略值非规范。023/029 提示迁入同一展示位并保留旧 testid（`layoutWarningTestId`），`channelEgressIssues` 提供结构化分级出口；净面积统一走 `zoneNetAreaMm2`（与 034 候选指标同源）。硬校验拒绝语义不变，后端不接入。见 [LAYOUT-035](tasks/LAYOUT-035-warning-levels-and-advice.md)。
 
 2026-10-26 多方案候选（LAYOUT-034）：`planLayoutProposal` 返回 `candidates` Top 3（`LAYOUT_CANDIDATE_TOP_N`），课桌式网格经 `OfficeLayoutPlan.alternates` 暴露 auto 内部评估过的朝向/对齐变体，会议枚举尺寸×朝向×位置；候选按 `layoutCandidateScore` 降序——目标达成 1000 分/座封顶于目标、超出 1 分/座、未指定目标按容量，并列保持生成顺序（既有默认方案不漂移），面积利用率/人均余量只展示不参与排序；家具集合签名去重（方形家具归一化旋转角）。面板以 `layoutCandidateKey` 签名跟随选中候选，应用时 `applyLayoutProposal` 重算并按候选索引取用，预览不落库与应用/失效语义不变。评分权重与指标均为策略值，非规范，见 [LAYOUT-034](tasks/LAYOUT-034-candidate-scheme-comparison.md)。
+
+2026-10-30 家具布置区（GEOM-016）：ZoneObject 增加可选 `layoutRegions` 数组（`LayoutRegion`：regionId/spaceId/name/polygonMm/isPrimary/visible/enabled/wallOffsetsMm），随画布 JSON 持久化，旧画布无该字段一律按空数组、严禁自动创建。polygonMm 为世界毫米 Y 向上（与障碍 `geometry.outer` 同一约定），画布换算用 `layoutRegionRing`/`layoutRegionWorldRing`。有效可排区 `allowedPlacementAreas` 三分支：无启用区返回 null（旧全房间行为）、启用区并集 ∩ 空间净轮廓为空返回 []（当前不可排）、否则返回多块/带孔多边形（polygon-clipping 并集，绝不退化为包围盒）；visible 绝不参与计算，硬禁放区/门洞净空/通道仍由既有机制另行扣除。同空间最多一个 isPrimary（`sanitizeLayoutRegions` 收敛），删除主区时首个剩余区自动升主；绘制/移动/顶点提交经 `saveZoneLayoutRegion` 完整校验（自交/退化/越界拒绝落库），列表操作经 `updateZoneLayoutRegions`（启用集合或多边形签名实际变化才使本空间排版确认失效，不改空间复核确认——reviewConfirmation 白名单不含 layoutRegions）；空间几何变化造成的越界/畸形区域保留并由 UI 标记「需人工修复」，不静默裁切。每条边长度与距墙为只读量测（外法线射线），不用于几何内缩。服务端 `OfficeLayoutValidationPolicy` 对已确认家具核验同一语义（Area 并集∩房间，多边形非包围盒；畸形/归属不符区域跳过不拒存）。手动放置、自动排版 `planLayoutProposal` 与组合布局 `planMixedLayout` 共用 `allowedPlacementAreas`/`ringWithinPlacementAreas`。无数据库迁移（objects_json jsonb 透传）。见 [GEOM-016](tasks/GEOM-016-layout-boundary.md)。
+
+2026-10-30 设施/点位标注（GEOM-018）：ZoneObject 增加可选 `facilities` 数组（`SpatialFacility`：facilityId/kind/spaceId/shape/pointsMm/sizeMm/clearanceMm/visible 等），与障碍分开建模——点位型（POWER_OUTLET/DATA_OUTLET）、线型（SKIRTING）、占用型（FIRE_FACILITY/ELECTRICAL_BOX），不混入矩形障碍模型。默认语义全部为标注与提示：不扣净面积、不进入 `zoneLayoutExclusions`、不参与排版硬阻断；占用型操作净空 `clearanceMm` 必须来自人工标注（净空环为占地包围盒外扩，诚实标注），缺省只提示；需要实际禁放时另建 NO_PLACEMENT 障碍。pointsMm 为世界毫米 Y 向上；`saveZoneFacility` 校验通过才落库且不失效排版确认；`facilityLayoutHints` 提供提示级排版提醒（踢脚线只承担全局提醒）。服务端无改动（jsonb 透传、不参与确认核验），无数据库迁移。见 [GEOM-018](tasks/GEOM-018-spatial-facilities.md)。
 
 ## 6. 几何约束与版本失效
 

@@ -36,6 +36,8 @@
     "test:layout-planning": "node scripts/test-layout-planning.mjs",
     "test:layout-channels": "node scripts/test-layout-channels.mjs",
     "test:space-boolean": "node scripts/test-space-boolean.mjs",
+    "test:layout-regions": "node scripts/test-layout-regions.mjs",
+    "test:layout-facilities": "node scripts/test-layout-facilities.mjs",
     "test:obstacle-window": "node scripts/test-obstacle-window.mjs",
     "test:mixed-layout": "node scripts/test-mixed-layout.mjs",
     "e2e:layout-planning": "node scripts/e2e-layout-planning.mjs",
@@ -46,7 +48,8 @@
     "e2e:module-selection": "node scripts/e2e-module-selection.mjs",
     "test:layout-references": "node scripts/test-layout-references.mjs",
     "e2e:layout-references": "node scripts/e2e-layout-references.mjs",
-    "e2e:project-floors": "node scripts/e2e-project-floors.mjs"
+    "e2e:project-floors": "node scripts/e2e-project-floors.mjs",
+    "e2e:layout-regions": "node scripts/e2e-layout-regions.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

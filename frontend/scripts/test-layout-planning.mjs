@@ -8,6 +8,10 @@ async function load(path) {
   const imports = [...source.matchAll(/(?:from\s*|import\s*)['"]([^'"]+)['"]/g)]
   for (const match of imports) {
     const spec = match[1]
+    if (spec === 'polygon-clipping') {
+      source = source.replaceAll(`'${spec}'`, `'${new URL('../node_modules/polygon-clipping/dist/polygon-clipping.esm.js', import.meta.url).href}'`)
+      continue
+    }
     if (!spec.startsWith('.') && !spec.startsWith('~/')) continue
     const resolved = new URL((spec.startsWith('~/') ? '../app/' + spec.slice(2) : spec) + (spec.endsWith('.ts') ? '' : '.ts'), spec.startsWith('~/') ? import.meta.url : path)
     source = source.replaceAll(`'${spec}'`, `'${await load(resolved)}'`)

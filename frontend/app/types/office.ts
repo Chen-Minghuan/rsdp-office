@@ -64,6 +64,10 @@ export interface ZoneObject {
   mmPerSourceUnit?: number
   evidenceKind?: 'DEMO' | 'REAL_SERVICE' | 'MANUAL' | 'ESTIMATED'
   obstacles?: import('./spatial').SpatialObstacle[]
+  /** 正向家具布置区（GEOM-016）；缺省=无布置区，维持全房间可排布。 */
+  layoutRegions?: import('./spatial').LayoutRegion[]
+  /** 设施/点位标注（GEOM-018）；提示用途，不参与硬校验与净面积。 */
+  facilities?: import('./spatial').SpatialFacility[]
   layoutPreferences?: import('./layoutPlanning').LayoutPreferences
 }
 

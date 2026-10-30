@@ -29,6 +29,9 @@ public final class OfficeLayoutValidationPolicy {
             }
             ring.closePath();
             Area room = new Area(ring);
+            // GEOM-016：有启用布置区时，已确认家具必须完整落在「启用区并集 ∩ 空间」内（与前端 allowedPlacementAreas 等价，多边形而非包围盒）。
+            boolean hasLayoutRegions = hasEnabledLayoutRegions(zone);
+            Area placementArea = hasLayoutRegions ? allowedPlacementArea(zone, room) : room;
             List<Rectangle2D.Double> bounds = furniture.stream().map(OfficeLayoutValidationPolicy::footprint).toList();
             List<Area> exclusions = new ArrayList<>();
             JsonNode preferences = zone.path("layoutPreferences");
@@ -44,8 +47,8 @@ public final class OfficeLayoutValidationPolicy {
             for (int i = 0; i < furniture.size(); i++) {
                 JsonNode item = furniture.get(i);
                 if (!item.path("layoutConfirmed").asBoolean()) continue;
-                Area outside = new Area(bounds.get(i)); outside.subtract(room);
-                if (!outside.isEmpty()) throw new BusinessException("已确认家具超出空间轮廓");
+                Area outside = new Area(bounds.get(i)); outside.subtract(placementArea);
+                if (!outside.isEmpty()) throw new BusinessException(hasLayoutRegions ? "已确认家具超出已启用的家具布置区" : "已确认家具超出空间轮廓");
                 // 座椅侧净空与椅子活动区仅作前端复核提示，不阻止确认保存。
                 for (Area area : exclusions) if (overlaps(bounds.get(i), area)) throw new BusinessException("已确认家具占用了入口或禁放区");
                 for (Rectangle2D.Double band : channelBands) if (bounds.get(i).intersects(band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
@@ -119,6 +122,45 @@ public final class OfficeLayoutValidationPolicy {
             }
         }
         return bands;
+    }
+    /**
+     * GEOM-016 布置区（与前端 layoutRegions.ts 等价）：zone.layoutRegions 中 enabled=true、归属本空间且
+     * 多边形有效（≥3 点、坐标有限）的区域参与计算；polygonMm 为世界毫米 Y 向上，取负转到画布坐标与 room 一致。
+     * 畸形/越界区域跳过——绘制端由前端拒绝落库，服务端只对有效区做排版对称校验，不因标注数据拒绝整稿保存。
+     */
+    private static boolean hasEnabledLayoutRegions(JsonNode zone) {
+        for (JsonNode region : zone.path("layoutRegions")) {
+            if (region.path("enabled").asBoolean() && zone.path("id").asText().equals(region.path("spaceId").asText()) && regionArea(region) != null) return true;
+        }
+        return false;
+    }
+    private static Area allowedPlacementArea(JsonNode zone, Area room) {
+        Area union = null;
+        for (JsonNode region : zone.path("layoutRegions")) {
+            if (!region.path("enabled").asBoolean() || !zone.path("id").asText().equals(region.path("spaceId").asText())) continue;
+            Area area = regionArea(region);
+            if (area == null) continue;
+            if (union == null) union = area; else union.add(area);
+        }
+        if (union == null) return room;
+        union.intersect(room);
+        return union;
+    }
+    /** 区域多边形 → Area（y 取负到画布坐标）；无效返回 null（跳过而非拒存）。 */
+    private static Area regionArea(JsonNode region) {
+        JsonNode polygon = region.path("polygonMm");
+        if (!polygon.isArray() || polygon.size() < 3) return null;
+        Path2D.Double path = new Path2D.Double();
+        for (int index = 0; index < polygon.size(); index++) {
+            JsonNode point = polygon.get(index);
+            if (!point.isArray() || point.size() != 2 || !point.get(0).isNumber() || !point.get(1).isNumber()) return null;
+            double x = point.get(0).asDouble(), y = -point.get(1).asDouble();
+            if (!Double.isFinite(x) || !Double.isFinite(y)) return null;
+            if (index == 0) path.moveTo(x, y); else path.lineTo(x, y);
+        }
+        path.closePath();
+        if (path.getBounds2D().getWidth() <= 0 || path.getBounds2D().getHeight() <= 0) return null;
+        return new Area(path);
     }
     private static Area obstacleArea(JsonNode obstacle) {
         JsonNode outer = obstacle.path("geometry").path("outer");

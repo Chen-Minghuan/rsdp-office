@@ -18,6 +18,7 @@ const uuidUrl = await moduleUrl('../app/utils/uuid.ts')
 const obstaclesUrl = await moduleUrl('../app/utils/spatial/obstacles.ts', { './geometry': geometryUrl, '~/utils/uuid': uuidUrl })
 const reviewUrl = await moduleUrl('../app/utils/spatial/review.ts', { '~/utils/spatial/geometry': geometryUrl, './obstacles': obstaclesUrl })
 const constraintsUrl = await moduleUrl('../app/utils/layoutConstraints.ts', { './spatial/review': reviewUrl })
+const regionsUrl = await moduleUrl('../app/utils/spatial/layoutRegions.ts', { 'polygon-clipping': new URL('../node_modules/polygon-clipping/dist/polygon-clipping.esm.js', import.meta.url).href, './review': reviewUrl })
 const { planMixedLayout } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
   './manualFurniture': manualUrl,
   './officeCanvasView': canvasViewUrl,
@@ -26,6 +27,7 @@ const { planMixedLayout } = await import(await moduleUrl('../app/utils/mixedLayo
   './layoutConstraints': constraintsUrl,
   './layoutChannels': channelsUrl,
   './spatial/geometry': geometryUrl,
+  './spatial/layoutRegions': regionsUrl,
 }))
 const spacing = { wallMm: 0, aisleMm: 900, gapMm: 300 }
 const zone = { id: 'MIXED', kind: 'zone', name: '组合空间', x: 0, y: 0, w: 12000, h: 8000, reviewUnit: 'mm', polygon: [[0,0],[12000,0],[12000,8000],[0,8000]] }

@@ -124,6 +124,54 @@ export interface SpatialSceneSnapshot {
 
 export type SpatialObstacleKind = 'COLUMN' | 'SHAFT' | 'NO_PLACEMENT' | 'DOOR_CLEARANCE' | 'WINDOW' | 'OTHER'
 
+/**
+ * 正向家具布置区（GEOM-016）：独立于空间轮廓与障碍物（obstacles）的可选对象。
+ * polygonMm 为世界毫米、Y 向上，与 SpatialObstacle.geometry.outer 同一约定；
+ * 渲染/画布交互时按 zone.reviewUnit 取反 Y（同 obstacleRing）。
+ * 同空间最多一个 isPrimary=true；没有启用区时维持旧的全房间可排布行为。
+ */
+export interface LayoutRegion {
+  regionId: string
+  spaceId: string
+  name: string
+  polygonMm: Array<[number, number]>
+  /** 主布置区只用于优先布局/聚焦展示，不代表其他启用区被禁止。 */
+  isPrimary: boolean
+  /** 显隐只影响渲染，绝不改变几何计算与家具可排区。 */
+  visible: boolean
+  /** 启用才参与有效可排区计算；需有明确 UI 开关。 */
+  enabled: boolean
+  /** 每条边的距墙量测结果（只读展示；edgeIndex 对应 polygonMm 的边序号，由量测函数刷新，不用于几何内缩）。 */
+  wallOffsetsMm?: Array<{ edgeIndex: number; distanceMm: number }>
+}
+
+export type SpatialFacilityKind = 'FIRE_FACILITY' | 'ELECTRICAL_BOX' | 'SKIRTING' | 'POWER_OUTLET' | 'DATA_OUTLET'
+
+/**
+ * 设施/点位标注（GEOM-018）：与障碍物分开建模——
+ * 点位型（POWER_OUTLET/DATA_OUTLET，shape=point）、线型（SKIRTING，shape=polyline）、占用型（FIRE_FACILITY/ELECTRICAL_BOX，shape=polygon）。
+ * 统一语义：标注与提示用途，不参与排版硬阻断、不扣净面积（excludesFloorArea 恒为 false 的语义等价物）；
+ * 占用型的操作净空 clearanceMm 必须来自人工标注，缺省只提示；需要实际禁放时应另建 NO_PLACEMENT 障碍。
+ * pointsMm 为世界毫米、Y 向上（同障碍物约定）：point=1 点（中心）；polyline=≥2 点；polygon=≥3 点单外环。
+ */
+export interface SpatialFacility {
+  facilityId: string
+  kind: SpatialFacilityKind
+  spaceId: string
+  name?: string
+  shape: 'point' | 'polyline' | 'polygon'
+  pointsMm: Array<[number, number]>
+  /** 点位/占用型的占地尺寸（渲染与净空提示用；不用于扣减面积）。 */
+  sizeMm?: { widthMm: number; depthMm: number }
+  rotationDeg?: number
+  /** 人工标注的操作净空毫米（仅占用型）；缺省仅提示不阻断，不得虚构消防规范数值。 */
+  clearanceMm?: number
+  /** 显隐只影响渲染。 */
+  visible: boolean
+  source?: 'MANUAL' | 'CAD_GEOMETRY' | 'AI_VISION'
+  note?: string
+}
+
 export interface SpatialObstacle {
   obstacleId: string
   kind: SpatialObstacleKind

@@ -6,6 +6,7 @@ import { officeFurnitureFootprint, officePlacementHardProblem, officePlacementSo
 import { canvasZoneBounds } from './officeCanvasView'
 import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
 import { zoneLayoutExclusions } from './spatial/obstacles'
+import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
 import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects, validateChannels } from './layoutChannels'
 import { zoneNetAreaMm2 } from './layoutWarnings'
@@ -124,6 +125,12 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   }
   const channelProblem = channels.length ? validateChannels(zone, channels) : null
   if (channelProblem) return { ...result, problem: channelProblem }
+  // GEOM-016：有启用布置区时，自动排版把「启用区并集 ∩ 空间」当作可排轮廓（多边形，非包围盒）。
+  const placementAreas = allowedPlacementAreas(zone)
+  if (placementAreas !== null && !placementAreas.length) return { ...result, problem: '启用的布置区与空间没有可排布交集，请调整布置区' }
+  const insideLayout = (rect: { x: number; y: number; w: number; h: number }) => placementAreas === null
+    ? layoutRectInsideRing(rect, zone.polygon!)
+    : ringWithinPlacementAreas(placementAreas, [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]])
   const bounds = canvasZoneBounds(zone)
   // 课桌式网格由 planOfficeFurniture 原生切段排版，通道不进 blockers（否则首排豁免和贴边落子会被间距规则误杀）；
   // 会议/职员桌等排布把通道作为硬阻挡并入既有避障。
@@ -132,7 +139,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   const valid = (item: FurnitureObject, peers: FurnitureObject[], wall = spacing.wallMm, clearance = 0) => {
     const footprint = officeFurnitureFootprint(item)
     const expanded = { x: footprint.x - wall, y: footprint.y - wall, w: footprint.w + wall * 2, h: footprint.h + wall * 2 }
-    return layoutRectInsideRing(expanded, zone.polygon!) && !blockers.some(b => rectOverlapsBlocker(footprint, b, Math.max(spacing.gapMm, clearance)))
+    return insideLayout(expanded) && !blockers.some(b => rectOverlapsBlocker(footprint, b, Math.max(spacing.gapMm, clearance)))
       && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
   }
   // Adaptive workstation entries are checked like the planner: the wall
@@ -141,7 +148,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   const seatCorner = workstationSeatCorner(request.productStyleId)
   const validAdaptive = (entry: FurnitureObject, peers: FurnitureObject[]) => {
     const footprint = officeFurnitureFootprint(entry)
-    return layoutRectInsideRing(seatSideRect({ ...footprint, rotation: entry.rotation, mirrorX: entry.mirrorX }, seatWallClearance(spacing, seatOverhang), seatCorner), zone.polygon!)
+    return insideLayout(seatSideRect({ ...footprint, rotation: entry.rotation, mirrorX: entry.mirrorX }, seatWallClearance(spacing, seatOverhang), seatCorner))
       && !blockers.some(b => rectOverlapsBlocker(footprint, b, spacing.aisleMm))
       && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
   }

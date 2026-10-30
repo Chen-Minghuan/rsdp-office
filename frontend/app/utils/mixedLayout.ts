@@ -5,6 +5,8 @@ import { furnitureById } from './manualFurniture'
 import { canvasZoneBounds } from './officeCanvasView'
 import { layoutRectInsideRing } from './officeAutoLayout'
 import { zoneLayoutExclusions } from './spatial/obstacles'
+import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
+import type { PlacementArea } from './spatial/layoutRegions'
 import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects } from './layoutChannels'
 import { ringArea } from './spatial/geometry'
@@ -130,7 +132,7 @@ function bundleFurniture(bundle: Bundle, x: number, y: number, zoneId: string, s
   }))
 }
 
-function findPosition(bundle: Bundle, strategy: StrategyId, zone: ZoneObject, spacing: OfficeLayoutSpacing, taken: FurnitureObject[], blockers: ReturnType<typeof zoneLayoutExclusions>): { x: number; y: number } | null {
+function findPosition(bundle: Bundle, strategy: StrategyId, zone: ZoneObject, spacing: OfficeLayoutSpacing, taken: FurnitureObject[], blockers: ReturnType<typeof zoneLayoutExclusions>, placementAreas: PlacementArea[] | null): { x: number; y: number } | null {
   const bounds = canvasZoneBounds(zone)
   const wall = Math.max(0, spacing.wallMm), gap = Math.max(300, spacing.gapMm)
   const preferred = preferredPoint(bundle, strategy, bounds, wall)
@@ -143,9 +145,13 @@ function findPosition(bundle: Bundle, strategy: StrategyId, zone: ZoneObject, sp
   }
   positions.push({ ...preferred, distance: 0 })
   positions.sort((a, b) => a.distance - b.distance)
+  // GEOM-016：有启用布置区时按「启用区并集 ∩ 空间」判定可排位置（多边形，非包围盒）。
+  const insideLayout = (item: FurnitureObject) => placementAreas === null
+    ? layoutRectInsideRing(item, zone.polygon!)
+    : ringWithinPlacementAreas(placementAreas, [[item.x, item.y], [item.x + item.w, item.y], [item.x + item.w, item.y + item.h], [item.x, item.y + item.h]])
   for (const position of positions) {
     const candidates = bundleFurniture(bundle, position.x, position.y, zone.id, spacing, 0)
-    if (candidates.every(item => layoutRectInsideRing(item, zone.polygon!)
+    if (candidates.every(item => insideLayout(item)
       && !blockers.some(blocker => rectOverlapsBlocker(item, blocker))
       && !taken.some(other => overlaps(item, other, gap)))) return position
   }
@@ -168,6 +174,8 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
     ...zoneLayoutExclusions(zone),
     ...channelRects(zone, zone.layoutPreferences?.channels || []),
   ]
+  const placementAreas = allowedPlacementAreas(zone)
+  if (placementAreas !== null && !placementAreas.length) return { ...empty, furniture: [], label: '组合布局', problem: '启用的布置区与空间没有可排布交集，请调整布置区', warnings: [] }
   const retained = existing.filter(item => !replaceIds.includes(item.id))
   const candidates: PlacedCandidate[] = []
   for (const strategy of STRATEGIES) {
@@ -179,7 +187,7 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
       const count = categoryId === 'workstation' ? requests : 1
       let placed = 0
       for (let index = 0; index < count; index++) {
-        const position = findPosition(bundle, strategy.id, zone, spacing, taken, blockers)
+        const position = findPosition(bundle, strategy.id, zone, spacing, taken, blockers, placementAreas)
         if (!position) continue
         const items = bundleFurniture(bundle, position.x, position.y, zone.id, spacing, furniture.length)
         furniture.push(...items)

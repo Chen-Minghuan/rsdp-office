@@ -5,6 +5,7 @@ import { layoutRectInsideRing, seatSideRect } from '~/utils/officeAutoLayout'
 import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import { zoneLayoutExclusions } from './spatial/obstacles'
+import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
 import { rectOverlapsBlocker } from './layoutConstraints'
 
 export interface OfficeFurniturePlacement {
@@ -40,6 +41,13 @@ export function officePlacementHardProblem(zone: ZoneObject, candidate: Furnitur
     || candidate.w < 10 || candidate.h < 10 || spacing.wallMm < 0 || spacing.gapMm < 0) return '家具尺寸或间距无效'
   const footprint = officeFurnitureFootprint(candidate)
   if (!layoutRectInsideRing(footprint, zone.polygon || [])) return '此位置超出空间边界'
+  // GEOM-016：有启用布置区时，家具占地必须完整落在启用区并集 ∩ 空间内（多边形，非包围盒）。
+  const areas = allowedPlacementAreas(zone)
+  if (areas !== null) {
+    if (!areas.length) return '启用的布置区与空间没有可排布交集'
+    const ring: Array<[number, number]> = [[footprint.x, footprint.y], [footprint.x + footprint.w, footprint.y], [footprint.x + footprint.w, footprint.y + footprint.h], [footprint.x, footprint.y + footprint.h]]
+    if (!ringWithinPlacementAreas(areas, ring)) return '此位置超出已启用的家具布置区'
+  }
   for (const item of existing) {
     if (item.zoneId !== zone.id) continue
     const other = officeFurnitureFootprint(item), gap = spacing.gapMm, eps = 0.001

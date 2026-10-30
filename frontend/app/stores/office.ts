@@ -34,7 +34,7 @@ import type { OfficeFurniturePlacement } from '~/utils/officeManualPlacement'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
 import { geometryForZone, ringProblem, ringsOverlap, zoneProblem, zoneRing, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
-import { inferRectangleFrame, resizeRectangle, rotateRing } from '~/utils/spatial/geometry'
+import { inferRectangleFrame, polygonCentroid, resizeRectangle, rotateRing } from '~/utils/spatial/geometry'
 import { subtractRings, unionRings } from '~/utils/spatial/boolean'
 import type { SpaceTemplate } from '~/types/spaceTemplate'
 import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFromTemplate, templatePlan } from '~/utils/spatial/spaceTemplate'
@@ -42,8 +42,10 @@ import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import type { LayoutChannel, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
-import type { SpatialObstacle } from '~/types/spatial'
+import type { LayoutRegion, SpatialFacility, SpatialObstacle } from '~/types/spatial'
 import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } from '~/utils/spatial/obstacles'
+import { layoutRegionProblem, layoutRegionRing, measureLayoutRegionWallOffsets } from '~/utils/spatial/layoutRegions'
+import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilities'
 import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 
@@ -546,6 +548,10 @@ export const useOfficeStore = defineStore('office', {
         keep.confirmed = false
         keep.confirmedAt = undefined
         keep.obstacles = [...(keep.obstacles || []), ...(drop.obstacles || []).map(obstacle => ({ ...obstacle, spaceId: keep.id }))]
+        // 布置区/设施随空间并入（GEOM-016/018）；保留空间已有主区时被并入空间的主区降级，保证同空间最多一个主区。
+        const keepHasPrimary = (keep.layoutRegions || []).some(region => region.isPrimary)
+        keep.layoutRegions = [...(keep.layoutRegions || []), ...(drop.layoutRegions || []).map(region => ({ ...region, spaceId: keep.id, isPrimary: keepHasPrimary ? false : region.isPrimary }))]
+        keep.facilities = [...(keep.facilities || []), ...(drop.facilities || []).map(facility => ({ ...facility, spaceId: keep.id }))]
         this.objects.forEach(object => {
           if (object.kind !== 'zone' && object.zoneId === dropId) {
             object.zoneId = keepId
@@ -946,13 +952,26 @@ export const useOfficeStore = defineStore('office', {
         if (!ring) return obstacle
         return { ...obstacle, geometry: { ...obstacle.geometry, outer: ring.map(([x, y]): [number, number] => [x, y * factor]) } }
       })
+      // 布置区与设施标注随轮廓同步旋转（GEOM-016/018）；点位/线型无面积，改用绕空间质心的逐点旋转。
+      const layoutRegions = (zone.layoutRegions || []).map(region => {
+        const ring = rotateRing(layoutRegionRing(zone, region), angleDeg)
+        if (!ring) return region
+        return { ...region, polygonMm: ring.map(([x, y]): [number, number] => [x, y * factor]), wallOffsetsMm: undefined }
+      })
+      const centroid = polygonCentroid({ type: 'POLYGON', coordinateSystem: 'SOURCE_PAGE', outer: zoneRing(zone), outerVertexIds: [], holes: [], holeVertexIds: [] })
+      const rad = angleDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad)
+      const facilities = (zone.facilities || []).map(facility => {
+        if (!centroid) return facility
+        const points = facilityCanvasPoints(zone, facility).map(([x, y]): [number, number] => [centroid.x + (x - centroid.x) * cos - (y - centroid.y) * sin, centroid.y + (x - centroid.x) * sin + (y - centroid.y) * cos])
+        return { ...facility, pointsMm: points.map(([x, y]): [number, number] => [x, y * factor]) }
+      })
       if (zone.reviewUnit === 'mm') {
         const layoutProblem = zoneLayoutProblem({ ...zone, polygon, obstacles })
         if (layoutProblem) return layoutProblem
       }
       const bounds = polygonBoundsMm(polygon)!
       this.updateObject(id, {
-        polygon, obstacles, x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY,
+        polygon, obstacles, layoutRegions, facilities, x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY,
         actualWidthMm: zone.reviewUnit === 'mm' ? bounds.maxX - bounds.minX : undefined,
         actualDepthMm: zone.reviewUnit === 'mm' ? bounds.maxY - bounds.minY : undefined,
         geometrySource: 'manual_geometry',
@@ -989,6 +1008,69 @@ export const useOfficeStore = defineStore('office', {
       return true
     },
 
+    /** GEOM-016 布置区几何变化使本空间排版确认失效（不改空间复核确认，reviewConfirmation 由服务端快照管理）。 */
+    _invalidateZoneLayoutForRegions(zoneId: string) {
+      this.objects.forEach(object => {
+        if (object.kind === 'furniture' && object.zoneId === zoneId) object.layoutConfirmed = false
+      })
+      this.submitted = null
+    },
+
+    /** GEOM-016 保存/更新单个布置区（绘制、拖动、顶点编辑提交）：完整校验（含须在空间净轮廓内）后落库。 */
+    saveZoneLayoutRegion(zoneId: string, region: LayoutRegion): string | null {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone || region.spaceId !== zoneId) return '布置区归属无效'
+      const measured = measureLayoutRegionWallOffsets(zone, region)
+      const problem = layoutRegionProblem(zone, measured)
+      if (problem) return problem
+      const layoutRegions = zone.layoutRegions?.some(item => item.regionId === region.regionId)
+        ? zone.layoutRegions.map(item => item.regionId === region.regionId ? measured : item)
+        : [...(zone.layoutRegions || []), measured]
+      this.updateObject(zoneId, { layoutRegions } as Partial<ZoneObject>)
+      this._invalidateZoneLayoutForRegions(zoneId)
+      return null
+    },
+
+    /**
+     * GEOM-016 布置区列表操作（改名/设主/启用/显隐/删除）：几何仅做轮廓级校验；
+     * 空间几何变化造成的越界区允许保留并由 UI 标记「需人工修复」（B1.6），不静默裁切或删除。
+     * 启用集合或多边形实际变化时才使排版确认失效；改名/显隐/设主不失效。
+     */
+    updateZoneLayoutRegions(zoneId: string, layoutRegions: LayoutRegion[]): string | null {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone) return '空间不存在'
+      if (layoutRegions.some(region => region.spaceId !== zoneId)) return '布置区归属无效'
+      for (const region of layoutRegions) {
+        const problem = ringProblem(layoutRegionRing(zone, region))
+        if (problem) return '布置区' + problem
+      }
+      const signature = (regions: LayoutRegion[]) => JSON.stringify((regions || []).filter(region => region.enabled).map(region => region.polygonMm).sort())
+      const changed = signature(zone.layoutRegions || []) !== signature(layoutRegions)
+      this.updateObject(zoneId, { layoutRegions } as Partial<ZoneObject>)
+      if (changed) this._invalidateZoneLayoutForRegions(zoneId)
+      return null
+    },
+
+    /** GEOM-018 保存/更新设施标注（校验通过才落库）；提示型对象，不使排版确认失效。 */
+    saveZoneFacility(zoneId: string, facility: SpatialFacility): string | null {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone || facility.spaceId !== zoneId) return '设施标注归属无效'
+      const problem = facilityProblem(zone, facility)
+      if (problem) return problem
+      const facilities = zone.facilities?.some(item => item.facilityId === facility.facilityId)
+        ? zone.facilities.map(item => item.facilityId === facility.facilityId ? facility : item)
+        : [...(zone.facilities || []), facility]
+      this.updateObject(zoneId, { facilities } as Partial<ZoneObject>)
+      return null
+    },
+
+    removeZoneFacility(zoneId: string, facilityId: string): boolean {
+      const zone = this.zones.find(item => item.id === zoneId)
+      if (!zone || !zone.facilities?.some(item => item.facilityId === facilityId)) return false
+      this.updateObject(zoneId, { facilities: zone.facilities.filter(item => item.facilityId !== facilityId) } as Partial<ZoneObject>)
+      return true
+    },
+
     calibrateReviewPage(referenceDistance: number, lengthMm: number) {
       if (!Number.isFinite(referenceDistance) || !Number.isFinite(lengthMm) || referenceDistance <= 0 || lengthMm <= 0 || !this.zones.length) return false
       const factor = lengthMm / referenceDistance
@@ -998,6 +1080,9 @@ export const useOfficeStore = defineStore('office', {
           if (!zone.sourcePolygon) zone.sourcePolygon = ring.map(([x, y]) => [x, y])
           zone.polygon = ring.map(([x, y]) => [x * factor, y * factor])
           zone.obstacles?.forEach(obstacle => { obstacle.geometry.outer = obstacle.geometry.outer.map(([x, y]) => [x * factor, y * factor]) })
+          // 布置区/设施与障碍同比例换算（GEOM-016/018）；旧量测随几何变化清除。
+          zone.layoutRegions?.forEach(region => { region.polygonMm = region.polygonMm.map(([x, y]) => [x * factor, y * factor]); region.wallOffsetsMm = undefined })
+          zone.facilities?.forEach(facility => { facility.pointsMm = facility.pointsMm.map(([x, y]) => [x * factor, y * factor]) })
           const bounds = polygonBoundsMm(zone.polygon)
           if (bounds) Object.assign(zone, { x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY, actualWidthMm: bounds.maxX - bounds.minX, actualDepthMm: bounds.maxY - bounds.minY })
           zone.mmPerSourceUnit = (zone.mmPerSourceUnit || 1) * factor
