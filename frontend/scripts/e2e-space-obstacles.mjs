@@ -63,6 +63,7 @@ try {
     assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 0, '空间总览不再提供' + label)
   }
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   const originalRoomPolygon = (await zoneState()).polygon
 

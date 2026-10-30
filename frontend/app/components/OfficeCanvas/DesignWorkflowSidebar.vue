@@ -29,7 +29,8 @@ const categories = [
   { id: 'bar', label: '厨房吧台', moduleId: 'counter-straight' },
   { id: 'lounge', label: '休闲会客', moduleId: 'sofa-triple' },
 ]
-const selectedCategories = ref<string[]>(['workstation']), selectedCatalogId = ref('')
+// 进入排版默认不选中任何功能模块，由用户按需点选，避免未操作就生成办公桌椅预览。
+const selectedCategories = ref<string[]>([]), selectedCatalogId = ref('')
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const hasLayout = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
 const zoneType = computed({
@@ -40,10 +41,8 @@ const zoneType = computed({
 })
 watch(() => store.designZoneId, () => {
   activePage.value = 'auto'
-  selectedCategories.value = [zone.value?.zoneType === 'MEETING_ROOM' ? 'meeting' : zone.value?.zoneType === 'RECEPTION' ? 'lounge' : 'workstation']
-  const items = zone.value ? store.furnitureForZone(zone.value.id) : []
-  const item = items.find(entry => entry.layoutRole === 'primary') || items[0]
-  selectedCatalogId.value = item?.furnitureTemplateId || item?.moduleSnapshot?.glyphTemplateId || (zone.value?.zoneType === 'MEETING_ROOM' ? 'table-conference-rect' : 'desk-straight')
+  selectedCategories.value = []
+  selectedCatalogId.value = ''
 }, { immediate: true })
 function selectCategory(id: string) {
   selectedCategories.value = selectedCategories.value.includes(id) ? selectedCategories.value.filter(item => item !== id) : [...selectedCategories.value, id]

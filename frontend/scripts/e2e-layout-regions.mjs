@@ -103,6 +103,7 @@ try {
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   const originalPolygon = (await zoneState()).polygon
   assert.equal((await zoneState()).layoutRegions, undefined, '旧画布没有布置区字段，不得自动创建')

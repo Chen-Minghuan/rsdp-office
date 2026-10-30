@@ -50,6 +50,7 @@ try {
   await page.goto(`${baseUrl}/canvas?analysisId=STRICT-TEST`, { waitUntil: 'networkidle' })
   const enter = page.getByRole('button', { name: '进入家具排版 →', exact: true })
   await enter.click()
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   assert.equal(await page.getByRole('button', { name: '自动优化', exact: true }).count(), 0)
   assert.equal(await page.getByRole('button', { name: '矩阵', exact: true }).count(), 0)

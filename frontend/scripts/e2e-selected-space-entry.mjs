@@ -48,6 +48,7 @@ try {
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
+    await page.getByTestId('functional-category-workstation').click()
     await page.getByTestId('apply-layout').waitFor()
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     await assertFit(id)
@@ -69,6 +70,7 @@ try {
   for (const [id, name] of [['ROOM-B', '其他会议室'], ['ROOM-L', '独立 L 形办公室'], ['ROOM-B', '其他会议室']]) {
     await page.locator('.review-rooms').getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
     await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+    await page.getByTestId('functional-category-workstation').click()
     await page.getByTestId('apply-layout').waitFor()
     assert.equal(new URL(page.url()).searchParams.get('zoneId'), id, '进入排版必须使用核对页当前选中的空间')
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()

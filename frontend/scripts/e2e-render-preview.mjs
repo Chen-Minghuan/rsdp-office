@@ -79,6 +79,7 @@ try {
     await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor()
   }
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X', { waitUntil: 'networkidle' })
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   await open()
   await page.getByText('尚无效果预览', { exact: true }).waitFor()

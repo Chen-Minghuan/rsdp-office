@@ -48,6 +48,7 @@ try {
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
+    await page.getByTestId('functional-category-workstation').click()
     await page.getByTestId('apply-layout').waitFor()
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     await assertFit(id)

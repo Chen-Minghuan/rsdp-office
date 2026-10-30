@@ -60,6 +60,8 @@ try {
   assert.equal(original.filter(item=>item.layoutGroupId==='auto:OPEN-ROOM').length,36)
   await page.getByTestId('office-design-canvas').screenshot({path:'C:/Users/cmh/AppData/Local/Temp/rsdp-adaptive-room.png'})
   await page.reload({waitUntil:'networkidle'})
+  await page.getByTestId('tab-product-selection').click()
+  await catalog.locator('[data-auto-module-id="desk-l"]').click()
   await page.getByTestId('layout-unchanged').waitFor()
   assert.equal((await state()).objects.filter(item=>item.layoutGroupId==='auto:OPEN-ROOM').length,36)
   await page.getByRole('tab',{name:'调整参数',exact:true}).click()

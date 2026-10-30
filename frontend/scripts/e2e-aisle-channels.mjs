@@ -577,6 +577,7 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
   await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('tab-product-selection').click()
   await page.getByTestId('unit-module-catalog').waitFor()
   await page.getByTestId('apply-layout').click()

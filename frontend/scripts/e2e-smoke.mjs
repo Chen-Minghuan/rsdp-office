@@ -43,6 +43,7 @@ await shot('02-overview')
 // 3. 进入单空间设计
 console.log('Step 3: enter design')
 await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+await page.getByTestId('functional-category-workstation').click()
 await page.waitForURL(/mode=design/, { timeout: 10000 })
 await page.getByTestId('apply-layout').waitFor({ timeout: 10000 })
 await shot('03-design')
