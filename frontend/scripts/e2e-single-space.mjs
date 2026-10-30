@@ -48,6 +48,8 @@ try {
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
+    // 进入排版不再默认选中功能模块（3b42ed3），需显式点选品类后才出现排版操作
+    await page.getByTestId('functional-category-workstation').click()
     await page.getByTestId('apply-layout').waitFor()
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     await assertFit(id)
@@ -87,6 +89,8 @@ try {
   assert.equal(await spaceSelect.isVisible(), false)
   await page.getByRole('button', { name: '展开默认楼层空间', exact: true }).click()
   assert.equal(await spaceSelect.locator('[data-space-id="ROOM-L"]').getAttribute('aria-current'), 'page')
+  // 刷新后品类选择同样为空（不预选），确认排版前需重新点选
+  await page.getByTestId('functional-category-workstation').click()
   const initial = await state()
   assert.equal(await canvas().locator('polygon.board-element').count(), 1)
   assert.equal((await canvas().locator('polygon.board-element').getAttribute('points')).split(' ').length, 6, 'L 形不能变成包围盒')
@@ -147,6 +151,8 @@ try {
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   assert.equal(await canvas().locator('img').count(), 1, '显示与当前空间对齐的原始图纸')
   // Applying a layout in the newly selected room never replaces the previous room's furniture.
+  // 切换空间后品类选择被重置，需重新点选
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('tab-product-selection').click()
   const staffCatalog = page.getByTestId('unit-module-catalog').locator('details').filter({ hasText: '职员桌' })
   if (!(await staffCatalog.getAttribute('open'))) await staffCatalog.locator('summary').click()
@@ -165,6 +171,12 @@ try {
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-L')
   await assertFit('ROOM-L')
   await page.getByTestId('tab-product-selection').click()
+  // 切回 ROOM-L 后选型目录选择被重置，需重新点选模块才有「逐件添加」
+  const staffCatalogBack = page.getByTestId('unit-module-catalog').locator('details').filter({ hasText: '职员桌' })
+  // 职员桌在办公室类空间默认展开；open 是 DOM 属性，getAttribute 拿不到，需读 property
+  if (!(await staffCatalogBack.evaluate(node => node.open))) await staffCatalogBack.locator('summary').click()
+  // 点模块卡片主体（选中不跳转），而非「自动」（会跳回排版页）
+  await page.getByTestId('unit-module-catalog').locator('[data-module-id="desk-l"]').click()
   await page.getByRole('button', { name: '逐件添加', exact: true }).waitFor()
   assert.equal(await page.getByTestId('furniture-placement-preview').count(), 0)
   await page.getByRole('button').filter({ has: page.getByText('重新调整排版', { exact: true }) }).waitFor()
