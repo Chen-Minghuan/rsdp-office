@@ -17,7 +17,7 @@ const viewRotation = ref(0)
 const showDimensions = ref(true)
 const snapEnabled = ref(true)
 const showUnderlay = ref(true)
-const underlayOpacity = ref(0.75)
+const underlayOpacity = ref(0.5)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
 watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
 
