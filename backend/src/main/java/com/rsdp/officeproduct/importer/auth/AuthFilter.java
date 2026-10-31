@@ -26,6 +26,12 @@ public class AuthFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         if (!auth.isEnabled() || "OPTIONS".equalsIgnoreCase(request.getMethod())) return true;
         String path = request.getRequestURI();
+        // /office 子路径入口经 X-Forwarded-Prefix 处理后，前缀并入 requestURI 与 contextPath，
+        // 直接 startsWith 会让过滤器被整体跳过（登录态校验与用户上下文均失效），先剥离 contextPath。
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
         return path.startsWith("/api/auth/")
             || "/actuator/health".equals(path)
             || !(path.startsWith("/api/v1/") || path.startsWith("/uploads/"));

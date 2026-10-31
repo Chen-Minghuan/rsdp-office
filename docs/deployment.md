@@ -61,6 +61,8 @@ HTTP 入口仅在代理层移除 `RSDP_SESSION` 的 Secure 标记，保留 HttpO
 
 HTTPS 终止在外层 Nginx，Docker 内网与后端配置不变；`X-Forwarded-Proto` 随 scheme 传递。实测 `https://rooom.vip/office/` 200、登录页 200、匿名 API 401、原站点 200，真实 DNS 全流程（登录/文件选择/画布/退出）复测通过。`www.rooom.vip` 证书已覆盖但 DNS 仍指旧服务器，启用前需先改解析。
 
+2026-10-31 子路径入口鉴权失效修复（代码已改，**待重新构建部署后端镜像生效**）：用户报 `/office/` 入口登录后侧栏仍提示「请先登录」。实测该入口下匿名 `GET /office/api/v1/office/projects` 返回 HTTP 200 + `code:403`、匿名 `GET /office/api/v1/products` 直接返回商品数据（根路径 `:8081` 入口均正常 401）——`X-Forwarded-Prefix: /office` 经后端 forwarded headers 处理并入 `getRequestURI()` 后，`AuthFilter` 的 `startsWith("/api/v1/")` 判断失效，过滤器在子路径入口对 `/api/v1/**`、`/uploads/**` 整体跳过：匿名 401 拦截失效（与上文 10-21「匿名 API 401」记录不符，当时验证的具体接口未留样，PROJECT-004（10-29）上线前无接口读取用户上下文，问题隐形），且 `CurrentUserContext` 不设置导致已登录用户的项目列表一律 403「请先登录」。修复为 `AuthFilter` 路径判断前剥离 `contextPath`，根路径入口行为不变；`X-Forwarded-Prefix` 保留（资源 URL 生成依赖）。详见 [status.md](status.md) 当日记录。
+
 ## 手动检查与部署
 
 在仓库根目录、使用有权限的服务器账号执行：
