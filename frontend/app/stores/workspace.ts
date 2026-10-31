@@ -49,12 +49,14 @@ export const useWorkspaceStore = defineStore('workspace', {
       try {
         const projects = await useWorkspaceApi().listProjects()
         this.projects = projects.length ? projects : [defaultWorkspaceProject()]
+        this.initialized = true
       } catch (error) {
+        // 失败（如未登录 401/后端重启中）不锁定初始化：保留兜底项目展示，
+        // 下一次进入页面时重试，登录恢复后自动换成真实项目
         this.projects = [defaultWorkspaceProject()]
         this.error = error instanceof Error ? error.message : '项目列表暂时不可用'
       } finally {
         this.restoreSelection()
-        this.initialized = true
         this.loading = false
       }
     },

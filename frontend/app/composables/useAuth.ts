@@ -8,7 +8,7 @@ interface ApiResponse<T> {
   data: T
 }
 
-interface AuthUser {
+export interface AuthUser {
   userId: string
   username: string
   displayName: string

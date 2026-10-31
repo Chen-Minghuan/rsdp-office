@@ -17,6 +17,10 @@ onMounted(() => { void initializeWorkspace() })
 watch(isLoginPage, (loginPage, wasLoginPage) => {
   if (wasLoginPage && !loginPage) void initializeWorkspace()
 })
+// 初始化曾失败（未锁定 initialized）时，切换路由自动重试加载真实工作区
+watch(() => route.path, () => {
+  if (!workspace.initialized && !isLoginPage.value) void initializeWorkspace()
+})
 </script>
 
 <template>
