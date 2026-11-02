@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFurniture'
-import { OFFICE_LAYOUT_SPACING, OFFICE_LAYOUT_SPACING_PRESETS } from '~/utils/officeAutoLayout'
+import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
@@ -244,11 +244,6 @@ function selectPreset(id: OfficeArrangementPresetId) {
   arrangement.value = preset.baseMode
   Object.assign(spacing, preset.defaults)
 }
-/** 间距预设档（策略初始值）：一键写入全部间距字段，之后仍可逐项微调。 */
-function applySpacingPreset(id: 'compact' | 'standard' | 'comfort') {
-  const preset = OFFICE_LAYOUT_SPACING_PRESETS.find(item => item.id === id)
-  if (preset) Object.assign(spacing, preset.values)
-}
 
 function goToStep(step: LayoutPanelStep) {
   activeStep.value = step
@@ -474,21 +469,6 @@ defineExpose({ selectModule, applyAutoLayout })
               <span class="text-[11px] font-semibold text-[#5b5751]">空间间距</span>
               <span class="text-[9px] text-muted">单位：mm</span>
             </div>
-            <div class="mb-1.5 flex gap-1" data-testid="spacing-presets">
-              <button
-                v-for="item in OFFICE_LAYOUT_SPACING_PRESETS"
-                :key="item.id"
-                type="button"
-                :data-testid="'spacing-preset-' + item.id"
-                :aria-label="'间距预设：' + item.label"
-                class="flex-1 rounded-none border border-line bg-white px-1.5 py-1 text-left transition hover:border-bronze"
-                @click="applySpacingPreset(item.id)"
-              >
-                <span class="block text-[10px] font-semibold text-[#5b5751]">{{ item.label }}</span>
-                <span class="mt-0.5 block text-[9px] leading-tight text-muted">{{ item.hint }}</span>
-              </button>
-            </div>
-            <p class="mb-1.5 text-[9px] text-muted">修改标准方案间距，紧凑和舒适方案随之调整。</p>
             <div class="grid grid-cols-2 gap-1.5 text-[10px] text-muted">
               <label v-if="!isWorkstation">{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
               <label v-if="isWorkstation">图例组间净距<input v-model.number="spacing.faceGapMm" aria-label="图例组间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
@@ -555,7 +535,7 @@ defineExpose({ selectModule, applyAutoLayout })
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
           <!-- 候选卡落在画布右下角浮层（CanvasBoard 的 #layout-candidate-dock），随选随预览 -->
           <Teleport to="#layout-candidate-dock" defer>
-            <div v-if="baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="pointer-events-auto rounded-xl border border-line bg-white/95 p-2 shadow-panel" data-testid="layout-candidates" @pointerdown.stop>
+            <div v-if="(showPreview || currentFurniture.length > 0) && baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="pointer-events-auto rounded-xl border border-line bg-white/95 p-2 shadow-panel" data-testid="layout-candidates" @pointerdown.stop>
               <div class="mb-1 text-[9px] text-[#8a8178]">方案选择 · 默认标准，点击预览</div>
               <div class="flex flex-col gap-1">
                 <button
