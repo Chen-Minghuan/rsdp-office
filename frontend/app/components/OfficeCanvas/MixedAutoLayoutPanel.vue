@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { FurnitureObject } from '~/types/office'
 import type { OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
-import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { OFFICE_LAYOUT_SPACING, OFFICE_LAYOUT_SPACING_PRESETS } from '~/utils/officeAutoLayout'
 import { defaultLayoutPreferences } from '~/utils/layoutPlanning'
-import { planMixedLayout, MIXED_LAYOUT_CATEGORIES, MIXED_CATEGORY_IDS } from '~/utils/mixedLayout'
+import { planTieredMixedLayout, MIXED_LAYOUT_CATEGORIES, MIXED_CATEGORY_IDS } from '~/utils/mixedLayout'
+import { AREA_PER_SEAT_HINT_M2, zoneNetAreaMm2 } from '~/utils/layoutWarnings'
 
 const props = defineProps<{ categoryIds: string[]; currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
 const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null] }>()
@@ -11,11 +12,18 @@ const store = useOfficeStore()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const preferences = reactive(defaultLayoutPreferences())
 const spacing = reactive<OfficeLayoutSpacing>({ ...OFFICE_LAYOUT_SPACING })
+/** 间距预设档（策略初始值）：一键写入全部间距字段，之后仍可逐项微调。 */
+function applySpacingPreset(id: 'compact' | 'standard' | 'comfort') {
+  const preset = OFFICE_LAYOUT_SPACING_PRESETS.find(item => item.id === id)
+  if (preset) Object.assign(spacing, preset.values)
+}
 const applicationMessage = ref('')
 const previewReady = ref(false)
 const selectedCandidateIndex = ref(0)
 const categoryLabels = computed(() => props.categoryIds.map(id => MIXED_LAYOUT_CATEGORIES[MIXED_CATEGORY_IDS.indexOf(id)]?.label).filter(Boolean))
-const proposal = computed(() => zone.value ? planMixedLayout(zone.value, store.furnitureForZone(zone.value.id), props.categoryIds, spacing, preferences.targetSeats) : null)
+// LAYOUT-036：按面积推荐人数（2 ㎡/人为可调策略值，非规范）；一键采用，手动改过不覆盖。
+const recommendedSeats = computed(() => zone.value ? Math.max(0, Math.floor(zoneNetAreaMm2(zone.value) / 1_000_000 / AREA_PER_SEAT_HINT_M2)) : 0)
+const proposal = computed(() => zone.value ? planTieredMixedLayout(zone.value, store.furnitureForZone(zone.value.id), props.categoryIds, spacing, preferences.targetSeats, { objective: preferences.objective, fixedQuantity: preferences.fixedQuantity, scoreMode: preferences.scoreMode }) : null)
 const activeProposal = computed(() => {
   const base = proposal.value
   if (!base) return null
@@ -60,32 +68,65 @@ function apply() {
         <p class="mt-1 text-[9px] text-muted">选完需求后统一生成候选，不会点击品类就立即出图；办公桌椅跟随目标人数，其他模块默认一套。</p>
       </div>
       <div class="space-y-2 border-b border-line py-2.5 text-[11px]">
-        <label v-if="categoryIds.includes('workstation')" class="flex items-center justify-between gap-2">办公座位目标<input v-model.number="preferences.targetSeats" data-testid="mixed-target-seats" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
+        <div v-if="categoryIds.includes('workstation')" class="space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-muted">求解目标</span>
+            <div class="flex gap-1" role="radiogroup" aria-label="求解目标">
+              <button type="button" data-testid="mixed-objective-target-seats" :aria-pressed="(preferences.objective || 'target-seats') === 'target-seats'" :class="['rounded-none border px-1.5 py-0.5 text-[10px]', (preferences.objective || 'target-seats') === 'target-seats' ? 'border-[#83c95a] bg-[#eef8e7] text-[#38523a]' : 'border-line text-muted']" @click="preferences.objective = 'target-seats'">目标人数</button>
+              <button type="button" data-testid="mixed-objective-fixed-quantity" :aria-pressed="preferences.objective === 'fixed-quantity'" :class="['rounded-none border px-1.5 py-0.5 text-[10px]', preferences.objective === 'fixed-quantity' ? 'border-[#83c95a] bg-[#eef8e7] text-[#38523a]' : 'border-line text-muted']" @click="preferences.objective = 'fixed-quantity'">固定套数</button>
+              <button type="button" data-testid="mixed-objective-max-capacity" :aria-pressed="preferences.objective === 'max-capacity'" :class="['rounded-none border px-1.5 py-0.5 text-[10px]', preferences.objective === 'max-capacity' ? 'border-[#83c95a] bg-[#eef8e7] text-[#38523a]' : 'border-line text-muted']" @click="preferences.objective = 'max-capacity'">最大容量</button>
+            </div>
+          </div>
+          <label v-if="(preferences.objective || 'target-seats') === 'target-seats'" class="flex items-center justify-between gap-2">办公座位目标<input v-model.number="preferences.targetSeats" data-testid="mixed-target-seats" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
+          <p v-if="(preferences.objective || 'target-seats') === 'target-seats' && recommendedSeats > 0 && !preferences.targetSeats" class="text-right text-[10px] text-muted">按面积约可容 {{ recommendedSeats }} 人（策略参考值）<button type="button" data-testid="mixed-adopt-recommended-seats" class="ml-1 underline decoration-dotted" @click="preferences.targetSeats = recommendedSeats">采用</button></p>
+          <label v-else-if="preferences.objective === 'fixed-quantity'" class="flex items-center justify-between gap-2">工位套数<input v-model.number="preferences.fixedQuantity" data-testid="mixed-fixed-quantity" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
+          <p v-else class="text-[10px] leading-relaxed text-muted">探索当前硬约束下可容纳的工位上限（估计值，非核准容量）。</p>
+        </div>
+        <p class="text-[10px] text-muted">标准方案间距 · 修改后三档联动</p>
+        <div class="flex gap-1" data-testid="mixed-spacing-presets">
+          <button
+            v-for="item in OFFICE_LAYOUT_SPACING_PRESETS"
+            :key="item.id"
+            type="button"
+            :data-testid="'mixed-spacing-preset-' + item.id"
+            :aria-label="'间距预设：' + item.label"
+            :title="item.hint + '（策略初始值，应用后可再微调）'"
+            class="flex-1 rounded-none border border-line bg-white px-1.5 py-1 text-[10px] text-muted transition hover:border-bronze hover:text-bronze"
+            @click="applySpacingPreset(item.id)"
+          >{{ item.label }}</button>
+        </div>
         <label class="flex items-center justify-between gap-2">离墙距离 mm<input v-model.number="spacing.wallMm" type="number" min="0" step="100" class="w-24 rounded-none border border-line px-2 py-1"></label>
         <label class="flex items-center justify-between gap-2">组合净距 mm<input v-model.number="spacing.aisleMm" type="number" min="0" step="100" class="w-24 rounded-none border border-line px-2 py-1"></label>
         <label class="flex items-center justify-between gap-2">模块间距 mm<input v-model.number="spacing.gapMm" type="number" min="0" step="100" class="w-24 rounded-none border border-line px-2 py-1"></label>
+        <label class="flex items-center justify-between gap-2 text-muted">综合评分排序<input v-model="preferences.scoreMode" type="checkbox" true-value="balanced" false-value="legacy" data-testid="mixed-score-mode" aria-label="综合评分排序"></label>
       </div>
       <div class="py-2.5 text-[11px]">
         <div class="flex items-center justify-between"><span class="text-muted">组合预估</span><strong data-testid="mixed-layout-count" class="text-[#4f7d3e]">{{ activeProposal?.furniture.length || 0 }} 件</strong></div>
         <p v-if="activeProposal?.problem" role="status" class="mt-2 text-[10px] leading-relaxed text-[#a65e4c]">{{ activeProposal.problem }}</p>
+        <ul v-if="activeProposal?.problem && activeProposal.problemAdvice?.length" class="mt-1 list-inside list-disc text-[10px] leading-relaxed text-muted" data-testid="mixed-problem-advice">
+          <li v-for="advice in activeProposal.problemAdvice" :key="advice">{{ advice }}</li>
+        </ul>
         <div v-for="warning in activeProposal?.warnings || []" :key="warning" class="mt-2 border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ warning }}</div>
-        <div v-if="previewReady && (activeProposal?.candidates?.length || 0) > 1" class="mt-2" data-testid="mixed-layout-candidates">
-          <p class="mb-1.5 text-[10px] text-muted">选择整体候选，预览与应用使用同一方案。</p>
-          <div class="flex flex-col gap-1.5">
-            <button
-              v-for="(candidate, index) in activeProposal?.candidates || []"
-              :key="index"
-              type="button"
-              data-testid="mixed-layout-candidate"
-              :class="['rounded-none border px-2 py-2 text-left text-[10px] leading-snug', index === selectedCandidateIndex ? 'border-[#83c95a] bg-[#eef8e7] text-[#38523a]' : 'border-line bg-white text-muted hover:bg-[#f7f9f4]']"
-              :aria-pressed="index === selectedCandidateIndex"
-              @click="selectedCandidateIndex = index"
-            >
-              <span class="block font-semibold">{{ candidate.label }}</span>
-              <span class="mt-0.5 block">{{ candidate.furniture.length }} 件 · 座位 {{ candidate.seats }}<span v-if="candidate.shortfall"> · 尚缺 {{ candidate.shortfall }}</span> · 利用率 {{ Math.round(candidate.metrics.utilization * 100) }}%<span v-if="candidate.metrics.freeAreaPerSeatM2 != null"> · 人均余量 {{ candidate.metrics.freeAreaPerSeatM2.toFixed(1) }} ㎡</span></span>
-            </button>
+        <!-- 候选卡落在画布右下角浮层（CanvasBoard 的 #layout-candidate-dock），随选随预览 -->
+        <Teleport to="#layout-candidate-dock" defer>
+          <div v-if="previewReady && (activeProposal?.candidates?.length || 0) > 1" class="pointer-events-auto rounded-xl border border-line bg-white/95 p-2 shadow-panel" data-testid="mixed-layout-candidates" @pointerdown.stop>
+            <p class="mb-1.5 text-[10px] text-muted">方案选择 · 默认标准，调整间距后三档联动</p>
+            <div class="flex flex-col gap-1.5">
+              <button
+                v-for="(candidate, index) in activeProposal?.candidates || []"
+                :key="index"
+                type="button"
+                data-testid="mixed-layout-candidate"
+                :class="['rounded-none border px-2 py-2 text-left text-[10px] leading-snug', index === selectedCandidateIndex ? 'border-[#83c95a] bg-[#eef8e7] text-[#38523a]' : 'border-line bg-white text-muted hover:bg-[#f7f9f4]']"
+                :aria-pressed="index === selectedCandidateIndex"
+                @click="selectedCandidateIndex = index"
+              >
+                <span class="block font-semibold">{{ candidate.label.split(' · ')[0] }}</span>
+                <span class="mt-0.5 block">{{ candidate.furniture.length }} 件 · 座位 {{ candidate.seats }} · 利用率 {{ Math.round(candidate.metrics.utilization * 100) }}%</span>
+              </button>
+            </div>
           </div>
-        </div>
+        </Teleport>
         <p v-if="applicationMessage" role="status" class="mt-2 text-[10px] leading-relaxed text-[#56636e]">{{ applicationMessage }}</p>
       </div>
     </div>

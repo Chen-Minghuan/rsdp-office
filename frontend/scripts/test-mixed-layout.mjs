@@ -19,7 +19,9 @@ const obstaclesUrl = await moduleUrl('../app/utils/spatial/obstacles.ts', { './g
 const reviewUrl = await moduleUrl('../app/utils/spatial/review.ts', { '~/utils/spatial/geometry': geometryUrl, './obstacles': obstaclesUrl })
 const constraintsUrl = await moduleUrl('../app/utils/layoutConstraints.ts', { './spatial/review': reviewUrl })
 const regionsUrl = await moduleUrl('../app/utils/spatial/layoutRegions.ts', { 'polygon-clipping': new URL('../node_modules/polygon-clipping/dist/polygon-clipping.esm.js', import.meta.url).href, './review': reviewUrl })
-const { planMixedLayout } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
+const facilitiesUrl = await moduleUrl('../app/utils/spatial/facilities.ts', { './review': reviewUrl })
+const scoringUrl = await moduleUrl('../app/utils/layoutScoring.ts', { './spatial/layoutRegions': regionsUrl, './spatial/obstacles': obstaclesUrl })
+const { planMixedLayout, planTieredMixedLayout } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
   './manualFurniture': manualUrl,
   './officeCanvasView': canvasViewUrl,
   './officeAutoLayout': autoUrl,
@@ -28,6 +30,8 @@ const { planMixedLayout } = await import(await moduleUrl('../app/utils/mixedLayo
   './layoutChannels': channelsUrl,
   './spatial/geometry': geometryUrl,
   './spatial/layoutRegions': regionsUrl,
+  './spatial/facilities': facilitiesUrl,
+  './layoutScoring': scoringUrl,
 }))
 const spacing = { wallMm: 0, aisleMm: 900, gapMm: 300 }
 const zone = { id: 'MIXED', kind: 'zone', name: '组合空间', x: 0, y: 0, w: 12000, h: 8000, reviewUnit: 'mm', polygon: [[0,0],[12000,0],[12000,8000],[0,8000]] }
@@ -90,4 +94,49 @@ for (const candidate of doorCandidates) {
 }
 const channelBlocked = { ...zone, layoutPreferences: { channels: [{ id: 'CH-ALL', orientation: 'vertical', offsetMm: 0, widthMm: 12000 }] } }
 assert.equal(planMixedLayout(channelBlocked, [], ['workstation', 'sofa'], spacing).furniture.length, 0, '组合候选不得压占通道')
-console.log('混合布局算法通过：整体候选、会议场景双侧/短边座椅、会客交流区、目标人数、边界、禁放区与通道校验。')
+
+// --- LAYOUT-036 组合布局求解目标三入口与可解释评分 ---
+// 固定套数：恰好 3 套工位 + 其他模块各一套
+const fixed3 = planMixedLayout(zone, [], ['workstation', 'sofa'], spacing, 0, { objective: 'fixed-quantity', fixedQuantity: 3 })
+assert.equal(fixed3.furniture.filter(item => item.furnitureTemplateId === 'desk-straight').length, 3, '固定套数恰好 3 套工位')
+assert.equal(fixed3.shortfall, 0)
+// 固定套数超容量：报告缺口与原因
+const fixedOver = planMixedLayout(zone, [], ['workstation'], spacing, 0, { objective: 'fixed-quantity', fixedQuantity: 490 })
+assert.ok(fixedOver.shortfall > 0, '超出容量报告缺口')
+// 最大容量：超过目标 4 的套数，附非核准容量提示
+const maxCapMixed = planMixedLayout(zone, [], ['workstation'], spacing, 0, { objective: 'max-capacity' })
+assert.ok(maxCapMixed.furniture.filter(item => item.furnitureTemplateId === 'desk-straight').length > 4, '最大容量排满工位')
+assert.ok(maxCapMixed.warnings.some(w => /不等于施工或法规核准容量/.test(w)), '最大容量附非核准容量提示')
+// 旧行为不漂移：无 objective 时与之前一致（工位 1 套）
+const legacyMixed = planMixedLayout(zone, [], ['workstation', 'sofa'], spacing)
+assert.equal(legacyMixed.furniture.filter(item => item.furnitureTemplateId === 'desk-straight').length, 1, '缺省仍是一套')
+// 可解释评分与拓扑差异：候选附 scoreDetail/topologyKey，balanced 按总分降序
+for (const candidate of maxCapMixed.candidates) {
+  assert.ok(candidate.scoreDetail && candidate.topologyKey, '组合候选附可解释评分与拓扑签名')
+}
+const balancedMixed = planMixedLayout(zone, [], ['workstation', 'meeting', 'entry'], spacing, 0, { objective: 'max-capacity', scoreMode: 'balanced' })
+for (let i = 1; i < balancedMixed.candidates.length; i++) {
+  assert.ok(balancedMixed.candidates[i - 1].scoreDetail.total >= balancedMixed.candidates[i].scoreDetail.total, 'balanced 按总分降序')
+}
+// 失败建议：全通道封死时附 problemAdvice
+const blockedAdvice = planMixedLayout(channelBlocked, [], ['workstation', 'sofa'], spacing)
+assert.ok(blockedAdvice.problem && blockedAdvice.problemAdvice?.length >= 2, '组合失败附调整建议')
+// --- 三档间距组合候选 v2（2026-11-02 定稿：标准档=当前间距并固定首位默认，紧凑/舒适对比，无自定义卡）---
+const tieredMixed = planTieredMixedLayout(zone, [], ['workstation', 'sofa'], spacing)
+assert.equal(tieredMixed.problem, null)
+const mixedTiers = tieredMixed.candidates.map(candidate => candidate.spacingTier)
+assert.equal(mixedTiers[0], 'standard', '标准档（当前间距）固定首位默认')
+assert.ok(mixedTiers.length >= 2, '至少两档产出不同整体方案')
+assert.ok(mixedTiers.every(tier => ['compact', 'standard', 'comfort'].includes(tier)), '候选附档位标记且无自定义')
+assert.equal(new Set(mixedTiers).size, mixedTiers.length, '几何相同的档位去重')
+for (const candidate of tieredMixed.candidates) assert.match(candidate.label, /^(标准|紧凑|舒适) · /, '组合候选标注间距档位')
+assert.equal(tieredMixed.furniture, tieredMixed.candidates[0].furniture, 'candidates[0] 即默认标准基准')
+// 标准离墙变化后，紧凑和舒适也要跟随移动；不覆盖已有家具。
+const updatedTiered = planTieredMixedLayout(zone, [], ['workstation', 'sofa'], { ...spacing, wallMm: 500, gapMm: 800 })
+assert.equal(updatedTiered.candidates[0].spacingTier, 'standard')
+for (const candidate of tieredMixed.candidates) {
+  const updated = updatedTiered.candidates.find(item => item.spacingTier === candidate.spacingTier)
+  assert.ok(updated, `${candidate.spacingTier} 仍有可用组合`)
+  assert.notDeepEqual(updated.furniture.map(item => [item.x, item.y]), candidate.furniture.map(item => [item.x, item.y]), `${candidate.spacingTier} 组合几何随标准间距变化`)
+}
+console.log('混合布局算法通过：整体候选、会议场景双侧/短边座椅、会客交流区、目标人数、边界、禁放区与通道校验、求解目标与可解释评分（LAYOUT-036）、三档间距候选。')

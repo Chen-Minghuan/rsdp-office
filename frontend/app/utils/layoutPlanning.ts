@@ -1,12 +1,13 @@
 import type { FurnitureObject, ZoneObject } from '~/types/office'
-import type { LayoutCandidate, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
-import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture, seatSideRect, seatWallClearance, workstationSeatCorner, workstationSeatOverhang } from './officeAutoLayout'
+import type { LayoutCandidate, LayoutCandidateScoreDetail, LayoutObjective, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
+import { layoutRectInsideRing, planOfficeFurniture, planMeetingFurniture, seatSideRect, seatWallClearance, workstationSeatCorner, workstationSeatOverhang, officeLayoutSpacingVariants } from './officeAutoLayout'
 import { planAdaptiveArrangement } from './officeAdaptiveLayout'
 import { officeFurnitureFootprint, officePlacementHardProblem, officePlacementSoftWarning } from './officeManualPlacement'
 import { canvasZoneBounds } from './officeCanvasView'
 import { OFFICE_ARRANGEMENT_RULE_VERSION, productStyleForTemplate, presetsForProductStyle } from './officeArrangementPresets'
 import { zoneLayoutExclusions } from './spatial/obstacles'
 import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
+import { facilityLayoutHints } from './spatial/facilities'
 import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects, validateChannels } from './layoutChannels'
 import { zoneNetAreaMm2 } from './layoutWarnings'
@@ -25,6 +26,10 @@ export const LAYOUT_CANDIDATE_TOP_N = 3
 export function layoutCandidateScore(seats: number, targetSeats: number): number {
   return targetSeats > 0 ? Math.min(targetSeats, seats) * 1000 - Math.max(0, seats - targetSeats) : seats
 }
+
+// LAYOUT-036 可解释评分/求解目标/差异化纯函数见 layoutScoring.ts（独立模块便于轻量测试加载）；此处再导出保持既有引用口。
+export { BALANCED_SCORE_WEIGHTS, layoutObjectiveGoal, layoutCandidateScoreDetail, layoutTopologyKey, selectDiverseCandidates, layoutFailureAdvice } from './layoutScoring'
+import { layoutObjectiveGoal, layoutCandidateScoreDetail, layoutTopologyKey, selectDiverseCandidates, layoutFailureAdvice } from './layoutScoring'
 
 export function defaultLayoutPreferences(): LayoutPreferences {
   return { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 400, channels: [] }
@@ -107,27 +112,31 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   // Preserve the reference topology while adapting its repeat count to the room.
   if (request.module.category === '职员桌') request = { ...request, spacing: { ...request.spacing, gapMm: 0 } }
   const prefs = request.preferences
+  // LAYOUT-036：求解目标归一（target-seats 缺省旧行为 / fixed-quantity 件数 / max-capacity 不设上限）
+  const { objective, goal } = layoutObjectiveGoal(prefs)
   const meeting = request.module.category === '会议与洽谈'
   const general = request.productStyleId === 'general'
   const channels = prefs.channels || []
   const exclusions = zoneLayoutExclusions(zone)
   const replaceIds = replaceableLayoutIds(zone, existing, request)
   const retained = existing.filter(item => item.zoneId === zone.id && !replaceIds.includes(item.id))
-  const result: LayoutProposal = { furniture: [], replaceIds, retainedIds: retained.map(item => item.id), seats: 0, shortfall: prefs.targetSeats, label: '', problem: null, warnings: [exclusions.length ? '已按已记录的柱、门洞净空和禁放区避障；请复核现场通道' : '门窗、柱及真实通道尚未自动核验；请在空间核对中补充'], sourceKey: layoutSourceKey(zone, existing) }
+  const result: LayoutProposal = { furniture: [], replaceIds, retainedIds: retained.map(item => item.id), seats: 0, shortfall: goal, label: '', problem: null, warnings: [exclusions.length ? '已按已记录的柱、门洞净空和禁放区避障；请复核现场通道' : '门窗、柱及真实通道尚未自动核验；请在空间核对中补充'], sourceKey: layoutSourceKey(zone, existing) }
+  if (objective === 'max-capacity') result.warnings.push('最大容量为当前硬约束下的可容纳上限探索值，不等于施工或法规核准容量')
   if (channels.length && !general) result.warnings.push('「仅从二排起」仅对课桌式网格排布生效；当前排布按全深避让通道')
   const problem = automaticModuleProblem(zone, request)
   if (problem) return { ...result, problem }
   const { widthMm: w, depthMm: d, spacing } = request
-  const values = [w, d, spacing.wallMm, spacing.aisleMm, spacing.gapMm, prefs.targetSeats, prefs.seatClearanceMm]
+  const values = [w, d, spacing.wallMm, spacing.aisleMm, spacing.gapMm, goal, prefs.seatClearanceMm]
   if (zone.reviewUnit !== 'mm' || !zone.polygon?.length || values.some(v => !Number.isFinite(v) || v < 0) || w < 10 || d < 10
-    || !Number.isInteger(prefs.targetSeats) || prefs.targetSeats > 500 || exclusions.some(r => ![r.x, r.y, r.w, r.h].every(Number.isFinite) || r.w <= 0 || r.h <= 0)) {
-    return { ...result, problem: '请检查毫米尺寸、非负间距、目标人数或数量（0—500 整数）及禁放区尺寸' }
+    || !Number.isInteger(goal) || goal > 500 || (objective === 'fixed-quantity' && !Number.isInteger(prefs.fixedQuantity || 0))
+    || exclusions.some(r => ![r.x, r.y, r.w, r.h].every(Number.isFinite) || r.w <= 0 || r.h <= 0)) {
+    return { ...result, problem: '请检查毫米尺寸、非负间距、目标人数或数量（0—500 整数）及禁放区尺寸', problemAdvice: layoutFailureAdvice(zone, goal) }
   }
   const channelProblem = channels.length ? validateChannels(zone, channels) : null
   if (channelProblem) return { ...result, problem: channelProblem }
   // GEOM-016：有启用布置区时，自动排版把「启用区并集 ∩ 空间」当作可排轮廓（多边形，非包围盒）。
   const placementAreas = allowedPlacementAreas(zone)
-  if (placementAreas !== null && !placementAreas.length) return { ...result, problem: '启用的布置区与空间没有可排布交集，请调整布置区' }
+  if (placementAreas !== null && !placementAreas.length) return { ...result, problem: '启用的布置区与空间没有可排布交集，请调整布置区', problemAdvice: layoutFailureAdvice(zone, goal) }
   const insideLayout = (rect: { x: number; y: number; w: number; h: number }) => placementAreas === null
     ? layoutRectInsideRing(rect, zone.polygon!)
     : ringWithinPlacementAreas(placementAreas, [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]])
@@ -162,14 +171,15 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       arrangementRuleVersion: OFFICE_ARRANGEMENT_RULE_VERSION, layoutContext: request.module.category === '会议与洽谈' ? 'meeting' : request.module.category === '职员桌' ? 'workstation' : 'other' },
   })
   const retainedSeats = general ? retained.filter(entry => entry.furnitureTemplateId === request.module.id).length : furnitureSeatCount(retained, meeting)
-  const neededSeats = Math.max(0, prefs.targetSeats - retainedSeats)
-  if (!meeting && prefs.targetSeats > 0 && neededSeats === 0) return { ...result, seats: retainedSeats, shortfall: 0, problem: '保留家具已满足目标，无需自动添加；可调整目标或逐件编辑' }
+  const neededSeats = Math.max(0, goal - retainedSeats)
+  if (!meeting && objective !== 'max-capacity' && goal > 0 && neededSeats === 0) return { ...result, seats: retainedSeats, shortfall: 0, problem: '保留家具已满足目标，无需自动添加；可调整目标或逐件编辑' }
   const candidates: Array<{ furniture: FurnitureObject[]; seats: number; label: string; rows?: number; columns?: number; rotated?: boolean; fillCount?: number }> = []
   if (meeting) {
     const round = ['round-table', 'oval-table'].includes(request.module.kind)
     // Resize only explicitly, preserving round/oval proportions and the entered depth.
-    const requestedW = prefs.resizeMeetingTable && prefs.targetSeats > 0
-      ? Math.max(w, round ? Math.ceil(prefs.targetSeats * 650 / Math.PI) : Math.ceil(Math.max(1, prefs.targetSeats - 2 * Math.floor(Math.max(0, d - 100) / 650)) / 2) * 650 + 100) : w
+    // LAYOUT-036：桌长随人数自动推算仅属 target-seats 口径；fixed-quantity/max-capacity 不改写桌尺寸。
+    const requestedW = objective === 'target-seats' && prefs.resizeMeetingTable && goal > 0
+      ? Math.max(w, round ? Math.ceil(goal * 650 / Math.PI) : Math.ceil(Math.max(1, goal - 2 * Math.floor(Math.max(0, d - 100) / 650)) / 2) * 650 + 100) : w
     const sizeOptions = [[requestedW, round ? d * requestedW / w : d]]
     if (requestedW !== w) {
       const margin = prefs.includeChairs ? Math.max(spacing.wallMm, spacing.aisleMm) + 580 + prefs.seatClearanceMm : Math.max(spacing.wallMm, spacing.aisleMm)
@@ -201,7 +211,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
           for (let i = 0; i < ny; i++) for (const sign of [-1, 1]) chairs.push({ x: sign * radiusX, y: (i - (ny - 1) / 2) * 650, rotation: sign < 0 ? 90 : 270 })
         }
         if (prefs.includeChairs) for (const local of chairs) {
-          if (prefs.targetSeats && furniture.length - 1 >= neededSeats) break
+          if (goal > 0 && furniture.length - 1 >= neededSeats) break
           const x = angle ? -local.y : local.x, y = angle ? local.x : local.y
           const chair = item(`plan-chair-${furniture.length}`, cx + x - 275, cy + y - 290, 550, 580, (local.rotation + angle + 360) % 360, true)
           const activity = chairActivityRect(chair, prefs.seatClearanceMm)
@@ -223,7 +233,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       const fillCount = general ? 0 : plan.slots.filter(slot => slot.fill).length
       for (const slot of plan.slots) {
         const entry = item(`plan-desk-${furniture.length}`, slot.x + (slot.w - w) / 2, slot.y + (slot.h - d) / 2, w, d, slot.rotation)
-        if (general && prefs.targetSeats > 0 && furniture.length >= neededSeats) break
+        if (general && goal > 0 && furniture.length >= neededSeats) break
         if (slot.mirrorX) entry.mirrorX = true
         entry.layoutClusterId = slot.clusterId
         if (entry.layoutSettings && plan.presetId) entry.layoutSettings.arrangementPresetId = plan.presetId
@@ -241,7 +251,8 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
       if (plan.problem && !candidates.length) result.problem = general ? plan.problem.replace('会议桌', '家具') : plan.problem
     }
   }
-  candidates.sort((a, b) => layoutCandidateScore(b.seats, prefs.targetSeats) - layoutCandidateScore(a.seats, prefs.targetSeats))
+  // LAYOUT-036：legacy 默认排序口径不变（目标达成单因子）；balanced 显式选择时改按可解释加权总分。
+  candidates.sort((a, b) => layoutCandidateScore(b.seats, goal) - layoutCandidateScore(a.seats, goal))
   // LAYOUT-034：去除家具完全相同的变体（会议位置枚举常产生同集结果），保留 Top N 并附展示指标。
   const seen = new Set<string>()
   const distinct = candidates.filter(candidate => {
@@ -253,18 +264,84 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   // 净面积 = 轮廓面积 − 建筑约束外包矩形面积（近似）；利用率与人均余量为展示指标，见 layoutCandidateScore 注释。
   const netAreaMm2 = zoneNetAreaMm2(zone)
   const retainedAreaMm2 = retained.reduce((sum, entry) => { const f = officeFurnitureFootprint(entry); return sum + f.w * f.h }, 0)
-  const best = distinct[0]
-  if (!best) return { ...result, problem: result.problem || '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置' }
-  const topCandidates: LayoutCandidate[] = distinct.slice(0, LAYOUT_CANDIDATE_TOP_N).map(candidate => {
+  const enriched = distinct.map(candidate => {
     const area = retainedAreaMm2 + candidate.furniture.reduce((sum, entry) => { const f = officeFurnitureFootprint(entry); return sum + f.w * f.h }, 0)
+    const metrics = { utilization: Math.min(1, area / netAreaMm2), freeAreaPerSeatM2: candidate.seats > 0 ? Math.max(0, (netAreaMm2 - area) / candidate.seats / 1_000_000) : null }
     return {
-      furniture: candidate.furniture, seats: candidate.seats, shortfall: Math.max(0, prefs.targetSeats - candidate.seats), label: candidate.label,
-      rows: candidate.rows, columns: candidate.columns, rotated: candidate.rotated, fillCount: candidate.fillCount,
-      metrics: { utilization: Math.min(1, area / netAreaMm2), freeAreaPerSeatM2: candidate.seats > 0 ? Math.max(0, (netAreaMm2 - area) / candidate.seats / 1_000_000) : null },
+      ...candidate, metrics,
+      scoreDetail: layoutCandidateScoreDetail({ seats: candidate.seats, placed: candidate.seats, goal, utilization: metrics.utilization, freeAreaPerSeatM2: metrics.freeAreaPerSeatM2, fillCount: candidate.fillCount }),
+      topologyKey: layoutTopologyKey(candidate),
     }
   })
+  if (prefs.scoreMode === 'balanced') {
+    enriched.sort((a, b) => b.scoreDetail.total - a.scoreDetail.total || layoutCandidateScore(b.seats, goal) - layoutCandidateScore(a.seats, goal))
+  }
+  // LAYOUT-036：差异化 Top N——优先拓扑互不相同的候选，不足额按分数顺序补实际数量。
+  const top = selectDiverseCandidates(enriched, LAYOUT_CANDIDATE_TOP_N)
+  const best = top[0]
+  if (!best) return { ...result, problem: result.problem || '当前尺寸、保留家具或预留区域无法容纳方案；请调整参数或逐件放置', problemAdvice: layoutFailureAdvice(zone, goal) }
+  const topCandidates: LayoutCandidate[] = top.map(candidate => ({
+    furniture: candidate.furniture, seats: candidate.seats, shortfall: Math.max(0, goal - candidate.seats), label: candidate.label,
+    rows: candidate.rows, columns: candidate.columns, rotated: candidate.rotated, fillCount: candidate.fillCount,
+    metrics: candidate.metrics, scoreDetail: candidate.scoreDetail, topologyKey: candidate.topologyKey,
+  }))
   const fillWarning = best.fillCount ? `主排布之外的边缘余量已用单件补位 ${best.fillCount} 件，座位朝房间内侧；请核对补位位置与现场通道` : null
-  return { ...result, ...best, shortfall: Math.max(0, prefs.targetSeats - best.seats), problem: null, warnings: fillWarning ? [...result.warnings, fillWarning] : result.warnings, candidates: topCandidates }
+  // GEOM-018：设施提示接入候选结果（提示级，不阻断；点位压占/操作净空压占提醒现场复核）。
+  const facilityHints = facilityLayoutHints(zone, best.furniture.map(entry => {
+    const f = officeFurnitureFootprint(entry)
+    return { id: entry.id, label: entry.label, ring: [[f.x, f.y], [f.x + f.w, f.y], [f.x + f.w, f.y + f.h], [f.x, f.y + f.h]] as Array<[number, number]> }
+  }))
+  const shortfallNote = objective === 'fixed-quantity' && best.seats < goal ? `固定件数仅放下 ${best.seats}/${goal} 件，受空间或约束限制` : null
+  return {
+    ...result, ...best, shortfall: Math.max(0, goal - best.seats), problem: null,
+    warnings: [...result.warnings, ...(fillWarning ? [fillWarning] : []), ...(shortfallNote ? [shortfallNote] : []), ...facilityHints.map(hint => hint.message)],
+    candidates: topCandidates,
+  }
+}
+
+/**
+ * 标准使用当前间距；紧凑/舒适按相对标准的毫米差值联动计算，固定标准优先。
+ * 几何相同的档位去重，放不下的档位在 warnings 说明；预览与应用共用此入口。
+ */
+export function planTieredLayoutProposal(zone: ZoneObject, existing: FurnitureObject[], request: LayoutRequest): LayoutProposal {
+  const variants = officeLayoutSpacingVariants(request.spacing)
+  const results = variants.map(variant => ({ variant, proposal: planLayoutProposal(zone, existing, { ...request, spacing: variant.spacing }) }))
+  const picked: Array<{ tier: LayoutCandidate['spacingTier']; label: string; candidate: LayoutCandidate }> = []
+  const seen = new Set<string>()
+  for (const { variant, proposal } of results) {
+    const best = proposal.candidates?.[0]
+    if (!best) continue
+    const key = layoutCandidateKey(best)
+    if (seen.has(key)) continue
+    seen.add(key)
+    picked.push({ tier: variant.tier, label: variant.label, candidate: { ...best, spacingTier: variant.tier, label: `${variant.label} · ${best.label}` } })
+  }
+  if (!picked.length) {
+    // 全部档位失败：沿用标准档（当前间距）的问题与建议，其余档位的失败并入说明。
+    const first = results[0]!.proposal
+    const notes = results.slice(1).map(({ variant, proposal }) => proposal.problem ? `${variant.label}档同样放不下` : null).filter(Boolean) as string[]
+    return { ...first, warnings: [...first.warnings, ...notes] }
+  }
+  // 候选固定 标准→紧凑→舒适 顺序（变体定义序），不按分数重排：标准档始终是默认基准。
+  const failureNotes = results
+    .filter(({ variant, proposal }) => proposal.problem && !picked.some(item => item.tier === variant.tier))
+    .map(({ variant, proposal }) => `${variant.label}档放不下：${proposal.problem}`)
+  const best = picked[0]!
+  const base = results.find(({ variant }) => variant.tier === best.tier)!.proposal
+  return {
+    ...base,
+    furniture: best.candidate.furniture,
+    seats: best.candidate.seats,
+    shortfall: best.candidate.shortfall,
+    label: best.candidate.label,
+    rows: best.candidate.rows,
+    columns: best.candidate.columns,
+    rotated: best.candidate.rotated,
+    fillCount: best.candidate.fillCount,
+    problem: null,
+    warnings: [...base.warnings, ...failureNotes],
+    candidates: picked.map(item => item.candidate),
+  }
 }
 
 export function proposalDifference(current: FurnitureObject[], proposal: LayoutProposal) {

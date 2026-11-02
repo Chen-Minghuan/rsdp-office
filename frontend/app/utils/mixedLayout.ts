@@ -1,22 +1,24 @@
 import type { FurnitureObject, ZoneObject } from '~/types/office'
-import type { LayoutCandidate, LayoutProposal } from '~/types/layoutPlanning'
+import type { LayoutCandidate, LayoutObjective, LayoutProposal, LayoutScoreMode } from '~/types/layoutPlanning'
 import type { OfficeLayoutSpacing } from './officeAutoLayout'
 import { furnitureById } from './manualFurniture'
 import { canvasZoneBounds } from './officeCanvasView'
-import { layoutRectInsideRing } from './officeAutoLayout'
+import { layoutRectInsideRing, officeLayoutSpacingVariants } from './officeAutoLayout'
 import { zoneLayoutExclusions } from './spatial/obstacles'
 import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
+import { facilityLayoutHints } from './spatial/facilities'
 import type { PlacementArea } from './spatial/layoutRegions'
 import { rectOverlapsBlocker } from './layoutConstraints'
 import { channelRects } from './layoutChannels'
 import { ringArea } from './spatial/geometry'
+import { layoutCandidateScoreDetail, layoutFailureAdvice, layoutObjectiveGoal, layoutTopologyKey, selectDiverseCandidates } from './layoutScoring'
 
 type BundleItem = { templateId: string; role: 'primary' | 'seat'; x: number; y: number; w: number; h: number; rotation?: number }
 type Bundle = { categoryId: string; label: string; width: number; height: number; items: BundleItem[] }
 type BundleDefinition = { label: string; primary: string; accessories?: Array<{ id: string; role?: 'primary' | 'seat'; count?: number }> }
 type StrategyId = 'workstations' | 'social' | 'walls'
 type Strategy = { id: StrategyId; label: string; order: string[] }
-type PlacedCandidate = LayoutCandidate & { skipped: number; span: number; anchorPenalty: number; strategy: StrategyId }
+type PlacedCandidate = LayoutCandidate & { skipped: number; span: number; anchorPenalty: number; strategy: StrategyId; units: number }
 
 export const MIXED_LAYOUT_CATEGORIES: BundleDefinition[] = [
   { label: '办公桌椅', primary: 'desk-straight', accessories: [{ id: 'chair-office', role: 'seat' }] },
@@ -162,14 +164,26 @@ function candidateFurnitureKey(furniture: FurnitureObject[]) {
   return furniture.map(item => [item.furnitureTemplateId, Math.round(item.x), Math.round(item.y), Math.round(item.w), Math.round(item.h)].join(':')).sort().join('|')
 }
 
-export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], categoryIds: string[], spacing: OfficeLayoutSpacing, targetSeats = 0): LayoutProposal {
+/** LAYOUT-036 组合布局求解选项；缺省全部为旧行为（目标人数驱动工位套数，legacy 排序）。 */
+export interface MixedLayoutOptions {
+  objective?: LayoutObjective
+  /** objective = fixed-quantity 时的工位套数目标（0—500 整数）。 */
+  fixedQuantity?: number
+  scoreMode?: LayoutScoreMode
+}
+
+export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], categoryIds: string[], spacing: OfficeLayoutSpacing, targetSeats = 0, options: MixedLayoutOptions = {}): LayoutProposal {
   const replaceIds = existing.filter(item => item.layoutGroupId === `auto:${zone.id}`).map(item => item.id)
   const retainedIds = existing.filter(item => !replaceIds.includes(item.id)).map(item => item.id)
   const sourceKey = JSON.stringify([zone, existing])
-  const empty = { replaceIds, retainedIds, seats: 0, shortfall: targetSeats, sourceKey, candidates: undefined }
+  // LAYOUT-036：求解目标归一；max-capacity 不设上限（工位套数探索到放不下为止，上限 500 防御）。
+  const { objective, goal } = layoutObjectiveGoal({ objective: options.objective, targetSeats, fixedQuantity: options.fixedQuantity })
+  const empty = { replaceIds, retainedIds, seats: 0, shortfall: goal, sourceKey, candidates: undefined }
   if (!zone.polygon?.length || !categoryIds.length) return { ...empty, furniture: [], label: '组合布局', problem: '请先选择需要组合的功能模块', warnings: [] }
 
-  const requests = categoryIds.includes('workstation') && targetSeats > 0 ? Math.max(1, Math.floor(targetSeats)) : 1
+  const requests = !categoryIds.includes('workstation') ? 1
+    : objective === 'max-capacity' ? 500
+    : goal > 0 ? Math.max(1, Math.floor(goal)) : 1
   const blockers = [
     ...zoneLayoutExclusions(zone),
     ...channelRects(zone, zone.layoutPreferences?.channels || []),
@@ -181,6 +195,7 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
   for (const strategy of STRATEGIES) {
     const taken = [...retained]
     const furniture: FurnitureObject[] = [], warnings: string[] = [], placedCategories = new Set<string>()
+    let units = 0
     for (const categoryId of strategy.order.filter(id => categoryIds.includes(id))) {
       const bundle = createBundle(categoryId)
       if (!bundle) continue
@@ -188,12 +203,14 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
       let placed = 0
       for (let index = 0; index < count; index++) {
         const position = findPosition(bundle, strategy.id, zone, spacing, taken, blockers, placementAreas)
-        if (!position) continue
+        // 放不下一件时后续同款包也不会更放得下（占用只增不减），直接结束该品类——max-capacity 下避免 500 次无效全扫描
+        if (!position) break
         const items = bundleFurniture(bundle, position.x, position.y, zone.id, spacing, furniture.length)
         furniture.push(...items)
         taken.push(...items)
         placed++
       }
+      if (categoryId === 'workstation') units = placed
       if (placed) placedCategories.add(categoryId)
       if (placed < count && !warnings.includes(`${bundle.label}在当前空间无法完整放下，已跳过`)) warnings.push(`${bundle.label}在当前空间无法完整放下，已跳过`)
     }
@@ -207,13 +224,14 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
     const anchorPenalty = table ? Math.hypot((table.x + table.w / 2 - (bounds.minX + bounds.maxX) / 2) / (bounds.maxX - bounds.minX), (table.y + table.h / 2 - (bounds.minY + bounds.maxY) / 2) / (bounds.maxY - bounds.minY)) : 0
     const label = strategy.id === 'workstations' && !categoryIds.includes('workstation') && categoryIds.includes('meeting') ? '会议居中 · 功能分区' : strategy.label
     candidates.push({
-      furniture, seats, shortfall: Math.max(0, targetSeats - seats), label,
+      furniture, seats, shortfall: Math.max(0, goal - (objective === 'fixed-quantity' ? units : seats)), label,
       rows: new Set(furniture.map(item => Math.round(item.y))).size,
       columns: new Set(furniture.map(item => Math.round(item.x))).size,
-      metrics: { utilization: 0, freeAreaPerSeatM2: null }, skipped, span, anchorPenalty, strategy: strategy.id,
+      metrics: { utilization: 0, freeAreaPerSeatM2: null }, skipped, span, anchorPenalty, strategy: strategy.id, units,
     })
   }
 
+  // LAYOUT-036：legacy 缺省排序口径不变（缺口→跳过模块→锚点→紧凑度）；balanced 显式选择时按加权总分。
   candidates.sort((a, b) => a.shortfall - b.shortfall || a.skipped - b.skipped || a.anchorPenalty - b.anchorPenalty || a.span - b.span || STRATEGIES.findIndex(s => s.id === a.strategy) - STRATEGIES.findIndex(s => s.id === b.strategy))
   const seen = new Set<string>()
   const distinct = candidates.filter(candidate => {
@@ -221,21 +239,41 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
     if (seen.has(key)) return false
     seen.add(key)
     return true
-  }).slice(0, 3)
-  if (!distinct.length) return { ...empty, furniture: [], label: '组合布局', problem: '所选功能模块在当前空间放不下，请减少模块或调整尺寸/间距', warnings: ['所选组合与现有家具、建筑约束或通道冲突'] }
+  })
+  if (!distinct.length) return { ...empty, furniture: [], label: '组合布局', problem: '所选功能模块在当前空间放不下，请减少模块或调整尺寸/间距', problemAdvice: layoutFailureAdvice(zone, goal), warnings: ['所选组合与现有家具、建筑约束或通道冲突'] }
 
   const netAreaMm2 = Math.max(1, ringArea(zone.polygon) - zoneLayoutExclusions(zone).reduce((sum, area) => sum + area.w * area.h, 0))
   const retainedAreaMm2 = retained.reduce((sum, item) => sum + item.w * item.h, 0)
-  const topCandidates: LayoutCandidate[] = distinct.map(candidate => {
+  const enriched = distinct.map(candidate => {
     const area = retainedAreaMm2 + candidate.furniture.reduce((sum, item) => sum + item.w * item.h, 0)
+    const metrics = { utilization: Math.min(1, area / netAreaMm2), freeAreaPerSeatM2: candidate.seats > 0 ? Math.max(0, (netAreaMm2 - area) / candidate.seats / 1_000_000) : null }
     return {
-      furniture: candidate.furniture, seats: candidate.seats, shortfall: candidate.shortfall, label: candidate.label,
-      rows: candidate.rows, columns: candidate.columns,
-      metrics: { utilization: Math.min(1, area / netAreaMm2), freeAreaPerSeatM2: candidate.seats > 0 ? Math.max(0, (netAreaMm2 - area) / candidate.seats / 1_000_000) : null },
+      ...candidate, metrics,
+      scoreDetail: layoutCandidateScoreDetail({
+        seats: candidate.seats, placed: objective === 'fixed-quantity' ? candidate.units : candidate.seats, goal,
+        utilization: metrics.utilization, freeAreaPerSeatM2: metrics.freeAreaPerSeatM2,
+        requestedModules: categoryIds.length, placedModules: categoryIds.length - candidate.skipped,
+      }),
+      topologyKey: layoutTopologyKey(candidate),
     }
   })
-  const best = distinct[0]!
-  const warnings = best.skipped ? ['部分功能模块无法完整放入当前空间，已跳过；可减少模块或调整间距'] : []
+  if (options.scoreMode === 'balanced') {
+    enriched.sort((a, b) => b.scoreDetail.total - a.scoreDetail.total || a.shortfall - b.shortfall || a.skipped - b.skipped)
+  }
+  // LAYOUT-036：差异化 Top N——三策略本身即不同拓扑；不足额按顺序补实际数量，不编造。
+  const top = selectDiverseCandidates(enriched, 3)
+  const topCandidates: LayoutCandidate[] = top.map(candidate => ({
+    furniture: candidate.furniture, seats: candidate.seats, shortfall: candidate.shortfall, label: candidate.label,
+    rows: candidate.rows, columns: candidate.columns,
+    metrics: candidate.metrics, scoreDetail: candidate.scoreDetail, topologyKey: candidate.topologyKey,
+  }))
+  const best = top[0]!
+  const warnings = [
+    ...(best.skipped ? ['部分功能模块无法完整放入当前空间，已跳过；可减少模块或调整间距'] : []),
+    ...(objective === 'max-capacity' ? ['最大容量为当前硬约束下的可容纳上限探索值，不等于施工或法规核准容量'] : []),
+    // GEOM-018：设施提示（提示级，不阻断）
+    ...facilityLayoutHints(zone, best.furniture.map(item => ({ id: item.id, label: item.label, ring: [[item.x, item.y], [item.x + item.w, item.y], [item.x + item.w, item.y + item.h], [item.x, item.y + item.h]] as Array<[number, number]> }))).map(hint => hint.message),
+  ]
   return {
     ...empty,
     furniture: best.furniture,
@@ -245,5 +283,44 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
     problem: null,
     warnings,
     candidates: topCandidates,
+  }
+}
+
+/**
+ * 标准使用当前间距；紧凑/舒适按相对标准的毫米差值联动计算，固定标准优先。
+ * 几何相同的档位去重，放不下的档位在 warnings 说明；预览与应用共用此入口。
+ */
+export function planTieredMixedLayout(zone: ZoneObject, existing: FurnitureObject[], categoryIds: string[], spacing: OfficeLayoutSpacing, targetSeats = 0, options: MixedLayoutOptions = {}): LayoutProposal {
+  const variants = officeLayoutSpacingVariants(spacing)
+  const results = variants.map(variant => ({ variant, proposal: planMixedLayout(zone, existing, categoryIds, variant.spacing, targetSeats, options) }))
+  const picked: Array<{ tier: LayoutCandidate['spacingTier']; label: string; candidate: LayoutCandidate }> = []
+  const seen = new Set<string>()
+  for (const { variant, proposal } of results) {
+    const best = proposal.candidates?.[0]
+    if (!best) continue
+    const key = candidateFurnitureKey(best.furniture)
+    if (seen.has(key)) continue
+    seen.add(key)
+    picked.push({ tier: variant.tier, label: variant.label, candidate: { ...best, spacingTier: variant.tier, label: `${variant.label} · ${best.label}` } })
+  }
+  if (!picked.length) {
+    const first = results[0]!.proposal
+    return { ...first, warnings: [...first.warnings, ...results.slice(1).map(({ variant, proposal }) => proposal.problem ? `${variant.label}档同样放不下` : null).filter(Boolean) as string[]] }
+  }
+  // 候选固定 标准→紧凑→舒适 顺序（变体定义序），不按分数重排：标准档始终是默认基准。
+  const failureNotes = results
+    .filter(({ variant, proposal }) => proposal.problem && !picked.some(item => item.tier === variant.tier))
+    .map(({ variant, proposal }) => `${variant.label}档放不下：${proposal.problem}`)
+  const best = picked[0]!
+  const base = results.find(({ variant }) => variant.tier === best.tier)!.proposal
+  return {
+    ...base,
+    furniture: best.candidate.furniture,
+    seats: best.candidate.seats,
+    shortfall: best.candidate.shortfall,
+    label: best.candidate.label,
+    problem: null,
+    warnings: [...base.warnings, ...failureNotes],
+    candidates: picked.map(item => item.candidate),
   }
 }

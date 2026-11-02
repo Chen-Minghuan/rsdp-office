@@ -1612,6 +1612,8 @@ function furnitureProduct(o: FurnitureObject) {
       <p class="mt-1.5 text-[9px] leading-relaxed text-muted">设施只提示不阻断排版、不扣净面积；需要实际禁放请用建筑标注的禁放区。拖动移动，拖顶点调整，Delete 删除。</p>
     </div>
     <div v-if="mode === 'design' && showDimensions !== false" class="absolute right-3 bottom-12 z-10 rounded-lg border border-[#e8dfd5] bg-white/90 px-2 py-1 text-[10px] text-[#786b5d] pointer-events-none">绿色：离墙 · 棕色：组间净距<br>按家具外包占地测量，椅子为座席示意</div>
+    <!-- 候选方案浮层锚点（2026-11-02 用户定稿）：排版面板的候选卡经 Teleport 落到画布右下角，随选随预览 -->
+    <div v-if="mode === 'design'" id="layout-candidate-dock" data-testid="layout-candidate-dock" class="pointer-events-none absolute bottom-24 right-3 z-20 flex max-h-[50vh] w-64 flex-col gap-1.5 overflow-y-auto"></div>
     <!-- 选中通道浮动编辑卡：屏幕坐标系，不随画布缩放；编辑走 updateZoneChannels 同一入口 -->
     <div
       v-if="selectedChannel && designZoneBounds"

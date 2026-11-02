@@ -22,6 +22,39 @@ export interface OfficeLayoutSpacing {
   staggerOffsetMm?: number
 }
 export const OFFICE_LAYOUT_SPACING: OfficeLayoutSpacing = { wallMm: 0, aisleMm: 900, gapMm: 0, faceGapMm: 900, backGapMm: 0 }
+/**
+ * 间距预设档（紧凑/标准/舒适，策略初始值，非建筑规范）：一键应用后仍可逐项微调；
+ * 只在使用者点击时写入，不改变默认间距，旧行为不漂移。
+ */
+export interface OfficeLayoutSpacingPreset {
+  id: 'compact' | 'standard' | 'comfort'
+  label: string
+  hint: string
+  values: OfficeLayoutSpacing
+}
+export const OFFICE_LAYOUT_SPACING_PRESETS: readonly OfficeLayoutSpacingPreset[] = [
+  { id: 'compact', label: '紧凑', hint: '排间 800 · 同排 300 · 靠墙', values: { wallMm: 0, aisleMm: 800, gapMm: 300, faceGapMm: 800, backGapMm: 0 } },
+  { id: 'standard', label: '标准', hint: '排间 900 · 同排 600 · 靠墙', values: { wallMm: 0, aisleMm: 900, gapMm: 600, faceGapMm: 900, backGapMm: 0 } },
+  { id: 'comfort', label: '舒适', hint: '排间 1200 · 同排 800 · 离墙 600', values: { wallMm: 600, aisleMm: 1200, gapMm: 800, faceGapMm: 1200, backGapMm: 300 } },
+]
+/** 以当前标准间距为基准，沿用三档预设之间的毫米差值；紧凑档最小为 0，不改家具尺寸或其他预留。 */
+export function officeLayoutSpacingVariants(standard: OfficeLayoutSpacing) {
+  const baseline = OFFICE_LAYOUT_SPACING_PRESETS.find(preset => preset.id === 'standard')!.values
+  return (['standard', 'compact', 'comfort'] as const).map(tier => {
+    const preset = OFFICE_LAYOUT_SPACING_PRESETS.find(preset => preset.id === tier)!
+    const spacing = { ...standard }
+    if (tier !== 'standard') {
+      for (const field of ['wallMm', 'aisleMm', 'gapMm', 'faceGapMm', 'backGapMm'] as const) {
+        const value = standard[field] ?? (field === 'faceGapMm' ? standard.pairMm ?? standard.aisleMm : field === 'backGapMm' ? standard.pairMm ?? 0 : 0)
+        // 非法输入继续交给单档引擎拒绝，不能借紧凑档的归零掩盖负数。
+        spacing[field] = Number.isFinite(value) && value >= 0
+          ? Math.max(0, value + preset.values[field]! - baseline[field]!)
+          : value
+      }
+    }
+    return { tier, label: preset.label, spacing }
+  })
+}
 /** LAYOUT-038：椅背相对时椅子占位之外的通行量（毫米，策略值，非建筑规范）。 */
 export const CHAIR_BACK_PASSAGE_MM = 500
 /**

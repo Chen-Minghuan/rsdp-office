@@ -61,14 +61,35 @@ try {
     await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 8 })
     await page.mouse.up()
   }
-  /** 布置区多边形可能被家具覆盖：沿边缘探测一个未被遮挡的屏幕点用于拖动（必须命中目标区域自身）。 */
+  /** 布置区多边形可能被家具覆盖：沿实际边中点（向质心内收）探测未被遮挡的屏幕点用于拖动（必须命中目标区域自身）。 */
   async function polygonFreePoint(locator, regionId) {
     const box = await locator.boundingBox()
     assert.ok(box)
-    const probes = [[0.02, 0.5], [0.5, 0.02], [0.98, 0.5], [0.5, 0.98], [0.02, 0.06], [0.98, 0.06], [0.06, 0.94], [0.94, 0.94]]
-    for (const [fx, fy] of probes) {
-      const x = box.x + box.width * fx
-      const y = box.y + box.height * fy
+    // 顶点编辑后形状可能倾斜/带选中描边，按包围盒百分比探测不可靠；改用真实顶点做屏幕变换。
+    const candidates = await locator.evaluate(el => {
+      const ctm = el.getScreenCTM()
+      if (!ctm) return []
+      const pts = []
+      for (let index = 0; index < el.points.length; index++) {
+        const screen = new DOMPoint(el.points.getItem(index).x, el.points.getItem(index).y).matrixTransform(ctm)
+        pts.push([screen.x, screen.y])
+      }
+      if (!pts.length) return []
+      const cx = pts.reduce((sum, pt) => sum + pt[0], 0) / pts.length
+      const cy = pts.reduce((sum, pt) => sum + pt[1], 0) / pts.length
+      const out = []
+      for (let index = 0; index < pts.length; index++) {
+        const a = pts[index]
+        const b = pts[(index + 1) % pts.length]
+        const mx = (a[0] + b[0]) / 2
+        const my = (a[1] + b[1]) / 2
+        out.push([mx + (cx - mx) * 0.15, my + (cy - my) * 0.15])
+        out.push([mx + (cx - mx) * 0.35, my + (cy - my) * 0.35])
+      }
+      out.push([cx, cy])
+      return out
+    })
+    for (const [x, y] of candidates) {
       const hit = await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.getAttribute('data-region-id') || '', [x, y])
       if (hit === regionId) return { x, y }
     }

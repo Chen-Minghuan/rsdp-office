@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFurniture'
-import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { OFFICE_LAYOUT_SPACING, OFFICE_LAYOUT_SPACING_PRESETS } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
-import { defaultLayoutPreferences, layoutCandidateKey, planLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
-import { layoutPanelWarnings, layoutWarningTestId, type LayoutWarningLevel } from '~/utils/layoutWarnings'
+import { defaultLayoutPreferences, layoutCandidateKey, planTieredLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
+import { layoutPanelWarnings, layoutWarningTestId, zoneNetAreaMm2, AREA_PER_SEAT_HINT_M2, type LayoutWarningLevel } from '~/utils/layoutWarnings'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
 import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/officeArrangement'
 import { moduleGlyphId } from '~/utils/officeModules'
+import { formatDimensionMm, officeLayoutClearances } from '~/utils/officeDimensionAnnotations'
 import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
 
 const props = withDefaults(defineProps<{ embedded?: boolean; moduleId?: string; currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>(), { embedded: false, moduleId: '', currentPreview: null })
@@ -66,6 +67,10 @@ const isWorkstation = computed(() => selectedModule.value.category === '职员�
 const isGeneral = computed(() => productStyle.value === 'general')
 const catalogCategories = computed(() => isMeetingSpace.value ? ['会议与洽谈', ...furnitureCategories.filter(category => category !== '会议与洽谈')] : furnitureCategories)
 const nameSeatSuggestion = computed(() => Number(zone.value?.name.match(/(?:\(|（)?(\d+)\s*人/)?.[1] || 0))
+// LAYOUT-036：按面积推荐人数（2 ㎡/人为可调策略值，非规范）；一键采用，手动改过不覆盖。
+const areaSeatSuggestion = computed(() => zone.value ? Math.max(0, Math.floor(zoneNetAreaMm2(zone.value) / 1_000_000 / AREA_PER_SEAT_HINT_M2)) : 0)
+// LAYOUT-036：当前求解目标对应的目标值（目标人数/固定件数；最大容量无目标）
+const goalCount = computed(() => (preferences.objective || 'target-seats') === 'fixed-quantity' ? preferences.fixedQuantity || 0 : (preferences.objective || 'target-seats') === 'target-seats' ? preferences.targetSeats : 0)
 watch(() => zone.value?.id, () => {
   Object.assign(preferences, defaultLayoutPreferences(), JSON.parse(JSON.stringify(zone.value?.layoutPreferences || {})))
   activeStep.value = props.embedded ? 'settings' : 'module'
@@ -166,9 +171,15 @@ const currentFurniture = computed(() => zone.value ? store.furnitureForZone(zone
 const channels = computed<LayoutChannel[]>(() => zone.value?.layoutPreferences?.channels || [])
 // 通道和入口继续参与布局计算；此处不再重复渲染其策略提示。
 const request = computed<LayoutRequest>(() => ({ module: selectedModule.value, widthMm: unitW.value, depthMm: unitD.value, spacing: { ...spacing, ...(isWorkstation.value ? { gapMm: 0 } : {}) }, productStyleId: productStyle.value, presetId: effectivePresetId.value, preferences: { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(channels.value)), strategy: isMeetingLayout.value ? preferences.strategy : 'template' } }))
-const baseProposal = computed(() => zone.value ? planLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
-// LAYOUT-034：Top N 候选卡片选择。选择按候选家具签名跟随：应用候选后候选集重算，同一候选仍在榜则保持选中
-// （新摆放与当前布局一致、预览退场）；参数或保留家具变化导致该候选消失时回落到评分最高的默认方案。
+const baseProposal = computed(() => zone.value ? planTieredLayoutProposal(zone.value, currentFurniture.value, request.value) : null)
+// 数量/利用率相同不代表坐标相同；与画布标注共用实际组间净距，便于比较窄空间三档。
+const candidateGapLabels = computed(() => baseProposal.value?.candidates?.map(candidate => {
+  if (!zone.value || !isWorkstation.value) return null
+  const gaps = officeLayoutClearances(zone.value, candidate.furniture).filter(item => item.kind === 'group')
+  return gaps.length ? formatDimensionMm(Math.min(...gaps.map(item => item.distanceMm))) : null
+}) || [])
+// LAYOUT-034：候选卡片选择（2026-11-02 v2：固定 标准→紧凑→舒适 顺序，默认标准档）。选择按候选家具签名跟随：
+// 应用候选后候选集重算，同一候选仍在榜则保持选中（新摆放与当前布局一致、预览退场）；候选消失时回落到默认标准档。
 const selectedCandidateKey = ref<string | null>(null)
 const selectedCandidateIndex = computed(() => {
   if (!selectedCandidateKey.value) return 0
@@ -178,6 +189,7 @@ const selectedCandidateIndex = computed(() => {
 function selectCandidate(index: number) {
   const candidate = index > 0 ? baseProposal.value?.candidates?.[index] : undefined
   selectedCandidateKey.value = candidate ? layoutCandidateKey(candidate) : null
+  showPreview.value = true
 }
 const proposal = computed(() => {
   const base = baseProposal.value
@@ -217,6 +229,7 @@ watch(() => store.lastManualFurnitureEdit, mark => { if (mark && mark.zoneId ===
 function selectModule(template: OfficeModuleTemplate) {
   store.cancelFurniturePlacement()
   selectedModule.value = template
+  showPreview.value = true
 }
 watch(() => props.moduleId, id => {
   const template = modules.value.find(module => module.id === id)
@@ -230,6 +243,11 @@ function selectPreset(id: OfficeArrangementPresetId) {
   presetId.value = id
   arrangement.value = preset.baseMode
   Object.assign(spacing, preset.defaults)
+}
+/** 间距预设档（策略初始值）：一键写入全部间距字段，之后仍可逐项微调。 */
+function applySpacingPreset(id: 'compact' | 'standard' | 'comfort') {
+  const preset = OFFICE_LAYOUT_SPACING_PRESETS.find(item => item.id === id)
+  if (preset) Object.assign(spacing, preset.values)
 }
 
 function goToStep(step: LayoutPanelStep) {
@@ -402,7 +420,20 @@ defineExpose({ selectModule, applyAutoLayout })
         <div class="px-3 py-2 border-b border-line text-[11px] space-y-2">
           <div class="font-semibold">方案需求</div>
           <div v-if="isMeetingLayout" class="flex gap-1.5"><button type="button" :aria-pressed="preferences.strategy === 'template'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'template'">{{ isMeetingLayout ? '单桌居中' : '按场地排布' }}</button><button v-if="isMeetingLayout" type="button" :aria-pressed="preferences.strategy === 'recommended'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'recommended'">自动推荐</button></div>
-          <label class="flex items-center justify-between gap-1.5">{{ isGeneral ? '目标数量' : '目标人数' }}<input v-model.number="preferences.targetSeats" :aria-label="isGeneral ? '目标数量' : '目标人数'" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
+          <!-- LAYOUT-036 求解目标三选（缺省目标人数，旧行为不变；与布局拓扑正交） -->
+          <div class="flex items-center justify-between gap-1.5">
+            <span class="text-muted">求解目标</span>
+            <div class="flex gap-1" role="radiogroup" aria-label="求解目标">
+              <button type="button" data-testid="objective-target-seats" :aria-pressed="(preferences.objective || 'target-seats') === 'target-seats'" :class="['rounded-none border px-1.5 py-0.5 text-[10px]', (preferences.objective || 'target-seats') === 'target-seats' ? 'border-bronze bg-cream text-bronze' : 'border-line text-muted']" @click="preferences.objective = 'target-seats'">{{ isGeneral ? '目标数量' : '目标人数' }}</button>
+              <button type="button" data-testid="objective-fixed-quantity" :aria-pressed="preferences.objective === 'fixed-quantity'" :class="['rounded-none border px-1.5 py-0.5 text-[10px]', preferences.objective === 'fixed-quantity' ? 'border-bronze bg-cream text-bronze' : 'border-line text-muted']" @click="preferences.objective = 'fixed-quantity'">固定件数</button>
+              <button type="button" data-testid="objective-max-capacity" :aria-pressed="preferences.objective === 'max-capacity'" :class="['rounded-none border px-1.5 py-0.5 text-[10px]', preferences.objective === 'max-capacity' ? 'border-bronze bg-cream text-bronze' : 'border-line text-muted']" @click="preferences.objective = 'max-capacity'">最大容量</button>
+            </div>
+          </div>
+          <label v-if="(preferences.objective || 'target-seats') === 'target-seats'" class="flex items-center justify-between gap-1.5">{{ isGeneral ? '目标数量' : '目标人数' }}<input v-model.number="preferences.targetSeats" :aria-label="isGeneral ? '目标数量' : '目标人数'" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
+          <label v-else-if="preferences.objective === 'fixed-quantity'" class="flex items-center justify-between gap-1.5">{{ isMeetingLayout ? '椅数目标' : '件数目标' }}<input v-model.number="preferences.fixedQuantity" aria-label="件数目标" type="number" min="0" max="500" class="w-24 rounded-none border border-line px-2 py-1"></label>
+          <p v-else class="text-[10px] text-muted">探索当前硬约束下可容纳的上限（估计值，非施工或法规核准容量）。</p>
+          <p v-if="(preferences.objective || 'target-seats') === 'target-seats' && !isGeneral && areaSeatSuggestion > 0 && !preferences.targetSeats" class="text-[10px] text-muted">按面积约可容 {{ areaSeatSuggestion }} 人（策略参考值）<button type="button" data-testid="adopt-area-seats" class="ml-1 text-bronze underline decoration-dotted" @click="preferences.targetSeats = areaSeatSuggestion">采用</button></p>
+          <label class="flex items-center justify-between gap-1.5 text-muted">综合评分排序（可解释加权，缺省为目标达成优先）<input v-model="preferences.scoreMode" type="checkbox" true-value="balanced" false-value="legacy" data-testid="score-mode-balanced" aria-label="综合评分排序"></label>
           <p class="text-[10px] text-muted">{{ isGeneral ? '0 表示未指定数量；多件请选择按场地排布。' : '0 表示未指定；房名中的人数需确认后使用。' }}</p>
           <button v-if="!isGeneral && nameSeatSuggestion && nameSeatSuggestion <= 500 && !preferences.targetSeats" class="text-bronze underline" @click="preferences.targetSeats = nameSeatSuggestion">采用房名建议 {{ nameSeatSuggestion }} 人</button>
           <template v-if="isMeetingLayout">
@@ -412,7 +443,7 @@ defineExpose({ selectModule, applyAutoLayout })
           </template>
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
           <label class="block"><input v-model="showPreview" type="checkbox" aria-label="显示排版预览"> 显示待应用预览</label>
-          <p v-if="!showPreview" class="text-[10px] text-muted mt-1">预览已关闭：画布只显示实际已放置的家具；选择模块/排布或勾选后查看方案预览，删除或清空排版会自动关闭预览。</p>
+          <p v-if="!showPreview" class="text-[10px] text-muted mt-1">预览已关闭：画布只显示实际已放置的家具；点击候选方案、选择模块/排布或勾选后查看预览，删除或清空排版会自动关闭预览。</p>
           <details v-if="isMeetingLayout" data-testid="advanced-options" class="rounded-none border border-[#eee5dc] bg-[#fdfcfa] px-2 py-1.5">
             <summary class="cursor-pointer text-[10px] text-muted">高级选项（拉椅预留）—— 新手可跳过</summary>
             <label class="mt-2 flex items-center justify-between">拉椅活动预留 mm<input v-model.number="preferences.seatClearanceMm" aria-label="拉椅活动预留（毫米）" type="number" min="0" class="w-24 rounded-none border border-line px-2 py-1"></label>
@@ -443,6 +474,21 @@ defineExpose({ selectModule, applyAutoLayout })
               <span class="text-[11px] font-semibold text-[#5b5751]">空间间距</span>
               <span class="text-[9px] text-muted">单位：mm</span>
             </div>
+            <div class="mb-1.5 flex gap-1" data-testid="spacing-presets">
+              <button
+                v-for="item in OFFICE_LAYOUT_SPACING_PRESETS"
+                :key="item.id"
+                type="button"
+                :data-testid="'spacing-preset-' + item.id"
+                :aria-label="'间距预设：' + item.label"
+                class="flex-1 rounded-none border border-line bg-white px-1.5 py-1 text-left transition hover:border-bronze"
+                @click="applySpacingPreset(item.id)"
+              >
+                <span class="block text-[10px] font-semibold text-[#5b5751]">{{ item.label }}</span>
+                <span class="mt-0.5 block text-[9px] leading-tight text-muted">{{ item.hint }}</span>
+              </button>
+            </div>
+            <p class="mb-1.5 text-[9px] text-muted">修改标准方案间距，紧凑和舒适方案随之调整。</p>
             <div class="grid grid-cols-2 gap-1.5 text-[10px] text-muted">
               <label v-if="!isWorkstation">{{ arrangement === 'centerAisle' ? '中央通道/排间净距' : '排间净距' }}<input v-model.number="spacing.aisleMm" aria-label="排间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
               <label v-if="isWorkstation">图例组间净距<input v-model.number="spacing.faceGapMm" aria-label="图例组间净距（毫米）" type="number" min="0" step="100" class="mt-1 w-full h-8 px-2 border border-line rounded-none text-xs text-[#5b5751]"></label>
@@ -507,24 +553,28 @@ defineExpose({ selectModule, applyAutoLayout })
             </div>
           </div>
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
-          <div v-if="baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="mt-2" data-testid="layout-candidates">
-            <div class="mb-1 text-[9px] text-[#8a8178]">候选方案 · 按目标达成优先排序；利用率/人均余量为策略参考值</div>
-            <div class="flex max-h-36 flex-col gap-1 overflow-y-auto">
-              <button
-                v-for="(candidate, index) in baseProposal.candidates"
-                :key="index"
-                type="button"
-                data-testid="layout-candidate-card"
-                :class="['rounded-none border px-2 py-1.5 text-left text-[10px] leading-snug', index === selectedCandidateIndex ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line bg-white text-muted hover:bg-[#f9f7f4]']"
-                @click="selectCandidate(index)"
-              >
-                <span class="block font-semibold">{{ candidate.label }}</span>
-                <span class="mt-0.5 block">{{ isMeetingLayout ? '座位' : isGeneral ? '家具' : '工位' }} {{ candidate.seats }}<span v-if="preferences.targetSeats"> / 目标 {{ preferences.targetSeats }}</span> · 利用率 {{ Math.round(candidate.metrics.utilization * 100) }}%<span v-if="candidate.metrics.freeAreaPerSeatM2 != null"> · 人均余量 {{ candidate.metrics.freeAreaPerSeatM2.toFixed(1) }} ㎡</span></span>
-              </button>
+          <!-- 候选卡落在画布右下角浮层（CanvasBoard 的 #layout-candidate-dock），随选随预览 -->
+          <Teleport to="#layout-candidate-dock" defer>
+            <div v-if="baseProposal && !baseProposal.problem && (baseProposal.candidates?.length || 0) > 1" class="pointer-events-auto rounded-xl border border-line bg-white/95 p-2 shadow-panel" data-testid="layout-candidates" @pointerdown.stop>
+              <div class="mb-1 text-[9px] text-[#8a8178]">方案选择 · 默认标准，点击预览</div>
+              <div class="flex flex-col gap-1">
+                <button
+                  v-for="(candidate, index) in baseProposal.candidates"
+                  :key="index"
+                  type="button"
+                  data-testid="layout-candidate-card"
+                  :class="['rounded-none border px-2 py-1.5 text-left text-[10px] leading-snug', index === selectedCandidateIndex ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line bg-white text-muted hover:bg-[#f9f7f4]']"
+                  :aria-pressed="index === selectedCandidateIndex"
+                  @click="selectCandidate(index)"
+                >
+                  <span class="block font-semibold">{{ candidate.label.split(' · ')[0] }}</span>
+                  <span class="mt-0.5 block">{{ isMeetingLayout ? '座位' : isGeneral ? '家具' : '工位' }} {{ candidate.seats }}<template v-if="candidateGapLabels[index]"> · 最小组间净距 {{ candidateGapLabels[index] }}</template><template v-else> · 利用率 {{ Math.round(candidate.metrics.utilization * 100) }}%</template></span>
+                </button>
+              </div>
             </div>
-          </div>
+          </Teleport>
           <p v-if="currentFurniture.length && capacity && !draftApplied" data-testid="layout-pending" class="mt-2 rounded-none border border-[#f0d9b3] bg-[#fff8e8] px-2 py-1.5 text-[10px] leading-relaxed text-[#8a6a2c]">{{ differenceText }}</p>
-          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ preferences.targetSeats || '未指定' }}</p>
+          <p v-if="proposal && !proposal.problem" data-testid="layout-seat-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '已排座位' : isGeneral ? '家具数量' : '工位' }} {{ proposal.seats }} · 目标 {{ goalCount || '未指定' }}</p>
           <div v-if="panelWarnings.length" class="mt-2 flex max-h-32 flex-col gap-1 overflow-y-auto" data-testid="layout-warnings">
             <div
               v-for="warning in panelWarnings"
@@ -543,6 +593,9 @@ defineExpose({ selectModule, applyAutoLayout })
           <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
           <p v-if="applicationMessage" role="status" class="mt-1 text-[10px] text-[#56636e]">{{ applicationMessage }}</p>
           <p v-if="plan?.problem" role="status" class="mt-1 text-[10px] text-[#a65e4c]">{{ plan.problem }}</p>
+          <ul v-if="proposal?.problem && proposal.problemAdvice?.length" class="mt-1 list-inside list-disc text-[10px] leading-relaxed text-muted" data-testid="layout-problem-advice">
+            <li v-for="advice in proposal.problemAdvice" :key="advice">{{ advice }}</li>
+          </ul>
         </div>
 
         <!-- Actions -->

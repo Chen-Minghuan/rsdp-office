@@ -46,7 +46,7 @@ import type { LayoutRegion, SpatialFacility, SpatialObstacle } from '~/types/spa
 import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } from '~/utils/spatial/obstacles'
 import { layoutRegionProblem, layoutRegionRing, measureLayoutRegionWallOffsets } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilities'
-import { planLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
+import { planTieredLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 
 const STORAGE_KEY = 'rsdp-office-v01'
@@ -1551,7 +1551,7 @@ export const useOfficeStore = defineStore('office', {
       if (sourceKey !== layoutSourceKey(zone, existing)) return false
       const template = this.customModules.find(module => module.id === request.module.id) || furnitureById.get(request.module.id)
       if (!template) return false
-      const proposal = planLayoutProposal(zone, existing, { ...request, module: template })
+      const proposal = planTieredLayoutProposal(zone, existing, { ...request, module: template })
       if (proposal.problem || !proposal.furniture.length) return false
       // LAYOUT-034：应用用户在面板上选中的候选；索引越界时回落到评分最高的默认方案。
       const chosen = candidateIndex > 0 ? proposal.candidates?.[candidateIndex] : undefined
