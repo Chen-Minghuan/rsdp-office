@@ -50,7 +50,9 @@
     "test:layout-references": "node scripts/test-layout-references.mjs",
     "e2e:layout-references": "node scripts/e2e-layout-references.mjs",
     "e2e:project-floors": "node scripts/e2e-project-floors.mjs",
-    "e2e:layout-regions": "node scripts/e2e-layout-regions.mjs"
+    "e2e:layout-regions": "node scripts/e2e-layout-regions.mjs",
+    "test:white-model": "node scripts/test-white-model.mjs",
+    "e2e:white-model": "node scripts/e2e-white-model.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
@@ -59,11 +61,13 @@
     "pinia": "^4.0.3",
     "polygon-clipping": "^0.15.7",
     "tailwindcss": "^4.3.3",
+    "three": "^0.187.0",
     "vue": "^3.5.43",
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/three": "^0.187.0",
     "playwright": "^1.64.0"
   }
 }

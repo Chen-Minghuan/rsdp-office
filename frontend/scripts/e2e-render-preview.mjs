@@ -75,7 +75,7 @@ try {
   const pageErrors = []
   page.on('pageerror', error => pageErrors.push(error.message))
   const open = async () => {
-    await page.getByRole('button', { name: '效果预览', exact: true }).click()
+    await page.getByRole('button', { name: 'AI 效果图', exact: true }).click()
     await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor()
   }
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X', { waitUntil: 'networkidle' })

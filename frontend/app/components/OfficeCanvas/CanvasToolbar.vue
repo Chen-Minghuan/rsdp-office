@@ -25,7 +25,8 @@ const designTools = [
   { key: 'select', icon: 'pencil', label: '选择' },
   { key: 'pan', icon: 'hand', label: '拖动' },
   { key: 'note', icon: 'note', label: '便签' },
-  { key: 'render', icon: 'reference', label: '效果预览' },
+  { key: 'white-model', icon: 'cube', label: '3D 白模' },
+  { key: 'render', icon: 'reference', label: 'AI 效果图' },
   { key: 'constraints', icon: 'door', label: '建筑标注' },
   { key: 'regions', icon: 'zone', label: '布置区' },
   { key: 'facilities', icon: 'tag', label: '设施标注' },
@@ -40,6 +41,7 @@ const emit = defineEmits<{
   zoomOut: []
   fit: []
   render: []
+  whiteModel: []
   rotate: [degrees: number]
 }>()
 
@@ -126,7 +128,7 @@ function removeChannel(id: string) {
           ]"
           :data-testid="t.key === 'constraints' ? 'toolbar-constraints' : t.key === 'channels' ? 'toolbar-channels' : t.key === 'regions' ? 'toolbar-regions' : t.key === 'facilities' ? 'toolbar-facilities' : undefined"
           :aria-expanded="t.key === 'constraints' ? constraintsOpen : t.key === 'channels' ? channelsOpen : t.key === 'regions' ? regionsOpen : t.key === 'facilities' ? facilitiesOpen : undefined"
-          @click="t.key === 'render' ? emit('render') : t.key === 'constraints' ? openConstraints() : t.key === 'channels' ? togglePopover('channels') : t.key === 'regions' ? togglePopover('regions') : t.key === 'facilities' ? togglePopover('facilities') : tool = t.key"
+          @click="t.key === 'render' ? emit('render') : t.key === 'white-model' ? emit('whiteModel') : t.key === 'constraints' ? openConstraints() : t.key === 'channels' ? togglePopover('channels') : t.key === 'regions' ? togglePopover('regions') : t.key === 'facilities' ? togglePopover('facilities') : tool = t.key"
         >
           <AppIcon :name="t.icon" size="4" />
           <span>{{ t.label }}</span>

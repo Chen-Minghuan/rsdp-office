@@ -12,6 +12,7 @@ const selectedId = ref<string | null>(null)
 const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
+const showWhiteModel = ref(false)
 const overviewCollapsed = ref(false)
 const viewRotation = ref(0)
 const showDimensions = ref(true)
@@ -115,6 +116,7 @@ watch(() => store.designZoneId, (id, oldId) => {
   tool.value = 'select'
   showSubmit.value = false
   showRenderPreview.value = false
+  showWhiteModel.value = false
   store.cancelFurniturePlacement()
   if (id && route.query.zoneId !== id) {
     const query: Record<string, string> = { ...route.query as Record<string, string>, mode: 'design', zoneId: id }
@@ -170,6 +172,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"
           @render="showRenderPreview = true"
+          @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
         <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" />
@@ -234,5 +237,6 @@ watch(() => store.canEnterLayout, (confirmed) => {
 
     <OfficeCanvasSubmitDialog v-model:show="showSubmit" />
     <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" />
+    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" @ai-render="showRenderPreview = true" />
   </div>
 </template>
