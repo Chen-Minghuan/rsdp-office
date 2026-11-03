@@ -11,6 +11,14 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   vite: {
     plugins: [tailwindcss()],
+    optimizeDeps: {
+      include: [
+        '@heroicons/vue/24/outline',
+        'polygon-clipping',
+        'three',
+        'three/examples/jsm/controls/OrbitControls.js',
+      ],
+    },
   },
   imports: {
     dirs: ['stores'],
