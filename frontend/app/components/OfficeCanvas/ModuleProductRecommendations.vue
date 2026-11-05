@@ -2,6 +2,7 @@
 import type { FurnitureObject } from '~/types/office'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import type { ModuleRecommendation, ModuleProductCandidate } from '~/types/moduleRecommendation'
+import { applyModuleProductSelection } from '~/utils/moduleProductSelection'
 import { money } from '~/utils/helpers'
 
 const props = defineProps<{ selectedId?: string | null }>()
@@ -73,16 +74,7 @@ async function choose(candidate: ModuleProductCandidate) {
       applyToSameModules: applyToSameModules.value })
     if (current !== signature.value) { error.value = '布局已变更，请重新匹配，已保存的商品选择请在方案中核对'; return }
     if (!response?.canvas || !Array.isArray(response.cartItems)) throw new Error('保存结果无效，请重新读取')
-    store.objects = response.canvas.objects
-    store.canvasRevision = response.canvas.revision
-    store.submitted = null
-    const product = response.match.product
-    store.products = [...store.products.filter(item => item.id !== product.id), product]
-    for (const line of response.cartItems) {
-      store.cart = [...store.cart.filter(item => item.id !== line.lineId), { id: line.lineId, projectId: line.projectId,
-        zoneId: line.zoneId, zoneName: line.zoneName, productId: line.productId, qty: line.qty }]
-    }
-    store.saveLocal()
+    applyModuleProductSelection(store, response)
     await nextTick()
     clearTimeout(timer)
     await refresh()

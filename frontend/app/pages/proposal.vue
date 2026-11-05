@@ -45,7 +45,10 @@ type Detail =
 
 const store = useOfficeStore()
 const route = useRoute()
+const router = useRouter()
 const selectedDetail = ref<Detail | null>(null)
+// 效果图详情页签：3D 交互 / AI 概念图 / 2D 布局（RENDER-004）
+const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
 const confirmed = ref(false)
 const notice = ref('')
 const collapsedGroups = ref<Set<string>>(new Set())
@@ -236,8 +239,26 @@ function isGroupOpen(group: ProposalGroup) { return !collapsedGroups.value.has(g
 function toggleGroup(group: ProposalGroup) { const next = new Set(collapsedGroups.value); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); collapsedGroups.value = next }
 function activeSpace(group: ProposalGroup) { const id = activeSpaceIds.value[group.id] || group.spaces[0]?.zoneId; return group.spaces.find(space => space.zoneId === id) || group.spaces[0] }
 function chooseSpace(group: ProposalGroup, space: ProposalSpace) { activeSpaceIds.value = { ...activeSpaceIds.value, [group.id]: space.zoneId } }
-function openDetail(detail: Detail) { selectedDetail.value = detail }
+function openDetail(detail: Detail) { selectedDetail.value = detail; renderTab.value = 'ai' }
 function closeDetail() { selectedDetail.value = null }
+
+// 3D 只读查看器的显隐跟随页签；只读，不发起 AI 生图，修改必须回到设计流程
+const modelViewerShow = computed({
+  get: () => selectedDetail.value?.kind === 'render' && renderTab.value === 'model',
+  set: (value: boolean) => { if (!value && renderTab.value === 'model') renderTab.value = 'ai' },
+})
+function onLocateFromProposal() {
+  const detail = selectedDetail.value
+  if (!detail || detail.kind !== 'render' || !detail.space.zone) return
+  const zoneId = detail.space.zoneId
+  closeDetail()
+  router.push({ path: '/canvas', query: { mode: 'design', zoneId } })
+}
+
+function openRenderDetail(space: ProposalSpace, tab: 'model' | 'ai' = 'ai') {
+  openDetail({ kind: 'render', space })
+  renderTab.value = tab
+}
 
 function changeQty(module: ProposalModule, delta: number) {
   if (previewMode.value || !module.cartItem) { notice.value = '预览数据不写入项目草稿'; window.setTimeout(() => { notice.value = '' }, 2200); return }
@@ -310,7 +331,7 @@ function detailTitle(detail: Detail | null) {
             <div v-if="isGroupOpen(group)" class="group-body">
               <div class="space-rows"><button v-for="space in group.spaces" :key="space.zoneId" type="button" class="space-row" :class="{ active: activeSpace(group)?.zoneId === space.zoneId }" @click="chooseSpace(group, space)"><span class="space-row-chevron">{{ activeSpace(group)?.zoneId === space.zoneId ? '▼' : '▶' }}</span><strong>{{ space.name }}</strong><span>{{ areaText(space.zone, space.preview) }}</span><span>{{ money(space.total) }}</span><span>{{ space.modules.reduce((sum, module) => sum + module.qty, 0) }} 件商品</span><span class="space-row-status" :class="space.status === '已确认' ? 'is-confirmed' : 'is-pending'"><span></span>{{ space.status }}</span></button></div>
               <div v-if="activeSpace(group)" class="space-detail-board">
-                <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ activeSpace(group)?.name }}</h3><p>{{ areaText(activeSpace(group)?.zone || null, activeSpace(group)?.preview) }} · {{ activeSpace(group)?.modules.length }} 类模块</p></div><div class="space-detail-actions"><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: activeSpace(group)! })"><span></span>{{ activeSpace(group)?.status }} · 查看需求</button><button type="button" class="space-confirm-button" :disabled="activeSpace(group)?.status === '已确认'" @click="confirmSpace(activeSpace(group)!)"><AppIcon name="check" size="3" />{{ activeSpace(group)?.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
+                <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ activeSpace(group)?.name }}</h3><p>{{ areaText(activeSpace(group)?.zone || null, activeSpace(group)?.preview) }} · {{ activeSpace(group)?.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="activeSpace(group)?.zone && !activeSpace(group)?.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(activeSpace(group)!, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: activeSpace(group)! })"><span></span>{{ activeSpace(group)?.status }} · 查看需求</button><button type="button" class="space-confirm-button" :disabled="activeSpace(group)?.status === '已确认'" @click="confirmSpace(activeSpace(group)!)"><AppIcon name="check" size="3" />{{ activeSpace(group)?.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
                 <div class="space-modules preset-space-board">
                   <button type="button" class="preset-panel requirement-panel" @click="openDetail({ kind: 'requirement', space: activeSpace(group)! })">
                     <div class="preset-panel-title"><span>需求描述</span><AppIcon name="arrowRight" size="3" /></div>
@@ -361,12 +382,33 @@ function detailTitle(detail: Detail | null) {
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
-    <div v-if="selectedDetail" class="detail-backdrop" @click.self="closeDetail"><aside class="detail-drawer" :class="{ 'layout-detail-dialog': selectedDetail.kind === 'layout' }" role="dialog" aria-modal="true" :aria-label="detailTitle(selectedDetail)"><div class="detail-header"><div><span class="section-kicker">{{ selectedDetail.space.category }} · {{ selectedDetail.space.name }}</span><h2>{{ detailTitle(selectedDetail) }}</h2></div><button type="button" class="detail-close" aria-label="关闭详情" @click="closeDetail"><AppIcon name="close" size="5" /></button></div>
+    <div v-if="selectedDetail" class="detail-backdrop" @click.self="closeDetail"><aside class="detail-drawer" :class="{ 'layout-detail-dialog': selectedDetail.kind === 'layout' || selectedDetail.kind === 'render' }" role="dialog" aria-modal="true" :aria-label="detailTitle(selectedDetail)"><div class="detail-header"><div><span class="section-kicker">{{ selectedDetail.space.category }} · {{ selectedDetail.space.name }}</span><h2>{{ detailTitle(selectedDetail) }}</h2></div><button type="button" class="detail-close" aria-label="关闭详情" @click="closeDetail"><AppIcon name="close" size="5" /></button></div>
       <template v-if="selectedDetail.kind === 'requirement'"><div class="detail-hero blue"><AppIcon name="documentText" size="8" /><div><strong>空间需求说明</strong><span>{{ areaText(selectedDetail.space.zone, selectedDetail.space.preview) }} · {{ selectedDetail.space.status }}</span></div></div><dl class="detail-list"><div><dt>空间类别</dt><dd>{{ selectedDetail.space.category }}</dd></div><div><dt>空间用途</dt><dd>{{ selectedDetail.space.name }}</dd></div><div><dt>备注</dt><dd>{{ selectedDetail.space.note }}</dd></div></dl></template>
       <template v-else-if="selectedDetail.kind === 'layout'"><p class="layout-detail-hint">前一步的实际家具排版 · 按空间真实比例展示</p><div class="layout-plan-detail"><OfficeCanvasLayoutPlanPreview :zone="selectedDetail.space.zone" :furniture="selectedDetail.space.layoutObjects" :products="products" /></div><div class="detail-stat-grid"><div><span>家具件数</span><strong>{{ selectedDetail.space.layoutObjects.length }}</strong></div><div><span>空间面积</span><strong>{{ areaText(selectedDetail.space.zone, selectedDetail.space.preview) }}</strong></div></div></template>
       <template v-else-if="selectedDetail.kind === 'products'"><div class="drawer-product-list"><button v-for="module in selectedDetail.space.modules" :key="module.key" type="button" class="drawer-product" @click="openDetail({ kind: 'module', space: selectedDetail.space, module })"><span class="drawer-product-art"><ProductImagePreview v-if="module.product?.imageUrl" :src="productImageUrl(module.product)" :alt="module.label" size="small" /><span v-else class="product-no-image">无图</span></span><span class="drawer-product-copy"><strong>{{ module.label }}</strong><small>{{ module.product?.variant || '未绑定商品规格' }}</small></span><span class="drawer-product-qty">× {{ module.qty }}</span><AppIcon name="arrowRight" size="3" /></button></div><div class="drawer-total"><span>空间参考金额</span><strong>{{ money(selectedDetail.space.total) }}</strong></div></template>
       <template v-else-if="selectedDetail.kind === 'module'"><div class="detail-product-hero"><span class="large-product-art"><ProductImagePreview v-if="selectedDetail.module.product?.imageUrl" :src="productImageUrl(selectedDetail.module.product)" :alt="selectedDetail.module.label" size="large" /><span v-else class="product-no-image">暂无图片</span></span><div><h3>{{ selectedDetail.module.label }}</h3><p>{{ selectedDetail.module.product?.desc || '当前模块尚未绑定真实商品。' }}</p></div></div><dl class="detail-list"><div><dt>Variant</dt><dd>{{ selectedDetail.module.product?.variant || '待补充' }}</dd></div><div><dt>尺寸</dt><dd>{{ dimensionText(selectedDetail.module.product) }}</dd></div><div><dt>数量</dt><dd class="qty-control"><button type="button" @click="changeQty(selectedDetail.module, -1)">−</button><b>{{ selectedDetail.module.qty }}</b><button type="button" @click="changeQty(selectedDetail.module, 1)">＋</button></dd></div><div><dt>参考小计</dt><dd class="detail-price">{{ money(moduleTotal(selectedDetail.module)) }}</dd></div></dl></template>
-      <template v-else-if="selectedDetail.kind === 'render'"><div v-if="latestRender(selectedDetail.space)?.status === 'SUCCEEDED' && latestRender(selectedDetail.space)?.imageUrl" class="drawer-render drawer-render-image"><img :src="assetUrl(latestRender(selectedDetail.space)?.imageUrl)" :alt="`${selectedDetail.space.name}效果图`"><span>真实生成结果 · {{ latestRender(selectedDetail.space)?.view === 'INTERIOR' ? '室内透视' : '鸟瞰' }}</span></div><div v-else class="drawer-render"><span>CONCEPT PREVIEW</span><strong>{{ renderStatus(latestRender(selectedDetail.space)) }}</strong><p>{{ latestRender(selectedDetail.space)?.errorMessage || '该空间尚未生成效果图；生成后会在这里显示真实结果，并绑定当前家具快照。' }}</p></div><button type="button" class="proposal-primary full" @click="closeDetail">返回方案确认</button></template>
+      <template v-else-if="selectedDetail.kind === 'render'">
+        <div class="render-tabs" data-testid="proposal-render-tabs">
+          <button type="button" :class="{ active: renderTab === 'model' }" data-testid="proposal-render-tab-model" @click="renderTab = 'model'">3D 交互</button>
+          <button type="button" :class="{ active: renderTab === 'ai' }" data-testid="proposal-render-tab-ai" @click="renderTab = 'ai'">AI 概念图</button>
+          <button type="button" :class="{ active: renderTab === 'layout' }" data-testid="proposal-render-tab-layout" @click="renderTab = 'layout'">2D 布局</button>
+        </div>
+        <template v-if="renderTab === 'model'">
+          <div v-if="selectedDetail.space.zone && !selectedDetail.space.preview" class="proposal-3d-host" data-testid="proposal-3d-view">
+            <OfficeCanvasWhiteModelPreview v-model:show="modelViewerShow" :zone-id="selectedDetail.space.zoneId" readonly inline @locate="onLocateFromProposal" />
+          </div>
+          <p v-else class="drawer-hint">演示或未绑定空间的条目没有真实设计几何，无法查看交互式 3D 场景。</p>
+        </template>
+        <template v-else-if="renderTab === 'layout'">
+          <p class="layout-detail-hint">当前空间的真实排版几何 · 与无限画布同一份数据</p>
+          <div class="layout-plan-detail"><OfficeCanvasLayoutPlanPreview :zone="selectedDetail.space.zone" :furniture="selectedDetail.space.layoutObjects" :products="products" /></div>
+        </template>
+        <template v-else>
+          <div v-if="latestRender(selectedDetail.space)?.status === 'SUCCEEDED' && latestRender(selectedDetail.space)?.imageUrl" class="drawer-render drawer-render-image"><img :src="assetUrl(latestRender(selectedDetail.space)?.imageUrl)" :alt="`${selectedDetail.space.name}效果图`"><span>真实生成结果 · {{ latestRender(selectedDetail.space)?.sourceType === 'whiteModelView' ? '白模视角引导' : latestRender(selectedDetail.space)?.view === 'INTERIOR' ? '室内透视' : '鸟瞰' }}</span></div>
+          <div v-else class="drawer-render"><span>CONCEPT PREVIEW</span><strong>{{ renderStatus(latestRender(selectedDetail.space)) }}</strong><p>{{ latestRender(selectedDetail.space)?.errorMessage || '该空间尚未生成效果图；生成后会在这里显示真实结果，并绑定当前家具快照。' }}</p></div>
+        </template>
+        <button type="button" class="proposal-primary full" @click="closeDetail">返回方案确认</button>
+      </template>
       <template v-else><label class="comment-editor">客户批注<textarea :value="selectedDetail.space.note" rows="6" placeholder="记录客户对空间、材质或预算的补充要求"></textarea></label><p class="drawer-hint">批注会和空间一起进入方案快照，便于后续复核。</p><button type="button" class="proposal-primary full" @click="closeDetail">保存批注</button></template>
     </aside></div>
   </div>
@@ -443,4 +485,9 @@ function detailTitle(detail: Detail | null) {
 .layout-detail-dialog{width:min(1100px,calc(100vw - 48px))}
 .layout-plan-detail{height:min(65dvh,700px);min-height:240px;border:1px solid #e7e0d7;border-radius:12px;overflow:hidden}
 .layout-detail-hint{font-size:12px;color:#968c82;margin-bottom:12px}
+/* 效果图详情三页签：3D 交互 / AI 概念图 / 2D 布局 */
+.render-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #eee6dc;padding-bottom:10px}
+.render-tabs button{border:1px solid #e4ddd4;border-radius:8px;background:#fff;color:#72675c;font-size:11px;font-weight:700;padding:7px 14px}
+.render-tabs button.active{background:#a77b51;border-color:#a77b51;color:#fff}
+.proposal-3d-host{height:min(62dvh,640px);min-height:360px;border:1px solid #e7e0d7;border-radius:12px;overflow:hidden;margin-bottom:14px}
 </style>

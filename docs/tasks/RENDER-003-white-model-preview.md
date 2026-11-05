@@ -11,7 +11,7 @@
 
 - 新增 [whiteModel.ts](../../frontend/app/utils/whiteModel.ts) 纯数据构建器：空间多边形 → 地板 + 沿边墙体；家具按模板/类别映射高度（仅渲染，不回写几何）；障碍按 obstacleRing 的世界毫米→画布约定翻转 Y（柱/井道到顶 2800、禁放区 2000 半透明、门洞净空 20 平贴、窗 900–2100 墙段）；设施标注（GEOM-018）按点/线/面渲染并显示人工净空圈；启用的布置区（GEOM-016）作地板着色。
 - 新增 [WhiteModelPreview.vue](../../frontend/app/components/OfficeCanvas/WhiteModelPreview.vue)：three.js 场景 + OrbitControls 自由视角（非固定视角）；点选/列表选择家具；沿地面拖动并在松开时经 `store.moveObject` 写回同一份设计几何（2D 画布同步）；旋转 90°、替换家具模块（图例目录）、绑定/替换商品（真实商品库，尺寸同步）均经 `store.updateObject`，与 2D 排版共用数据与撤销/持久化链路。
-- 墙体采用 1500mm 半高剖切（2800 全高墙会遮挡近墙家具，实测相机俯角 41° 时遮挡深度约 3.1m）；柱/井道保持到顶。
+- 首版墙体采用 1500mm 半高剖切（2800 全高墙会遮挡近墙家具，实测相机俯角 41° 时遮挡深度约 3.1m）；柱/井道保持到顶。2026-11-03 用户要求所有墙体同高，当前已统一为 2800mm，见 [RENDER-004 墙高统一追修](RENDER-004-3d-furniture-interaction.md)。
 - 工具栏新增「3D 白模」入口（设计模式）；原「效果预览」更名「AI 效果图」保留可达，白模对话框内也有「AI 概念效果图」跳转；方案页的 AI 效果图流程不受影响。
 - 新增依赖 three 0.187（+ @types/three）。
 

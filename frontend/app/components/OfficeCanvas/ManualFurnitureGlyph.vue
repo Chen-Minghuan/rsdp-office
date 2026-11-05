@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { ManualFurnitureItem } from '~/types/manualCanvas'
 import { furnitureById } from '~/utils/manualFurniture'
+import { workstationSeatGeometry } from '~/utils/furniture3d/workstationSeating'
 
 const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number; showSeat?: boolean }>()
 const template = computed(() => furnitureById.get(props.item.templateId))
@@ -25,12 +26,13 @@ const leftPanel = computed(() => [
   'desk-manager-double', 'desk-executive',
 ].includes(props.item.templateId))
 const panelWidth = computed(() => Math.min(w.value * 0.24, 340))
-const desktopDepth = computed(() => Math.min(d.value * 0.48, props.item.templateId.startsWith('desk-executive') ? 800 : 650))
+const seatGeometry = computed(() => workstationSeatGeometry({ w: w.value, h: d.value, wingWidthMm: props.item.wingWidthMm, furnitureTemplateId: props.item.templateId }, template.value?.kind || ''))
+const desktopDepth = computed(() => seatGeometry.value?.desktopDepth ?? Math.min(d.value * 0.48, 650))
 const innerRadius = computed(() => Math.min(wing.value * 0.9, desktopDepth.value * 0.9))
-const seatX = computed(() => (w.value - wing.value) * 0.42)
-const seatY = computed(() => (d.value + desktopDepth.value) / 2)
-const seatRx = computed(() => Math.min(220, (w.value - wing.value) * 0.24))
-const seatRy = computed(() => Math.min(220, (d.value - desktopDepth.value) * 0.26))
+const seatX = computed(() => seatGeometry.value?.cx ?? 0)
+const seatY = computed(() => seatGeometry.value?.cy ?? 0)
+const seatRx = computed(() => (seatGeometry.value?.width ?? 0) / 2)
+const seatRy = computed(() => (seatGeometry.value?.depth ?? 0) / 2)
 const isReferenceCabinet = computed(() => ['cabinet-low', 'cabinet-short', 'cabinet-high'].includes(props.item.templateId))
 const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400)))
 </script>

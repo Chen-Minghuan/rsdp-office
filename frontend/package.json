@@ -52,7 +52,9 @@
     "e2e:project-floors": "node scripts/e2e-project-floors.mjs",
     "e2e:layout-regions": "node scripts/e2e-layout-regions.mjs",
     "test:white-model": "node scripts/test-white-model.mjs",
-    "e2e:white-model": "node scripts/e2e-white-model.mjs"
+    "test:furniture3d": "node scripts/test-furniture3d.mjs",
+    "e2e:white-model": "node scripts/e2e-white-model.mjs",
+    "e2e:proposal-3d": "node scripts/e2e-proposal-3d.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
