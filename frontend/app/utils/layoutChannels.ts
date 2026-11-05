@@ -30,6 +30,64 @@ export function clampChannelsToZone(zone: ZoneObject, channels: LayoutChannel[])
 }
 
 /**
+ * 通道沿走向的包围盒区间（世界毫米）：纵向取 Y、横向取 X。
+ * 走向平移与端点拖柄（LAYOUT-040）共用同一基准。
+ */
+export function channelTravelSpan(zone: ZoneObject, channel: LayoutChannel): { axisMin: number; axisMax: number } | null {
+  const bounds = canvasZoneBounds(zone)
+  const axisMin = channel.orientation === 'vertical' ? bounds.minY : bounds.minX
+  const axisMax = channel.orientation === 'vertical' ? bounds.maxY : bounds.maxX
+  return [axisMin, axisMax].every(Number.isFinite) && axisMax > axisMin ? { axisMin, axisMax } : null
+}
+
+/** 当前走向窗口 [from, to]：缺省端点按包围盒端（贯通）处理，越界输入收敛到区间。 */
+function channelTravelWindow(zone: ZoneObject, channel: LayoutChannel): { from: number; to: number; axisMin: number; axisMax: number } | null {
+  const span = channelTravelSpan(zone, channel)
+  if (!span) return null
+  const from = Number.isFinite(channel.startMm) ? Math.min(Math.max(channel.startMm!, span.axisMin), span.axisMax) : span.axisMin
+  const to = Number.isFinite(channel.endMm) ? Math.min(Math.max(channel.endMm!, span.axisMin), span.axisMax) : span.axisMax
+  return { from, to, ...span }
+}
+
+/** 沿走向整体平移允许的增量区间 [min, max]（毫米）：窗口两端均不越出包围盒；贯通通道恒为 [0, 0]。 */
+export function channelTravelDeltaRange(zone: ZoneObject, channel: LayoutChannel): { min: number; max: number } | null {
+  const window = channelTravelWindow(zone, channel)
+  if (!window || window.to <= window.from) return null
+  return { min: window.axisMin - window.from, max: window.axisMax - window.to }
+}
+
+/**
+ * 应用沿走向整体平移，返回 startMm/endMm 补丁：增量先按 channelTravelDeltaRange 钳制，
+ * 平移后贴到包围盒边界的一端恢复贯通（undefined）；无可移动空间（贯通或区间非法）返回 null。
+ */
+export function shiftChannelTravel(zone: ZoneObject, channel: LayoutChannel, deltaMm: number): { startMm?: number; endMm?: number } | null {
+  const window = channelTravelWindow(zone, channel)
+  if (!window || window.to <= window.from || !Number.isFinite(deltaMm)) return null
+  const dt = Math.min(Math.max(deltaMm, window.axisMin - window.from), window.axisMax - window.to)
+  if (!dt) return null
+  const from = window.from + dt, to = window.to + dt
+  return {
+    startMm: from <= window.axisMin ? undefined : Math.round(from),
+    endMm: to >= window.axisMax ? undefined : Math.round(to),
+  }
+}
+
+/**
+ * 拖动单个走向端点（min=走向起点、max=终点）：值钳制在包围盒内且与另一端保持至少 1mm；
+ * 拖到边界返回 undefined（恢复该端贯通）。另一端越界输入先收敛到区间再作基准。
+ */
+export function clampChannelTravelEndpoint(zone: ZoneObject, channel: LayoutChannel, edge: 'min' | 'max', valueMm: number): number | undefined {
+  const window = channelTravelWindow(zone, channel)
+  if (!window || !Number.isFinite(valueMm)) return undefined
+  if (edge === 'min') {
+    const value = Math.min(Math.max(valueMm, window.axisMin), window.to - 1)
+    return value <= window.axisMin ? undefined : Math.round(value)
+  }
+  const value = Math.min(Math.max(valueMm, window.from + 1), window.axisMax)
+  return value >= window.axisMax ? undefined : Math.round(value)
+}
+
+/**
  * 通道矩形与家具/禁放区共用世界毫米坐标；纵向通道沿 Y、横向通道沿 X 展开。
  * 走向范围：缺省贯通包围盒；startMm/endMm（LAYOUT-028 端点留断）与「仅从二排起」按最大交集收窄。
  * 禁放带先按包围盒钳制，再按房间多边形裁剪（LAYOUT-027）：凹形空间可能输出多段矩形；

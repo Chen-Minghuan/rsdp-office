@@ -134,12 +134,50 @@ try {
   await page.mouse.move(roomBox.x + 2, roomBox.y + roomBox.height * 0.4)
   await page.mouse.down()
   await page.mouse.move(roomBox.x + 60, roomBox.y + roomBox.height * 0.5, { steps: 8 })
+  await page.getByTestId('window-line-draft').waitFor()
+  assert.equal(await page.getByTestId('window-line-draft').locator('polygon').count(), 0, '绘制窗时只显示线段')
   await page.mouse.up()
   assert.equal((await zoneState()).obstacles[2].kind, 'WINDOW')
-  const windowMinX = Math.min(...(await zoneState()).obstacles[2].geometry.outer.map(point => point[0]))
-  assert.ok(Math.abs(windowMinX) < 0.001, '窗创建时保留贴墙吸附，实际 minX=' + windowMinX)
+  const windowId = (await zoneState()).obstacles[2].obstacleId
+  const windowShape = page.locator('[data-obstacle-id="' + windowId + '"]')
+  assert.equal(await windowShape.locator('polygon').count(), 0, '窗不再绘制矩形')
+  assert.equal(await windowShape.getByTestId('window-line').count(), 1)
+  const windowXs = (await zoneState()).obstacles[2].geometry.outer.map(point => point[0])
+  assert.ok(Math.abs((Math.min(...windowXs) + Math.max(...windowXs)) / 2) < 0.001, '窗线中心吸附墙体')
+  assert.equal(await editor.getByLabel('标注深度（毫米）').count(), 0, '窗只编辑长度')
+  await editor.getByLabel('窗长度（毫米）').fill('1200')
+  await editor.getByLabel('窗长度（毫米）').press('Tab')
+  const beforeWindowMove = (await zoneState()).obstacles[2].geometry.outer
+  await dragElement(windowShape.locator('line').first(), 12, 18)
+  assert.notDeepEqual((await zoneState()).obstacles[2].geometry.outer, beforeWindowMove)
+  const movedWindow = (await zoneState()).obstacles[2].geometry.outer
+  assert.ok(Math.abs(Math.max(...movedWindow.map(p => p[1])) - Math.min(...movedWindow.map(p => p[1])) - 1200) < 0.001, '沿墙拖动保持长度')
+  await dragElement(page.getByTestId('constraint-handle-end-1'), 10, 20)
+  assert.notDeepEqual((await zoneState()).obstacles[2].geometry.outer, movedWindow, '拖端点可改变窗长')
+  const windowBeforeReload = (await zoneState()).obstacles[2]
+  await page.screenshot({ path: outDir + '/window-line.png', fullPage: true })
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.deepEqual((await zoneState()).obstacles[2], windowBeforeReload, '刷新保留窗线与稳定 ID')
+  await dragElement(windowShape.locator('line').first(), 0, 0)
   await editor.getByRole('button', { name: /^删除/ }).click()
   assert.equal((await zoneState()).obstacles.length, 2)
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await zoneState()).obstacles[2].obstacleId, windowId, '撤销恢复同一窗标注')
+  await dragElement(windowShape.locator('line').first(), 0, 0)
+  await editor.getByRole('button', { name: /^删除/ }).click()
+
+  // 纯水平拖线也能创建窗，不需要拖出矩形厚度。
+  const horizontalRoom = await page.locator('polygon[data-id="ROOM-001"]').boundingBox()
+  await page.getByTestId('toolbar-constraints').click()
+  await page.getByTestId('constraint-tool-WINDOW').click()
+  await page.mouse.move(horizontalRoom.x + horizontalRoom.width * 0.4, horizontalRoom.y + 2)
+  await page.mouse.down()
+  await page.mouse.move(horizontalRoom.x + horizontalRoom.width * 0.6, horizontalRoom.y + 2, { steps: 8 })
+  await page.mouse.up()
+  await editor.getByLabel('窗长度（毫米）').waitFor()
+  const horizontalWindow = (await zoneState()).obstacles[2]
+  assert.ok(Math.max(...horizontalWindow.geometry.outer.map(p => p[1])) - Math.min(...horizontalWindow.geometry.outer.map(p => p[1])) <= 1.001)
+  await editor.getByRole('button', { name: /^删除/ }).click()
 
   await createConstraint('NO_PLACEMENT', 0.4, 0.4, 0.52, 0.52)
   const constraint = (await zoneState()).obstacles[2]

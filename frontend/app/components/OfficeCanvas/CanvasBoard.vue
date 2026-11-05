@@ -10,13 +10,13 @@ import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitu
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
 import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld, rotateCanvasVector } from '~/utils/officeCanvasView'
-import { rectangleObstacle, moveObstacle, reshapeObstacle, obstacleExclusion, obstacleLabel, snapObstacleToZone } from '~/utils/spatial/obstacles'
+import { rectangleObstacle, moveObstacle, reshapeObstacle, obstacleExclusion, obstacleLabel, snapObstacleToZone, windowLinePoints, windowOnWall, resizeWindowOnWall } from '~/utils/spatial/obstacles'
 import type { SpatialObstacle, SpatialObstacleKind, LayoutRegion, SpatialFacility, SpatialFacilityKind } from '~/types/spatial'
 import { layoutRegionRing, layoutRegionWorldRing, layoutRegionsForZone, layoutRegionProblem, layoutRegionEdgeMeasurements, moveLayoutRegion, moveLayoutRegionVertex, nextLayoutRegionName, setPrimaryLayoutRegion, removeLayoutRegion } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityFootprintRing, facilityClearanceRing, facilityLabel, facilityShape, facilitiesForZone } from '~/utils/spatial/facilities'
 import type { LayoutChannel, LayoutExclusion } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
-import { channelRects, channelOffsetRange, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
+import { channelRects, channelOffsetRange, channelTravelSpan, channelTravelDeltaRange, shiftChannelTravel, clampChannelTravelEndpoint, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 
 
 const store = useOfficeStore()
@@ -84,7 +84,7 @@ const hintText = computed(() => {
   if (facilityMessage.value) return facilityMessage.value
   if (constraintMessage.value) return constraintMessage.value
   if (mode.value === 'design' && tool.value === 'select') return activePreview.value ? '预览家具可直接拖动调整，应用时按调整后的位置生成 · 空白处框选已排版家具' : '点击选中 · Shift/Ctrl 点选多个 · 空白处框选 · 拖动选中家具一起移动'
-  if (isConstraintTool.value) return constraintKind.value === 'DOOR_CLEARANCE' ? '从门扇铰链角拖向开启区域，Esc 取消' : '在当前空间底图上拖出矩形标注，Esc 取消'
+  if (isConstraintTool.value) return constraintKind.value === 'WINDOW' ? '沿墙拖出窗线，自动贴墙；拖动端点调整长度，Esc 取消' : constraintKind.value === 'DOOR_CLEARANCE' ? '从门扇铰链角拖向开启区域，Esc 取消' : '在当前空间底图上拖出矩形标注，Esc 取消'
   if (tool.value === 'region-rect') return '在当前空间内拖出矩形布置区，Esc 取消'
   if (tool.value === 'region-poly') return sketchPoints.value.length ? `布置区已取 ${sketchPoints.value.length} 点 · Enter/双击结束（≥3 点） · Esc 取消` : '逐点绘制布置区多边形，Enter 或双击结束，Esc 取消'
   if (isFacilityTool.value) {
@@ -199,8 +199,9 @@ const sketchColor = computed(() => tool.value === 'region-poly' ? '#589153' : FA
 const yFactor = computed(() => designZone.value?.reviewUnit === 'mm' ? -1 : 1)
 const constraintCreateArea = computed<LayoutExclusion | null>(() => {
   const current = drag.value
-  if (current?.mode !== 'constraints' || constraintKind.value !== 'DOOR_CLEARANCE' || !designZone.value || current.lastX === undefined || current.lastY === undefined) return null
-  const obstacle = rectangleObstacle(designZone.value.id, 'DOOR_CLEARANCE', { x: current.x || 0, y: -(current.y || 0) }, { x: current.lastX, y: -current.lastY }, 'DOOR_DRAFT')
+  if (current?.mode !== 'constraints' || !['DOOR_CLEARANCE', 'WINDOW'].includes(constraintKind.value) || !designZone.value || current.lastX === undefined || current.lastY === undefined) return null
+  const start = { x: current.x || 0, y: -(current.y || 0) }, end = { x: current.lastX, y: -current.lastY }
+  const obstacle = constraintKind.value === 'WINDOW' ? windowOnWall(designZone.value, start, end, 'WINDOW_DRAFT') : rectangleObstacle(designZone.value.id, 'DOOR_CLEARANCE', start, end, 'DOOR_DRAFT')
   return obstacle ? obstacleExclusion(designZone.value, obstacle) : null
 })
 function isEditableConstraint(area: LayoutExclusion) {
@@ -223,9 +224,14 @@ function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
   const selected = selectedChannelId.value === entry.channel.id
   let { x, y, w, h } = entry.rect
   if (d?.mode === 'channel' && d.channelId === entry.channel.id) {
-    // 位置拖动预览：只沿垂直轴平移
-    if (vertical) x += d.dx || 0
-    else y += d.dx || 0
+    // 位置拖动预览：垂直分量平移位置，走向分量平移起止窗口（裁剪分段仅整体平移，松手后按真实几何重算）
+    if (vertical) { x += d.dx || 0; y += d.dt || 0 }
+    else { y += d.dx || 0; x += d.dt || 0 }
+  } else if (d?.mode === 'channel-travel' && d.channelId === entry.channel.id) {
+    // 走向端点拖柄预览：min 端位置与长度联动（远端固定），max 端只改长度
+    const dx = d.dx || 0
+    if (vertical) { if (d.edge === 'max') h += dx; else { y += dx; h -= dx } }
+    else { if (d.edge === 'max') w += dx; else { x += dx; w -= dx } }
   } else if (d?.mode === 'channel-width' && d.channelId === entry.channel.id) {
     // 宽度拖柄预览：净距不变，禁放带边缘随宽度等量伸缩
     const dx = d.dx || 0
@@ -242,6 +248,12 @@ function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
       : 'repeating-linear-gradient(45deg, rgba(48,111,203,0.10) 0 12px, rgba(48,111,203,0.02) 12px 24px)',
     border: `${(selected ? 2.5 : 1.5) / store.zoom}px ${selected ? 'solid' : 'dashed'} #306fcb`,
   }
+}
+/** 条带光标：设了端点留断的有限通道两轴都可拖（位置 + 走向平移）用 move；贯通通道走向无可动空间，保持垂直走向的 resize 光标。 */
+function channelCursor(channel: LayoutChannel) {
+  const canTravel = Number.isFinite(channel.startMm) || Number.isFinite(channel.endMm)
+  if (canTravel) return 'cursor-move'
+  return channel.orientation === 'vertical' ? 'cursor-ew-resize' : 'cursor-ns-resize'
 }
 /** 选中的通道（design 模式点选条带）；编辑走 store.updateZoneChannels 同一入口。 */
 const selectedChannel = computed(() => {
@@ -277,8 +289,12 @@ const channelEditorStyle = computed(() => {
   let { x, y, w, h } = entry.rect
   const d = drag.value
   if (d?.mode === 'channel' && d.channelId === channel.id) {
-    if (channel.orientation === 'vertical') x += d.dx || 0
-    else y += d.dx || 0
+    if (channel.orientation === 'vertical') { x += d.dx || 0; y += d.dt || 0 }
+    else { y += d.dx || 0; x += d.dt || 0 }
+  } else if (d?.mode === 'channel-travel' && d.channelId === channel.id) {
+    const dx = d.dx || 0
+    if (channel.orientation === 'vertical') { if (d.edge === 'max') h += dx; else { y += dx; h -= dx } }
+    else { if (d.edge === 'max') w += dx; else { x += dx; w -= dx } }
   } else if (d?.mode === 'channel-width' && d.channelId === channel.id) {
     const dx = d.dx || 0
     if (channel.orientation === 'vertical') { if (d.edge === 'max') w += dx; else { x += dx; w -= dx } }
@@ -313,9 +329,20 @@ function obstaclePoints(area: LayoutExclusion) {
   const polygon = area.polygon || [[area.x, area.y], [area.x + area.w, area.y], [area.x + area.w, area.y + area.h], [area.x, area.y + area.h]]
   return polygon.map(([x, y]) => `${x - area.x},${y - area.y}`).join(' ')
 }
+function isWindowArea(area: LayoutExclusion) {
+  return area.id === 'WINDOW_DRAFT' || designZone.value?.obstacles?.some(item => item.obstacleId === area.id && item.kind === 'WINDOW')
+}
+function windowAreaLine(area: LayoutExclusion) {
+  return windowLinePoints({ geometry: { outer: area.polygon || [] } })
+}
+function windowAreaLength(area: LayoutExclusion) {
+  const line = windowAreaLine(area)
+  return line.length === 2 ? Math.hypot(line[1][0] - line[0][0], line[1][1] - line[0][1]) : 0
+}
 function constraintHandles(area: LayoutExclusion) {
   const polygon = area.polygon || []
   const kind = designZone.value?.obstacles?.find(obstacle => obstacle.obstacleId === area.id)?.kind
+  if (kind === 'WINDOW') return windowAreaLine(area).map((point, index) => ({ handle: 'end-' + index, point }))
   if (kind === 'DOOR_CLEARANCE') {
     const point = polygon[Math.floor(polygon.length / 2)]
     return point ? [{ handle: 'radius', point }] : []
@@ -479,7 +506,7 @@ function rotateView(degrees: number) {
 }
 
 interface DragState {
-  mode: 'pan' | 'move' | 'furniture' | 'preview-furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width' | 'constraints' | 'constraint' | 'region-draw' | 'region' | 'region-vertex' | 'facility-draw' | 'facility' | 'facility-vertex'
+  mode: 'pan' | 'move' | 'furniture' | 'preview-furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width' | 'channel-travel' | 'constraints' | 'constraint' | 'region-draw' | 'region' | 'region-vertex' | 'facility-draw' | 'facility' | 'facility-vertex'
   cx?: number
   cy?: number
   px?: number
@@ -496,6 +523,8 @@ interface DragState {
   ids?: string[]
   dx?: number
   dy?: number
+  /** 通道条带拖动的走向分量（沿通道轴向，毫米）：垂直分量改位置，走向分量平移起止窗口（LAYOUT-040）。 */
+  dt?: number
   channelId?: string
   orientation?: 'vertical' | 'horizontal'
   edge?: 'min' | 'max'
@@ -639,6 +668,23 @@ function onChannelEdgePointerDown(channel: LayoutChannel, edge: 'min' | 'max', e
   e.preventDefault()
 }
 
+/** 走向端点拖柄（LAYOUT-040）：min=走向起点、max=终点；ox 记录按下时该端的有效值（缺省端取包围盒边界），拖动经 clampChannelTravelEndpoint 钳制，拖回边界恢复贯通。 */
+function onChannelTravelPointerDown(channel: LayoutChannel, edge: 'min' | 'max', e: PointerEvent) {
+  if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || placing.value || !canvasWindow.value || !designZone.value) return
+  const span = channelTravelSpan(designZone.value, channel)
+  if (!span) return
+  const p = point(e)
+  selectedId.value = null
+  selectedFurnitureIds.value = []
+  selectedChannelId.value = channel.id
+  const origin = edge === 'min'
+    ? (Number.isFinite(channel.startMm) ? channel.startMm! : span.axisMin)
+    : (Number.isFinite(channel.endMm) ? channel.endMm! : span.axisMax)
+  drag.value = { mode: 'channel-travel', channelId: channel.id, orientation: channel.orientation, edge, cx: p.x, cy: p.y, ox: origin, dx: 0 }
+  canvasWindow.value.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+
 function onConstraintPointerDown(area: LayoutExclusion, handle: string, e: PointerEvent) {
   if (e.button !== 0 || mode.value !== 'design' || tool.value !== 'select' || placing.value || !canvasWindow.value || !isEditableConstraint(area)) return
   const obstacle = designZone.value?.obstacles?.find(item => item.obstacleId === area.id)
@@ -665,12 +711,14 @@ function removeSelectedConstraint() {
   constraintEditPreview.value = null
 }
 
-function resizeSelectedConstraint(key: 'width' | 'depth' | 'radius', event: Event) {
+function resizeSelectedConstraint(key: 'width' | 'depth' | 'radius' | 'length', event: Event) {
   const area = selectedConstraintArea.value, obstacle = selectedConstraint.value
   const value = Number((event.target as HTMLInputElement).value)
   if (!area || !obstacle || !Number.isFinite(value) || value < 1) return
   let next: SpatialObstacle | null = null
-  if (obstacle.kind === 'DOOR_CLEARANCE') {
+  if (obstacle.kind === 'WINDOW' && designZone.value) {
+    next = resizeWindowOnWall(designZone.value, obstacle, value)
+  } else if (obstacle.kind === 'DOOR_CLEARANCE') {
     const hinge = obstacle.geometry.outer[0], first = obstacle.geometry.outer[1], last = obstacle.geometry.outer.at(-1)
     if (!hinge || !first || !last || key !== 'radius') return
     next = rectangleObstacle(obstacle.spaceId!, obstacle.kind, { x: hinge[0], y: hinge[1] }, { x: hinge[0] + Math.sign(first[0] - hinge[0]) * value, y: hinge[1] + Math.sign(last[1] - hinge[1]) * value }, obstacle.obstacleId)
@@ -679,7 +727,7 @@ function resizeSelectedConstraint(key: 'width' | 'depth' | 'radius', event: Even
     const center = { x: area.x + area.w / 2, y: area.y + area.h / 2 }
     next = rectangleObstacle(obstacle.spaceId!, obstacle.kind, { x: center.x - width / 2, y: -center.y - depth / 2 }, { x: center.x + width / 2, y: -center.y + depth / 2 }, obstacle.obstacleId)
   }
-  if (!next) { constraintMessage.value = '标注尺寸无效'; return }
+  if (!next) { constraintMessage.value = obstacle.kind === 'WINDOW' ? '窗长度无效或超过所在墙段长度' : '标注尺寸无效'; return }
   const snapped = designZone.value && snapEnabled.value ? snapObstacleToZone(designZone.value, next, Math.min(8 / store.zoom, 20)).obstacle : next
   const problem = store.saveZoneObstacle(obstacle.spaceId!, snapped)
   constraintMessage.value = problem || '标注尺寸已更新，可撤销'
@@ -1130,6 +1178,10 @@ function onPointerMove(e: PointerEvent) {
     const channel = (zone?.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
     const range = channel && zone ? channelOffsetRange(zone, channel) : null
     if (range) dx = Math.min(Math.max(dx, range.lo - (d.ox || 0)), range.hi - (d.ox || 0))
+    // 走向分量（LAYOUT-040）：有限通道沿轴平移起止窗口；贯通通道区间钳制为 0，即走向不响应。
+    const rawDt = d.orientation === 'vertical' ? p.y - (d.cy || 0) : p.x - (d.cx || 0)
+    const travelRange = channel && zone ? channelTravelDeltaRange(zone, channel) : null
+    d.dt = travelRange ? Math.min(Math.max(rawDt, travelRange.min), travelRange.max) : 0
     // 吸附（与家具同一 50mm 阈值与开关）：禁放带边缘/中线对齐墙边、家具边缘与其他通道边缘。
     if (zone && channel && snapEnabled.value) {
       const b = canvasZoneBounds(zone)
@@ -1157,19 +1209,37 @@ function onPointerMove(e: PointerEvent) {
     const p = point(e)
     const rawDx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
     d.dx = clampChannelWidthDelta(d, rawDx)
+  } else if (d.mode === 'channel-travel' && d.channelId && designZone.value) {
+    // 走向端点拖柄：预览即钳制（不越包围盒、与另一端保持 1mm），松手按同一函数提交。
+    const p = point(e)
+    const channel = (designZone.value.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
+    const span = channel ? channelTravelSpan(designZone.value, channel) : null
+    if (!channel || !span) return
+    const rawDt = d.orientation === 'vertical' ? p.y - (d.cy || 0) : p.x - (d.cx || 0)
+    const clamped = clampChannelTravelEndpoint(designZone.value, channel, d.edge || 'min', (d.ox || 0) + rawDt)
+    const effective = clamped ?? (d.edge === 'min' ? span.axisMin : span.axisMax)
+    d.dx = effective - (d.ox || 0)
   } else if (d.mode === 'constraints') {
     const p = point(e)
     d.lastX = p.x
     d.lastY = p.y
-    if (constraintKind.value === 'DOOR_CLEARANCE' && drawPreview.value) drawPreview.value.style.display = 'none'
+    if (['DOOR_CLEARANCE', 'WINDOW'].includes(constraintKind.value) && drawPreview.value) drawPreview.value.style.display = 'none'
     else updatePreview(d, p)
   } else if (d.mode === 'constraint' && d.id && designZone.value) {
     const original = designZone.value.obstacles?.find(obstacle => obstacle.obstacleId === d.id)
     if (!original) return
     const p = point(e)
-    constraintEditPreview.value = d.constraintHandle === 'move'
+    if (original.kind === 'WINDOW' && d.constraintHandle !== 'move') {
+      const line = windowLinePoints(original), anchor = line[d.constraintHandle === 'end-0' ? 1 : 0]
+      const next = anchor ? windowOnWall(designZone.value, { x: anchor[0], y: anchor[1] }, { x: p.x, y: -p.y }, original.obstacleId) : null
+      constraintEditPreview.value = next ? { ...original, geometry: next.geometry, excludesFloorArea: false } : null
+    } else constraintEditPreview.value = d.constraintHandle === 'move'
       ? moveObstacle(original, p.x - (d.cx || 0), -(p.y - (d.cy || 0)))
       : reshapeObstacle(original, d.constraintHandle || '', { x: p.x, y: -p.y })
+    if (original.kind === 'WINDOW' && constraintEditPreview.value) {
+      const snapped = snapObstacleToZone(designZone.value, constraintEditPreview.value, Infinity)
+      constraintEditPreview.value = snapped.snapped ? snapped.obstacle : original
+    }
   } else if (d.mode === 'region-draw' || d.mode === 'facility-draw') {
     updatePreview(d, point(e))
   } else if ((d.mode === 'region' || d.mode === 'region-vertex') && d.id && designZone.value) {
@@ -1258,8 +1328,9 @@ function onPointerUp(e: PointerEvent) {
   } else if (d.mode === 'constraints' && designZone.value) {
     drawPreview.value.style.display = 'none'
     const p = point(e)
-    const raw = rectangleObstacle(designZone.value.id, constraintKind.value, { x: d.x || 0, y: -(d.y || 0) }, { x: p.x, y: -p.y })
-    if (!raw) { constraintMessage.value = constraintKind.value === 'DOOR_CLEARANCE' ? '请从铰链角拖出清晰的开启区域' : '请拖出清晰的矩形区域'; return }
+    const start = { x: d.x || 0, y: -(d.y || 0) }, end = { x: p.x, y: -p.y }
+    const raw = constraintKind.value === 'WINDOW' ? windowOnWall(designZone.value, start, end) : rectangleObstacle(designZone.value.id, constraintKind.value, start, end)
+    if (!raw) { constraintMessage.value = constraintKind.value === 'WINDOW' ? '请沿墙拖出有长度的窗线' : constraintKind.value === 'DOOR_CLEARANCE' ? '请从铰链角拖出清晰的开启区域' : '请拖出清晰的矩形区域'; return }
     const obstacle = snapEnabled.value ? snapObstacleToZone(designZone.value, raw, Math.min(8 / store.zoom, 20)).obstacle : raw
     const problem = store.saveZoneObstacle(designZone.value.id, obstacle)
     if (problem) { constraintMessage.value = problem; return }
@@ -1272,7 +1343,7 @@ function onPointerUp(e: PointerEvent) {
     if (!next) return
     const original = designZone.value.obstacles?.find(obstacle => obstacle.obstacleId === d.id)
     if (JSON.stringify(original?.geometry) === JSON.stringify(next.geometry)) return
-    const snapped = snapEnabled.value ? snapObstacleToZone(designZone.value, next, Math.min(8 / store.zoom, 20)).obstacle : next
+    const snapped = next.kind === 'WINDOW' ? snapObstacleToZone(designZone.value, next, Infinity).obstacle : snapEnabled.value ? snapObstacleToZone(designZone.value, next, Math.min(8 / store.zoom, 20)).obstacle : next
     const problem = store.saveZoneObstacle(designZone.value.id, snapped)
     constraintMessage.value = problem || obstacleLabel(snapped.kind) + '已更新，可撤销'
   } else if (d.mode === 'region-draw' && designZone.value) {
@@ -1329,10 +1400,24 @@ function onPointerUp(e: PointerEvent) {
       layoutPreview.value = { ...preview, furniture: preview.furniture.map(item => item.id === d.id ? { ...item, x: Math.round(item.x + dx), y: Math.round(item.y + dy) } : item) }
     }
   } else if (d.mode === 'channel' && d.channelId && store.designZoneId) {
-    // 拖动只改垂直轴向位置；松手一次性提交，走 store 的失效与撤销路径。
-    if (d.dx) {
-      const offsetMm = Math.round((d.ox || 0) + d.dx)
-      const channels = (designZone.value?.layoutPreferences?.channels || []).map(channel => channel.id === d.channelId ? { ...channel, offsetMm } : channel)
+    // 松手一次性提交（走 store 的失效与撤销路径）：垂直分量改位置，走向分量平移起止窗口（LAYOUT-040）。
+    const zone = designZone.value
+    const channel = (zone?.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
+    if (zone && channel && (d.dx || d.dt)) {
+      const patch: Partial<LayoutChannel> = {}
+      if (d.dx) patch.offsetMm = Math.round((d.ox || 0) + d.dx)
+      if (d.dt) Object.assign(patch, shiftChannelTravel(zone, channel, d.dt) || {})
+      const channels = (zone.layoutPreferences?.channels || []).map(item => item.id === d.channelId ? { ...item, ...patch } : item)
+      store.updateZoneChannels(store.designZoneId, channels)
+    }
+  } else if (d.mode === 'channel-travel' && d.channelId && store.designZoneId) {
+    // 走向端点拖柄：min 端改 startMm、max 端改 endMm；拖到边界恢复该端贯通（undefined）。
+    const zone = designZone.value
+    const channel = (zone?.layoutPreferences?.channels || []).find(channel => channel.id === d.channelId)
+    if (zone && channel && d.dx) {
+      const value = clampChannelTravelEndpoint(zone, channel, d.edge || 'min', (d.ox || 0) + d.dx)
+      const patch: Partial<LayoutChannel> = d.edge === 'max' ? { endMm: value } : { startMm: value }
+      const channels = (zone.layoutPreferences?.channels || []).map(item => item.id === d.channelId ? { ...item, ...patch } : item)
       store.updateZoneChannels(store.designZoneId, channels)
     }
   } else if (d.mode === 'channel-width' && d.channelId && store.designZoneId) {
@@ -1546,13 +1631,15 @@ function furnitureProduct(o: FurnitureObject) {
     <div v-if="selectedConstraintArea" class="absolute bottom-12 left-3 z-20 w-56 border border-line bg-white/95 p-2.5 text-[11px] text-[#5b5751]" data-testid="design-constraint-editor" @pointerdown.stop>
       <div class="mb-2 flex items-center justify-between"><strong>{{ obstacleLabel(selectedConstraint?.kind || 'NO_PLACEMENT') }}</strong><button class="text-[#a65e4c]" :aria-label="'删除' + obstacleLabel(selectedConstraint?.kind || 'NO_PLACEMENT')" @click="removeSelectedConstraint">删除</button></div>
       <label v-if="selectedConstraint?.kind === 'DOOR_CLEARANCE'" class="block text-[10px] text-muted">半径 mm<input :value="Math.round(Math.max(selectedConstraintArea.w, selectedConstraintArea.h))" aria-label="门洞半径（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('radius', $event)"></label>
+      <label v-else-if="selectedConstraint?.kind === 'WINDOW'" class="block text-[10px] text-muted">长度 mm<input :value="Math.round(windowAreaLength(selectedConstraintArea))" aria-label="窗长度（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('length', $event)"></label>
       <div v-else class="grid grid-cols-2 gap-2">
         <label class="text-[10px] text-muted">宽度 mm<input :value="Math.round(selectedConstraintArea.w)" aria-label="标注宽度（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('width', $event)"></label>
         <label class="text-[10px] text-muted">深度 mm<input :value="Math.round(selectedConstraintArea.h)" aria-label="标注深度（毫米）" type="number" min="1" step="50" class="mt-1 w-full border border-line bg-white px-1.5 py-1" @change="resizeSelectedConstraint('depth', $event)"></label>
       </div>
       <div class="mt-1.5 flex items-center justify-between text-[10px] text-muted">
         <button v-if="selectedConstraint?.kind === 'DOOR_CLEARANCE'" class="text-[#596252]" @click="rotateSelectedConstraintDoor">换向</button>
-        <label v-if="['COLUMN', 'SHAFT', 'WINDOW'].includes(selectedConstraint?.kind || '')"><input v-model="snapEnabled" type="checkbox" aria-label="建筑标注贴墙吸附"> 贴墙吸附</label>
+        <span v-if="selectedConstraint?.kind === 'WINDOW'" class="text-muted">沿墙吸附 · 拖动两端调整长度</span>
+        <label v-if="['COLUMN', 'SHAFT'].includes(selectedConstraint?.kind || '')"><input v-model="snapEnabled" type="checkbox" aria-label="建筑标注贴墙吸附"> 贴墙吸附</label>
       </div>
       <p class="mt-1.5 text-[9px] text-muted">拖动移动，拖角点或弧线手柄调整，Delete 删除。</p>
     </div>
@@ -1635,7 +1722,7 @@ function furnitureProduct(o: FurnitureObject) {
       </div>
       <label v-if="selectedChannel.orientation === 'vertical'" class="mt-1.5 block"><input :checked="!!selectedChannel.fromSecondRow" type="checkbox" aria-label="通道属性首排不断开" @change="updateSelectedChannel({ fromSecondRow: ($event.target as HTMLInputElement).checked })"> 仅从二排起（首排桌列不断开）</label>
       <p v-if="selectedChannel.widthMm < CHANNEL_WIDTH_HINT_MM" data-testid="channel-editor-width-hint" class="mt-1 text-[10px] text-amber-600">宽度低于 {{ CHANNEL_WIDTH_HINT_MM }}mm 通行提示阈值（策略提示，非规范强制）</p>
-      <p class="mt-1 text-[10px] text-muted">Delete 移除 · Esc 取消选中 · 排版面板同步编辑</p>
+      <p class="mt-1 text-[10px] text-muted">Delete 移除 · Esc 取消选中 · 条带可沿走向平移，两端紫色手柄调起止（拖到边界恢复贯通）</p>
     </div>
     <div
       ref="board"
@@ -1822,9 +1909,10 @@ function furnitureProduct(o: FurnitureObject) {
           </div>
         </template>
 
-        <div v-if="constraintCreateArea" class="absolute pointer-events-none" data-testid="door-clearance-draft" :style="{ left: constraintCreateArea.x + 'px', top: constraintCreateArea.y + 'px', width: constraintCreateArea.w + 'px', height: constraintCreateArea.h + 'px' }">
+        <div v-if="constraintCreateArea" class="absolute pointer-events-none" :data-testid="isWindowArea(constraintCreateArea) ? 'window-line-draft' : 'door-clearance-draft'" :style="{ left: constraintCreateArea.x + 'px', top: constraintCreateArea.y + 'px', width: constraintCreateArea.w + 'px', height: constraintCreateArea.h + 'px' }">
           <svg :viewBox="`0 0 ${constraintCreateArea.w} ${constraintCreateArea.h}`" width="100%" height="100%" style="overflow: visible">
-            <polygon :points="obstaclePoints(constraintCreateArea)" fill="#2586a022" stroke="#2586a0" :stroke-width="2 / store.zoom" stroke-dasharray="6 3" />
+            <line v-if="isWindowArea(constraintCreateArea)" :x1="windowAreaLine(constraintCreateArea)[0][0] - constraintCreateArea.x" :y1="windowAreaLine(constraintCreateArea)[0][1] - constraintCreateArea.y" :x2="windowAreaLine(constraintCreateArea)[1][0] - constraintCreateArea.x" :y2="windowAreaLine(constraintCreateArea)[1][1] - constraintCreateArea.y" stroke="#4a7fbf" :stroke-width="3 / store.zoom" />
+            <polygon v-else :points="obstaclePoints(constraintCreateArea)" fill="#2586a022" stroke="#2586a0" :stroke-width="2 / store.zoom" stroke-dasharray="6 3" />
           </svg>
         </div>
         <div v-if="mode === 'design' && displayedDesignObstacles.length" class="absolute inset-0 pointer-events-none" data-testid="design-obstacles">
@@ -1833,13 +1921,18 @@ function furnitureProduct(o: FurnitureObject) {
             :key="area.id"
             :data-obstacle-id="area.id"
             :data-testid="isEditableConstraint(area) ? 'design-constraint' : undefined"
-            :class="isEditableConstraint(area) ? 'pointer-events-auto cursor-move' : ''"
+            :class="isEditableConstraint(area) ? isWindowArea(area) ? 'cursor-move' : 'pointer-events-auto cursor-move' : ''"
             :style="{ position: 'absolute', left: area.x + 'px', top: area.y + 'px', width: area.w + 'px', height: area.h + 'px' }"
             @pointerdown.stop="isEditableConstraint(area) && onConstraintPointerDown(area, 'move', $event)"
           >
             <svg :viewBox="`0 0 ${area.w} ${area.h}`" width="100%" height="100%" style="overflow: visible">
-              <polygon :points="obstaclePoints(area)" :fill="area.label === '门洞净空' ? '#2586a022' : '#b44f4522'" :stroke="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :stroke-width="(selectedConstraintId === area.id ? 3 : 2) / store.zoom" stroke-dasharray="6 3" />
-              <text x="4" y="14" :fill="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :font-size="11 / store.zoom" font-weight="600">{{ area.label }}</text>
+              <template v-if="isWindowArea(area)">
+                <line :x1="windowAreaLine(area)[0][0] - area.x" :y1="windowAreaLine(area)[0][1] - area.y" :x2="windowAreaLine(area)[1][0] - area.x" :y2="windowAreaLine(area)[1][1] - area.y" stroke="transparent" :stroke-width="14 / store.zoom" style="pointer-events: stroke" />
+                <line data-testid="window-line" :x1="windowAreaLine(area)[0][0] - area.x" :y1="windowAreaLine(area)[0][1] - area.y" :x2="windowAreaLine(area)[1][0] - area.x" :y2="windowAreaLine(area)[1][1] - area.y" stroke="#4a7fbf" :stroke-width="(selectedConstraintId === area.id ? 4 : 3) / store.zoom" style="pointer-events: none" />
+                <title>窗 · {{ Math.round(windowAreaLength(area)) }} mm</title>
+              </template>
+              <polygon v-else :points="obstaclePoints(area)" :fill="area.label === '门洞净空' ? '#2586a022' : '#b44f4522'" :stroke="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :stroke-width="(selectedConstraintId === area.id ? 3 : 2) / store.zoom" stroke-dasharray="6 3" />
+              <text v-if="!isWindowArea(area)" x="4" y="14" :fill="area.label === '门洞净空' ? '#2586a0' : '#b44f45'" :font-size="11 / store.zoom" font-weight="600">{{ area.label }}</text>
               <template v-if="selectedConstraintId === area.id && isEditableConstraint(area)">
                 <rect
                   v-for="handle in constraintHandles(area)"
@@ -1965,8 +2058,8 @@ function furnitureProduct(o: FurnitureObject) {
             :key="entry.key"
             :data-channel-id="entry.channel.id"
             class="pointer-events-auto absolute select-none"
-            :class="entry.channel.orientation === 'vertical' ? 'cursor-ew-resize' : 'cursor-ns-resize'"
-            :title="`通道 ${entry.channel.widthMm} mm${entry.channel.clearanceMm ? ` + 两侧净距 ${entry.channel.clearanceMm} mm` : ''}${entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 仅从二排起' : ''} · 拖动调整位置，选中后拖两端手柄改宽度`"
+            :class="channelCursor(entry.channel)"
+            :title="`通道 ${entry.channel.widthMm} mm${entry.channel.clearanceMm ? ` + 两侧净距 ${entry.channel.clearanceMm} mm` : ''}${entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 仅从二排起' : ''} · 拖动调整位置${Number.isFinite(entry.channel.startMm) || Number.isFinite(entry.channel.endMm) ? '（含沿走向平移）' : ''}，选中后拖两侧手柄改宽度、拖两端手柄改起止`"
             :style="channelStyle(entry)"
             @pointerdown.stop="onChannelPointerDown(entry.channel, $event)"
           >
@@ -1989,6 +2082,26 @@ function furnitureProduct(o: FurnitureObject) {
                   :style="entry.channel.orientation === 'vertical'
                     ? { left: '50%', top: '50%', width: 4 / store.zoom + 'px', height: 36 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }
                     : { top: '50%', left: '50%', height: 4 / store.zoom + 'px', width: 36 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }"
+                ></div>
+              </div>
+              <!-- 走向端点手柄（LAYOUT-040）：拖 min/max 端改起点/终点，拖回边界恢复贯通；紫色与宽度手柄区分 -->
+              <div
+                v-for="edge in (['min', 'max'] as const)"
+                :key="'travel-' + edge"
+                :data-testid="`channel-travel-handle-${edge}`"
+                :class="entry.channel.orientation === 'vertical' ? 'cursor-ns-resize' : 'cursor-ew-resize'"
+                class="absolute"
+                :style="entry.channel.orientation === 'vertical'
+                  ? { [edge === 'min' ? 'top' : 'bottom']: '0', left: '0', right: '0', height: 10 / store.zoom + 'px', transform: `translateY(${edge === 'min' ? -50 : 50}%)` }
+                  : { [edge === 'min' ? 'left' : 'right']: '0', top: '0', bottom: '0', width: 10 / store.zoom + 'px', transform: `translateX(${edge === 'min' ? -50 : 50}%)` }"
+                :title="`拖动向${edge === 'min' ? '起' : '终'}点，拖到边界恢复贯通`"
+                @pointerdown.stop="onChannelTravelPointerDown(entry.channel, edge, $event)"
+              >
+                <div
+                  class="absolute rounded-full bg-[#7a5af5]"
+                  :style="entry.channel.orientation === 'vertical'
+                    ? { left: '50%', top: '50%', height: 4 / store.zoom + 'px', width: 24 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }
+                    : { left: '50%', top: '50%', width: 4 / store.zoom + 'px', height: 24 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }"
                 ></div>
               </div>
             </template>

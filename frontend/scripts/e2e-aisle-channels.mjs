@@ -230,13 +230,25 @@ try {
     return channel && (channel.clearanceMm || 0) === 0 && channel.offsetMm === expected
   }, afterDrag)
 
-  // 5.6 宽度阈值提示：低于 900mm 给出策略提示（不拦截），恢复后提示消失。
+  // 5.6 宽度阈值提示：低于 900mm 时选中通道的浮动编辑卡给出策略提示（不拦截），恢复后提示消失。
+  // 修复记录（2026-11-05，LAYOUT-040 顺带）：面板预警块自 7cf5806 起仅展示 error 级，原 channel-width-hint 不再渲染，
+  // 本步骤改断言画布编辑卡的 channel-editor-width-hint（当前唯一策略提示出口，语义不变）。
   await page.getByLabel('通道宽度（毫米）').fill('800')
   await page.getByLabel('通道宽度（毫米）').press('Enter')
-  await page.getByTestId('channel-width-hint').waitFor()
-  await page.getByLabel('通道宽度（毫米）').fill('900')
-  await page.getByLabel('通道宽度（毫米）').press('Enter')
-  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-width-hint"]'))
+  await page.waitForFunction(() => {
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    return (draft.objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || [])[0]?.widthMm === 800
+  })
+  const hintStripBox = await page.getByTestId('layout-channels').locator('[data-channel-id]').first().boundingBox()
+  assert.ok(hintStripBox, '通道条带不可见')
+  await page.mouse.click(hintStripBox.x + hintStripBox.width / 2, hintStripBox.y + hintStripBox.height / 2)
+  await page.getByTestId('channel-editor').waitFor()
+  await page.getByTestId('channel-editor-width-hint').waitFor()
+  await page.getByLabel('通道属性宽度（毫米）').fill('900')
+  await page.getByLabel('通道属性宽度（毫米）').press('Enter')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor-width-hint"]'))
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
 
   // 5.7 通道选中态：点选条带出现浮动编辑卡，卡内编辑宽度生效，Esc 取消选中。
   const stripForSelect = page.getByTestId('layout-channels').locator('[data-channel-id]').first()
@@ -472,6 +484,77 @@ try {
   const epRestoredBox = await epStrip.first().boundingBox()
   assert.ok(epRestoredBox && Math.abs(epRestoredBox.height - epFullBox.height) < epFullBox.height * 0.03, '清空起终点后条带应恢复全跨')
 
+  // 11.5 沿走向拖动与端点拖柄（LAYOUT-040）：竖向通道可上下整体平移起止窗口（位置不变），端点手柄单独调起/终点，拖到边界恢复贯通。
+  // 刷新后工具栏通道面板会遮住条带（elementFromPoint 命中面板 label），先收起再做画布点选；本步全部用编辑卡输入，步骤 10 会重新打开面板。
+  await page.getByTestId('toolbar-channels').click()
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-vertical"]'))
+  const travelZoom = epRestoredBox.height / epSpanY
+  await page.mouse.click(epRestoredBox.x + epRestoredBox.width / 2, epRestoredBox.y + epRestoredBox.height * 0.25)
+  await page.getByTestId('channel-editor').waitFor()
+  await page.getByLabel('通道属性起点（毫米）').fill(String(Math.round(epSpanY * 0.3)))
+  await page.getByLabel('通道属性起点（毫米）').press('Enter')
+  await page.getByLabel('通道属性终点（毫米）').fill(String(Math.round(epSpanY * 0.7)))
+  await page.getByLabel('通道属性终点（毫米）').press('Enter')
+  await page.waitForFunction(({ id, minY, span }) => {
+    const channel = (JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.id === id)
+    return channel && Math.abs(channel.startMm - (minY + span * 0.3)) <= 1 && Math.abs(channel.endMm - (minY + span * 0.7)) <= 1
+  }, { id: epChannelId, minY: epMinY, span: epSpanY })
+  // 条带整体向下拖 0.1 跨：起点/终点同步增加，位置（offsetMm）不变。拖起点避开横向通道带（0.5 跨附近）。
+  const travelOffset = (await channelsState()).find(item => item.id === epChannelId).offsetMm
+  const finiteBox = await epStrip.first().boundingBox()
+  assert.ok(finiteBox, '设端点后条带不可见')
+  await page.mouse.move(finiteBox.x + finiteBox.width / 2, finiteBox.y + finiteBox.height * 0.1)
+  await page.mouse.down()
+  await page.mouse.move(finiteBox.x + finiteBox.width / 2, finiteBox.y + finiteBox.height * 0.1 + epSpanY * 0.1 * travelZoom, { steps: 4 })
+  await page.mouse.up()
+  await page.waitForFunction(({ id, minY, span }) => {
+    const channel = (JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.id === id)
+    return channel && Math.abs(channel.startMm - (minY + span * 0.4)) <= 4 && Math.abs(channel.endMm - (minY + span * 0.8)) <= 4
+  }, { id: epChannelId, minY: epMinY, span: epSpanY })
+  assert.equal((await channelsState()).find(item => item.id === epChannelId).offsetMm, travelOffset, '沿走向拖动不应改通道位置')
+  // 大幅上拖：起点钳到包围盒顶并恢复贯通（undefined），终点跟随平移。
+  const shiftedBox = await epStrip.first().boundingBox()
+  assert.ok(shiftedBox, '平移后条带不可见')
+  await page.mouse.move(shiftedBox.x + shiftedBox.width / 2, shiftedBox.y + shiftedBox.height * 0.1)
+  await page.mouse.down()
+  await page.mouse.move(shiftedBox.x + shiftedBox.width / 2, 2, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForFunction(({ id, minY, span }) => {
+    const channel = (JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.id === id)
+    return channel && channel.startMm === undefined && Math.abs(channel.endMm - (minY + span * 0.4)) <= 4
+  }, { id: epChannelId, minY: epMinY, span: epSpanY })
+  // 端点拖柄：max 端大幅下拖越过包围盒底，恢复该端贯通。
+  const maxTravel = await page.getByTestId('channel-travel-handle-max').boundingBox()
+  assert.ok(maxTravel, '走向端点拖柄不可见')
+  await page.mouse.move(maxTravel.x + maxTravel.width / 2, maxTravel.y + maxTravel.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(maxTravel.x + maxTravel.width / 2, maxTravel.y + maxTravel.height / 2 + epSpanY * travelZoom, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForFunction((id) => {
+    const channel = (JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.id === id)
+    return channel && channel.startMm === undefined && channel.endMm === undefined
+  }, epChannelId)
+  // min 端下拖 0.05 跨：仅起点生效，终点保持贯通。
+  const minTravel = await page.getByTestId('channel-travel-handle-min').boundingBox()
+  assert.ok(minTravel, '走向端点拖柄不可见')
+  await page.mouse.move(minTravel.x + minTravel.width / 2, minTravel.y + minTravel.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(minTravel.x + minTravel.width / 2, minTravel.y + minTravel.height / 2 + epSpanY * 0.05 * travelZoom, { steps: 4 })
+  await page.mouse.up()
+  await page.waitForFunction(({ id, minY, span }) => {
+    const channel = (JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.id === id)
+    return channel && Math.abs(channel.startMm - (minY + span * 0.05)) <= 4 && channel.endMm === undefined
+  }, { id: epChannelId, minY: epMinY, span: epSpanY })
+  // 还原：清空起点恢复贯通，Esc 取消选中，后续步骤不受影响。
+  await page.getByLabel('通道属性起点（毫米）').fill('')
+  await page.getByLabel('通道属性起点（毫米）').press('Enter')
+  await page.waitForFunction((id) => {
+    const channel = (JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === 'CHANNEL-ROOM')?.layoutPreferences?.channels || []).find(item => item.id === id)
+    return channel && channel.startMm === undefined && channel.endMm === undefined
+  }, epChannelId)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="channel-editor"]'))
+
   // 10. U 形空间（LAYOUT-027）：通道按多边形裁剪——缺角内的纵向通道截断到缺口下方、不画出缺角；
   // 缺口高度上的横向通道断成左右两段。
   await page.evaluate(() => {
@@ -525,8 +608,10 @@ try {
   const leftSeg = segBoxes.reduce((a, b) => a.x < b.x ? a : b), rightSeg = segBoxes.reduce((a, b) => a.x > b.x ? a : b)
   assert.ok(leftSeg.right < rightSeg.x, '缺口高度的横向通道应在缺角处断开为两段')
 
-  // 12. 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）：未标注门洞净空→未核验提示；
-  // 端头衔接门洞→无提示；衔接走廊被禁放区贯穿→截断提示；门远离通道→未衔接提示。
+  // 12. 通道-入口/疏散联动提示（LAYOUT-029，提示级不拦截）：四场景（未标注/衔接/截断/远离）的提示文案与判定逻辑
+  // 由 pnpm test:layout-channels 单测覆盖。偏差记录（2026-11-05，LAYOUT-040 顺带修复既有失稳）：
+  // LAYOUT-013 面板改版（7cf5806，用户定稿）后操作区只保留 error 级预警，channel-egress-hint（warning/info 级）
+  // 在 UI 无出口；恢复展示需另立任务。本步骤保留场景搭建，验证门洞净空/禁放区与通道共存渲染、无运行时错误。
   const setupEgress = async (mode) => {
     await page.evaluate((m) => {
       const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
@@ -551,21 +636,16 @@ try {
     }, mode)
     await page.reload({ waitUntil: 'networkidle' })
     await page.getByTestId('tab-product-selection').click()
-  await page.getByTestId('unit-module-catalog').waitFor()
+    await page.getByTestId('unit-module-catalog').waitFor()
     await page.getByTestId('toolbar-channels').click()
-    return page.locator('[data-testid="channel-egress-hint"]')
+    return page.getByTestId('layout-channels').locator('[data-channel-id="CH-EGRESS"]')
   }
-  let egressHints = await setupEgress('unmarked')
-  assert.equal(await egressHints.count(), 1, '未标注门洞净空应给出未核验提示')
-  assert.match(await egressHints.first().textContent(), /未核验/)
-  egressHints = await setupEgress('linked')
-  assert.equal(await egressHints.count(), 0, '通道端头衔接门洞后不应有提示')
-  egressHints = await setupEgress('blocked')
-  assert.equal(await egressHints.count(), 1, '衔接走廊被贯穿应给出截断提示')
-  assert.match(await egressHints.first().textContent(), /净宽不足/)
-  egressHints = await setupEgress('far')
-  assert.equal(await egressHints.count(), 1, '门远离通道应给出未衔接提示')
-  assert.match(await egressHints.first().textContent(), /未衔接/)
+  for (const egressMode of ['unmarked', 'linked', 'blocked', 'far']) {
+    const egressStrip = await setupEgress(egressMode)
+    assert.equal(await egressStrip.count(), 1, `${egressMode} 场景通道条带应渲染`)
+    // 当前定稿行为：提示不在面板展示（单测覆盖提示逻辑本身）。
+    assert.equal(await page.locator('[data-testid="channel-egress-hint"]').count(), 0, `${egressMode} 场景提示按 LAYOUT-013 定稿不在操作区展示`)
+  }
 
   // 12. 确认排版阻塞的具体原因：目标人数不足 / 家具压占通道分别给出明确文案，解除后可确认。
   await page.evaluate(() => {
@@ -580,6 +660,11 @@ try {
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('tab-product-selection').click()
   await page.getByTestId('unit-module-catalog').waitFor()
+  // 与脚本开头同一流程选定模块并排布后才出现可用的应用按钮（LAYOUT-013 三段式改版后无默认方案）。
+  await page.locator('details summary', { hasText: '主管桌' }).first().click()
+  await page.getByRole('button', { name: '用于自动布局 主管直线桌', exact: true }).click()
+  await page.getByRole('tab', { name: '选择排布', exact: true }).click()
+  await page.getByRole('button', { name: '按场地排布', exact: true }).click()
   await page.getByTestId('apply-layout').click()
   await page.waitForFunction(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))

@@ -21,7 +21,7 @@ async function load(path) {
   return url
 }
 const { clipRectToRingRects } = await import(await load(new URL('../app/utils/spatial/geometry.ts', import.meta.url)))
-const { channelRects, axisSegments, clampChannelsToZone, validateChannels } = await import(await load(new URL('../app/utils/layoutChannels.ts', import.meta.url)))
+const { channelRects, axisSegments, clampChannelsToZone, validateChannels, channelTravelSpan, channelTravelDeltaRange, shiftChannelTravel, clampChannelTravelEndpoint } = await import(await load(new URL('../app/utils/layoutChannels.ts', import.meta.url)))
 const { doorClearanceObstacle } = await import(await load(new URL('../app/utils/spatial/obstacles.ts', import.meta.url)))
 const { channelEgressHints, MIN_PASSAGE_MM } = await import(await load(new URL('../app/utils/channelEgress.ts', import.meta.url)))
 
@@ -106,4 +106,25 @@ const legacyBlock = { ...egressZone, obstacles: [doorLeft], layoutPreferences: {
 assert.equal(channelEgressHints(legacyBlock, hChannel, []).length, 1, 'legacy exclusion can sever the corridor')
 // 无通道时不核验。
 assert.deepEqual(channelEgressHints(egressZone, [], []), [])
-console.log('PASS: rect×polygon clipping (rect identity, U/L segmentation, degenerate guards), channelRects clipping + fallback, axisSegments full-band cuts, endpoint breaks (startMm/endMm + fromSecondRow compose), clamp/validate, egress hints (LAYOUT-029: unmarked/door-linked/corridor-blocked/end-break/horizontal)')
+// 走向平移与端点拖柄（LAYOUT-040）：纵向空间 6000×4000，纵向通道走向轴为 Y。
+const travelZone = rectZone
+const travelChannel = { id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900, startMm: 500, endMm: 2500 }
+assert.deepEqual(channelTravelSpan(travelZone, travelChannel), { axisMin: 0, axisMax: 4000 }, 'travel span follows orientation axis')
+assert.deepEqual(channelTravelSpan(travelZone, { id: 'h', orientation: 'horizontal', offsetMm: 1000, widthMm: 900 }), { axisMin: 0, axisMax: 6000 }, 'horizontal span uses X axis')
+assert.deepEqual(channelTravelDeltaRange(travelZone, travelChannel), { min: -500, max: 1500 }, 'delta range keeps both ends inside bbox')
+assert.deepEqual(channelTravelDeltaRange(travelZone, { id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900 }), { min: 0, max: 0 }, 'full-span channel cannot travel')
+assert.deepEqual(shiftChannelTravel(travelZone, travelChannel, 300), { startMm: 800, endMm: 2800 }, 'travel shifts both endpoints')
+assert.deepEqual(shiftChannelTravel(travelZone, travelChannel, -9999), { startMm: undefined, endMm: 2000 }, 'travel clamped at axis start restores open start')
+assert.deepEqual(shiftChannelTravel(travelZone, travelChannel, 9999), { startMm: 2000, endMm: undefined }, 'travel clamped at axis end restores open end')
+assert.equal(shiftChannelTravel(travelZone, { id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900 }, 100), null, 'full-span channel travel is a no-op')
+assert.equal(shiftChannelTravel(travelZone, travelChannel, 0), null, 'zero delta returns null')
+assert.deepEqual(shiftChannelTravel(travelZone, { id: 'h', orientation: 'horizontal', offsetMm: 1000, widthMm: 900, endMm: 2000 }, 500), { startMm: 500, endMm: 2500 }, 'horizontal travel shifts along X')
+// 端点拖柄：min 端钳制在 [axisMin, 另一端-1]，max 端钳制在 [另一端+1, axisMax]；拖到边界恢复贯通（undefined）。
+assert.equal(clampChannelTravelEndpoint(travelZone, travelChannel, 'min', -100), undefined, 'min handle past axis start restores open start')
+assert.equal(clampChannelTravelEndpoint(travelZone, travelChannel, 'min', 1200), 1200, 'min handle sets start')
+assert.equal(clampChannelTravelEndpoint(travelZone, travelChannel, 'min', 2600), 2499, 'min handle clamped below the far end')
+assert.equal(clampChannelTravelEndpoint(travelZone, travelChannel, 'max', 99999), undefined, 'max handle past axis end restores open end')
+assert.equal(clampChannelTravelEndpoint(travelZone, travelChannel, 'max', 3000), 3000, 'max handle sets end')
+assert.equal(clampChannelTravelEndpoint(travelZone, travelChannel, 'max', 300), 501, 'max handle clamped above the near end')
+assert.equal(clampChannelTravelEndpoint(travelZone, { id: 'c', orientation: 'vertical', offsetMm: 1000, widthMm: 900 }, 'min', 800), 800, 'open channel min handle creates a start break')
+console.log('PASS: rect×polygon clipping (rect identity, U/L segmentation, degenerate guards), channelRects clipping + fallback, axisSegments full-band cuts, endpoint breaks (startMm/endMm + fromSecondRow compose), travel shift + endpoint handles (LAYOUT-040), clamp/validate, egress hints (LAYOUT-029: unmarked/door-linked/corridor-blocked/end-break/horizontal)')
