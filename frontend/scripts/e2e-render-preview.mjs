@@ -50,6 +50,7 @@ try {
       if (boundProduct) assert.equal(body.expectedSnapshot.furniture[0].productSelection.product.id, 'SKU-SELECTED')
       assert.equal(body.expectedSnapshot.furniture[0].layoutConfirmed, undefined)
       assert.deepEqual(body.expectedSnapshot.furniture[0].x, saved.objects[1].x)
+      assert.equal(body.viewImage, undefined, '工具栏发起不带视角截图，仍用空间立体引导图')
       const job = { previewId: 'RPRE-' + submissions.length, zoneId: zone.id, zoneName: zone.name, canvasRevision: body.canvasRevision, purpose: 'CONCEPT_PREVIEW',
         model: 'qwen-image-3.0', style: body.style, view: body.view, instructions: body.instructions, snapshot: body.expectedSnapshot,
         status: failedSubmission ? 'FAILED' : 'PENDING', errorMessage: failedSubmission ? '生图鉴权失败，请核对模型调用权限' : null, stale: false,

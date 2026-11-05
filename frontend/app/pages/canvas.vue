@@ -13,6 +13,9 @@ const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
+/** 从 3D 白模发起 AI 效果图时携带的当前视角截图；工具栏直接发起时为空（RENDER-006）。 */
+const renderViewImage = ref('')
+function openRenderPreview(viewImage = '') { renderViewImage.value = viewImage; showRenderPreview.value = true }
 const overviewCollapsed = ref(false)
 const viewRotation = ref(0)
 const showDimensions = ref(true)
@@ -130,6 +133,12 @@ function openSubmit() {
   showSubmit.value = true
 }
 
+// 3D「定位到 2D」：关闭预览并在无限画布中选中同一家具实例
+function onLocateFrom3d(id: string) {
+  showWhiteModel.value = false
+  selectedId.value = id
+}
+
 function fitBoard() {
   boardRef.value?.fitBoard()
 }
@@ -171,7 +180,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
           @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"
-          @render="showRenderPreview = true"
+          @render="openRenderPreview()"
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
@@ -236,7 +245,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
     </div>
 
     <OfficeCanvasSubmitDialog v-model:show="showSubmit" />
-    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" />
-    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" @ai-render="showRenderPreview = true" />
+    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :view-image="renderViewImage" />
+    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" @ai-render="openRenderPreview" @locate="onLocateFrom3d" />
   </div>
 </template>

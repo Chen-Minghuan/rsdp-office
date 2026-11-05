@@ -32,7 +32,10 @@ public class RenderProductReferences {
         public static Prepared empty() { return new Prepared(List.of(), JsonNodeFactory.instance.arrayNode(), ""); }
     }
 
-    public Prepared prepare(JsonNode scene) {
+    public Prepared prepare(JsonNode scene) { return prepare(scene, false); }
+
+    /** guided：图1为白模实时视角截图；否则图1为无文字立体空间引导。 */
+    public Prepared prepare(JsonNode scene, boolean guided) {
         LinkedHashMap<String, List<Integer>> chosen = new LinkedHashMap<>();
         int index = 0;
         for (JsonNode item : scene.path("furniture")) {
@@ -48,7 +51,9 @@ public class RenderProductReferences {
         Map<String, OfficeProductDto> catalog = office.listOfficeProducts().stream().collect(Collectors.toMap(OfficeProductDto::getId, Function.identity(), (a,b) -> a));
         ArrayNode manifest = JsonNodeFactory.instance.arrayNode();
         List<BufferedImage> photos = new ArrayList<>();
-        StringBuilder prompt = new StringBuilder("\n商品外观约束：图1是无文字立体空间引导，只用于空间轮廓、数量和位置；后续图片为所选商品外观参考板，P编号对应下列家具对应关系。每件商品可能包含多视角照片，所有视角属于同一个商品，不得按照片数增加家具。主视角决定整体轮廓，其他角度补充侧面、背面及细节。按照片保留各商品的轮廓、桌腿/扶手/屏风结构、颜色和材质，不得用通用家具或装修风格替换所选款式。不要把参考板、编号、商品文字或照片背景绘入成品。未绑定商品的模块仍按类型表达。\n");
+        StringBuilder prompt = new StringBuilder(guided
+            ? "\n商品外观约束：图1是白模实时视角截图，只用于视角、空间轮廓、数量和位置；后续图片为所选商品外观参考板，P编号对应下列家具对应关系。每件商品可能包含多视角照片，所有视角属于同一个商品，不得按照片数增加家具。主视角决定整体轮廓，其他角度补充侧面、背面及细节。按照片保留各商品的轮廓、桌腿/扶手/屏风结构、颜色和材质，不得用通用家具或装修风格替换所选款式。不要把参考板、编号、商品文字或照片背景绘入成品。未绑定商品的模块仍按类型表达。\n"
+            : "\n商品外观约束：图1是无文字立体空间引导，只用于空间轮廓、数量和位置；后续图片为所选商品外观参考板，P编号对应下列家具对应关系。每件商品可能包含多视角照片，所有视角属于同一个商品，不得按照片数增加家具。主视角决定整体轮廓，其他角度补充侧面、背面及细节。按照片保留各商品的轮廓、桌腿/扶手/屏风结构、颜色和材质，不得用通用家具或装修风格替换所选款式。不要把参考板、编号、商品文字或照片背景绘入成品。未绑定商品的模块仍按类型表达。\n");
         for (var choice : chosen.entrySet()) {
             OfficeProductDto product = catalog.get(choice.getKey());
             if (product == null) throw new BusinessException("所选商品已不可用，请重新核对选品后生成：" + choice.getKey());

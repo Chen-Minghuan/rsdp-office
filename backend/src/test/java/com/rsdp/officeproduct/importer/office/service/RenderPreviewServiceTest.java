@@ -38,7 +38,7 @@ class RenderPreviewServiceTest {
               "polygon":[[-6000,-4000],[0,-4000],[0,-2000],[-2000,-2000],[-2000,0],[-6000,0]]},
              {"id":"F1","kind":"furniture","zoneId":"ROOM","label":"办公桌","x":-5500,"y":-3500,"w":1200,"h":600,"rotation":90,"productId":""}]
             """);
-        when(products.prepare(any())).thenReturn(RenderProductReferences.Prepared.empty());
+        when(products.prepare(any(),anyBoolean())).thenReturn(RenderProductReferences.Prepared.empty());
         canvas=new CanvasDto(); canvas.setRevision(3); sync();
         when(office.getCanvas("PROJECT")).thenAnswer(call->canvas);
         when(projects.lockWorkspace("PROJECT")).thenReturn(1);
@@ -68,7 +68,7 @@ class RenderPreviewServiceTest {
     @Test void sendsSelectedProductPhotosAndKeepsReferencesSeparateFromLayoutSnapshot() throws Exception {
         ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();
         ArrayNode manifest=json.createArrayNode(); manifest.addObject().put("productId","SKU-1").put("referenceId","P1");
-        when(products.prepare(any())).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1，保留商品外观"));
+        when(products.prepare(any(),eq(false))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1，保留商品外观"));
         var result=service.create("PROJECT",request());
         assertTrue(result.path("productImagesUsed").asBoolean());
         assertEquals("SKU-1",result.path("productReferences").path("items").get(0).path("productId").asText());
@@ -80,7 +80,7 @@ class RenderPreviewServiceTest {
         assertTrue(stored.contains("guideUrl"));
     }
     @Test void missingSelectedProductPhotoStopsBeforeBilling() {
-        when(products.prepare(any())).thenThrow(new BusinessException("所选商品图片缺失"));
+        when(products.prepare(any(),anyBoolean())).thenThrow(new BusinessException("所选商品图片缺失"));
         assertThrows(BusinessException.class,()->service.create("PROJECT",request()));
         verifyNoInteractions(provider); verify(mapper,never()).insert(any());
     }
@@ -141,5 +141,49 @@ class RenderPreviewServiceTest {
         objects.add(objects.get(1).deepCopy()); ((ObjectNode)objects.get(2)).put("id","F2");
         assertThrows(BusinessException.class,()->RenderPreviewScene.validate(RenderPreviewScene.snapshot(objects,"ROOM")));
         assertThrows(BusinessException.class,()->service.get("OTHER","RPRE-UNKNOWN"));
+    }
+
+    private byte[] viewPng(int w, int h) throws Exception {
+        var image=new java.awt.image.BufferedImage(w,h,java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var out=new java.io.ByteArrayOutputStream(); ImageIO.write(image,"png",out); return out.toByteArray();
+    }
+    private RenderPreviewRequest guidedRequest(byte[] png) {
+        var r=request(); r.setViewImage("data:image/png;base64,"+Base64.getEncoder().encodeToString(png)); return r;
+    }
+
+    @Test void guidedWhiteModelViewUsesScreenshotAsFirstReferenceAndSkipsSpaceGuide() throws Exception {
+        byte[] screenshot=viewPng(800,600);
+        var result=service.create("PROJECT",guidedRequest(screenshot));
+        assertEquals("whiteModelView",result.path("sourceType").asText());
+        assertTrue(result.hasNonNull("viewImageUrl")); assertFalse(result.path("productReferences").has("guideUrl"));
+        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==1 && Arrays.equals(refs.get(0),screenshot)),contains("白模的实时相机截图"));
+        String stored=records.values().iterator().next().getSnapshotJson();
+        assertTrue(stored.contains("whiteModelView")); assertTrue(stored.contains("viewUrl")); assertFalse(stored.contains("guideUrl"));
+        // 方案 A：绑定商品时截图为图1、商品外观板随后，仍不加入立体导视图。
+        ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();
+        ArrayNode manifest=json.createArrayNode(); manifest.addObject().put("productId","SKU-1").put("referenceId","P1");
+        when(products.prepare(any(),eq(true))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1"));
+        var withProducts=guidedRequest(screenshot); withProducts.setExpectedSnapshot(RenderPreviewScene.snapshot(objects,"ROOM")); withProducts.setClientChangeId("CHANGE-2");
+        service.create("PROJECT",withProducts);
+        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==2 && Arrays.equals(refs.get(0),screenshot) && Arrays.equals(refs.get(1),new byte[]{9,8,7})),contains("白模的实时相机截图"));
+    }
+    @Test void guidedContentHashSeparatesScreenshotRequests() throws Exception {
+        byte[] screenshot=viewPng(800,600);
+        var first=service.create("PROJECT",guidedRequest(screenshot));
+        assertEquals(first.path("previewId"),service.create("PROJECT",guidedRequest(screenshot)).path("previewId"));
+        var plain=request(); plain.setClientChangeId("CHANGE-1");
+        assertThrows(BusinessException.class,()->service.create("PROJECT",plain));
+        var other=guidedRequest(viewPng(640,480));
+        assertThrows(BusinessException.class,()->service.create("PROJECT",other));
+        verify(provider,times(1)).submit(anyList(),anyString());
+    }
+    @Test void invalidViewImageIsRejectedBeforeBilling() throws Exception {
+        var malformed=request(); malformed.setViewImage("data:image/png;base64,%%%not-base64%%%");
+        assertThrows(BusinessException.class,()->service.create("PROJECT",malformed));
+        var wrongType=request(); wrongType.setViewImage("data:image/jpeg;base64,"+Base64.getEncoder().encodeToString(new byte[200]));
+        assertThrows(BusinessException.class,()->service.create("PROJECT",wrongType));
+        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(16,16))));
+        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(8000,500))));
+        verifyNoInteractions(provider); verify(mapper,never()).insert(any());
     }
 }

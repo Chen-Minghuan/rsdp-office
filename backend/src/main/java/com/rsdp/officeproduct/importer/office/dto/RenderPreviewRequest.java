@@ -13,4 +13,9 @@ public class RenderPreviewRequest {
     private String style;
     private String view;
     private String instructions;
+    /**
+     * Optional white-model viewport screenshot (data:image/png;base64,...). When present it becomes the
+     * primary structure reference (whiteModelView); the server decodes and validates it, never trusting pixels blindly.
+     */
+    private String viewImage;
 }
