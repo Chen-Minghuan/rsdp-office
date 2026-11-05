@@ -72,8 +72,8 @@ await page.waitForSelector('text=待审核', { timeout: 5000 })
 assert(await page.locator('button:has-text("一键全部通过（3）")').isVisible(), '批量通过后列表刷新为剩余 3 件')
 await page.screenshot({ path: `${outDir}/batch-audit-02-batch-approved.png` })
 
-console.log('Step 3: 表头全选并批量驳回')
-await page.getByRole('checkbox', { name: '选择全部待审核商品' }).check()
+console.log('Step 3: 表头全选当前页并批量驳回')
+await page.getByRole('checkbox', { name: '选择当前页待审核商品' }).check()
 assert(await page.locator('button:has-text("批量驳回（3）")').isVisible(), '表头全选后显示批量驳回（3）')
 await page.locator('button:has-text("批量驳回（3）")').click()
 await page.waitForSelector('h3:has-text("驳回商品（3 件）")', { timeout: 5000 })
@@ -99,6 +99,38 @@ await page.waitForSelector('text=已通过 2 件待审核商品', { timeout: 100
 assert(calls.approveAll === 1, '一键全部通过接口被调用一次')
 assert(await page.locator('h2:has-text("暂无待审核商品")').isVisible(), '一键通过后显示空列表')
 await page.screenshot({ path: `${outDir}/batch-audit-05-all-approved.png` })
+
+console.log('Step 5: 分页浏览并跨页勾选批量通过')
+pending = Array.from({ length: 25 }, (_, index) => ({
+  rspuId: `P-2${String(index).padStart(3, '0')}`,
+  rspuCode: `PR-2${String(index).padStart(3, '0')}`,
+  productName: `分页测试商品${index + 1}`,
+  primaryImageUrl: null,
+  retailPrice: 100 + index,
+  createdAt: '2026-10-15T08:00:00',
+}))
+await page.reload({ waitUntil: 'networkidle' })
+await page.waitForSelector('text=分页测试商品1', { timeout: 10000 })
+await page.waitForSelector('text=正在显示 1–20 条，共 25 件待审核商品', { timeout: 5000 })
+assert(await page.locator('button:has-text("一键全部通过（25）")').isVisible(), '待审核总数仍按全部 25 件统计')
+assert((await page.locator('tbody tr').count()) === 20, '第一页默认显示 20 条')
+await page.screenshot({ path: `${outDir}/batch-audit-06-page1.png` })
+
+await page.getByRole('button', { name: '下一页' }).click()
+await page.waitForSelector('text=正在显示 21–25 条，共 25 件待审核商品', { timeout: 5000 })
+assert((await page.locator('tbody tr').count()) === 5, '第二页显示剩余 5 条')
+assert(await page.locator('button:has-text("上一页")').isEnabled(), '第二页可返回上一页')
+
+await page.getByRole('checkbox', { name: '选择分页测试商品25', exact: true }).check()
+await page.getByRole('button', { name: '上一页' }).click()
+await page.waitForSelector('text=正在显示 1–20 条，共 25 件待审核商品', { timeout: 5000 })
+await page.getByRole('checkbox', { name: '选择分页测试商品1', exact: true }).check()
+assert(await page.locator('button:has-text("批量通过（2）")').isVisible(), '跨页勾选累计 2 件')
+await page.locator('button:has-text("批量通过（2）")').click()
+await page.waitForSelector('text=已通过 2 件商品', { timeout: 10000 })
+assert(calls.batchApprove.length === 2 && calls.batchApprove[1].length === 2, '跨页批量通过接口携带 2 个商品 ID')
+await page.waitForSelector('text=正在显示 1–20 条，共 23 件待审核商品', { timeout: 5000 })
+await page.screenshot({ path: `${outDir}/batch-audit-07-cross-page-approved.png` })
 
 console.log('全部断言通过')
 await browser.close()
