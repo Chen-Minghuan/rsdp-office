@@ -1,5 +1,33 @@
 # 开发进度与下一步
 
+2026-11-05 [LAYOUT-040](tasks/LAYOUT-040-channel-travel-drag.md) 通道沿走向拖动与端点拖柄：回应"竖向通道应可上下调节、横向应可左右调节"。条带拖动新增走向分量——有限通道（设 startMm/endMm）沿轴整体平移起止窗口（位置不变、不越包围盒、贯通通道走向不响应）；选中后走向两端出现端点拖柄，单端改 startMm/endMm（保持 起<止），拖回边界恢复该端贯通；fromSecondRow 动态语义不冻结，走向分量不参与吸附。纯函数 `channelTravelSpan`/`channelTravelDeltaRange`/`shiftChannelTravel`/`clampChannelTravelEndpoint` 落在 layoutChannels.ts。顺带修复通道专项 e2e 三处既有失稳（7cf5806 面板改版后 warning/info 提示无 UI 出口：5.6 改断言编辑卡提示、步骤 12 疏散联动改单测覆盖+渲染验证、确认阻塞步骤补选模块流程）。验证：`pnpm build`、`test:layout-channels`（新增用例）/`test:layout-planning`、通道专项 e2e（新增步骤 11.5）、`MOCK_API=1` 冒烟（3021 自建服务）通过；真实浏览器目检未执行。未提交。
+
+2026-11-05 L 型屏风卡位侧屏：按用户目检"屏风右边没有"补 `buildLDesk` 翼板外沿侧屏（与背屏围合成 L 形卡位，镜像换侧），8 朝向截图目检通过。构建、白模/模型单测、e2e:white-model/proposal-3d 通过；未提交，详见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md) 追修节。
+
+2026-11-05 3D 白模朝向修复：用户反馈 3D 预览与 2D 排版对不上，定位为家具体积 `rotation.y` 取反错误（y→-z 映射已含镜像，应与墙体同号），90°/270° 的 L 卡位等异形家具在 3D 中镜像反转、配椅跑出桌位。修复后 8 种朝向投影残差收敛为纯抬升位移，e2e:white-model 新增 L90 朝向回归。构建、白模/模型单测、e2e:white-model/proposal-3d 通过，8 朝向对照截图已目检；未提交，详见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md) 追修节。
+
+2026-11-05 [RENDER-007](tasks/RENDER-007-white-model-realtime-quality.md) 3D 白模实时画质增强第一阶段：回应"打开白模就想看到接近效果图、且家具仍可编辑"。程序化木地板纹理（颜色+粗糙度，世界 3600mm 平铺、各向异性）、地板断面分色、PCFSoft 软阴影+暖阳光+冷补光、渐变背景与 CSS 暗角（DOM 层不污染 AI 截图）。只改渲染层，几何/接口/确认规则与全部交互不变；SSAO/后期通道与墙面材质留作第二阶段。构建、白模/模型单测、e2e:white-model/proposal-3d（模拟 API）通过；两轮截图目检，已修正 1800mm 块的平铺条带感。真实浏览器目检待复核，未提交。
+
+2026-11-05 [RENDER-006](tasks/RENDER-006-white-model-guided-render.md) 白模视角引导的 AI 效果图已实现（方案 A）：3D 白模「AI 概念效果图」按钮截取当前视角（隐藏选中叠加物，渲染一帧后 toDataURL）随生成请求提交，后端计费前校验截图（PNG/≤10MB/64–8000px/宽高比≤10:1）、内容哈希纳入截图区分幂等，参考图改为 [白模截图, …商品外观板] 不再提交立体导视图，prompt 与商品提示词适配"视角与布局以截图为准"；快照记录 sourceType/viewUrl，对话框显示截图缩略图并隐藏视角选择，方案页标注白模视角引导。附带修复效果图对话框被全屏白模遮盖的层级问题（z-index 90→95）。Java 240 项、构建、白模/模型单测、e2e:white-model（新增截图提交断言）/render-preview/proposal-3d/workflows(3001)/MOCK 冒烟、git diff --check 通过，均为模拟 API；真实百炼生图目检对比未执行。未提交。
+
+2026-11-03 3D 工位默认桌椅配套：补齐原 2D 职员/主管/高管工位的配椅示意，与桌体同实例点选/移动/旋转/镜像，已有独立椅按最近椅位一对一匹配去重；L 型桌侧翼与椅位按 2D 轮廓对齐。列表仍合并，注明桌椅配套；查看预览不新增持久化家具或真实商品引用。构建、白模/模型测试、设计/方案页 3D 模拟回归、2D 家具模块回归及差异/文档检查通过，16 工位桌椅截图已查看；2D 旧测试补齐登录模拟后通过。未新增真实业务验收，未提交，详见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)。
+
+2026-11-03 3D 家具键盘移动：选中实例后方向键按当前视角移动 10mm、Shift 100mm、Alt 1mm，支持长按连续移动和 Ctrl/⌘+Z 撤销。复用 moveFurnitureGroup 的校验/保存/确认失效链路；输入控件、商品弹窗、拖动、只读页及关闭后不移动，面板显示按键说明。构建、模型纯函数、设计/方案页 3D UI 模拟回归及差异/文档链接检查通过，提示截图已查看；未新增真实服务验收，未提交。见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)。
+
+2026-11-03 门洞立体效果：贴墙门洞净空由原扇形铰链、宽度和开启侧派生为落地墙洞、门框/门套、开启门扇及把手/合页；门高 2100mm 为悬停标明的示意值，整圈墙仍统一 2800mm。复用 polygon-clipping 扣除门窗立面，支持落地开口及交叠；离墙净空保留原标注，原 2D 避障/确认数据不变。构建、白模/模型测试、设计/方案页 3D UI 模拟回归、差异及文档链接检查通过，俯视/低视角截图已查看；未新增实测字段或真实业务验收，未提交。见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)。
+
+2026-11-03 墙高统一追修：移除含窗墙 2800mm/无窗墙 1500mm 的混合高度，整圈墙与柱/井道统一使用 2800mm 示意高度，添加/删除窗不再改变墙高，窗洞与立体窗保留。构建、白模/模型纯函数、设计/方案页 3D UI 模拟回归及差异检查通过；已查看俯视与低视角截图，墙顶连续等高。未新增实测高度或真实服务验收，未提交，见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)。
+
+2026-11-03 3D 窗升级为嵌墙立体窗：由 2D 窗线派生贯通墙厚的窗洞，保留窗楣/窗下墙/墙垛，并补齐铝合金框、分格窗扇、透明玻璃、把手及窗台；支持横/竖/斜墙和同墙多窗。此阶段仅含窗墙使用 2800mm 示意高度（已由上条统一墙高修订），窗高 1200mm/窗台高 900mm 仍为渲染估计，悬停明确提示；原窗标注/空间/家具数据不改写。构建、白模与模型纯函数、设计/方案页 3D UI 模拟回归、差异检查通过，场景截图已查看。未新增实测高度字段或真实服务验收；未提交。见 [GEOM-015](tasks/GEOM-015-window-openings.md) 和 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)。
+
+2026-11-03 窗改为沿墙线段标注：绘制、拖动、两端编辑与数值长度共用真实墙段投影，支持横/竖/斜墙；画布/总览显示蓝线，属性只保留长度。继续用 1mm 标注带兼容既有 POLYGON 存储与后端校验，不代表实际窗厚，窗仍不扣面积/不避障。旧矩形按中心线兼容显示，编辑时转换；3D 在后续改为嵌墙立体窗（见上条）。构建、窗与白模纯函数、建筑标注 UI 模拟回归、Java 排版校验专项 23 项及差异检查通过，截图已查看；真实服务验收未新增，详见 [GEOM-015](tasks/GEOM-015-window-openings.md)，本轮未提交。
+
+2026-11-03 职员工位聚合追修：用户反馈同规格仍拆成 15+1 行，移除商品/变体绑定与排版组来源作为拆行条件，改按家具模块和布局规格合并；自定义快照只比较图例形态，名称/目录元数据不拆行。每件的商品选择与场景几何保留，属性仍对应实际选中实例。构建、`e2e:white-model`（一件绑定商品/不同排版来源后仍显示 16 件一行，选中商品属性正确）、`e2e:proposal-3d` 及差异检查通过，均为模拟 API；见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)，本轮未提交。
+
+2026-11-03 3D 家具列表合并职员工位：同一排版中同模块、同规格、同选品的职员桌聚合为一行并显示件数（16 桌显示 1 项·16 件）；旋转/镜像不拆行，其他家具保留逐件展示。3D 实例与稳定 ID 不变，点选组内任一件同步高亮所在列表行，点击该行保持原实例选择。构建、`e2e:white-model`（新增 16 件聚合、选中与数据不变、不同规格/选品拆行）、`e2e:proposal-3d` 和差异检查通过，均为模拟 API，截图已人工查看；见 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md)，本轮未提交。
+
+2026-11-03 [RENDER-004](tasks/RENDER-004-3d-furniture-interaction.md) 3D 家具交互与属性联动：点击/拖动阈值分离（6px），选中家具材质提亮 + 橙色轮廓 + 底部占地标记三层反馈且不写回设计数据；新增 SelectedFurniturePanel（真实业务属性，材质/颜色等无字段明确「暂无数据」，下架提示，未绑定明示）；「替换商品」改走服务端 module-recommendations/module-products 真实链路（原 bindProduct 直接改 productId 的绕过已修复，绑定不再改变布局占地），写回逻辑抽取 `applyModuleProductSelection` 与 2D 款式推荐共用；模块替换/旋转改走 replaceFurnitureModule/rotateFurnitureGroup 带校验链路；3D 拖动提交经 officeFurnitureMoveProblem 硬校验、失败回退；「定位到 2D」联动画布选中；方案页效果图详情改为「3D 交互 / AI 概念图 / 2D 布局」三页签，3D 为内联只读 Viewer（复用同一组件，zoneId/readonly/inline props），空间详情新增不依赖 AI 任务的 3D 入口；P2 建立 GLB 模型注册/缓存/回退层（无真实模型资源），并按用户「只是一个方块/固定色」的反馈两轮升级程序化类别示意模型（procedural.ts：RoundedBoxGeometry 圆角部件、程序化 CanvasTexture 木纹/织物纹理（零外部资源）、seed 逐实例确定性配色微调、椅扶手滚轮/沙发独立坐垫靠垫/柜体拉手/显示器屏幕微光/绿植树冠群等细节，朝向与 2D 线稿一致，占地不超出业务尺寸，材质逐实例创建支持选中 emissive 提亮且取消后恢复固有自发光）+ RoomEnvironment 环境贴图（0.42 防洗白）+ ACES 色调映射 + 平行光 PCF 阴影（three 0.187 已移除 PCFSoftShadowMap）；修复稀疏几何旋转后射线穿缝导致点选丢失——每件家具加覆盖业务占地的不可见命中盒。附带修复：场景重建不再重置相机、设施材质泄漏、GLB 子节点命中归属。构建、test:white-model、新增 test:furniture3d、e2e:white-model（改写）、新增 e2e:proposal-3d、render-preview/module-recommendations/single-space/workflows（3001）/MOCK 冒烟、git diff --check 全部通过；多类别场景渲染截图两轮人工目检（首轮光照过强洗白已修正）；e2e 均为模拟 API；本轮未提交。
+
 2026-11-03 [RENDER-003](tasks/RENDER-003-white-model-preview.md) 3D 白模预览已实现：2D 排版直转可交互白模（three.js），家具可拖动/旋转/替换模块/绑定商品并写回同一份设计几何，障碍与设施标注同场渲染，半高剖切墙保证可读性；AI 效果图入口更名保留。构建、白模单测与专项 UI、render-preview/drawing-entry/single-space 回归通过；space-review 与 templates 在当前 main 既有失败（排版改版遗留），与本改动无关。
 
 2026-11-02 未操作时隐藏组合失败提示：未选功能模块不再求解组合候选、不显示组合预估 0 件和失败区；已选模块的失败原因、建议和档位警告仅在显式生成后显示，输入或约束变化后清理旧结果。构建、排版专项 UI 模拟回归及差异检查通过；回归覆盖初始/清空无误报、生成受阻时保留真实失败提示，见 [LAYOUT-036](tasks/LAYOUT-036-solve-modes.md)；本轮未提交。
@@ -316,6 +344,7 @@
 | RECOMMEND-001 | 已确认排版后的真实商品推荐 | 部分实现；模块宽深匹配及真实变体选择已按 RECOMMEND-002 落地，旧候选入口仍兼容 | 完整品类/结构与使用约束、方案确认、旧清单失效/复核及真实服务集成 | P1 |
 | RENDER-001 | 已确认方案效果图 | 正式已确认商品方案生成仍待开始；独立概念预览见 RENDER-002 | 正式方案条件核验、商品外观资源与精确对应验收 | P2 |
 | RENDER-002 | 单空间二维概念效果预览 | 已实现，Java 97 项、构建、专项模拟 UI/冒烟及两次真实百炼生图通过；独立 DB 验证去重、图片保存与修改后历史标记，见[任务记录](tasks/RENDER-002-single-space-preview.md) | 合成布局仅验证真实链路；模型仍可能补充家具/门窗，概念图不替代精确对应验收；完整工作流仍在旧商品详情选择器失败 | P1 |
+| RENDER-006 | 白模视角引导的 AI 效果图 | 已实现并通过本地验证（方案 A）；截图校验/幂等哈希/参考图替换/前后端展示，Java 240 项与模拟 UI 回归通过，见[任务记录](tasks/RENDER-006-white-model-guided-render.md) | 真实百炼生图与白模引导 vs 导视图的目检对比未执行 | P1 |
 | QA-001 | 分层验证与持续检查 | 部分实现；已有构建、UI E2E、Java/CAD 测试入口 | 增加几何/流程/商品测试和真实集成样本；统一脚本与 CI；处理金样本未执行判定 | 随各项实施 |
 
 P0 是后续设计流程的数据与业务基础；P1 依赖空间与确认基础；P2 依赖确认方案。
