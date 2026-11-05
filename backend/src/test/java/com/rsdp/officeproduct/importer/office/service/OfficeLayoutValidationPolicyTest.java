@@ -96,6 +96,19 @@ class OfficeLayoutValidationPolicyTest {
         geometry.withArray("outer").addArray().add(2200).add(-2600);
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
     }
+    @Test void acceptsWallAttachedWindowLineAnnotation() throws Exception {
+        ArrayNode objects = scene();
+        ObjectNode obstacle = ((ObjectNode) objects.get(0)).putArray("obstacles").addObject();
+        obstacle.put("obstacleId", "WIN-LINE").put("kind", "WINDOW").put("spaceId", "R").put("excludesFloorArea", false);
+        ObjectNode geometry = obstacle.putObject("geometry").put("type", "POLYGON").put("coordinateSystem", "WORLD_MM");
+        // 1mm 标注带跨墙中线，不代表真实窗厚，不阻挡已确认排版。
+        ArrayNode ring = geometry.putArray("outer");
+        ring.addArray().add(-0.5).add(-1000);
+        ring.addArray().add(-0.5).add(-2400);
+        ring.addArray().add(0.5).add(-2400);
+        ring.addArray().add(0.5).add(-1000);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
     @Test void validatesDoorSectorInsteadOfItsBoundingBox() throws Exception {
         ArrayNode objects = scene();
         ObjectNode obstacle = ((ObjectNode) objects.get(0)).putArray("obstacles").addObject();

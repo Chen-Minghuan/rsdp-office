@@ -5,7 +5,7 @@ import { fromScreen, toScreen } from '~/utils/spatial/camera'
 import { withApiBase } from '~/utils/apiBase'
 import { polygonCentroid, polygonBounds } from '~/utils/spatial/geometry'
 import type { ContourOperation, ResizeHandle } from '~/utils/spatial/contourTransform'
-import { obstacleLabel } from '~/utils/spatial/obstacles'
+import { obstacleLabel, windowLinePoints } from '~/utils/spatial/obstacles'
 
 const props = withDefaults(defineProps<{
   scene: SpatialSceneSnapshot | null
@@ -109,6 +109,10 @@ function obstacleColor(kind: SpatialObstacleKind) {
   return kind === 'DOOR_CLEARANCE' ? '#2586a0' : kind === 'NO_PLACEMENT' ? '#b07b38' : kind === 'WINDOW' ? '#4a7fbf' : '#b44f45'
 }
 function obstacleSize(geometry: SpatialGeometry, kind?: SpatialObstacleKind) {
+  if (kind === 'WINDOW') {
+    const line = windowLinePoints({ geometry })
+    return line.length === 2 ? Math.round(Math.hypot(line[1][0] - line[0][0], line[1][1] - line[0][1])) + ' mm' : ''
+  }
   const bounds = polygonBounds(geometry)
   if (!bounds) return ''
   return kind === 'DOOR_CLEARANCE' ? 'R ' + Math.round(Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)) + ' mm' : Math.round(bounds.maxX - bounds.minX) + ' × ' + Math.round(bounds.maxY - bounds.minY) + ' mm'
@@ -273,7 +277,8 @@ onBeforeUnmount(() => observer?.disconnect())
       </g>
       <g v-if="scene?.obstacles?.length" data-layer="obstacles">
         <g v-for="obstacle in scene.obstacles" :key="obstacle.obstacleId" :data-obstacle-id="obstacle.obstacleId" :class="obstacleEditing ? 'cursor-pointer' : 'pointer-events-none'">
-          <path :d="geometryPath(obstacle.geometry)" :fill="obstacleColor(obstacle.kind)" fill-opacity="0.24" :stroke="obstacleColor(obstacle.kind)" :stroke-width="selectedObstacleId === obstacle.obstacleId ? 3 : 1.8" stroke-dasharray="6 3" />
+          <path v-if="obstacle.kind === 'WINDOW'" :d="windowLinePoints(obstacle).map(([x, y], index) => { const p = pointToSvg({ x, y }); return (index ? 'L' : 'M') + p.x + ',' + p.y }).join(' ')" fill="none" :stroke="obstacleColor(obstacle.kind)" stroke-width="3" />
+          <path v-else :d="geometryPath(obstacle.geometry)" :fill="obstacleColor(obstacle.kind)" fill-opacity="0.24" :stroke="obstacleColor(obstacle.kind)" :stroke-width="selectedObstacleId === obstacle.obstacleId ? 3 : 1.8" stroke-dasharray="6 3" />
           <text v-if="obstacleLabelVisible(obstacle.geometry)" :x="pointToSvg(polygonCentroid(obstacle.geometry)!).x" :y="pointToSvg(polygonCentroid(obstacle.geometry)!).y" text-anchor="middle" dominant-baseline="middle" :fill="obstacleColor(obstacle.kind)" font-size="11" font-weight="600" pointer-events="none">{{ obstacleLabel(obstacle.kind) }} · {{ obstacleSize(obstacle.geometry, obstacle.kind) }}</text>
           <title>{{ obstacleLabel(obstacle.kind) }} · {{ obstacleSize(obstacle.geometry, obstacle.kind) }}</title>
         </g>

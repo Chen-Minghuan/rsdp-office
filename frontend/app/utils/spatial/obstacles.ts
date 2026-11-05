@@ -8,6 +8,76 @@ export function obstacleLabel(kind: SpatialObstacleKind) {
   return ({ COLUMN: '柱', SHAFT: '井道', NO_PLACEMENT: '禁放区', DOOR_CLEARANCE: '门洞净空', WINDOW: '窗', OTHER: '固定障碍' } as const)[kind]
 }
 
+/** 窗的语义是中心线；1mm 标注带仅兼容既有 POLYGON 存储/校验，不代表实际窗厚。 */
+export function windowLinePoints(obstacle: { geometry: { outer: Array<[number, number]> } }): Array<[number, number]> {
+  const ring = obstacle.geometry.outer
+  if (ring.length !== 4) return []
+  const midpoint = (a: number[], b: number[]): [number, number] => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  const length = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1])
+  return length(ring[0], ring[1]) >= length(ring[1], ring[2])
+    ? [midpoint(ring[0], ring[3]), midpoint(ring[1], ring[2])]
+    : [midpoint(ring[0], ring[1]), midpoint(ring[3], ring[2])]
+}
+
+export function windowLineObstacle(spaceId: string, start: { x: number; y: number }, end: { x: number; y: number }, obstacleId = createUuid()): SpatialObstacle | null {
+  const dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx, dy)
+  if (![start.x, start.y, end.x, end.y].every(Number.isFinite) || length < 1) return null
+  const nx = -dy / length * 0.5, ny = dx / length * 0.5
+  const outer: Array<[number, number]> = [[start.x + nx, start.y + ny], [end.x + nx, end.y + ny], [end.x - nx, end.y - ny], [start.x - nx, start.y - ny]]
+  return { obstacleId, kind: 'WINDOW', spaceId, geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer, outerVertexIds: outer.map((_, index) => obstacleId + '-V-' + index), holes: [], holeVertexIds: [] }, excludesFloorArea: false, source: 'MANUAL' }
+}
+
+function windowWallEdges(zone: ZoneObject) {
+  const ring = zone.reviewUnit === 'mm' ? zone.polygon?.map(([x, y]) => [x, -y]) : null
+  return (ring || []).map((a, edgeIndex) => {
+    const b = ring![(edgeIndex + 1) % ring!.length], length = Math.hypot(b[0] - a[0], b[1] - a[1])
+    return { a, length, ux: (b[0] - a[0]) / length, uy: (b[1] - a[1]) / length, edgeIndex }
+  }).filter(edge => Number.isFinite(edge.length) && edge.length >= 1)
+}
+
+function nearestWindowWall(zone: ZoneObject, point: { x: number; y: number }, minLength = 1) {
+  return windowWallEdges(zone).filter(edge => edge.length + 0.001 >= minLength).map(edge => {
+    const t = Math.max(0, Math.min(edge.length, (point.x - edge.a[0]) * edge.ux + (point.y - edge.a[1]) * edge.uy))
+    return { ...edge, distance: Math.hypot(point.x - edge.a[0] - edge.ux * t, point.y - edge.a[1] - edge.uy * t) }
+  }).sort((a, b) => a.distance - b.distance)[0]
+}
+
+/** 绘制起点选墙，终点投影到同一有限墙段；水平、竖直和斜墙使用同一投影。 */
+export function windowOnWall(zone: ZoneObject, start: { x: number; y: number }, end: { x: number; y: number }, obstacleId = createUuid()) {
+  const wall = nearestWindowWall(zone, start)
+  if (!wall) return null
+  const project = (p: { x: number; y: number }) => {
+    const t = Math.max(0, Math.min(wall.length, (p.x - wall.a[0]) * wall.ux + (p.y - wall.a[1]) * wall.uy))
+    return { x: wall.a[0] + t * wall.ux, y: wall.a[1] + t * wall.uy }
+  }
+  return windowLineObstacle(zone.id, project(start), project(end), obstacleId)
+}
+
+export function resizeWindowOnWall(zone: ZoneObject, obstacle: SpatialObstacle, lengthMm: number) {
+  const line = windowLinePoints(obstacle)
+  if (line.length !== 2 || !Number.isFinite(lengthMm) || lengthMm < 1) return null
+  const center = { x: (line[0][0] + line[1][0]) / 2, y: (line[0][1] + line[1][1]) / 2 }
+  const wall = nearestWindowWall(zone, center)
+  if (!wall || lengthMm > wall.length + 0.001) return null
+  const offset = Math.max(lengthMm / 2, Math.min(wall.length - lengthMm / 2, (center.x - wall.a[0]) * wall.ux + (center.y - wall.a[1]) * wall.uy))
+  const next = windowLineObstacle(zone.id, { x: wall.a[0] + (offset - lengthMm / 2) * wall.ux, y: wall.a[1] + (offset - lengthMm / 2) * wall.uy }, { x: wall.a[0] + (offset + lengthMm / 2) * wall.ux, y: wall.a[1] + (offset + lengthMm / 2) * wall.uy }, obstacle.obstacleId)
+  return next ? { ...obstacle, geometry: next.geometry, excludesFloorArea: false } : null
+}
+
+function snapWindowToZone(zone: ZoneObject, obstacle: SpatialObstacle, toleranceMm: number) {
+  const unchanged = { obstacle, snapped: false, edgeIndex: null as number | null }
+  const line = windowLinePoints(obstacle)
+  if (line.length !== 2 || toleranceMm <= 0 || Number.isNaN(toleranceMm)) return unchanged
+  const length = Math.hypot(line[1][0] - line[0][0], line[1][1] - line[0][1])
+  const center = { x: (line[0][0] + line[1][0]) / 2, y: (line[0][1] + line[1][1]) / 2 }
+  const wall = nearestWindowWall(zone, center)
+  if (!wall || wall.length + 0.001 < length || wall.distance > toleranceMm) return unchanged
+  const next = resizeWindowOnWall(zone, obstacle, length)
+  // 最近短墙不足以容纳整窗时不缩短窗或跳往另一墙面。
+  if (!next) return unchanged
+  return { obstacle: next, snapped: true, edgeIndex: wall.edgeIndex }
+}
+
 export function rectangleObstacle(spaceId: string, kind: SpatialObstacleKind, start: { x: number; y: number }, end: { x: number; y: number }, obstacleId = createUuid()): SpatialObstacle | null {
   if (kind === 'DOOR_CLEARANCE') return doorClearanceObstacle(spaceId, start, end, obstacleId)
   const minX = Math.min(start.x, end.x), maxX = Math.max(start.x, end.x)
@@ -119,6 +189,7 @@ export function moveObstacle(obstacle: SpatialObstacle, dx: number, dy: number):
 }
 
 export function snapObstacleToZone(zone: ZoneObject, obstacle: SpatialObstacle, toleranceMm: number) {
+  if (obstacle.kind === 'WINDOW') return snapWindowToZone(zone, obstacle, toleranceMm)
   const unchanged = { obstacle, snapped: false, edgeIndex: null as number | null }
   if (!['COLUMN', 'SHAFT', 'WINDOW'].includes(obstacle.kind) || obstacle.geometry.outer.length !== 4 || zone.reviewUnit !== 'mm' || !Number.isFinite(toleranceMm) || toleranceMm <= 0) return unchanged
   const bounds = polygonBounds(obstacle.geometry), ring = zone.polygon?.map(([x, y]): [number, number] => [x, -y])
