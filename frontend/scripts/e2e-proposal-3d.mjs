@@ -43,7 +43,7 @@ try {
   await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
     state.objects = [
-      { id: 'Z1', kind: 'zone', name: '开放办公区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', confirmed: true,
+      { id: 'Z1', kind: 'zone', name: '开放办公区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', confirmed: true, reviewConfirmation: { status: 'CONFIRMED' },
         polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]], obstacles: [], facilities: [] },
       { id: 'A', kind: 'furniture', zoneId: 'Z1', furnitureTemplateId: 'desk-straight', label: '职员桌 A', x: 400, y: 400, w: 1200, h: 600, rotation: 0,
         productId: 'P1', layoutConfirmed: true,

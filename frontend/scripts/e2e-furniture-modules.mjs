@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -34,7 +35,9 @@ try {
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
     rooms: [{ roomId: 'MODULE-ROOM', label: '办公家具测试空间', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0,0],[12000,0],[12000,8000],[0,8000]] }],
   }
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const data = path.endsWith('/floor-plan/MODULE-TEST') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -59,6 +62,7 @@ try {
   }
   await page.goto(baseUrl + '/canvas?analysisId=MODULE-TEST', { waitUntil: 'networkidle' })
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 办公家具测试空间', exact: true }).waitFor()
+  await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await page.getByTestId('tab-product-selection').click()
   await catalog().waitFor()

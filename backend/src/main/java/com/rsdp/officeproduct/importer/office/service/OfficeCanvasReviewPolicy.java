@@ -26,6 +26,24 @@ public final class OfficeCanvasReviewPolicy {
         OfficeLayoutValidationPolicy.requireConfirmedValid(objects);
     }
 
+    /**
+     * 进入家具排版前：全部空间必须持有服务端签发的有效复核确认（CONFIRMED）。
+     * 凭据由复核确认接口签发、普通保存时按几何快照维护（伪造剥离/变更置 STALE），
+     * 因此这里只需校验服务端维护后的状态字段。
+     */
+    public static void requireSpacesReviewConfirmed(JsonNode objects) {
+        if (objects == null || !objects.isArray()) throw new BusinessException("请先提供空间轮廓");
+        int zones = 0;
+        int unconfirmed = 0;
+        for (JsonNode zone : objects) {
+            if (!"zone".equals(zone.path("kind").asText())) continue;
+            zones++;
+            if (!"CONFIRMED".equals(zone.path("reviewConfirmation").path("status").asText())) unconfirmed++;
+        }
+        if (zones == 0) throw new BusinessException("请先识别或创建空间");
+        if (unconfirmed > 0) throw new BusinessException("还有 " + unconfirmed + " 个空间未完成复核确认，请逐个确认或使用「一键复核」后再进入家具排版");
+    }
+
     /** 单个空间进入精确排版/设计复核确认前的几何与比例校验。 */
     public static void requireZoneValid(JsonNode zone) {
         if (!"mm".equals(zone.path("reviewUnit").asText())) throw new BusinessException("请先校准空间的实际尺寸");

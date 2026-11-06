@@ -4,6 +4,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -60,7 +61,9 @@ try {
       { name: '测试会议室', polygon: [[110,250],[690,250],[690,490],[110,490]], sourceAnalysisId: 'PREVIOUS-ANALYSIS', sourceAnalysisRevision: 1, canvasRevision: 20 },
     ],
   })
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const data = path.includes('/floor-plan/CORRECTION-TEST') ? correctionSource(path.split('/').at(-1)) : path === '/api/v1/floor-plan/REVIEW-TEST' ? source : path === '/api/v1/floor-plan/CAD-TEST' ? cadSource : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -109,16 +112,33 @@ try {
     state.submitted = { projectContext: state.project, zones: [] }
     localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
   })
-  // A fresh direct link waits for source loading, without requiring prior room confirmations.
+  // 复核门禁：未完成复核确认时直达排版地址会被拦回总览
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
-  await page.getByTestId('apply-layout').waitFor()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
+  assert.doesNotMatch(page.url(), /mode=design/, '未完成复核确认不能绕过门禁直达排版')
+  // 页脚按钮灰化但可点击，弹出引导提示；徽标统一为「待复核」
+  assert.equal(await advance().getAttribute('aria-disabled'), 'true', '待复核时进入排版按钮灰化')
+  await advance().dispatchEvent('click')
+  await page.locator('.review-toast').getByText('待复核', { exact: false }).waitFor()
+  assert.equal(await page.locator('[data-testid="unit-module-catalog"]').count(), 0, '弹出提示后不进入排版')
+  assert.equal(await page.locator('.review-room-item .review-badge').first().innerText(), '待复核', '未确认空间徽标统一为待复核')
+  assert.equal(await page.locator('.review-canvas-footer .pending-total').innerText(), '12 待复核', '页脚统计待复核空间数')
+  // 一键复核：全部空间确认后按钮消失、徽标统一为「可用」、可进入排版
+  await confirmAllReviews(page)
+  assert.equal(await page.locator('.review-room-item .review-badge:has-text("待复核")').count(), 0, '一键复核后不再有待复核空间')
+  assert.equal(await page.locator('.review-room-item .review-badge').first().innerText(), '可用', '复核确认后徽标统一为可用')
+  assert.equal(await advance().getAttribute('aria-disabled'), 'false', '复核确认后进入排版按钮可用')
+  // A fresh direct link waits for source loading, and now passes the review gate after confirmation.
+  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
   await page.waitForURL(/mode=design/)
+  await page.getByTestId('functional-category-workstation').click()
+  await page.getByTestId('apply-layout').waitFor()
   assert.equal(Object.hasOwn(await stored(), 'project'), false, '旧项目资料从本地草稿移除')
   assert.equal(Object.hasOwn((await stored()).submitted, 'projectContext'), false, '旧需求快照不再含项目资料')
   assert.match(page.url(), /mode=design/)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
-  assert.ok(await advance().isEnabled(), '空间无需逐个确认即可排版')
+  assert.ok(await advance().isEnabled(), '复核确认后可进入排版')
   assert.equal(await page.getByRole('button', { name: '确认当前空间', exact: true }).count(), 0)
   assert.equal(await page.locator('[data-layer="design"]>g').count(), 12)
   await page.getByRole('button', { name: '编辑轮廓', exact: true }).click()
@@ -147,20 +167,23 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.equal(await selectedArea(), '43.2 m²')
   await labelResize(8000)
-  assert.equal(await page.locator('.review-room-item.selected .review-badge').innerText(), '需复核', '边界重叠在空间列表标记需复核')
-  assert.ok(await advance().isEnabled(), '边界重叠只提示复核，不强制处理')
+  assert.equal(await page.locator('.review-room-item.selected .review-badge').innerText(), '可用', '边界重叠不改变已确认的复核状态')
+  assert.match(await page.locator('.review-room-item.selected .review-room-hint').innerText(), /边界重叠/, '边界重叠作为提示信息保留在卡片上')
+  assert.ok(await advance().isEnabled(), '边界重叠只提示，已确认复核后不拦截排版')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.ok(await advance().isEnabled())
   const beforeLayout = (await stored()).objects.filter(object => object.kind === 'zone')
   await advance().click()
-  await page.getByTestId('apply-layout').waitFor()
   await page.waitForURL(/mode=design/)
+  await page.getByTestId('functional-category-workstation').click()
+  await page.getByTestId('apply-layout').waitFor()
   assert.match(page.url(), /mode=design/)
   assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入排版只绑定模板，不改写人工确认和几何')
   const designUrl = page.url()
   await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
-  assert.equal(page.url(), designUrl, '未逐个确认的有效空间可刷新恢复排版')
+  assert.equal(page.url(), designUrl, '已确认复核的空间可刷新恢复排版')
 
 
   // Import an unknown-scale image through the actual upload target route.
@@ -391,7 +414,8 @@ try {
     assert.equal(imported.contourCorrection.sourceAnalysisId, 'PREVIOUS-ANALYSIS')
     assert.deepEqual((await stored()).objects.find(o => o.id === id + '-TEST-ROOM').polygon, source.rooms[0].polygon, '旧错位框不覆盖新定位的封闭房间')
     await choose('测试会议室')
-    assert.equal(await page.locator('.review-room-item.selected .review-badge').innerText(), '需复核', '历史编辑与本次墙线轮廓不一致在空间列表标记需复核')
+    assert.equal(await page.locator('.review-room-item.selected .review-badge').innerText(), '需修正', '继承轮廓未校准比例在空间列表标记需修正')
+    assert.match(await page.locator('.review-room-item.selected .review-room-hint').innerText(), /待校准/, '未校准原因作为提示信息显示')
     await choose('L 形办公区')
     await page.reload({ waitUntil: 'networkidle' })
     assert.deepEqual((await stored()).objects.find(o => o.id === imported.id).polygon, correctedOutline)
@@ -506,7 +530,9 @@ try {
     const expectY = Math.min(...ys) + (lFractions[i][1] - 0.55) / fySpan * ry
     assert.ok(Math.abs(px - expectX) < rx * 0.03 && Math.abs(py - expectY) < ry * 0.03, '顶点 ' + i + ' 与点击位置一致（坐标未翻转）')
   })
-  assert.ok(await advance().isEnabled(), '手画毫米空间可直接进入家具排版')
+  assert.ok(await advance().isDisabled(), '手画毫米空间未复核确认前同样不能进入家具排版')
+  await confirmAllReviews(page)
+  assert.ok(await advance().isEnabled(), '手画空间一键复核确认后可进入家具排版')
   // Esc 取消不留下空间
   await page.getByRole('button', { name: '画新空间', exact: true }).click()
   await sketchRect(0.1, 0.1, 0.2, 0.2)
@@ -777,6 +803,7 @@ try {
       await page.mouse.move(b.x, b.y, { steps: 5 })
       await page.mouse.up()
     }
+    await confirmAllReviews(page)
     await page.getByRole('button', { name: '放大核对当前空间', exact: true }).click()
     await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
     await page.getByTestId('toolbar-constraints').click()
@@ -799,22 +826,19 @@ try {
     await page.locator('.review-rooms').getByRole('button', { name: '选择空间 手动空间 4', exact: true }).click()
   }
   // 空间列表点名字直接改名
-  await page.locator('.review-room-item', { hasText: '手画开放办公区' }).locator('.review-room-name').click()
+  await page.locator('.review-room-name[title="点击改名：手画开放办公区"]').click()
   const renameInput = page.getByRole('textbox', { name: '重命名空间 手画开放办公区', exact: true })
   await renameInput.fill('开放办公区 A')
   await renameInput.press('Enter')
   await page.getByText('开放办公区 A', { exact: true }).first().waitFor()
   assert.ok((await stored()).objects.some(object => object.kind === 'zone' && object.name === '开放办公区 A'), '列表改名已保存')
   await choose('手动空间 4')
-  // 家具排版侧栏同样可改名
+  // 复核确认后可从总览进入排版；排版侧栏改名入口已随三段式工作台改版移除，改名走总览列表与画布标签两处
   await advance().click()
+  await page.waitForURL(/mode=design/)
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
-  await page.getByRole('button', { name: '手动空间 4', exact: true }).click()
-  await page.getByLabel('排版空间名称').fill('设计侧改名区')
-  await page.getByLabel('排版空间名称').press('Enter')
-  assert.ok((await stored()).objects.some(object => object.kind === 'zone' && object.name === '设计侧改名区'), '排版侧栏改名已保存')
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
-  await page.getByText('设计侧改名区', { exact: true }).first().waitFor()
   // 画布上点选中空间的名称标签：就地改名称/用途/矩形尺寸
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 开放办公区 A', exact: true }).click()
   await page.locator('.space-label-editable').click()
@@ -830,7 +854,7 @@ try {
   assert.equal(edited.actualWidthMm, 5200, '画布标签改宽度已保存并联动轮廓')
   assert.ok(profileRequests.every(url => new URL(url).pathname === '/api/v1/office/projects'), '只调用新项目树接口，不调用已删除的项目资料详情接口')
   assert.deepEqual(errors, [])
-  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层（画布右下角图层面板）、画布左上角用途下拉、毫米编辑与撤销（画布标签内联尺寸）、复核仅提示、直接排版与刷新恢复、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览/列表/排版三处改名、画布名称标签快捷编辑属性、Esc 取消、逐点描 Enter 快捷保存与撤销、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除）、右栏空间属性面板整体移除）。使用模拟 API。')
+  console.log('空间核对 UI 回归通过：统一坐标、原图/轮廓/尺寸图层（画布右下角图层面板）、画布左上角用途下拉、毫米编辑与撤销（画布标签内联尺寸）、复核确认门禁（未确认拦截直达地址与页脚按钮、一键复核全部确认、徽标统一待复核/可用、重叠仅提示不拦截、确认后刷新恢复排版）、比例和几何校验、图片两点校准、L 形顶点拖动、凹角重描、八点自由变换/等比缩放/平移/整边推拉、缩放后坐标、取消与撤销、刷新恢复、移动布局、新识别沿用同图人工轮廓、来源与比例保留、旧错位框保护、手动画区（矩形/L 形模块拖拽与逐点描、毫米取整、90° 旋转宽深互换、逐顶点坐标、已画空间质心旋转（输入预览不落库、仅 Enter/应用提交、点空白或 Esc 放弃）与撤销、总览列表与画布标签两处改名、画布名称标签快捷编辑属性、Esc 取消、逐点描 Enter 快捷保存与撤销、空间合并/剔除（相邻合并、重叠剔除、不相连/无重叠拒绝、撤销恢复）、单空间窗标注（不扣面积、不改轮廓、撤销移除）、右栏空间属性面板整体移除）。使用模拟 API。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

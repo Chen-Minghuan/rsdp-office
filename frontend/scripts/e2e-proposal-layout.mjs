@@ -14,7 +14,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  const zone = { id: 'PLAN-L', kind: 'zone', name: '测试办公室', zoneType: 'OPEN_OFFICE', x: -6000, y: -4000, w: 8000, h: 6000, reviewUnit: 'mm', polygon: [[-6000,-4000],[2000,-4000],[2000,-1000],[-1000,-1000],[-1000,2000],[-6000,2000]] }
+  const zone = { id: 'PLAN-L', kind: 'zone', name: '测试办公室', zoneType: 'OPEN_OFFICE', x: -6000, y: -4000, w: 8000, h: 6000, reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, polygon: [[-6000,-4000],[2000,-4000],[2000,-1000],[-1000,-1000],[-1000,2000],[-6000,2000]] }
   const objects = [zone,
     { id: 'DESK-A', kind: 'furniture', zoneId: zone.id, productId: '', furnitureTemplateId: 'desk-l', x: -5000, y: -3000, w: 1400, h: 1400, rotation: 90, mirrorX: true },
     { id: 'DESK-B', kind: 'furniture', zoneId: zone.id, productId: '', furnitureTemplateId: 'desk-straight', x: -3000, y: -3000, w: 1200, h: 600, rotation: 0 },

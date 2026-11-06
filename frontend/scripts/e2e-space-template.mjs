@@ -4,6 +4,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -37,7 +38,9 @@ try {
       { roomId: 'TPL-L', label: 'L 形会议区', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[6500,0],[10500,0],[10500,4000],[8500,4000],[8500,6000],[6500,6000]] },
     ],
   }
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', async route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname, method = route.request().method()
     const respond = (data, code = 200, message = '成功') => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code, message, data }) })
     if (path.endsWith('/space-templates') && method === 'POST') {
@@ -62,6 +65,14 @@ try {
     return respond(path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : [])
   })
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const labelResize = async (width) => {
+    await page.locator('.review-rooms').getByRole('button', { name: '选择空间 开放办公区', exact: true }).click()
+    await page.locator('.space-label-editable').click()
+    const form = page.locator('[data-testid="label-inline"]')
+    await form.waitFor()
+    await form.getByLabel('画布空间宽度（毫米）').fill(String(width))
+    await form.getByRole('button', { name: '保存', exact: true }).click()
+  }
   const room = async () => (await state()).objects.find(room => room.id === 'TPL-A')
   const open = () => page.getByRole('button', { name: /^(生成空间模板|查看空间模板)$/ }).click()
   const dialog = () => page.getByRole('dialog', { name: '空间模板', exact: true })
@@ -77,6 +88,19 @@ try {
   await dialog().getByText('24.0 m²', { exact: true }).waitFor()
   await dialog().getByText('20.0 m²', { exact: true }).waitFor()
   assert.deepEqual((await state()).objects, initial, '生成预览不改设计稿')
+  // 点击模板空间（列表或平面色块）冒出「定位」气泡，一键回画布编辑该空间
+  await dialog().locator('.template-room-list button', { hasText: 'L 形会议区' }).click()
+  await page.getByTestId('template-locate-pop-button').waitFor()
+  assert.match(await page.getByTestId('template-locate-pop-button').innerText(), /L 形会议区/)
+  await dialog().locator('[data-template-space="TPL-A"]').click()
+  await page.getByTestId('template-locate-pop-button').waitFor()
+  await page.getByTestId('template-locate-pop-button').click()
+  await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
+  assert.equal(await page.locator('.space-template-dialog').count(), 0, '定位后关闭模板对话框')
+  assert.match(await page.locator('.review-room-item.selected').innerText(), /开放办公区/, '定位后画布选中对应空间')
+  assert.equal(await page.locator('svg[aria-label="空间核对画布"] [data-layer="design"]>g[data-space-id]').count(), 2, '定位只居中当前空间，整层其他空间保持可见')
+  await open()
+  await dialog().waitFor()
   await dialog().getByLabel('空间模板名称').fill('总部一层空间模板')
   await save()
   await dialog().getByRole('alert').filter({ hasText: '模拟保存失败' }).waitFor()
@@ -91,15 +115,18 @@ try {
   await dialog().getByRole('button', { name: '导出模板 JSON', exact: true }).click()
   assert.match((await downloadEvent).suggestedFilename(), /总部一层空间模板.*json/)
   await close()
-  await page.getByLabel('空间宽度（毫米）').fill('5000')
-  await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
-  await page.getByText('空间已修改，模板需更新', { exact: false }).waitFor()
+  await labelResize(5000)
+  // 「模板需更新」独立提示条已随右栏面板移除，现由模板对话框的「此模板与当前草稿不同」表达（下方断言）
   assert.equal((await room()).actualWidthMm, 5000)
   assert.equal(saved[0].scene.spaces[0].designGeometry.outer[1][0], 6000, '编辑草稿不能修改已保存模板')
   await open()
   await dialog().getByLabel('选择已保存空间模板').selectOption('STPL-MOCK-1')
   await dialog().getByText('此模板与当前草稿不同。', { exact: false }).waitFor()
   await dialog().getByRole('button', { name: '用此模板新建布局 →', exact: true }).click()
+  // 模板副本是新的未复核空间，先被门禁拦回总览，一键复核后才能进入排版
+  await confirmAllReviews(page)
+  await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   assert.doesNotMatch(page.url(), /analysisId=TEMPLATE-TEST/, '模板副本不能刷新后被旧识别结果覆盖')
   assert.equal((await state()).spaceTemplate.templateId, 'STPL-MOCK-1')
@@ -114,15 +141,18 @@ try {
   await open()
   await dialog().getByLabel('选择已保存空间模板').selectOption('STPL-MOCK-1')
   await dialog().getByRole('button', { name: '用此模板新建布局 →', exact: true }).click()
+  await confirmAllReviews(page)
+  await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   assert.equal((await room()).actualWidthMm, 6000)
   assert.equal((await state()).spaceTemplate.templateId, 'STPL-MOCK-1')
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
-  await page.getByLabel('空间宽度（毫米）').fill('5000')
-  await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
+  await labelResize(5000)
   await open()
   await dialog().getByLabel('选择已保存空间模板').selectOption('STPL-MOCK-1')
   await dialog().getByRole('button', { name: '用此模板新建布局 →', exact: true }).waitFor()
@@ -138,8 +168,7 @@ try {
   await save()
   while (!pending) await new Promise(resolve => setTimeout(resolve, 10))
   await close()
-  await page.getByLabel('空间宽度（毫米）').fill('4800')
-  await page.getByRole('button', { name: '应用尺寸', exact: true }).click()
+  await labelResize(4800)
   const beforeLate = (await state()).spaceTemplate
   await pending()
   assert.equal((await room()).actualWidthMm, 4800)

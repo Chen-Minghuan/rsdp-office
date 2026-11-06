@@ -28,6 +28,12 @@ public class OfficeController {
         return Result.ok(spaceReviewService.confirm(floorId, spaceId, request));
     }
 
+    @PostMapping("/floors/{floorId}/spaces/review-confirm-all")
+    public Result<SpaceReviewConfirmAllResult> confirmAllSpaceReviews(@PathVariable String floorId,
+                                                                      @RequestBody SpaceReviewConfirmRequest request) {
+        return Result.ok(spaceReviewService.confirmAll(floorId, request));
+    }
+
     @PostMapping("/projects/{projectId}/module-recommendations")
     public Result<ModuleRecommendationDto> recommendModules(@PathVariable String projectId, @RequestBody ModuleRecommendationRequest request) {
         return Result.ok(moduleRecommendations.recommend(projectId, request));

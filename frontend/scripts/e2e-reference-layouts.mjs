@@ -24,6 +24,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -53,7 +54,10 @@ try {
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
     rooms: [{ roomId: 'MEETING-ROOM', label: '测试会议室', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[0, 0], [12000, 0], [12000, 8000], [0, 8000]] }, { roomId: 'OPEN-ROOM', label: '测试办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[20000, 0], [32000, 0], [32000, 8000], [20000, 8000]] }],
   }
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const data = path.endsWith('/floor-plan/MEETING-TEST') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -62,6 +66,7 @@ try {
   const catalog = page.getByTestId('unit-module-catalog')
   await page.goto(`${baseUrl}/canvas?analysisId=MEETING-TEST`, { waitUntil: 'networkidle' })
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
+  await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -105,6 +110,11 @@ try {
     await page.getByTestId('office-design-canvas').screenshot({ path: 'C:/Users/cmh/AppData/Local/Temp/rsdp-reference-' + preset + '.png' })
   }
   await page.reload({ waitUntil: 'networkidle' })
+  // 刷新后功能模块选择被重置（不默认选中），需重选上一组模块与排布才能恢复「与当前布局一致」
+  await page.getByTestId('tab-product-selection').click()
+  await page.locator('[data-auto-module-id="desk-screen-l"]').click()
+  await page.getByRole('tab', { name: '选择排布', exact: true }).click()
+  await page.getByRole('button', { name: '十字型对坐', exact: true }).click()
   await page.getByTestId('layout-unchanged').waitFor()
   assert.equal((await state()).objects.filter(item => item.layoutGroupId === 'auto:OPEN-ROOM').length, expectedCapacity('l-screen', 'screen-cross-face-to-face', 1400, 1400, 900))
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('3')

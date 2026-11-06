@@ -82,6 +82,14 @@ public class OfficeService {
         JsonNode objects = objectMapper.valueToTree(request.getObjects());
         maintainSpaceReviewConfirmations(objects, latest);
 
+        // 只在「总览 → 排版」的进入转换上强制全部空间已完成复核确认；
+        // 已在排版模式内的继续保存不受此门禁约束（几何失效会把凭据置 STALE，重新进入时再拦截）。
+        boolean enteringDesign = "design".equals(request.getMode())
+            && (latest == null || !"design".equals(latest.getMode()));
+        if (enteringDesign) {
+            OfficeCanvasReviewPolicy.requireSpacesReviewConfirmed(objects);
+        }
+
         OfficeCanvas canvas = new OfficeCanvas();
         canvas.setProjectId(projectId);
         canvas.setRevision(request.getRevision() != null ? request.getRevision() : 1);
@@ -290,6 +298,7 @@ public class OfficeService {
         if ("design".equals(dto.getMode())) {
             try {
                 OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(dto.getObjects()), dto.getDesignZoneId());
+                OfficeCanvasReviewPolicy.requireSpacesReviewConfirmed(objectMapper.valueToTree(dto.getObjects()));
             } catch (BusinessException invalidDraft) {
                 dto.setMode("overview");
                 dto.setDesignZoneId(null);

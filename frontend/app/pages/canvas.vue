@@ -31,14 +31,14 @@ const designZoneId = computed(() => store.designZoneId)
 // Sync URL query -> store (browser back/forward, direct links)
 watch([() => route.query, () => store.initialized, () => workspace.loading], ([q, initialized]) => {
   if (!initialized) return
-  const urlMode = q.mode === 'design' && store.canEnterLayout ? 'design' : 'overview'
+  const urlMode = q.mode === 'design' && !store.layoutEntryBlocker ? 'design' : 'overview'
   const urlZoneId = q.zoneId as string | undefined
   if (urlMode !== store.canvasMode || urlZoneId !== store.designZoneId) {
     if (urlMode === 'design') store.enterDesign(store.zones.some(zone => zone.id === urlZoneId) ? urlZoneId! : store.zones[0]?.id || '')
     else { store.canvasMode = 'overview'; store.designZoneId = null }
   }
-  // 楼层数据加载途中 canEnterLayout 会短暂为 false，等加载结束再决定是否剥离设计入口参数，避免误丢 zoneId
-  if (q.mode === 'design' && !store.canEnterLayout && !workspace.loading) {
+  // 楼层数据加载途中门禁条件会短暂不满足，等加载结束再决定是否剥离设计入口参数，避免误丢 zoneId
+  if (q.mode === 'design' && !!store.layoutEntryBlocker && !workspace.loading) {
     const { mode, zoneId, ...query } = q
     router.replace({ path: '/canvas', query })
   }

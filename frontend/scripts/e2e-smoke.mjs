@@ -1,4 +1,5 @@
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 import { mkdir } from 'node:fs/promises'
 
 const baseUrl = process.env.BASE_URL || 'http://localhost:3001'
@@ -10,7 +11,9 @@ const browser = await chromium.launch({ headless: true, executablePath: process.
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
 if (process.env.MOCK_API === '1') {
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const url = new URL(route.request().url())
     return route.fulfill({
       status: 200,
@@ -40,8 +43,9 @@ await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor
 await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
 await shot('02-overview')
 
-// 3. 进入单空间设计
+// 3. 进入单空间设计（先完成全部空间复核确认）
 console.log('Step 3: enter design')
+await confirmAllReviews(page)
 await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
 await page.getByTestId('functional-category-workstation').click()
 await page.waitForURL(/mode=design/, { timeout: 10000 })

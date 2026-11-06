@@ -2,7 +2,7 @@
 import SpatialCanvas from './SpatialCanvas.vue'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
-import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneReviewMessage } from '~/utils/spatial/review'
+import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
 import type { CameraTransform } from '~/utils/spatial/camera'
 import type { FloorPlanDrawingBounds } from '~/types/floorPlan'
@@ -140,37 +140,47 @@ const labelEditAnchor = computed(() => {
   }
 })
 function onTemplateWorkbench() {
-  if (footerBlocker.value) { notify(footerBlocker.value); return }
+  if (templateBlocker.value) { notify(templateBlocker.value); return }
   showTemplate.value = true
 }
 function onAdvanceLayout() {
-  if (footerBlocker.value) { notify(footerBlocker.value); return }
+  if (advanceBlocker.value) { notify(advanceBlocker.value); return }
   advance()
 }
-/** 页脚按钮被禁用时给出原因与下一步引导（未校准优先指向两点校准）。 */
-const footerBlocker = computed(() => {
+/** 页脚按钮的交互阻塞（校准/描边/约束编辑中）。 */
+const interactionBlocker = computed(() => {
   if (calibrating.value) return '正在两点校准：在底图上选两个端点并输入实际长度后即可继续'
   if (tracing.value || sketching.value) return '请先保存或取消当前描边/画区'
   if (obstacleDraft.value || obstacleManipulation.value) return '请先完成或取消当前建筑约束编辑'
-  const blocker = store.layoutBlocker
-  if (!blocker) return null
-  return blocker.includes('待校准') ? blocker + '，请先用工具条「两点校准」确认图纸尺寸比例' : blocker
+  return null
 })
-const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
-function status(zone: ZoneObject) {
-  return zoneReviewMessage(zone, zones.value) ? '需复核' : '可用'
+/** 未校准优先指向两点校准。 */
+function withCalibrationHint(blocker: string | null) {
+  return blocker?.includes('待校准') ? blocker + '，请先用工具条「两点校准」确认图纸尺寸比例' : blocker
 }
-/** 设计复核确认（SPACE_REVIEW）状态；与“需复核”提示和排版确认相互独立。 */
-function reviewConfirmStatus(zone: ZoneObject) {
-  const status = zone.reviewConfirmation?.status
-  return status === 'CONFIRMED' ? '已确认复核' : status === 'STALE' ? '复核失效' : null
+/** 生成空间模板只要求几何可排版；复核确认门禁只约束进入家具排版。 */
+const templateBlocker = computed(() => interactionBlocker.value || withCalibrationHint(store.layoutBlocker))
+const advanceBlocker = computed(() => interactionBlocker.value || withCalibrationHint(store.layoutEntryBlocker))
+const displayedZones = computed(() => showAllSpaces.value ? zones.value : zones.value.slice(0, 6))
+/**
+ * 统一复核状态：几何/比例问题为「需修正」；其余按服务端复核确认凭据显示
+ * 「可用」（已确认）/「复核失效」（几何已变更，需重新确认）/「待复核」。
+ */
+function status(zone: ZoneObject) {
+  if (zoneLayoutProblem(zone)) return '需修正'
+  const confirmation = zone.reviewConfirmation?.status
+  return confirmation === 'CONFIRMED' ? '可用' : confirmation === 'STALE' ? '复核失效' : '待复核'
+}
+/** 重叠/继承修正/识别来源等提示性信息；不拦截确认，确认后仍保留供对照。 */
+function reviewHint(zone: ZoneObject) {
+  return zoneReviewMessage(zone, zones.value)
 }
 function canConfirmReview(zone: ZoneObject) {
-  return zone.reviewUnit === 'mm' && zone.reviewConfirmation?.status !== 'CONFIRMED'
+  return zone.reviewUnit === 'mm' && !zoneLayoutProblem(zone) && zone.reviewConfirmation?.status !== 'CONFIRMED'
 }
 const confirmingReviewId = ref<string | null>(null)
 async function confirmReview(zone: ZoneObject) {
-  if (confirmingReviewId.value) return
+  if (confirmingReviewId.value || confirmingAll.value) return
   confirmingReviewId.value = zone.id
   try {
     await store.confirmSpaceReview(zone.id)
@@ -179,6 +189,23 @@ async function confirmReview(zone: ZoneObject) {
     notify(cause instanceof Error ? cause.message : '复核确认失败，请稍后重试')
   } finally {
     confirmingReviewId.value = null
+  }
+}
+const confirmingAll = ref(false)
+async function confirmAllReviews() {
+  if (confirmingAll.value || confirmingReviewId.value) return
+  confirmingAll.value = true
+  try {
+    const result = await store.confirmAllSpaceReviews()
+    if (!result) return
+    const parts = []
+    if (result.confirmed.length) parts.push(`已确认 ${result.confirmed.length} 个空间复核`)
+    if (result.failed.length) parts.push(`${result.failed.length} 个无法确认：${result.failed.map(item => `${item.spaceName || item.spaceId}（${item.reason}）`).join('、')}`)
+    notify(parts.length ? parts.join('；') : '全部空间此前已完成复核确认')
+  } catch (cause) {
+    notify(cause instanceof Error ? cause.message : '一键复核失败，请稍后重试')
+  } finally {
+    confirmingAll.value = false
   }
 }
 /** 用途区域标签（开放办公区/会议室等），未知类型回退原始值。 */
@@ -190,8 +217,7 @@ function dimensions(zone: ZoneObject) {
   const metrics = zoneMeasurements(zone)
   return metrics.width && metrics.depth ? Math.round(metrics.width).toLocaleString() + ' × ' + Math.round(metrics.depth).toLocaleString() + ' mm' : '轮廓待补充'
 }
-const reviewSpaceIds = computed(() => zones.value.filter(zone => zoneReviewMessage(zone, zones.value)).map(zone => zone.id))
-const pendingCount = computed(() => reviewSpaceIds.value.length)
+const pendingCount = computed(() => store.pendingReviewZones.length)
 const imageUrl = computed(() => sameOriginAssetUrl(store.floorPlan?.previewUrl || store.floorPlan?.referenceImageUrl || store.floorPlan?.imageUrl || ''))
 const isExample = computed(() => store.zones.some(zone => zone.evidenceKind === 'DEMO'))
 
@@ -329,6 +355,23 @@ function showEverySpace() {
   tool.value = 'select'
   cameraTouched.value = false
   nextTick(fit)
+}
+/** 从空间模板定位：关闭对话框后选中该空间并把视图居中放大到它，整层其他空间保持可见。 */
+function locateSpace(zoneId: string) {
+  showTemplate.value = false
+  const zone = store.zones.find(zone => zone.id === zoneId)
+  if (!zone) return
+  selectSpace(zoneId)
+  focusedZoneId.value = null
+  selectedObstacleId.value = null
+  tool.value = 'select'
+  nextTick(() => {
+    const bounds = polygonBounds(geometryForZone(zone))
+    const padding = Math.max(600, Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.12)
+    camera.value = fitCameraToBoundsBySystem({ minX: bounds.minX - padding, minY: bounds.minY - padding, maxX: bounds.maxX + padding, maxY: bounds.maxY + padding }, viewport.value.width, viewport.value.height, scene.value.workingCoordinateSystem, viewport.value.width > 800 ? 72 : 50)
+    fittedZoom.value = camera.value.zoom
+    cameraTouched.value = true
+  })
 }
 function startObstacle(kind: SpatialObstacleKind) {
   if (!selected.value || !calibrated.value) return
@@ -827,7 +870,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
           <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button v-if="!focusedZoneId" :disabled="!selectedId" @click="focusSelectedSpace">放大核对当前空间</button><button @click="showEverySpace">显示全部空间</button></div>
           <div v-if="message" class="review-toast" role="status">{{ message }}</div>
         </div>
-        <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 需复核</span></div><button class="template-workbench-button" :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="template-workbench" @click="onTemplateWorkbench">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button><button :aria-disabled="!!footerBlocker" :title="footerBlocker || undefined" data-testid="advance-layout" @click="onAdvanceLayout">进入家具排版 →</button></footer>
+        <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 待复核</span></div><button :aria-disabled="!!advanceBlocker" :title="advanceBlocker || undefined" data-testid="advance-layout" @click="onAdvanceLayout">进入家具排版 →</button></footer>
       </section>
       <aside class="review-rooms review-panel">
         <div class="review-requirements"><CustomerRequirementsBlock /></div>
@@ -838,8 +881,9 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
               <input v-model="renameDraft" :aria-label="'重命名空间 ' + zone.name" maxlength="40" @blur="commitRoomRename(zone.id)" @keydown.esc.prevent="renamingId = null">
             </form>
             <div v-else class="review-room-card" :class="{ selected: zone.id === selectedId }" role="button" tabindex="0" :aria-pressed="zone.id === selectedId" :aria-label="'选择空间 ' + zone.name" @click="selectSpace(zone.id)" @keydown.enter.prevent="selectSpace(zone.id)" @keydown.space.prevent="selectSpace(zone.id)">
-              <div><strong class="review-room-name" :title="'点击改名：' + zone.name" @click.stop="startRoomRename(zone)">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'">{{ status(zone) }}</span><span v-if="reviewConfirmStatus(zone)" class="review-badge" :class="zone.reviewConfirmation?.status === 'CONFIRMED' ? 'verified' : 'pending'" :data-review-confirm="zone.reviewConfirmation?.status">{{ reviewConfirmStatus(zone) }}</span></div>
+              <div><strong class="review-room-name" :title="'点击改名：' + zone.name" @click.stop="startRoomRename(zone)">{{ zone.name }}</strong><span class="review-badge" :class="status(zone) === '可用' ? 'verified' : 'pending'" :data-review-confirm="zone.reviewConfirmation?.status || null">{{ status(zone) }}</span></div>
               <div><small class="review-room-use">{{ zoneTypeLabel(zone.zoneType) }}</small><small class="review-room-dims" :title="dimensions(zone)">{{ dimensions(zone) }}</small><small class="review-room-area">{{ zoneMeasurements(zone).area?.toFixed(1) ?? '—' }} m²</small></div>
+              <small v-if="reviewHint(zone)" class="review-room-hint" :title="reviewHint(zone) || undefined">{{ reviewHint(zone) }}</small>
               <button v-if="canConfirmReview(zone)" class="review-confirm-button" type="button" :disabled="confirmingReviewId === zone.id" :aria-label="(zone.reviewConfirmation?.status === 'STALE' ? '重新确认复核 ' : '确认复核 ') + zone.name" :data-tip="confirmingReviewId === zone.id ? '确认中…' : '确认该空间轮廓、尺寸与比例已人工核对'" :data-testid="'confirm-review-' + zone.id" @click.stop="confirmReview(zone)"><AppIcon name="check" size="3" /></button>
               <button class="review-room-delete" type="button" :disabled="!!tracing || calibrating" :aria-label="'删除空间 ' + zone.name" data-tip="删除空间" @click.stop="deleteSpace(zone.id)"><AppIcon name="close" size="3" /></button>
             </div>
@@ -850,9 +894,13 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             <button class="review-example-button" type="button" data-testid="sketch-start" @click="startSketch">手动画新空间</button>
           </template>
         </div>
+        <div class="review-room-actions">
+          <button class="template-workbench-button" :aria-disabled="!!templateBlocker" :title="templateBlocker || undefined" data-testid="template-workbench" @click="onTemplateWorkbench">{{ store.spaceTemplate ? '查看空间模板' : '生成空间模板' }}</button>
+          <button v-if="pendingCount" class="review-all-button" type="button" :disabled="confirmingAll" title="由服务端对全部空间逐签复核确认；无法确认的空间会列出原因" data-testid="confirm-all-review" @click="confirmAllReviews">{{ confirmingAll ? '复核确认中…' : '一键复核（' + pendingCount + '）' }}</button>
+        </div>
       </aside>
     </div>
-    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
+    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
   </div>
 </template>
 

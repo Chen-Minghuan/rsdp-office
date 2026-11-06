@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 // 组合预览未应用即可拖动：拖动只改预览显示与预览模型，应用时按调整后的位置生成家具。
 const cwd = fileURLToPath(new URL('../', import.meta.url))
@@ -32,7 +33,9 @@ try {
   }
   let floorPlanRequests = 0
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const data = path.endsWith('/floor-plan/PREVIEW-DRAG') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -47,6 +50,7 @@ try {
     localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
   })
   await page.goto(`${baseUrl}/canvas?analysisId=PREVIEW-DRAG`, { waitUntil: 'networkidle' })
+  await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
 
   // 默认不选品类；选两个品类切换到组合面板。

@@ -3,12 +3,54 @@ import SpaceTemplatePlan from './SpaceTemplatePlan.vue'
 import type { SpaceTemplate, SpaceTemplateSummary, SpaceTemplateCreateRequest } from '~/types/spaceTemplate'
 import { templateMatches, templateLayoutProblem } from '~/utils/spatial/spaceTemplate'
 import { createUuid } from '~/utils/uuid'
-const emit = defineEmits<{ (event: 'close'): void; (event: 'layout', zoneId: string): void }>()
+const emit = defineEmits<{ (event: 'close'): void; (event: 'layout', zoneId: string): void; (event: 'locate', zoneId: string): void }>()
 const store = useOfficeStore(), api = useSpaceTemplateApi()
 const candidate = ref<SpaceTemplate | null>(store.spaceTemplateCurrent ? JSON.parse(JSON.stringify(store.spaceTemplate)) : store.captureSpaceTemplate())
 const name = ref(candidate.value?.name || '')
 const library = ref<SpaceTemplateSummary[]>([]), busy = ref(''), error = ref(''), notice = ref(''), selectedId = ref('')
 const sameDraft = computed(() => !!candidate.value && templateMatches(candidate.value, store.zones, store.floorPlan))
+/** 只有空间 ID 仍在当前设计稿中（模板与草稿同源）才能定位回画布编辑。 */
+function canLocateSpace(spaceId: string) {
+  return store.zones.some(zone => zone.id === spaceId)
+}
+/** 点击空间（列表行或平面色块）后在点击处冒出的「定位」气泡。 */
+const contentEl = ref<HTMLElement | null>(null)
+const locateMenu = ref<{ spaceId: string; name: string; x: number; y: number } | null>(null)
+function openLocateMenu(event: MouseEvent, spaceId: string) {
+  selectedId.value = spaceId
+  const space = candidate.value?.scene.spaces.find(item => item.spaceId === spaceId)
+  const host = contentEl.value?.getBoundingClientRect()
+  if (!space || !host || !canLocateSpace(spaceId)) { locateMenu.value = null; return }
+  locateMenu.value = {
+    spaceId,
+    name: space.name,
+    x: Math.max(8, Math.min(event.clientX - host.left, host.width - 200)),
+    y: Math.max(8, Math.min(event.clientY - host.top + 6, host.height - 44)),
+  }
+}
+let pendingPlanSpace: string | null = null
+function onPlanSelect(spaceId: string) {
+  selectedId.value = spaceId
+  pendingPlanSpace = spaceId
+}
+function onPlanWrapClick(event: MouseEvent) {
+  if (pendingPlanSpace) openLocateMenu(event, pendingPlanSpace)
+  else locateMenu.value = null
+  pendingPlanSpace = null
+}
+function locateSelected() {
+  if (!locateMenu.value) return
+  emit('locate', locateMenu.value.spaceId)
+  locateMenu.value = null
+}
+/** 点其他空间直接换气泡目标；点气泡与空间以外的空白处收起气泡（不阻塞二次点选）。 */
+function onContentClick(event: MouseEvent) {
+  if (!locateMenu.value) return
+  const target = event.target as HTMLElement
+  if (target.closest('.template-locate-pop')) return
+  if (target.closest('[data-template-room]') || target.closest('[data-template-space]')) return
+  locateMenu.value = null
+}
 const unsupported = computed(() => candidate.value ? templateLayoutProblem(candidate.value) : null)
 const projectScope = () => (store.floorPlan?.analysisId || '') + ':' + (store.floorPlan?.analysisRevision || 1)
 const dialog = ref<HTMLElement | null>(null)
@@ -76,8 +118,8 @@ function download() {
     <div class="space-template-backdrop" @click.self="emit('close')">
       <section ref="dialog" tabindex="-1" class="space-template-dialog" role="dialog" aria-modal="true" aria-label="空间模板" @keydown.esc="emit('close')">
         <header><div><span class="template-kicker">SPACE TEMPLATE</span><h2>空间模板</h2><p>保留整层空间结构，为后续家具布局和排版提供基础。</p></div><button aria-label="关闭空间模板" @click="emit('close')">×</button></header>
-        <div class="space-template-content">
-          <main><div class="template-plan-caption"><strong>整层空间结构</strong><span>{{ candidate?.evidenceKind === 'DEMO' ? '演示模板' : '毫米空间模型' }}</span></div><SpaceTemplatePlan v-if="candidate" :scene="candidate.scene" :selected-id="selectedId" @select="selectedId = $event" /><div v-else class="template-empty">{{ store.layoutBlocker || '暂无可生成的空间' }}</div><p>色块表示空间用途，保持真实轮廓与相对位置。建筑图层未识别完整时，后续仍可补充。</p></main>
+        <div ref="contentEl" class="space-template-content" @click="onContentClick">
+          <main><div class="template-plan-caption"><strong>整层空间结构</strong><span>{{ candidate?.evidenceKind === 'DEMO' ? '演示模板' : '毫米空间模型' }}</span></div><div class="template-plan-wrap" @click="onPlanWrapClick"><SpaceTemplatePlan v-if="candidate" :scene="candidate.scene" :selected-id="selectedId" @select="onPlanSelect" /><div v-else class="template-empty">{{ store.layoutBlocker || '暂无可生成的空间' }}</div></div><p>色块表示空间用途，保持真实轮廓与相对位置，点击色块或右侧空间可定位回画布编辑。</p></main>
           <aside>
             <label>模板名称<input v-model="name" maxlength="120" aria-label="空间模板名称" :disabled="!!busy"></label>
             <div v-if="candidate" class="template-summary"><div><b>{{ candidate.spaceCount }}</b><span>空间</span></div><div><b>{{ candidate.areaM2.toFixed(1) }}</b><span>面积合计 m²</span></div></div>
@@ -85,10 +127,13 @@ function download() {
             <p v-if="candidate && !sameDraft" class="template-warning">此模板与当前草稿不同。使用它将创建新的空间布局副本，原稿可撤销；已有方案清单保留供核对。</p>
             <button class="template-refresh" :disabled="!!busy || !store.canEnterLayout" @click="fresh">按当前空间重新生成</button>
             <label v-if="library.length">已保存模板<select aria-label="选择已保存空间模板" :disabled="!!busy" @change="load(($event.target as HTMLSelectElement).value)"><option value="">选择模板…</option><option v-for="item in library" :key="item.templateId" :value="item.templateId">{{ item.name }} · {{ item.spaceCount }} 个空间 · {{ item.createdAt.replace('T', ' ').slice(5, 16) }}</option></select></label>
-            <div class="template-room-list"><button v-for="space in candidate?.scene.spaces || []" :key="space.spaceId" :class="{ selected: selectedId === space.spaceId }" @click="selectedId = space.spaceId"><strong>{{ space.name }}</strong><span>{{ space.derived.areaM2?.toFixed(2) }} m²</span></button></div>
-            <p v-if="candidate?.scene.qualityIssues.length" class="template-warning">有 {{ candidate.scene.qualityIssues.length }} 处复核提示，可按需修改，不要求逐个确认。</p>
+            <div class="template-room-list"><button v-for="space in candidate?.scene.spaces || []" :key="space.spaceId" :class="{ selected: selectedId === space.spaceId }" :data-template-room="space.spaceId" @click="openLocateMenu($event, space.spaceId)"><strong>{{ space.name }}</strong><span>{{ space.derived.areaM2?.toFixed(2) }} m²</span></button></div>
+            <p v-if="candidate?.scene.qualityIssues.length" class="template-warning">有 {{ candidate.scene.qualityIssues.length }} 处复核提示，可按需修改；进入家具排版前需完成全部空间复核确认。</p>
             <p v-if="unsupported" class="template-warning">{{ unsupported }}</p>
           </aside>
+          <div v-if="locateMenu" class="template-locate-pop" :style="{ left: locateMenu.x + 'px', top: locateMenu.y + 'px' }">
+            <button type="button" data-testid="template-locate-pop-button" @click.stop="locateSelected">定位到画布编辑「{{ locateMenu.name }}」</button>
+          </div>
         </div>
         <div v-if="error" class="template-feedback error" role="alert">{{ error }}</div><div v-if="notice" class="template-feedback" role="status">{{ notice }}</div>
         <footer><button :disabled="!candidate" @click="download">导出模板 JSON</button><div><button :disabled="!!busy || !candidate || !name.trim()" @click="save">{{ busy === 'saving' ? '保存中…' : '保存空间模板' }}</button><button class="template-primary" :disabled="!!busy || !candidate || !!unsupported" @click="useTemplate">{{ sameDraft ? '基于模板进入排版 →' : '用此模板新建布局 →' }}</button></div></footer>

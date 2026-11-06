@@ -27,6 +27,7 @@ try {
   const page = await context.newPage(), errors = []
   debugPage = page
   page.on('pageerror', error => errors.push(error.message))
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', route => {
     const path = new URL(route.request().url()).pathname
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : [] }) })
@@ -37,8 +38,8 @@ try {
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
     draft.objects = [
-      { id: 'DELETE-ROOM', kind: 'zone', x: -10000, y: -6000, w: 12000, h: 8000, name: '删除测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[-10000,-6000],[2000,-6000],[2000,2000],[-10000,2000]] },
-      { id: 'OTHER-ROOM', kind: 'zone', x: 10000, y: 0, w: 6000, h: 4000, name: '其他空间', zoneType: 'MEETING_ROOM', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[10000,0],[16000,0],[16000,4000],[10000,4000]] },
+      { id: 'DELETE-ROOM', kind: 'zone', x: -10000, y: -6000, w: 12000, h: 8000, name: '删除测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[-10000,-6000],[2000,-6000],[2000,2000],[-10000,2000]] },
+      { id: 'OTHER-ROOM', kind: 'zone', x: 10000, y: 0, w: 6000, h: 4000, name: '其他空间', zoneType: 'MEETING_ROOM', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[10000,0],[16000,0],[16000,4000],[10000,4000]] },
       ...['DELETE-A','DELETE-B'].map((id,index) => ({ id, kind: 'furniture', zoneId: 'DELETE-ROOM', furnitureTemplateId: 'desk-straight', productId: '', label: id, x: -9400 + index * 2500, y: -5000, w: 1200, h: 600, rotation: 0, layoutConfirmed: true })),
       { id: 'KEEP-OTHER', kind: 'furniture', zoneId: 'OTHER-ROOM', furnitureTemplateId: 'chair-office', productId: '', x: 11000, y: 1000, w: 650, h: 650, rotation: 0, layoutConfirmed: true },
     ]

@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const outDir = process.env.OUT_DIR || '../output/space-obstacles'
@@ -25,7 +26,11 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
-  await context.route('**/api/v1/**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) }))
+  const reviewMock = createReviewConfirmMock()
+  await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) })
+  })
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -62,6 +67,7 @@ try {
   for (const label of ['标柱', '门洞净空', '窗', '禁放区']) {
     assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 0, '空间总览不再提供' + label)
   }
+  await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()

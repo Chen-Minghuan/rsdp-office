@@ -12,7 +12,7 @@ await new Promise(resolve => reservation.close(resolve))
 const baseUrl = `http://127.0.0.1:${port}`
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
 const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV1sAAAAASUVORK5CYII=', 'base64')
-const zone = { id: 'ROOM-X', kind: 'zone', x: -6000, y: -4000, w: 6000, h: 4000, name: '效果预览办公室', zoneType: 'OPEN_OFFICE', seats: 4, note: '', tone: 'sand', reviewUnit: 'mm', evidenceKind: 'MANUAL', polygon: [[-6000, -4000], [0, -4000], [0, -2000], [-2000, -2000], [-2000, 0], [-6000, 0]] }
+const zone = { id: 'ROOM-X', kind: 'zone', x: -6000, y: -4000, w: 6000, h: 4000, name: '效果预览办公室', zoneType: 'OPEN_OFFICE', seats: 4, note: '', tone: 'sand', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', polygon: [[-6000, -4000], [0, -4000], [0, -2000], [-2000, -2000], [-2000, 0], [-6000, 0]] }
 const furniture = { id: 'F1', kind: 'furniture', zoneId: zone.id, x: -5500, y: -3500, w: 1200, h: 600, rotation: 90, productId: '', label: '职员直线桌', furnitureTemplateId: 'desk-straight', layoutConfirmed: false }
 let saved = { revision: 3, mode: 'design', designZoneId: zone.id, objects: [zone, furniture], files: [], blank: false }
 let boundProduct = false

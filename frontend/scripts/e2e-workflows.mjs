@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const baseUrl = process.env.BASE_URL || 'http://localhost:3001'
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
@@ -36,7 +37,9 @@ const importPreview = {
 }
 
 await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+const reviewMock = createReviewConfirmMock()
 await context.route('**/api/v1/**', async route => {
+  if (fulfillReviewConfirm(reviewMock, route)) return
   const request = route.request()
   const url = new URL(request.url())
   const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: status === 200 ? '成功' : '服务暂不可用', data }) })
@@ -116,6 +119,7 @@ try {
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   const enterLayout = page.getByRole('button', { name: '进入家具排版 →', exact: true })
+  await confirmAllReviews(page)
   assert.equal(await enterLayout.isEnabled(), true)
   await enterLayout.click()
   await page.waitForURL(/mode=design/)

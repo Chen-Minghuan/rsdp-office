@@ -208,6 +208,16 @@ export const useOfficeStore = defineStore('office', {
     canEnterLayout(): boolean {
       return !this.layoutBlocker
     },
+    /** 尚未持有有效复核确认（服务端签发且未失效）的空间；进入家具排版前必须为零。 */
+    pendingReviewZones(): ZoneObject[] {
+      return this.zones.filter(zone => zone.reviewConfirmation?.status !== 'CONFIRMED')
+    },
+    /** 进入排版的门禁：几何可排版之外，还要求全部空间已完成复核确认。 */
+    layoutEntryBlocker(): string | null {
+      if (this.layoutBlocker) return this.layoutBlocker
+      const pending = this.pendingReviewZones
+      return pending.length ? '还有 ' + pending.length + ' 个空间待复核确认，请逐个确认或点击「一键复核」' : null
+    },
     spaceTemplateCurrent(): boolean {
       return this.canEnterLayout && !!this.spaceTemplate && templateMatches(this.spaceTemplate, this.zones, this.floorPlan)
     },
@@ -284,7 +294,7 @@ export const useOfficeStore = defineStore('office', {
           if (saved?.scene && templateMatches(saved, this.zones, this.floorPlan)) this.spaceTemplate = { ...saved, storage: 'SAVED' }
         } catch { /* Keep the editable canvas even if its saved template cannot currently be fetched. */ }
       }
-      if (!this.canEnterLayout) {
+      if (this.layoutEntryBlocker) {
         this.canvasMode = 'overview'
         this.designZoneId = null
       }
@@ -790,7 +800,7 @@ export const useOfficeStore = defineStore('office', {
     },
 
     setCanvasMode(mode: CanvasMode, zoneId?: string | null) {
-      if (mode === 'design' && !this.canEnterLayout) return false
+      if (mode === 'design' && this.layoutEntryBlocker) return false
       if (mode === 'design') return this.enterDesign(zoneId || this.zones[0]?.id || '')
       this.canvasMode = mode
       this.designZoneId = zoneId ?? null
@@ -826,7 +836,7 @@ export const useOfficeStore = defineStore('office', {
       return zone?.id || null
     },
     enterDesign(zoneId: string) {
-      if (!this.canEnterLayout || !this.zones.some(zone => zone.id === zoneId)) return false
+      if (this.layoutEntryBlocker || !this.zones.some(zone => zone.id === zoneId)) return false
       if (!this.spaceTemplateCurrent) this.spaceTemplate = this.captureSpaceTemplate()
       this.zones.forEach(zone => { zone.spaceTemplateId = this.spaceTemplate!.templateId; zone.templateSpaceId = zone.id })
       this.canvasMode = 'design'
@@ -873,6 +883,39 @@ export const useOfficeStore = defineStore('office', {
       }
       if (result.canvasRevision > this.canvasRevision) this.canvasRevision = result.canvasRevision
       this.saveLocal()
+    },
+
+    /**
+     * 一键复核：先落盘当前画布，再由服务端对全部空间逐签确认凭据。
+     * 返回服务端结果（含无法确认的空间及原因），由调用方给出提示。
+     */
+    async confirmAllSpaceReviews() {
+      const api = useOfficeApi()
+      const workspaceId = this.workspaceId
+      await api.saveCanvas({
+        objects: this.objects,
+        files: this.files,
+        mode: this.canvasMode,
+        designZoneId: this.designZoneId,
+        revision: this.canvasRevision,
+        blank: this.blank,
+      }, workspaceId)
+      const result = await api.confirmAllSpaceReviews(this.canvasRevision, workspaceId)
+      if (this.workspaceId !== workspaceId) return result
+      for (const item of [...result.confirmed, ...result.alreadyConfirmed]) {
+        const zone = this.zones.find(entry => entry.id === item.spaceId)
+        if (zone) {
+          zone.reviewConfirmation = {
+            status: item.status,
+            confirmedCanvasRevision: item.confirmedCanvasRevision,
+            confirmedByUserId: item.confirmedByUserId,
+            confirmedAt: item.confirmedAt,
+          }
+        }
+      }
+      if (result.canvasRevision > this.canvasRevision) this.canvasRevision = result.canvasRevision
+      this.saveLocal()
+      return result
     },
 
     /** 保存后把服务端维护的复核确认状态（STALE/CONFIRMED）合并回本地空间。 */

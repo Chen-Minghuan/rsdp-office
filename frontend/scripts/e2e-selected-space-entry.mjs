@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -39,7 +40,9 @@ try {
       { roomId: 'ROOM-B', label: '其他会议室', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[28000,-6000],[34000,-6000],[34000,-2000],[28000,-2000]] },
     ],
   }
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const data = path.endsWith('/floor-plan/SINGLE-SPACE') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -65,6 +68,7 @@ try {
     }, id)
   }
   await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE', { waitUntil: 'networkidle' })
+  await confirmAllReviews(page)
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
   // Overview selection must determine the destination, even after another room was designed.
   for (const [id, name] of [['ROOM-B', '其他会议室'], ['ROOM-L', '独立 L 形办公室'], ['ROOM-B', '其他会议室']]) {

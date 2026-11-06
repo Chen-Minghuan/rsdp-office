@@ -24,6 +24,7 @@ try {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) }))
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
   const items = async () => (await state()).objects.filter(item => item.kind === 'furniture')
@@ -40,7 +41,7 @@ try {
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
-    const zone = (id, x) => ({ id, kind: 'zone', x, y: 0, w: 6000, h: 4000, name: id, zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[x,0],[x+6000,0],[x+6000,4000],[x,4000]] })
+    const zone = (id, x) => ({ id, kind: 'zone', x, y: 0, w: 6000, h: 4000, name: id, zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[x,0],[x+6000,0],[x+6000,4000],[x,4000]] })
     const furniture = (id, zoneId, x, y) => ({ id, kind: 'furniture', zoneId, furnitureTemplateId: 'desk-straight', productId: '', label: id, x, y, w: 800, h: 500, rotation: 0, layoutConfirmed: true })
     draft.objects = [zone('ROOM', 0), zone('OTHER', 10000), furniture('A', 'ROOM', 500, 1000), furniture('B', 'ROOM', 2000, 1000), furniture('C', 'ROOM', 4000, 1000), furniture('D', 'OTHER', 11000, 1000), furniture('E', 'ROOM', 5200, 1000)]
     draft.floorPlan = null
@@ -110,9 +111,9 @@ try {
   await page.keyboard.press('r')
   await page.keyboard.press('r')
   await page.keyboard.press('r')
-  assert.equal((await items()).find(f => f.id === 'E').rotation, 180, '座位区越界的旋转被拒绝且不写入')
+  assert.equal((await items()).find(f => f.id === 'E').rotation, 270, '座椅侧净空不足已降级为提示，不再拦截旋转（2026-10-26 定稿）')
   await page.reload({ waitUntil: 'networkidle' })
-  assert.equal((await items()).find(f => f.id === 'E').rotation, 180)
+  assert.equal((await items()).find(f => f.id === 'E').rotation, 270)
   // Manual arranging snaps to walls and other modules within 50mm; the toolbar toggle disables it.
   const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
   const beforeSnap = await items()

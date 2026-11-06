@@ -4,6 +4,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -32,7 +33,9 @@ try {
   }
   let floorPlanRequests = 0
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+  const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const data = path.endsWith('/floor-plan/STRICT-TEST') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -49,6 +52,7 @@ try {
   })
   await page.goto(`${baseUrl}/canvas?analysisId=STRICT-TEST`, { waitUntil: 'networkidle' })
   const enter = page.getByRole('button', { name: '进入家具排版 →', exact: true })
+  await confirmAllReviews(page)
   await enter.click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()

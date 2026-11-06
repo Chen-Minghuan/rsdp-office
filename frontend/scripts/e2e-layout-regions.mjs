@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 // GEOM-016 布置区 + GEOM-018 设施标注 UI 回归（模拟 API）：
 // 布置区矩形/多边形绘制、设主、改名、启用/显隐、量测读数、移动/顶点编辑、删主升主、撤销、刷新持久化；
@@ -28,7 +29,11 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
-  await context.route('**/api/v1/**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) }))
+  const reviewMock = createReviewConfirmMock()
+  await context.route('**/api/v1/**', route => {
+    if (fulfillReviewConfirm(reviewMock, route)) return
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) })
+  })
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -123,6 +128,7 @@ try {
 
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
+  await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()

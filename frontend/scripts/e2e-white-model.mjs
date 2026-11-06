@@ -80,7 +80,7 @@ try {
   await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
     state.objects = [
-      { id: 'Z1', kind: 'zone', name: '白模测试区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm',
+      { id: 'Z1', kind: 'zone', name: '白模测试区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' },
         polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]],
         obstacles: [{ obstacleId: 'OB1', kind: 'COLUMN', spaceId: 'Z1', geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer: [[4500, -100], [4900, -100], [4900, -500], [4500, -500]], holes: [] }, excludesFloorArea: true }],
         facilities: [{ facilityId: 'F1', kind: 'POWER_OUTLET', spaceId: 'Z1', shape: 'point', pointsMm: [[500, -3500]], visible: true }] },
@@ -250,7 +250,7 @@ try {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     const door = (id, x, y, signX, signY) => ({ obstacleId: id, kind: 'DOOR_CLEARANCE', spaceId: 'GROUP',
       geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', holes: [], outer: [[x, y], ...Array.from({ length: 17 }, (_, i) => [x + signX * 1000 * Math.cos(i * Math.PI / 32), y + signY * 1000 * Math.sin(i * Math.PI / 32)])] }, excludesFloorArea: false, source: 'MANUAL' })
-    store.objects.push({ id: 'GROUP', kind: 'zone', name: '统一工位测试区', x: 8000, y: 0, w: 12000, h: 8000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', polygon: [[8000, 0], [20000, 0], [20000, 8000], [8000, 8000]], obstacles: [
+    store.objects.push({ id: 'GROUP', kind: 'zone', name: '统一工位测试区', x: 8000, y: 0, w: 12000, h: 8000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, polygon: [[8000, 0], [20000, 0], [20000, 8000], [8000, 8000]], obstacles: [
       { obstacleId: 'GW1', kind: 'WINDOW', spaceId: 'GROUP', geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer: [[10000, 0.5], [12800, 0.5], [12800, -0.5], [10000, -0.5]], holes: [] }, excludesFloorArea: false },
       { obstacleId: 'GW2', kind: 'WINDOW', spaceId: 'GROUP', geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer: [[7999.5, -1500], [7999.5, -4300], [8000.5, -4300], [8000.5, -1500]], holes: [] }, excludesFloorArea: false },
       door('GD1', 16800, 0, 1, -1), door('GD2', 20000, -5000, -1, -1),

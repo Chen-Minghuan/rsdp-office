@@ -135,6 +135,111 @@ class OfficeSpaceReviewServiceTest {
             () -> reviewService.confirm("F1", "Z1", base(1))).getMessage());
     }
 
+    @Test void confirmAllSignsEveryValidZoneInOneRevision() throws Exception {
+        seedCanvas("[" + zone("Z1", 0) + "," + zone("Z2", 10000) + "]", 3);
+        var result = reviewService.confirmAll("F1", base(3));
+        assertEquals(4, result.getCanvasRevision());
+        assertEquals(2, result.getConfirmed().size());
+        assertEquals(0, result.getAlreadyConfirmed().size());
+        assertEquals(0, result.getFailed().size());
+        assertEquals(2, canvases.size());
+
+        JsonNode saved = json.readTree(canvases.get(1).getObjectsJson());
+        assertEquals("CONFIRMED", saved.get(0).path("reviewConfirmation").path("status").asText());
+        assertEquals("CONFIRMED", saved.get(1).path("reviewConfirmation").path("status").asText());
+    }
+
+    @Test void confirmAllSkipsConfirmedAndReportsInvalidZones() throws Exception {
+        seedCanvas("[" + zone("Z1", 0) + "," + zone("Z2", 10000) + "]", 3);
+        reviewService.confirm("F1", "Z1", base(3));
+
+        var request = new SaveCanvasRequest();
+        request.setProjectId("F1");
+        request.setMode("overview");
+        request.setRevision(5);
+        request.setObjects(List.of(
+            json.readTree(zone("Z1", 0)),
+            json.readTree(zone("Z2", 10000)),
+            json.readTree("{\"id\":\"Z3\",\"kind\":\"zone\",\"x\":0,\"y\":0,\"w\":1,\"h\":1,\"name\":\"未校准\",\"zoneType\":\"OTHER\"}")));
+        officeService.saveCanvas(request);
+
+        var result = reviewService.confirmAll("F1", base(5));
+        assertEquals(6, result.getCanvasRevision());
+        assertEquals(1, result.getConfirmed().size());
+        assertEquals("Z2", result.getConfirmed().get(0).getSpaceId());
+        assertEquals(1, result.getAlreadyConfirmed().size());
+        assertEquals("Z1", result.getAlreadyConfirmed().get(0).getSpaceId());
+        assertEquals(1, result.getFailed().size());
+        assertEquals("Z3", result.getFailed().get(0).getSpaceId());
+        assertEquals("未校准", result.getFailed().get(0).getSpaceName());
+        assertEquals("请先校准空间的实际尺寸", result.getFailed().get(0).getReason());
+    }
+
+    @Test void confirmAllIsIdempotentWhenNothingToConfirm() {
+        seedCanvas("[" + zone("Z1", 0) + "]", 3);
+        reviewService.confirmAll("F1", base(3));
+        var again = reviewService.confirmAll("F1", base(4));
+        assertEquals(4, again.getCanvasRevision());
+        assertEquals(0, again.getConfirmed().size());
+        assertEquals(1, again.getAlreadyConfirmed().size());
+        assertEquals(2, canvases.size());
+    }
+
+    @Test void confirmAllRequiresBaseRevisionAndZones() {
+        seedCanvas("[" + zone("Z1", 0) + "]", 3);
+        assertEquals("画布版本已过期（当前修订 3），请刷新后重新确认", assertThrows(BusinessException.class,
+            () -> reviewService.confirmAll("F1", base(2))).getMessage());
+
+        seedCanvas("[]", 4);
+        assertEquals("请先识别或创建空间", assertThrows(BusinessException.class,
+            () -> reviewService.confirmAll("F1", base(4))).getMessage());
+    }
+
+    @Test void enteringDesignRequiresAllSpacesReviewConfirmed() throws Exception {
+        seedCanvas("[" + zone("Z1", 0) + "," + zone("Z2", 10000) + "]", 3);
+        var enter = new SaveCanvasRequest();
+        enter.setProjectId("F1");
+        enter.setMode("design");
+        enter.setDesignZoneId("Z1");
+        enter.setRevision(4);
+        enter.setObjects(List.of(json.readTree(zone("Z1", 0)), json.readTree(zone("Z2", 10000))));
+        assertEquals("还有 2 个空间未完成复核确认，请逐个确认或使用「一键复核」后再进入家具排版",
+            assertThrows(BusinessException.class, () -> officeService.saveCanvas(enter)).getMessage());
+
+        reviewService.confirmAll("F1", base(3));
+        enter.setRevision(4);
+        var saved = officeService.saveCanvas(enter);
+        assertEquals("design", saved.getMode());
+    }
+
+    @Test void designContinuationSaveIsNotBlockedByStaleConfirmationButReloadDowngrades() throws Exception {
+        seedCanvas("[" + zone("Z1", 0) + "]", 3);
+        reviewService.confirmAll("F1", base(3));
+        var enter = new SaveCanvasRequest();
+        enter.setProjectId("F1");
+        enter.setMode("design");
+        enter.setDesignZoneId("Z1");
+        enter.setRevision(4);
+        enter.setObjects(List.of(json.readTree(zone("Z1", 0))));
+        officeService.saveCanvas(enter);
+
+        var continueDesign = new SaveCanvasRequest();
+        continueDesign.setProjectId("F1");
+        continueDesign.setMode("design");
+        continueDesign.setDesignZoneId("Z1");
+        continueDesign.setRevision(5);
+        continueDesign.setObjects(List.of(json.readTree(zone("Z1", 500))));
+        officeService.saveCanvas(continueDesign);
+        OfficeCanvas stored = canvases.get(canvases.size() - 1);
+        assertEquals("design", stored.getMode());
+        JsonNode staleZone = json.readTree(stored.getObjectsJson()).get(0);
+        assertEquals("STALE", staleZone.path("reviewConfirmation").path("status").asText());
+
+        var reloaded = officeService.getCanvas("F1");
+        assertEquals("overview", reloaded.getMode());
+        assertNull(reloaded.getDesignZoneId());
+    }
+
     @Test void saveCanvasStripsForgedConfirmation() throws Exception {
         var request = new SaveCanvasRequest();
         request.setProjectId("F1");

@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createReviewConfirmMock, fulfillReviewConfirm, confirmAllReviews } from './helpers/review-confirm-mock.mjs'
 
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -34,7 +35,9 @@ try {
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
     rooms: [{ roomId: 'CUSTOM-ROOM', label: '模块测试空间', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[10000,2000],[17000,2000],[17000,8000],[10000,8000]] }],
   }
+  const reviewMock = createReviewConfirmMock()
   async function api(route) {
+    if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
     if (path.endsWith('/floor-plan/CUSTOM-TEST')) return respond(source)
@@ -44,6 +47,7 @@ try {
     }
     return respond(path.endsWith('/OFFICE-PROJECT-001') ? { projectName: '自定义模块测试', area: 42 } : [])
   }
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', api)
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
   const placed = async () => (await state()).objects.filter(item => item.kind === 'furniture')
@@ -59,6 +63,7 @@ try {
   }
   await page.goto(baseUrl + '/canvas?analysisId=CUSTOM-TEST', { waitUntil: 'networkidle' })
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 模块测试空间', exact: true }).waitFor()
+  await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await page.getByTestId('tab-product-selection').click()
   await page.getByRole('button', { name: /新增单位模块/ }).click()
@@ -81,7 +86,8 @@ try {
   assert.equal(module.glyphTemplateId, 'desk-l')
   await page.getByTestId('tab-product-selection').click()
   assert.equal(await page.getByRole('button', { name: '我的长 L 桌', exact: true }).getAttribute('aria-pressed'), 'true')
-  await page.getByTestId('tab-auto-layout').click()
+  // 新建目录模块只选中不进入自动布局（组合面板改版后需显式点「自动」）
+  await page.locator('[data-auto-module-id="' + module.id + '"]').click()
   await page.getByRole('tab', { name: '调整参数', exact: true }).click()
   assert.equal(await page.getByLabel('模块宽度（毫米）').inputValue(), '1800')
   assert.equal((await placed()).length, 0, '保存目录不能自动改动画布')
@@ -178,6 +184,7 @@ try {
   assert.deepEqual((await state()).objects.find(item => item.id === room.id), geometry)
   await page.waitForFunction(() => !JSON.parse(localStorage.getItem('rsdp-office-v01')).furniturePlacement)
   const freshContext = await browser.newContext({ viewport: { width: 1750, height: 1150 } })
+  await freshContext.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await freshContext.route('**/api/v1/**', api)
   const fresh = await freshContext.newPage()
   fresh.on('pageerror', error => errors.push(error.message))
