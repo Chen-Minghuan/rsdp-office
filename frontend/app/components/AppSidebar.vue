@@ -8,12 +8,14 @@ const productLinks = [
   { icon: 'documentText', label: '导入记录', to: '/products/import-records' },
 ]
 
-// 用户管理入口只对系统管理员可见；服务端仍逐接口校验 ADMIN
+// 用户管理入口只对系统管理员可见，工作区账号入口只对经销商主号可见；服务端仍逐接口校验
 const isAdmin = ref(false)
+const isDealer = ref(false)
 onMounted(async () => {
-  if (!authEnabled) { isAdmin.value = true; return }
+  if (!authEnabled) { isAdmin.value = true; isDealer.value = true; return }
   const user = await useAuth().me()
   isAdmin.value = user?.role === 'ADMIN'
+  isDealer.value = user?.role === 'DEALER'
 })
 
 function isActive(to: string) {
@@ -57,6 +59,20 @@ function isActive(to: string) {
         <AppIcon :name="link.icon" />
         <span>{{ link.label }}</span>
       </NuxtLink>
+      </div>
+      <div v-if="isDealer" class="grid content-start gap-1">
+        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">经销商工作区</div>
+        <NuxtLink
+          to="/workspace/users"
+          :aria-current="isActive('/workspace/users') ? 'page' : undefined"
+          :class="[
+            'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
+            isActive('/workspace/users') ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
+          ]"
+        >
+          <AppIcon name="user" />
+          <span>工作区账号</span>
+        </NuxtLink>
       </div>
       <div v-if="isAdmin" class="grid content-start gap-1">
         <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">系统管理</div>

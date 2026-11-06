@@ -57,6 +57,7 @@ public class OfficeProjectService {
     private final OfficeProjectMemberMapper memberMapper;
     private final OfficeUserMapper userMapper;
     private final OfficeProjectAccessService accessService;
+    private final OfficeAuditService auditService;
     private final ObjectMapper objectMapper;
 
     public List<OfficeProjectDto> listProjects() {
@@ -106,13 +107,21 @@ public class OfficeProjectService {
             floorNames.add(floorName);
         }
         List<ProjectReferenceImage> referenceImages = validateReferenceImages(request.getReferenceImages());
+        String workspaceId = null;
+        if (accessService.enforcementEnabled()) {
+            OfficeUser operator = accessService.currentUserOrNull();
+            workspaceId = operator != null ? operator.getWorkspaceId() : null;
+            if (!StringUtils.hasText(workspaceId)) {
+                throw new BusinessException("当前账号不属于任何工作区，不能创建项目");
+            }
+        }
         boolean membersProvided = StringUtils.hasText(request.getLeaderUserId())
             || (request.getCollaboratorUserIds() != null && !request.getCollaboratorUserIds().isEmpty());
         List<String> collaboratorIds = List.of();
         String leaderUserId = null;
         if (membersProvided || accessService.enforcementEnabled()) {
             leaderUserId = request.getLeaderUserId();
-            collaboratorIds = validateMemberSet(leaderUserId, request.getCollaboratorUserIds());
+            collaboratorIds = validateMemberSet(workspaceId, leaderUserId, request.getCollaboratorUserIds());
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -121,6 +130,7 @@ public class OfficeProjectService {
         project.setName(projectName);
         project.setCustomerRequirements(request.getCustomerRequirements() == null ? "" : request.getCustomerRequirements());
         project.setRequirementsRevision(1);
+        project.setWorkspaceId(workspaceId);
         project.setReferenceImages(writeReferenceImages(referenceImages));
         project.setCreatedAt(now);
         project.setUpdatedAt(now);
@@ -219,18 +229,26 @@ public class OfficeProjectService {
     /**
      * 原子替换负责人与协作者集合：同事务先删后写，依赖
      * uk_office_project_one_leader 偏索引兜底并发双负责人。
+     * 成员必须同属项目工作区；替换前后集合写入审计日志。
      */
     @Transactional
     public OfficeProjectDto replaceMembers(String projectId, UpdateProjectMembersRequest request) {
         accessService.requireLeader(projectId);
-        requireProject(projectId);
+        OfficeDesignProject project = requireProject(projectId);
         if (request == null) {
             throw new BusinessException("成员参数不能为空");
         }
-        List<String> collaboratorIds = validateMemberSet(request.getLeaderUserId(), request.getCollaboratorUserIds());
+        List<String> collaboratorIds = validateMemberSet(
+            project.getWorkspaceId(), request.getLeaderUserId(), request.getCollaboratorUserIds());
+        List<String> before = members(projectId).stream()
+            .map(member -> member.getRole() + ":" + member.getUserId()).toList();
         memberMapper.delete(new QueryWrapper<OfficeProjectMember>().eq("project_id", projectId));
         List<OfficeProjectMember> members = insertMembers(projectId, request.getLeaderUserId().trim(), collaboratorIds, LocalDateTime.now());
-        return toProjectDto(requireProject(projectId), floors(projectId), members, usersById(members));
+        List<String> after = members.stream()
+            .map(member -> member.getRole() + ":" + member.getUserId()).toList();
+        auditService.record("MEMBERS_REPLACED", "PROJECT", projectId,
+            "before=" + before + "; after=" + after);
+        return toProjectDto(project, floors(projectId), members, usersById(members));
     }
 
     @Transactional
@@ -247,12 +265,17 @@ public class OfficeProjectService {
         return toProjectDto(project, floors(projectId), members(projectId), usersById(members(projectId)));
     }
 
-    /** 搜索可作为项目成员的有效用户，仅返回有限字段。 */
+    /** 搜索可作为项目成员的有效用户；认证开启时只返回当前账号同工作区的在用用户。 */
     public List<AssignableUserDto> listAssignableUsers(String keyword) {
-        if (accessService.enforcementEnabled()) {
-            accessService.currentUserId();
-        }
         QueryWrapper<OfficeUser> query = new QueryWrapper<OfficeUser>().eq("status", "active");
+        if (accessService.enforcementEnabled()) {
+            OfficeUser operator = accessService.currentUserOrNull();
+            String workspaceId = operator != null ? operator.getWorkspaceId() : null;
+            if (!StringUtils.hasText(workspaceId)) {
+                return List.of();
+            }
+            query.eq("workspace_id", workspaceId);
+        }
         if (StringUtils.hasText(keyword)) {
             String like = keyword.trim();
             query.and(wrapper -> wrapper.like("username", like).or().like("display_name", like));
@@ -284,12 +307,14 @@ public class OfficeProjectService {
     /**
      * 校验负责人/协作者集合并返回去重后的协作者 ID。
      * 负责人必填且为有效用户；协作者不得重复、不得与负责人重合、必须为有效用户。
+     * 项目已归属工作区时，所有成员账号必须同属该工作区；历史项目（无工作区）暂不限制。
      */
-    private List<String> validateMemberSet(String leaderUserId, List<String> collaboratorUserIds) {
+    private List<String> validateMemberSet(String workspaceId, String leaderUserId, List<String> collaboratorUserIds) {
         if (!StringUtils.hasText(leaderUserId)) {
             throw new BusinessException("项目负责人不能为空");
         }
         requireActiveUser(leaderUserId.trim(), "项目负责人不存在或已停用");
+        requireWorkspaceMember(workspaceId, leaderUserId.trim(), "项目负责人不属于本项目工作区");
         List<String> collaboratorIds = collaboratorUserIds == null ? List.of()
             : collaboratorUserIds.stream().filter(StringUtils::hasText).map(String::trim).toList();
         Set<String> unique = new LinkedHashSet<>(collaboratorIds);
@@ -301,8 +326,19 @@ public class OfficeProjectService {
         }
         for (String userId : unique) {
             requireActiveUser(userId, "协作者不存在或已停用");
+            requireWorkspaceMember(workspaceId, userId, "协作者不属于本项目工作区");
         }
         return List.copyOf(unique);
+    }
+
+    private void requireWorkspaceMember(String workspaceId, String userId, String message) {
+        if (!StringUtils.hasText(workspaceId)) {
+            return;
+        }
+        OfficeUser user = userMapper.selectById(userId);
+        if (user == null || !workspaceId.equals(user.getWorkspaceId())) {
+            throw new BusinessException(message);
+        }
     }
 
     private void requireActiveUser(String userId, String message) {

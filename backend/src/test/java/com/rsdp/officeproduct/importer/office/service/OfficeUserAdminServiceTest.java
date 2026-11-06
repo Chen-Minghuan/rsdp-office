@@ -10,7 +10,9 @@ import com.rsdp.officeproduct.importer.entity.OfficeUserSession;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserSessionMapper;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
+import com.rsdp.officeproduct.importer.office.entity.OfficeWorkspace;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceMapper;
 import com.rsdp.officeproduct.importer.office.dto.AdminUserDto;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeUserRequest;
 import com.rsdp.officeproduct.importer.util.CurrentUserContext;
@@ -36,6 +38,7 @@ class OfficeUserAdminServiceTest {
     private final Map<String, OfficeUser> users = new LinkedHashMap<>();
     private final List<OfficeUserSession> sessions = new ArrayList<>();
     private final List<OfficeProjectMember> members = new ArrayList<>();
+    private final List<OfficeWorkspace> workspaces = new ArrayList<>();
     private AuthService authService;
     private OfficeUserAdminService service;
 
@@ -43,10 +46,16 @@ class OfficeUserAdminServiceTest {
         users.clear();
         sessions.clear();
         members.clear();
+        workspaces.clear();
         authService = mock(AuthService.class);
         OfficeUserMapper userMapper = mock(OfficeUserMapper.class);
         OfficeUserSessionMapper sessionMapper = mock(OfficeUserSessionMapper.class);
         OfficeProjectMemberMapper memberMapper = mock(OfficeProjectMemberMapper.class);
+        OfficeWorkspaceMapper workspaceMapper = mock(OfficeWorkspaceMapper.class);
+        when(workspaceMapper.selectCount(any())).thenAnswer(call -> {
+            List<String> params = params(call.getArgument(0));
+            return workspaces.stream().filter(workspace -> params.contains(workspace.getOwnerUserId())).count();
+        });
         when(memberMapper.selectCount(any())).thenAnswer(call -> {
             List<String> params = params(call.getArgument(0));
             return members.stream().filter(member -> params.contains(member.getUserId())
@@ -91,7 +100,8 @@ class OfficeUserAdminServiceTest {
             }
             return removed;
         });
-        service = new OfficeUserAdminService(userMapper, sessionMapper, memberMapper, new CurrentUserService(authService, userMapper));
+        service = new OfficeUserAdminService(userMapper, sessionMapper, memberMapper, workspaceMapper,
+            new CurrentUserService(authService, userMapper));
     }
 
     @AfterEach void tearDown() {
@@ -171,11 +181,16 @@ class OfficeUserAdminServiceTest {
             () -> service.createUser(createRequest("carol", " ", "secret1", null))).getMessage());
         assertEquals("初始密码至少 6 位", assertThrows(BusinessException.class,
             () -> service.createUser(createRequest("carol", "Carol", "123", null))).getMessage());
-        assertEquals("角色只能是 USER 或 ADMIN", assertThrows(BusinessException.class,
+        // 系统管理员唯一：本接口只能创建设计师（普通用户）；经销商主号走工作区创建
+        assertEquals("只能创建设计师账号；经销商主号请通过经销商工作区创建", assertThrows(BusinessException.class,
             () -> service.createUser(createRequest("carol", "Carol", "secret1", "SUPER"))).getMessage());
+        assertEquals("只能创建设计师账号；经销商主号请通过经销商工作区创建", assertThrows(BusinessException.class,
+            () -> service.createUser(createRequest("carol", "Carol", "secret1", "admin"))).getMessage());
+        assertEquals("只能创建设计师账号；经销商主号请通过经销商工作区创建", assertThrows(BusinessException.class,
+            () -> service.createUser(createRequest("carol", "Carol", "secret1", "DEALER"))).getMessage());
 
-        AdminUserDto created = service.createUser(createRequest("carol", "Carol", "secret1", "admin"));
-        assertEquals("ADMIN", created.getRole());
+        AdminUserDto created = service.createUser(createRequest("carol", "Carol", "secret1", "user"));
+        assertEquals("USER", created.getRole());
         assertEquals("active", created.getStatus());
         OfficeUser stored = users.get(created.getUserId());
         assertNotEquals("secret1", stored.getPasswordHash());
@@ -186,7 +201,8 @@ class OfficeUserAdminServiceTest {
         OfficeUser root = addUser("root", "ADMIN", "active");
         OfficeUser bob = addUser("bob", "USER", "active");
         loginAs("root");
-        assertEquals("不能停用自己的账号", assertThrows(BusinessException.class,
+        // 系统管理员账号（含自己）不可被停用
+        assertEquals("不能操作系统管理员账号", assertThrows(BusinessException.class,
             () -> service.updateStatus(root.getUserId(), "disabled")).getMessage());
         assertEquals("状态只能是 active 或 disabled", assertThrows(BusinessException.class,
             () -> service.updateStatus(bob.getUserId(), "banned")).getMessage());
@@ -197,21 +213,22 @@ class OfficeUserAdminServiceTest {
         assertTrue(sessions.isEmpty());
         assertEquals("active", service.updateStatus(bob.getUserId(), "active").getStatus());
 
-        // 开发模式（认证关闭）无操作人身份：最后一位在用管理员仍受保护
+        // 开发模式（认证关闭）无操作人身份：目标角色规则仍生效
         when(authService.isEnabled()).thenReturn(false);
         CurrentUserContext.clear();
-        assertEquals("至少保留一位系统管理员", assertThrows(BusinessException.class,
+        assertEquals("不能操作系统管理员账号", assertThrows(BusinessException.class,
             () -> service.updateStatus(root.getUserId(), "disabled")).getMessage());
-        addUser("ops", "ADMIN", "active");
-        assertEquals("disabled", service.updateStatus(root.getUserId(), "disabled").getStatus());
+        assertEquals("disabled", service.updateStatus(bob.getUserId(), "disabled").getStatus());
     }
 
     @Test void resetPasswordChangesHashAndInvalidatesSessions() {
-        addUser("root", "ADMIN", "active");
+        OfficeUser root = addUser("root", "ADMIN", "active");
         OfficeUser bob = addUser("bob", "USER", "active");
         loginAs("root");
         assertEquals("新密码至少 6 位", assertThrows(BusinessException.class,
             () -> service.resetPassword(bob.getUserId(), "123")).getMessage());
+        assertEquals("不能操作系统管理员账号", assertThrows(BusinessException.class,
+            () -> service.resetPassword(root.getUserId(), "newpass9")).getMessage());
 
         addSession(bob.getUserId(), "S1");
         service.resetPassword(bob.getUserId(), "newpass9");
@@ -237,11 +254,12 @@ class OfficeUserAdminServiceTest {
             () -> service.deleteUser(bob.getUserId())).getMessage());
     }
 
-    @Test void deleteUserBlocksSelfLeaderAndLastAdmin() {
+    @Test void deleteUserBlocksAdminLeaderAndWorkspaceOwner() {
         OfficeUser root = addUser("root", "ADMIN", "active");
         OfficeUser bob = addUser("bob", "USER", "active");
         loginAs("root");
-        assertEquals("不能删除自己的账号", assertThrows(BusinessException.class,
+        // 系统管理员唯一：任何 ADMIN 账号（含自己）不可删除
+        assertEquals("不能操作系统管理员账号", assertThrows(BusinessException.class,
             () -> service.deleteUser(root.getUserId())).getMessage());
 
         addMember("P1", bob.getUserId(), OfficeProjectMember.ROLE_LEADER);
@@ -249,11 +267,28 @@ class OfficeUserAdminServiceTest {
             () -> service.deleteUser(bob.getUserId())).getMessage());
         assertNotNull(users.get(bob.getUserId()));
 
-        // 开发模式无操作人身份：最后一位在用管理员仍受保护
+        // 开发模式无操作人身份：目标角色规则仍生效
         when(authService.isEnabled()).thenReturn(false);
         CurrentUserContext.clear();
-        assertEquals("至少保留一位系统管理员", assertThrows(BusinessException.class,
+        assertEquals("不能操作系统管理员账号", assertThrows(BusinessException.class,
             () -> service.deleteUser(root.getUserId())).getMessage());
+    }
+
+    @Test void deleteUserBlocksDealerWhoOwnsWorkspace() {
+        addUser("root", "ADMIN", "active");
+        OfficeUser dealer = addUser("dealer1", "DEALER", "active");
+        loginAs("root");
+        OfficeWorkspace workspace = new OfficeWorkspace();
+        workspace.setWorkspaceId("OWKS-1");
+        workspace.setOwnerUserId(dealer.getUserId());
+        workspaces.add(workspace);
+        assertEquals("该用户仍是经销商主号，请先停用或移交其工作区后再删除", assertThrows(BusinessException.class,
+            () -> service.deleteUser(dealer.getUserId())).getMessage());
+        assertNotNull(users.get(dealer.getUserId()));
+        // 停用经销商主号不拦截：工作区/项目/账号保留，会话失效沿用既有逻辑
+        addSession(dealer.getUserId(), "S1");
+        assertEquals("disabled", service.updateStatus(dealer.getUserId(), "disabled").getStatus());
+        assertTrue(sessions.isEmpty());
     }
 
     private List<String> params(QueryWrapper<?> query) {

@@ -16,6 +16,10 @@ public class OfficeUser {
     private String displayName;
     private String role;
     private String status;
+    /** 账号归属的经销商工作区；系统管理员与历史账号为空。 */
+    private String workspaceId;
+    /** 来源标记（DEALER_STAFF 经销商员工 / FACTORY_SALES 厂家业务员）；一期不参与鉴权。 */
+    private String source;
     private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -43,7 +43,9 @@ Viewport（平移、缩放）独立于上述物理几何
 
 2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换为同事务删除+插入的原子操作且仅负责人可用。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
 
-2026-10-29 系统管理员与用户管理（AUTH-003）：全局角色只用既有 `office_user.role` 的 ADMIN/USER 两档，与项目内 LEADER/COLLABORATOR 无关（负责人不从管理员链路任命）。`/api/v1/office/admin/users` 提供列表/创建/停用启用/重置密码/删除，服务端逐接口 `requireAdmin`（认证关闭放行）；只存 PBKDF2 哈希，接口不返回哈希；停用与删除不能作用于自己、至少保留一位在用管理员，停用与重置密码即删该用户全部会话；删除为硬删除，仍是项目负责人的账号拒绝删除（协作者关系与会话一并清除）。前端 `/users` 页与侧栏入口仅管理员可见。见 [AUTH-003](tasks/AUTH-003-user-admin.md)。
+2026-10-29 系统管理员与用户管理（AUTH-003）：全局角色只用既有 `office_user.role` 的 ADMIN/USER 两档，与项目内 LEADER/COLLABORATOR 无关（负责人不从管理员链路任命）。`/api/v1/office/admin/users` 提供列表/创建/停用启用/重置密码/删除，服务端逐接口 `requireAdmin`（认证关闭放行）；只存 PBKDF2 哈希，接口不返回哈希；停用与重置密码即删该用户全部会话；删除为硬删除，仍是项目负责人的账号拒绝删除（协作者关系与会话一并清除）。前端 `/users` 页与侧栏入口仅管理员可见。2026-11-06 按用户要求修订（见 TENANT-001）：**系统管理员唯一**——创建接口只接受 USER（设计师），经销商主号随工作区创建；停用/重置/删除只能作用于 USER/DEALER，任何 ADMIN 目标一律拒绝（含自己与开发模式），原「不能停自己/至少保留一位管理员」兜底随之移除；界面 USER 称「设计师」。见 [AUTH-003](tasks/AUTH-003-user-admin.md)。
+
+2026-11-06 工作区与经销商角色（TENANT-001）：在全局角色与项目角色之间新增工作区（经销商）隔离层。`office_workspace(workspace_id, name, owner_user_id 唯一)` 一个经销商主号恰好一个工作区；`office_user.role` 增加第三档 `DEALER`（经销商主号），`office_user.workspace_id` 记录账号归属、`office_user.source` 预留来源标记（`DEALER_STAFF`/`FACTORY_SALES`，一期不参与鉴权）；`office_design_project.workspace_id` 使项目唯一归属一个工作区（旧项目为空，保持 PROJECT-004 纯成员判定，补录留待后续）。访问规则（仅 `rsdp.auth.enabled=true` 强制）：项目有工作区时访问者须为项目成员且账号同属该工作区，或为该工作区主号（主号可读并管理本工作区项目成员，用于指定负责人）；跨工作区成员关系写入拒绝、读取双重校验；创建项目取当前账号工作区，无工作区账号不能创建；`/users/assignable` 限定本工作区账号池。系统管理员经 `GET/POST /api/v1/office/admin/workspaces` 创建工作区+主号（单事务）；经销商主号经 `/api/v1/office/workspace/me|users` 开户（仅 USER 角色）。`office_audit_log` 记录成员替换（前后集合）、开户与建工作区，与业务写入同事务；成员移出按请求实时查库即时生效（含已登录会话）。经销商主号可停用（工作区/项目/账号保留、会话失效）但拥有工作区时拒绝删除。开发模式下项目/成员接口放行，经销商主号接口因无法解析归属明确报错。字段级权限（出厂价/毛利/终端客户分权）与竞品屏蔽列二期。见 [TENANT-001](tasks/TENANT-001-workspace-roles.md)。
 
 当前上传页和 office_canvas.files_json 使用零或一张当前图纸；后端保存拒绝多文件。旧草稿恢复时优先选择与底图同名的文件，否则保留首个。更换文件只更新上传文件和二进制缓存、清除上传页旧识别预览，不删除已保存几何或历史识别；见 [UPLOAD-001](tasks/UPLOAD-001-single-drawing.md)。
 
@@ -88,14 +90,14 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 校准：用户选择图纸上的参考线段并输入实际长度，得到该来源图/页的像素到毫米比例；影响所有依赖该来源的空间。
 自动候选：优先定位外围尺寸长线、裁图转录完整标注；不足时用标准图及四边放大图读取端点。后端从标注和像素跨度计算比例，至少两条独立一致参考及严格多数，当前相对偏差阈值为 3%（本轮策略）；无明确单位需显示假设。候选与确认分开，用户确认时重验版本、图像哈希、报告及单位，客户端不能提交任意比例。报告/确认保存在当前识别 revision 的 raw_result；读取不改 rooms 和来源单位。
-`/api/v1/floor-plan/{id}/dimension-calibration` 提供读取校验，`/recognize` 和 `/confirm` 提供重读与确认；详情见 [RECOG-003](tasks/RECOG-003-dimension-calibration.md)。前端核对页自 2026-10-21 起不再展示自动校准面板，统一以两点校准应用绝对来源比例比值，保留设计编辑并使全空间/排版确认失效；复核建议不拦截排版，无需逐空间确认。已保存空间携带 sourceAnalysisId/sourceAnalysisRevision，同版本恢复时只补回来源元数据；版本不一致保留编辑并提示，不能静默替换底图。
+`/api/v1/floor-plan/{id}/dimension-calibration` 提供读取校验，`/recognize` 和 `/confirm` 提供重读与确认；详情见 [RECOG-003](tasks/RECOG-003-dimension-calibration.md)。前端核对页自 2026-10-21 起不再展示自动校准面板，统一以两点校准应用绝对来源比例比值，保留设计编辑并使全空间/排版确认失效；复核确认凭据随几何失效，需重新确认后才能进入排版。已保存空间携带 sourceAnalysisId/sourceAnalysisRevision，同版本恢复时只补回来源元数据；版本不一致保留编辑并提示，不能静默替换底图。
 修改尺寸：用户改变一个设计空间的世界几何；视图比例不变，相邻空间不自动整体缩放。
 原始底图作为对照保留，设计副本变化不能冒充原始识别结果。
 
 首期矩形修改宽深默认固定局部左下角并显示锚点，用户可以切换；沿矩形局部轴更新对应顶点。
 异形空间首期以顶点/边界和选中边长度编辑为主；整体轴向缩放须显式预览，禁止简单替换成矩形。
 稳定顶点 ID 与持久局部轴防止重排顶点后宽深互换；边长自由/正交局部模式按几何附件明确固定点和传播顶点。
-已知邻接/重叠疑点提示需复核；不自动移动邻室。按用户最新要求，复核提示不作为排版门槛。
+已知邻接/重叠疑点提示需复核；不自动移动邻室。按用户最新要求（2026-11-06），全部空间完成复核确认才能进入家具排版；重叠等疑点经人工判断后允许确认，确认后提示保留不拦截。
 面积等派生值由几何推导，不能分别维护一套人工面积与一套未更新的几何并都声称为当前值。
 
 ## 4. 空间契约要点
@@ -180,10 +182,12 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 - 保存几何变更时更新修订与派生值，并使受影响确认/布局/推荐/渲染状态失效。
 - 缩放和平移属于视图，不更新几何版本。
 - 原子化保存相关几何、版本与失效状态；版本冲突明确反馈，不能静默覆盖其他版本。
-- 当前工作台不要求逐空间或整体空间确认：canEnterLayout / 后端 requireLayoutReady 只核验可靠单位、ID 和可计算轮廓；识别候选/边界重叠只提示复核。进入排版不填写人工确认记录，比例与排版确认保留。详情见 [FLOW-002](tasks/FLOW-002-advisory-space-review.md)；确认附件的历史逐空间 API 不再定义工作台门槛。
+- 进入家具排版实行复核确认门禁（2026-11-06，FLOW-004）：canEnterLayout / 后端 requireLayoutReady 核验可靠单位、ID 和可计算轮廓之外，前端 layoutEntryBlocker 与服务端 saveCanvas 进入转换还要求全部空间持有有效 reviewConfirmation（CONFIRMED）；识别候选/边界重叠允许人工确认，确认后提示保留不拦截。核对页提供「一键复核」批量确认。详见 [FLOW-004](tasks/FLOW-004-review-gate-and-batch-confirm.md)；[FLOW-002](tasks/FLOW-002-advisory-space-review.md) 的提示口径已被取代，其未知比例/无效轮廓拦截结论保留。
 - 草稿可包含待解决问题，确认快照必须通过阶段校验；后端不能只信任前端按钮是否禁用。
 
-2026-10-29 office_canvas 空间复核确认（SPACE_REVIEW，FLOW-001）：可选确认，不是进入排版门槛。`POST /api/v1/office/floors/{floorId}/spaces/{spaceId}/review-confirm` 以严格 `baseCanvasRevision`（须等于服务端当前修订）+ 项目成员访问 + 空间几何有效（`OfficeCanvasReviewPolicy.requireZoneValid`：毫米单位、≥3 顶点、无退化边/自交、正面积）为前置，由服务端在空间对象写入 `reviewConfirmation` 凭据（`status=CONFIRMED`、`confirmedCanvasRevision`、`confirmedByUserId`、`confirmedAt`）并追加新画布修订；几何未变的重复确认幂等返回、不增修订。确认时服务端保存几何白名单快照（`id/zoneType/reviewUnit/mmPerSourceUnit/actualWidthMm/actualDepthMm/polygon/x/y/w/h/obstacles`，名称/备注/颜色不影响确认）；此后每次 `saveCanvas` 由服务端重建凭据——无服务端记录的一律剥离（客户端不能伪造确认状态）、白名单几何变化转 `STALE`、改回与快照一致恢复 `CONFIRMED`（数字按数值等价比较）。该确认独立于排版确认与方案确认；普通 `saveCanvas` 仍按客户端递增修订，全量保存的严格版本锁留待后续评估。见 [FLOW-001](tasks/FLOW-001-spatial-confirmation.md)。
+2026-10-29 office_canvas 空间复核确认（SPACE_REVIEW，FLOW-001）：`POST /api/v1/office/floors/{floorId}/spaces/{spaceId}/review-confirm` 以严格 `baseCanvasRevision`（须等于服务端当前修订）+ 项目成员访问 + 空间几何有效（`OfficeCanvasReviewPolicy.requireZoneValid`：毫米单位、≥3 顶点、无退化边/自交、正面积）为前置，由服务端在空间对象写入 `reviewConfirmation` 凭据（`status=CONFIRMED`、`confirmedCanvasRevision`、`confirmedByUserId`、`confirmedAt`）并追加新画布修订；几何未变的重复确认幂等返回、不增修订。确认时服务端保存几何白名单快照（`id/zoneType/reviewUnit/mmPerSourceUnit/actualWidthMm/actualDepthMm/polygon/x/y/w/h/obstacles`，名称/备注/颜色不影响确认）；此后每次 `saveCanvas` 由服务端重建凭据——无服务端记录的一律剥离（客户端不能伪造确认状态）、白名单几何变化转 `STALE`、改回与快照一致恢复 `CONFIRMED`（数字按数值等价比较）。该确认独立于排版确认与方案确认；普通 `saveCanvas` 仍按客户端递增修订，全量保存的严格版本锁留待后续评估。见 [FLOW-001](tasks/FLOW-001-spatial-confirmation.md)。
+
+2026-11-06 起该确认从可选项转为进入家具排版的门禁（FLOW-004）：新增 `POST /api/v1/office/floors/{floorId}/spaces/review-confirm-all` 一键复核全部空间（同一事务逐签、已确认幂等跳过、不满足确认条件的空间逐个返回原因、有新增确认才追加一个修订）；服务端在 `saveCanvas` 的「总览 → 排版」进入转换上强制 `requireSpacesReviewConfirmed`（凭据先经服务端维护再判定，伪造无效），排版模式内的继续保存不受阻，读取已存排版稿时凭据失效降级回总览；前端 `layoutEntryBlocker` 统一约束页脚按钮、URL 直达、刷新恢复与 store 入口。核对页空间徽标统一为单一口径：需修正（几何/比例问题）/ 可用（已确认）/ 复核失效（STALE）/ 待复核；重叠与继承修正等提示降级为卡片提示行。见 [FLOW-004](tasks/FLOW-004-review-gate-and-batch-confirm.md)。
 
 ## 7. 当前迁移重点
 

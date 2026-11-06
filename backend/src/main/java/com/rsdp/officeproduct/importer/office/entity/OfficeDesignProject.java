@@ -18,6 +18,9 @@ public class OfficeDesignProject {
     private String customerRequirements;
     private Integer requirementsRevision;
 
+    /** 项目唯一归属的经销商工作区；旧项目为空，补录前保持项目成员判定。 */
+    private String workspaceId;
+
     /** 项目参考图片 JSON：[{"url": "/uploads/images/xxx.png", "name": "参考"}] */
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String referenceImages;

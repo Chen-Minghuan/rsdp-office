@@ -17,7 +17,9 @@ const displayName = computed(() => user.value?.displayName || user.value?.userna
 const roleLabel = computed(() => {
   if (!authEnabled) return '设计师'
   if (!user.value) return ''
-  return user.value.role === 'ADMIN' ? '系统管理员' : '协作者'
+  if (user.value.role === 'ADMIN') return '系统管理员'
+  if (user.value.role === 'DEALER') return '经销商主号'
+  return '设计师'
 })
 const avatarChar = computed(() => (displayName.value.trim()[0] || '设').toUpperCase())
 

@@ -10,7 +10,9 @@ import com.rsdp.officeproduct.importer.mapper.OfficeUserSessionMapper;
 import com.rsdp.officeproduct.importer.office.dto.AdminUserDto;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeUserRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
+import com.rsdp.officeproduct.importer.office.entity.OfficeWorkspace;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,9 +24,10 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * 系统管理员的用户管理：创建账号、启用/停用、重置密码。
- * 全局角色只有 ADMIN / USER 两档；项目内负责人/协作者与全局角色无关。
- * 认证关闭（rsdp.auth.enabled=false，开发模式）时不校验管理员身份。
+ * 系统管理员的用户管理：创建账号、启用/停用、重置密码、删除。
+ * 系统管理员唯一：本接口只能创建设计师（普通 USER）账号，经销商主号经工作区创建；
+ * 管理操作只能作用于设计师与经销商主号，不能操作任何系统管理员账号（含自己）。
+ * 认证关闭（rsdp.auth.enabled=false，开发模式）时不校验管理员身份，目标角色规则仍生效。
  */
 @Service
 @RequiredArgsConstructor
@@ -36,6 +39,7 @@ public class OfficeUserAdminService {
     private final OfficeUserMapper userMapper;
     private final OfficeUserSessionMapper sessionMapper;
     private final OfficeProjectMemberMapper memberMapper;
+    private final OfficeWorkspaceMapper workspaceMapper;
     private final CurrentUserService currentUserService;
 
     public List<AdminUserDto> listUsers() {
@@ -64,8 +68,8 @@ public class OfficeUserAdminService {
         }
         String password = requirePassword(request.getPassword(), "初始密码至少 6 位");
         String role = StringUtils.hasText(request.getRole()) ? request.getRole().trim().toUpperCase() : "USER";
-        if (!"USER".equals(role) && !"ADMIN".equals(role)) {
-            throw new BusinessException("角色只能是 USER 或 ADMIN");
+        if (!"USER".equals(role)) {
+            throw new BusinessException("只能创建设计师账号；经销商主号请通过经销商工作区创建");
         }
         OfficeUser user = new OfficeUser();
         user.setUserId("USR-" + UUID.randomUUID().toString().replace("-", ""));
@@ -84,18 +88,10 @@ public class OfficeUserAdminService {
     public AdminUserDto updateStatus(String userId, String status) {
         currentUserService.requireAdmin();
         OfficeUser user = requireUser(userId);
+        requireManageable(user);
         String next = status == null ? "" : status.trim().toLowerCase();
         if (!"active".equals(next) && !"disabled".equals(next)) {
             throw new BusinessException("状态只能是 active 或 disabled");
-        }
-        OfficeUser operator = currentUserService.currentUser();
-        if ("disabled".equals(next)) {
-            if (operator != null && operator.getUserId().equals(user.getUserId())) {
-                throw new BusinessException("不能停用自己的账号");
-            }
-            if ("ADMIN".equalsIgnoreCase(user.getRole()) && countActiveAdmins(user.getUserId()) == 0) {
-                throw new BusinessException("至少保留一位系统管理员");
-            }
         }
         user.setStatus(next);
         user.setUpdatedAt(LocalDateTime.now());
@@ -110,6 +106,7 @@ public class OfficeUserAdminService {
     public AdminUserDto resetPassword(String userId, String password) {
         currentUserService.requireAdmin();
         OfficeUser user = requireUser(userId);
+        requireManageable(user);
         user.setPasswordHash(PasswordHasher.hash(requirePassword(password, "新密码至少 6 位")));
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
@@ -119,29 +116,34 @@ public class OfficeUserAdminService {
 
     /**
      * 删除账号：协作者成员关系与会话一并删除；仍是项目负责人的账号禁止删除，
-     * 避免项目失去负责人。不能删除自己，且至少保留一位在用系统管理员。
+     * 避免项目失去负责人；仍拥有工作区的经销商主号禁止删除（一期无工作区转让/解散接口），
+     * 工作区与项目保留，可由管理员先停用该主号。系统管理员账号不可删除。
      */
     @Transactional
     public void deleteUser(String userId) {
         currentUserService.requireAdmin();
         OfficeUser user = requireUser(userId);
-        OfficeUser operator = currentUserService.currentUser();
-        if (operator != null && operator.getUserId().equals(user.getUserId())) {
-            throw new BusinessException("不能删除自己的账号");
-        }
-        if ("ADMIN".equalsIgnoreCase(user.getRole())
-            && "active".equalsIgnoreCase(user.getStatus())
-            && countActiveAdmins(user.getUserId()) == 0) {
-            throw new BusinessException("至少保留一位系统管理员");
-        }
+        requireManageable(user);
         long leaderProjects = memberMapper.selectCount(new QueryWrapper<OfficeProjectMember>()
             .eq("user_id", user.getUserId()).eq("role", OfficeProjectMember.ROLE_LEADER));
         if (leaderProjects > 0) {
             throw new BusinessException("该用户仍是 " + leaderProjects + " 个项目的负责人，请先在项目中更换负责人");
         }
+        long ownedWorkspaces = workspaceMapper.selectCount(new QueryWrapper<OfficeWorkspace>()
+            .eq("owner_user_id", user.getUserId()));
+        if (ownedWorkspaces > 0) {
+            throw new BusinessException("该用户仍是经销商主号，请先停用或移交其工作区后再删除");
+        }
         memberMapper.delete(new QueryWrapper<OfficeProjectMember>().eq("user_id", user.getUserId()));
         invalidateSessions(user.getUserId());
         userMapper.deleteById(user.getUserId());
+    }
+
+    /** 系统管理员唯一且不可被管理操作（停用/重置/删除）作用。 */
+    private void requireManageable(OfficeUser user) {
+        if ("ADMIN".equalsIgnoreCase(user.getRole())) {
+            throw new BusinessException("不能操作系统管理员账号");
+        }
     }
 
     private OfficeUser requireUser(String userId) {
@@ -157,13 +159,6 @@ public class OfficeUserAdminService {
             throw new BusinessException(message);
         }
         return password;
-    }
-
-    /** 除 excludeUserId 外的在用管理员数量，用于阻止停掉最后一位管理员。 */
-    private long countActiveAdmins(String excludeUserId) {
-        return userMapper.selectList(new QueryWrapper<OfficeUser>()
-                .eq("role", "ADMIN").eq("status", "active"))
-            .stream().filter(user -> !user.getUserId().equals(excludeUserId)).count();
     }
 
     private void invalidateSessions(String userId) {

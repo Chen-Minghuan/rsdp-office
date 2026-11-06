@@ -22,6 +22,15 @@ interface CanvasDto {
   blank: boolean
 }
 
+interface SpaceReviewConfirmItem {
+  spaceId: string
+  canvasRevision: number
+  status: 'UNCONFIRMED' | 'CONFIRMED' | 'STALE'
+  confirmedCanvasRevision?: number
+  confirmedByUserId?: string
+  confirmedAt?: string
+}
+
 interface AdminUserItem {
   userId: string
   username: string
@@ -29,6 +38,28 @@ interface AdminUserItem {
   role: string
   status: string
   lastLoginAt: string | null
+  createdAt: string | null
+}
+
+interface WorkspaceItem {
+  workspaceId: string
+  name: string
+  ownerUserId: string
+  ownerUsername: string
+  ownerDisplayName: string
+  ownerStatus: string
+  userCount: number
+  projectCount: number
+  createdAt: string | null
+}
+
+interface WorkspaceUserItem {
+  userId: string
+  username: string
+  displayName: string
+  role: string
+  source: string | null
+  status: string
   createdAt: string | null
 }
 
@@ -103,15 +134,18 @@ export function useOfficeApi() {
   }
 
   /** 设计复核确认（SPACE_REVIEW）：服务端基于当前画布签发凭据，baseCanvasRevision 必须等于服务端当前修订。 */
-  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId = currentProjectId()): Promise<{
-    spaceId: string
-    canvasRevision: number
-    status: 'UNCONFIRMED' | 'CONFIRMED' | 'STALE'
-    confirmedCanvasRevision?: number
-    confirmedByUserId?: string
-    confirmedAt?: string
-  }> {
+  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId = currentProjectId()): Promise<SpaceReviewConfirmItem> {
     return await request('POST', `/api/v1/office/floors/${workspaceId}/spaces/${zoneId}/review-confirm`, { baseCanvasRevision })
+  }
+
+  /** 一键复核：服务端对当前楼层全部空间逐签确认凭据，无法确认的空间逐个返回原因。 */
+  async function confirmAllSpaceReviews(baseCanvasRevision: number, workspaceId = currentProjectId()): Promise<{
+    canvasRevision: number
+    confirmed: SpaceReviewConfirmItem[]
+    alreadyConfirmed: SpaceReviewConfirmItem[]
+    failed: Array<{ spaceId: string; spaceName: string; reason: string }>
+  }> {
+    return await request('POST', `/api/v1/office/floors/${workspaceId}/spaces/review-confirm-all`, { baseCanvasRevision })
   }
 
   async function loadCart(): Promise<CartItem[]> {
@@ -340,6 +374,28 @@ export function useOfficeApi() {
     await request<void>('DELETE', `/api/v1/office/admin/users/${userId}`)
   }
 
+  /** 系统管理员的经销商工作区管理；服务端逐接口校验 ADMIN。 */
+  async function listAdminWorkspaces(): Promise<WorkspaceItem[]> {
+    return await request<WorkspaceItem[]>('GET', '/api/v1/office/admin/workspaces')
+  }
+
+  async function createAdminWorkspace(payload: { name: string; ownerUsername: string; ownerDisplayName: string; ownerPassword: string }): Promise<WorkspaceItem> {
+    return await request<WorkspaceItem>('POST', '/api/v1/office/admin/workspaces', payload)
+  }
+
+  /** 经销商主号的工作区账号管理；只能操作自己拥有的工作区。 */
+  async function getMyWorkspace(): Promise<WorkspaceItem> {
+    return await request<WorkspaceItem>('GET', '/api/v1/office/workspace/me')
+  }
+
+  async function listWorkspaceUsers(): Promise<WorkspaceUserItem[]> {
+    return await request<WorkspaceUserItem[]>('GET', '/api/v1/office/workspace/users')
+  }
+
+  async function createWorkspaceUser(payload: { username: string; displayName: string; password: string; source?: string }): Promise<WorkspaceUserItem> {
+    return await request<WorkspaceUserItem>('POST', '/api/v1/office/workspace/users', payload)
+  }
+
   async function createManualProduct(request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
     return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', request)
   }
@@ -383,6 +439,7 @@ export function useOfficeApi() {
     loadCanvas,
     saveCanvas,
     confirmSpaceReview,
+    confirmAllSpaceReviews,
     loadCart,
     addCartItem,
     updateCartItemQty,
@@ -416,6 +473,11 @@ export function useOfficeApi() {
     updateAdminUserStatus,
     resetAdminUserPassword,
     deleteAdminUser,
+    listAdminWorkspaces,
+    createAdminWorkspace,
+    getMyWorkspace,
+    listWorkspaceUsers,
+    createWorkspaceUser,
     createManualProduct,
     getProduct,
     updateProduct,

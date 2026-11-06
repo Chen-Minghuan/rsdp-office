@@ -75,7 +75,7 @@ onMounted(search)
   <section class="grid gap-3" data-testid="project-member-editor">
     <div>
       <h3 class="text-sm font-semibold">项目成员</h3>
-      <p class="mt-1 text-xs text-muted">每个项目恰好一位负责人；协作者可查看和编辑项目，仅负责人可管理成员。</p>
+      <p class="mt-1 text-xs text-muted">每个项目恰好一位负责人；协作者可查看和编辑项目，仅负责人或经销商主号可管理成员。开启认证后只能选择本工作区的已有账号；新账号由经销商主号或系统管理员开通。</p>
     </div>
     <label class="grid gap-2 text-sm font-semibold">项目负责人
       <select :value="leader?.userId || ''" :disabled="disabled" data-testid="leader-select"

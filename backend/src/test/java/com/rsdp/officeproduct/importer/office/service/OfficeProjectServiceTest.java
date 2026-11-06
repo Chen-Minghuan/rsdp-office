@@ -13,7 +13,9 @@ import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
+import com.rsdp.officeproduct.importer.office.entity.OfficeAuditLog;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeAuditLogMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
@@ -36,6 +38,7 @@ class OfficeProjectServiceTest {
     private final Map<String, OfficeDesignFloor> floors = new LinkedHashMap<>();
     private final Map<String, OfficeUser> users = new LinkedHashMap<>();
     private final List<OfficeProjectMember> members = new ArrayList<>();
+    private final List<OfficeAuditLog> auditLogs = new ArrayList<>();
     private OfficeProjectAccessService access;
     private OfficeProjectService service;
 
@@ -44,13 +47,18 @@ class OfficeProjectServiceTest {
         floors.clear();
         users.clear();
         members.clear();
+        auditLogs.clear();
         var projectMapper = mock(OfficeDesignProjectMapper.class);
         var floorMapper = mock(OfficeDesignFloorMapper.class);
         var memberMapper = mock(OfficeProjectMemberMapper.class);
         var userMapper = mock(OfficeUserMapper.class);
+        var auditLogMapper = mock(OfficeAuditLogMapper.class);
         access = mock(OfficeProjectAccessService.class);
         when(access.enforcementEnabled()).thenReturn(false);
         when(access.accessibleProjectIds()).thenReturn(null);
+        when(auditLogMapper.insert(any(OfficeAuditLog.class))).thenAnswer(call -> { auditLogs.add(call.getArgument(0)); return 1; });
+        var currentUserService = mock(CurrentUserService.class);
+        when(currentUserService.authEnabled()).thenReturn(false);
         when(projectMapper.insert(any(OfficeDesignProject.class))).thenAnswer(call -> { projects.put(call.getArgument(0, OfficeDesignProject.class).getProjectId(), call.getArgument(0)); return 1; });
         when(projectMapper.updateById(any(OfficeDesignProject.class))).thenAnswer(call -> { projects.put(call.getArgument(0, OfficeDesignProject.class).getProjectId(), call.getArgument(0)); return 1; });
         when(projectMapper.selectById(anyString())).thenAnswer(call -> projects.get(call.getArgument(0)));
@@ -71,19 +79,28 @@ class OfficeProjectServiceTest {
             .filter(user -> ((Collection<?>) call.getArgument(0)).contains(user.getUserId())).toList());
         when(userMapper.selectList(any())).thenAnswer(call -> {
             List<String> params = scopeIds(call.getArgument(0));
+            List<String> workspaceParams = params.stream()
+                .filter(param -> !"active".equals(param) && !"disabled".equals(param)).toList();
             return users.values().stream()
-                .filter(user -> params.isEmpty() || params.contains(user.getStatus()))
+                .filter(user -> !params.contains("active") || "active".equals(user.getStatus()))
+                .filter(user -> workspaceParams.isEmpty() || workspaceParams.contains(user.getWorkspaceId()))
                 .toList();
         });
-        service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access, new ObjectMapper());
+        service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
+            new OfficeAuditService(auditLogMapper, currentUserService), new ObjectMapper());
     }
 
     private OfficeUser activeUser(String userId, String username) {
+        return activeUserIn(userId, username, null);
+    }
+
+    private OfficeUser activeUserIn(String userId, String username, String workspaceId) {
         var user = new OfficeUser();
         user.setUserId(userId);
         user.setUsername(username);
         user.setDisplayName(username + " 显示名");
         user.setStatus("active");
+        user.setWorkspaceId(workspaceId);
         users.put(userId, user);
         return user;
     }
@@ -280,6 +297,73 @@ class OfficeProjectServiceTest {
         assertEquals(2, members.size());
         assertEquals(1, members.stream().filter(member -> "LEADER".equals(member.getRole())).count());
         assertEquals("USR-3", members.stream().filter(member -> "LEADER".equals(member.getRole())).findFirst().orElseThrow().getUserId());
+        assertEquals(1, auditLogs.size());
+        assertEquals("MEMBERS_REPLACED", auditLogs.get(0).getAction());
+        assertEquals(created.getProjectId(), auditLogs.get(0).getTargetId());
+        assertTrue(auditLogs.get(0).getDetail().contains("LEADER:USR-1"));
+        assertTrue(auditLogs.get(0).getDetail().contains("LEADER:USR-3"));
+    }
+
+    @Test void createProjectRequiresWorkspaceAndValidatesMemberWorkspaceWhenEnforced() {
+        when(access.enforcementEnabled()).thenReturn(true);
+        var outsider = activeUser("USR-9", "outsider");
+        when(access.currentUserOrNull()).thenReturn(outsider);
+        var request = request("项目", List.of("一层"));
+        request.setLeaderUserId("USR-9");
+        assertEquals("当前账号不属于任何工作区，不能创建项目", assertThrows(BusinessException.class,
+            () -> service.createProject(request)).getMessage());
+
+        // 操作人归属 W1，但负责人账号在 W2：拒绝
+        outsider.setWorkspaceId("W1");
+        activeUserIn("USR-1", "leader", "W2");
+        request.setLeaderUserId("USR-1");
+        assertEquals("项目负责人不属于本项目工作区", assertThrows(BusinessException.class,
+            () -> service.createProject(request)).getMessage());
+        assertTrue(projects.isEmpty());
+
+        // 负责人同属 W1：项目落在 W1
+        activeUserIn("USR-2", "leader1", "W1");
+        request.setLeaderUserId("USR-2");
+        var created = service.createProject(request);
+        assertEquals("W1", projects.get(created.getProjectId()).getWorkspaceId());
+        assertEquals("USR-2", created.getLeader().getUserId());
+    }
+
+    @Test void replaceMembersRejectsCollaboratorOutsideProjectWorkspace() {
+        when(access.enforcementEnabled()).thenReturn(true);
+        var operator = activeUserIn("USR-1", "leader", "W1");
+        when(access.currentUserOrNull()).thenReturn(operator);
+        activeUserIn("USR-2", "collab", "W1");
+        activeUserIn("USR-3", "outsider", "W2");
+        var request = request("项目", List.of("一层"));
+        request.setLeaderUserId("USR-1");
+        request.setCollaboratorUserIds(List.of("USR-2"));
+        var created = service.createProject(request);
+
+        var update = new UpdateProjectMembersRequest();
+        update.setLeaderUserId("USR-1");
+        update.setCollaboratorUserIds(List.of("USR-3"));
+        assertEquals("协作者不属于本项目工作区", assertThrows(BusinessException.class,
+            () -> service.replaceMembers(created.getProjectId(), update)).getMessage());
+        // 原成员关系未被破坏
+        assertEquals(2, members.size());
+        assertTrue(auditLogs.isEmpty());
+    }
+
+    @Test void assignableUsersScopedToOperatorWorkspaceWhenEnforced() {
+        when(access.enforcementEnabled()).thenReturn(true);
+        var operator = activeUserIn("USR-1", "alpha", "W1");
+        when(access.currentUserOrNull()).thenReturn(operator);
+        activeUserIn("USR-2", "beta", "W1");
+        activeUserIn("USR-3", "gamma", "W2");
+        var result = service.listAssignableUsers(null);
+        assertEquals(2, result.size());
+        assertTrue(result.stream().noneMatch(user -> user.getUserId().equals("USR-3")));
+
+        // 无工作区账号（如系统管理员）看不到任何账号池
+        var admin = activeUser("USR-9", "root");
+        when(access.currentUserOrNull()).thenReturn(admin);
+        assertTrue(service.listAssignableUsers(null).isEmpty());
     }
 
     @Test void updateReferencesReplacesImagesWithValidation() {
