@@ -7,11 +7,11 @@ WORKDIR /src
 
 # 先拷 csproj 还原依赖（利用 Docker 层缓存）
 COPY rsdp-cad-parser.csproj ./
-RUN --mount=type=cache,target=/root/.nuget/packages dotnet restore
+RUN dotnet restore
 
 # 拷贝源码并发布（.dockerignore 已排除 bin/obj/tests）
 COPY . .
-RUN --mount=type=cache,target=/root/.nuget/packages dotnet publish -c Release -o /app --no-restore
+RUN dotnet publish -c Release -o /app --no-restore
 
 # ---- 运行阶段 ----
 FROM mcr.microsoft.com/dotnet/aspnet:7.0 AS runtime
