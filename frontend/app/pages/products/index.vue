@@ -13,11 +13,11 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const pageInput = ref(1)
 const pageSizeOptions = [10, 20, 50, 100]
-const selectedIds = ref<Set<string>>(new Set())
-const isDeleting = ref(false)
-const deleteDialog = ref<HTMLDialogElement | null>(null)
 const selectedProduct = ref<ImportedProduct | null>(null)
 const detailDialog = ref<HTMLDialogElement | null>(null)
+/** 公共库两级开关状态（工作区级由主号控制；此处为成员自己的"不看"偏好） */
+const catalogStatus = ref<{ workspaceEnabled: boolean; userHides: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
+const catalogSaving = ref(false)
 const activeCount = computed(() => products.value.filter(product => product.status === 'active').length)
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
 const filteredProducts = computed(() => {
@@ -45,15 +45,8 @@ const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   })
   return items
 })
-const pageProductIds = computed(() => pageProducts.value.map(product => product.rspuId))
-const allPageSelected = computed(() => pageProductIds.value.length > 0 && pageProductIds.value.every(id => selectedIds.value.has(id)))
-const somePageSelected = computed(() => pageProductIds.value.some(id => selectedIds.value.has(id)) && !allPageSelected.value)
-const allFilteredSelected = computed(() => filteredProducts.value.length > 0 && filteredProducts.value.every(product => selectedIds.value.has(product.rspuId)))
-const selectedProducts = computed(() => products.value.filter(product => selectedIds.value.has(product.rspuId)))
-
 watch([search, status, pageSize], () => {
   currentPage.value = 1
-  selectedIds.value = new Set()
 })
 watch(pageCount, count => {
   currentPage.value = Math.min(currentPage.value, count)
@@ -73,6 +66,30 @@ async function loadProducts() {
   }
 }
 
+async function loadCatalogStatus() {
+  try {
+    catalogStatus.value = await api.getSharedCatalogStatus()
+  } catch {
+    // 状态拉取失败不阻断商品列表，开关不展示
+    catalogStatus.value = null
+  }
+}
+
+/** 成员切换自己的公共库显示偏好（仅工作区级开启时展示）。 */
+async function toggleSharedCatalog() {
+  if (!catalogStatus.value || catalogSaving.value) return
+  catalogSaving.value = true
+  actionError.value = null
+  try {
+    catalogStatus.value = await api.setUserHideSharedCatalog(!catalogStatus.value.userHides)
+    await loadProducts()
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '切换公共库失败'
+  } finally {
+    catalogSaving.value = false
+  }
+}
+
 function formatPrice(price: number | null) {
   return price == null ? '—' : `¥ ${price.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
@@ -87,71 +104,10 @@ function resetFilters() {
   status.value = ''
 }
 
-function toggleProduct(productId: string) {
-  const next = new Set(selectedIds.value)
-  if (next.has(productId)) next.delete(productId)
-  else next.add(productId)
-  selectedIds.value = next
-  actionError.value = null
-  actionMessage.value = null
-}
-
-function togglePageSelection() {
-  const next = new Set(selectedIds.value)
-  if (allPageSelected.value) pageProductIds.value.forEach(id => next.delete(id))
-  else pageProductIds.value.forEach(id => next.add(id))
-  selectedIds.value = next
-  actionError.value = null
-  actionMessage.value = null
-}
-
-function toggleFilteredSelection() {
-  const next = new Set(selectedIds.value)
-  if (allFilteredSelected.value) filteredProducts.value.forEach(product => next.delete(product.rspuId))
-  else filteredProducts.value.forEach(product => next.add(product.rspuId))
-  selectedIds.value = next
-  actionError.value = null
-  actionMessage.value = null
-}
-
-function clearSelection() {
-  selectedIds.value = new Set()
-  actionError.value = null
-}
-
-function openDeleteDialog() {
-  if (!selectedIds.value.size || isDeleting.value) return
-  deleteDialog.value?.showModal()
-}
-
-function closeDeleteDialog() {
-  if (!isDeleting.value) deleteDialog.value?.close()
-}
-
 function goToPage(value = pageInput.value) {
   const target = Math.min(pageCount.value, Math.max(1, Math.trunc(Number(value) || 1)))
   currentPage.value = target
   pageInput.value = target
-}
-
-async function deleteSelectedProducts() {
-  const ids = [...selectedIds.value]
-  if (!ids.length || isDeleting.value) return
-  isDeleting.value = true
-  actionError.value = null
-  actionMessage.value = null
-  try {
-    const deletedCount = await api.deleteProducts(ids)
-    if (deletedCount !== ids.length) throw new Error(`请求删除 ${ids.length} 件商品，服务仅确认删除 ${deletedCount} 件，请刷新核对。`)
-    deleteDialog.value?.close()
-    selectedIds.value = new Set()
-    await loadProducts()
-    if (!listError.value) actionMessage.value = `已永久删除 ${deletedCount} 件商品。`
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : '批量删除失败'
-  } finally {
-    isDeleting.value = false
-  }
 }
 
 async function showDetails(product: ImportedProduct) {
@@ -160,7 +116,10 @@ async function showDetails(product: ImportedProduct) {
   detailDialog.value?.showModal()
 }
 
-onMounted(loadProducts)
+onMounted(() => {
+  loadProducts()
+  loadCatalogStatus()
+})
 </script>
 
 <template>
@@ -173,9 +132,6 @@ onMounted(loadProducts)
           <p class="text-xs text-muted">维护办公商品资料，为空间设计与方案报价提供商品资源。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <NuxtLink to="/products/audit" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
-            <AppIcon name="checkCircle" size="4" />商品审核
-          </NuxtLink>
           <NuxtLink to="/products/manual" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
             <AppIcon name="plus" size="4" />手工录入
           </NuxtLink>
@@ -189,6 +145,17 @@ onMounted(loadProducts)
     <div class="flex flex-none flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted" aria-live="polite">
       <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? products.length : '—' }}</strong></span>
       <span>在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
+      <label v-if="catalogStatus?.workspaceEnabled" class="inline-flex cursor-pointer select-none items-center gap-2">
+        <input
+          type="checkbox"
+          class="h-3.5 w-3.5 accent-[#8c6a4a]"
+          :checked="!catalogStatus.userHides"
+          :disabled="catalogSaving"
+          @change="toggleSharedCatalog"
+        >
+        公共库（主项目全库商品）
+      </label>
+      <span v-else-if="catalogStatus && !catalogStatus.workspaceEnabled">公共库已被工作区主号关闭，当前仅显示本厂商品</span>
     </div>
 
     <section class="flex-none overflow-hidden rounded-xl border border-line bg-white shadow-panel" aria-label="商品列表">
@@ -200,17 +167,9 @@ onMounted(loadProducts)
         <select v-model="status" aria-label="筛选商品状态" class="min-w-0 rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" :disabled="!statsAvailable">
           <option value="">全部状态</option><option value="active">在售</option><option value="other">非在售</option>
         </select>
-        <button type="button" class="rounded-lg bg-red-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-45" :disabled="!selectedIds.size || isDeleting || !statsAvailable" @click="openDeleteDialog">批量删除{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</button>
         <button type="button" class="rounded-lg border border-line p-2.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="loadProducts"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
       </div>
 
-      <div v-if="selectedIds.size && statsAvailable" class="flex flex-wrap items-center gap-3 border-b border-line bg-red-50/60 px-4 py-3 text-sm">
-        <strong class="text-red-800">已选择 {{ selectedIds.size }} 件商品</strong>
-        <span class="text-xs text-muted">可跨页勾选</span>
-        <button v-if="filteredProducts.length" type="button" class="font-medium text-bronze-dark hover:underline" @click="toggleFilteredSelection">{{ allFilteredSelected ? '取消选择筛选结果' : `选择全部筛选结果（${filteredProducts.length}）` }}</button>
-        <button type="button" class="font-medium text-muted hover:text-ink hover:underline" @click="clearSelection">清空选择</button>
-      </div>
-      <p v-else-if="statsAvailable && products.length" class="border-b border-line px-4 py-2 text-xs text-muted">勾选商品后可批量永久删除；表头可选择当前页。</p>
       <div v-if="actionError" class="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{{ actionError }}</div>
       <div v-if="actionMessage" class="border-b border-green/20 bg-green/10 px-4 py-3 text-sm text-green" role="status">{{ actionMessage }}</div>
 
@@ -239,10 +198,9 @@ onMounted(loadProducts)
 
       <div v-else class="overflow-x-auto">
         <table class="w-full whitespace-nowrap text-left text-sm">
-          <thead class="bg-bg text-xs text-muted"><tr><th class="w-12 px-5 py-3 font-medium"><input type="checkbox" :checked="allPageSelected" :indeterminate="somePageSelected" :disabled="isDeleting" aria-label="选择当前页商品" @change="togglePageSelection"></th><th class="px-2 py-3 font-medium">商品名称 / 编码</th><th class="px-4 py-3 text-right font-medium">零售价</th><th class="px-4 py-3 font-medium">状态</th><th class="px-4 py-3 font-medium">更新日期</th><th class="px-5 py-3 text-right font-medium">操作</th></tr></thead>
+          <thead class="bg-bg text-xs text-muted"><tr><th class="px-2 py-3 font-medium">商品名称 / 编码</th><th class="px-4 py-3 text-right font-medium">零售价</th><th class="px-4 py-3 font-medium">状态</th><th class="px-4 py-3 font-medium">更新日期</th><th class="px-5 py-3 text-right font-medium">操作</th></tr></thead>
           <tbody>
             <tr v-for="product in pageProducts" :key="product.rspuId" class="border-t border-line transition hover:bg-bg/70">
-              <td class="px-5 py-4"><input type="checkbox" :checked="selectedIds.has(product.rspuId)" :disabled="isDeleting" :aria-label="`选择${product.productName || '商品'}`" @change="toggleProduct(product.rspuId)"></td>
               <td class="px-2 py-3">
                 <NuxtLink :to="`/products/${product.rspuId}`" class="group flex w-fit items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2" :aria-label="`查看${product.productName || '商品'}详情`">
                   <div class="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg border border-line bg-white transition group-hover:border-bronze"><ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" /></div>
@@ -295,20 +253,6 @@ onMounted(loadProducts)
         </div>
       </div>
     </section>
-
-    <dialog ref="deleteDialog" class="m-auto max-h-[85dvh] w-[min(520px,calc(100%_-_32px))] overflow-y-auto rounded-2xl border border-line bg-white p-6 text-ink shadow-panel backdrop:bg-black/40" aria-labelledby="batch-delete-title" @cancel="event => { if (isDeleting) event.preventDefault() }">
-      <h2 id="batch-delete-title" class="text-lg font-bold">确认永久删除 {{ selectedIds.size }} 件商品？</h2>
-      <p class="mt-2 text-sm leading-6 text-muted">商品主档及关联的规格、图片、报价等数据库记录会被删除，操作无法撤销。</p>
-      <div class="mt-4 max-h-48 overflow-y-auto rounded-lg border border-line bg-bg px-4 py-2 text-sm">
-        <div v-for="product in selectedProducts.slice(0, 8)" :key="product.rspuId" class="flex justify-between gap-3 border-b border-line py-2 last:border-0"><span class="min-w-0 truncate">{{ product.productName || '未命名商品' }}</span><span class="shrink-0 text-xs text-muted">{{ product.rspuCode || product.rspuId }}</span></div>
-        <p v-if="selectedProducts.length > 8" class="py-2 text-xs text-muted">另有 {{ selectedProducts.length - 8 }} 件商品</p>
-      </div>
-      <p v-if="actionError" class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{{ actionError }}</p>
-      <div class="mt-6 flex justify-end gap-2">
-        <button type="button" class="rounded-lg border border-line px-4 py-2 text-sm hover:bg-bg disabled:opacity-50" :disabled="isDeleting" @click="closeDeleteDialog">取消</button>
-        <button type="button" class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50" :disabled="isDeleting" @click="deleteSelectedProducts">{{ isDeleting ? '删除中…' : `永久删除 ${selectedIds.size} 件` }}</button>
-      </div>
-    </dialog>
 
     <dialog ref="detailDialog" class="m-auto max-h-[85dvh] w-[min(560px,calc(100%_-_32px))] overflow-y-auto rounded-2xl border border-line bg-white p-6 text-ink shadow-panel backdrop:bg-black/30" aria-labelledby="product-detail-title" @close="selectedProduct = null" @click="event => { if (event.target === event.currentTarget) detailDialog?.close() }">
       <template v-if="selectedProduct">

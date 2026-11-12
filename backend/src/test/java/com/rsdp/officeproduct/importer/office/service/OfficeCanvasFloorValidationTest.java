@@ -2,13 +2,12 @@ package com.rsdp.officeproduct.importer.office.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
-import com.rsdp.officeproduct.importer.mapper.RspuVariantMapper;
 import com.rsdp.officeproduct.importer.office.dto.SaveCanvasRequest;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -22,7 +21,7 @@ class OfficeCanvasFloorValidationTest {
     private final OfficeProjectAccessService access = mock(OfficeProjectAccessService.class);
     private final OfficeCanvasMapper canvases = mock(OfficeCanvasMapper.class);
     private final OfficeService service = new OfficeService(locks, projects, access, canvases, mock(OfficeCartMapper.class),
-        mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
+        mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
 
     @Test void blankScopeContinuesToUseValidatedLegacyDefaultFloor() {
         var request = new SaveCanvasRequest();

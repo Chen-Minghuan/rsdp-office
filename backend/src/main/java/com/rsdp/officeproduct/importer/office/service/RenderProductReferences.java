@@ -1,15 +1,17 @@
 package com.rsdp.officeproduct.importer.office.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.rsdp.officeproduct.importer.entity.ImageAssets;
-import com.rsdp.officeproduct.importer.mapper.ImageAssetsMapper;
 import com.fasterxml.jackson.databind.node.*;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.config.RsdpMainProperties;
+import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.service.VisionImagePreparer;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -21,13 +23,21 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** Read catalog-owned local photos, never fetch URLs supplied by a canvas. */
+/**
+ * 商品外观参考图装配（效果图生成）。
+ *
+ * <p>商品图片统一存于主项目（RSDP），引用地址为主项目图片接口的绝对 URL；
+ * 仅允许拉取主项目图片接口（base-url + /api/v1/images/）与本地 /uploads/images/ 的地址，
+ * 画布传入的其他 URL 一律拒绝。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class RenderProductReferences {
     public static final String VERSION = "selected-products-multiview-v2";
     private final OfficeService office;
-    private final ImageAssetsMapper imageAssets;
+    private final RsdpCatalogGateway catalogGateway;
+    private final RestTemplate restTemplate;
+    private final RsdpMainProperties mainProperties;
     public record Prepared(List<byte[]> images, ArrayNode manifest, String prompt) {
         public static Prepared empty() { return new Prepared(List.of(), JsonNodeFactory.instance.arrayNode(), ""); }
     }
@@ -61,7 +71,7 @@ public class RenderProductReferences {
             LinkedHashSet<String> urls=new LinkedHashSet<>();
             if (product.getImageUrl()!=null && !product.getImageUrl().isBlank()) urls.add(product.getImageUrl());
             if (product.getRspuId()!=null) {
-                var assets=imageAssets.selectList(new QueryWrapper<ImageAssets>().eq("rspu_id",product.getRspuId()).orderByDesc("is_primary").orderByAsc("created_at").orderByAsc("image_id"));
+                List<ProductDetailDto.Image> assets = catalogGateway.getProductDetail(product.getRspuId()).getImages();
                 if (assets!=null) for (var asset:assets) {
                     if (asset.getVariantId()!=null && !asset.getVariantId().isBlank() && !Objects.equals(asset.getVariantId(),product.getVariantId())) continue;
                     if (asset.getStorageUrl()!=null && !asset.getStorageUrl().isBlank()) urls.add(asset.getStorageUrl());
@@ -104,13 +114,30 @@ public class RenderProductReferences {
     byte[] readImage(String url, String name) {
         try {
             if (url == null || url.isBlank()) throw new IOException();
+            if (isMainImageUrl(url)) {
+                // 主项目图片接口（免登录 GET）；限制大小与来源
+                ResponseEntity<byte[]> response = restTemplate.getForEntity(url, byte[].class);
+                byte[] body = response.getBody();
+                if (body == null || body.length == 0 || body.length > 10_000_000) throw new IOException();
+                return body;
+            }
             String path = URI.create(url).getPath();
             if (path == null || !path.matches("/uploads/images/[A-Za-z0-9_.-]+\\.(?i:png|jpg|jpeg|webp)")) throw new IOException();
             Path root = imageDirectory().toRealPath();
             Path file = root.resolve(path.substring("/uploads/images/".length())).toRealPath();
             if (!file.startsWith(root) || Files.size(file) > 10_000_000) throw new IOException();
             return Files.readAllBytes(file);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) { throw new BusinessException("所选商品图片缺失或无法读取，请补齐图片后生成：" + name); }
+    }
+
+    /** 仅允许主项目图片接口地址（配置的 base-url + /api/v1/images/）。 */
+    private boolean isMainImageUrl(String url) {
+        String base = mainProperties.getBaseUrl();
+        if (base == null || base.isBlank()) return false;
+        String prefix = base.replaceAll("/+$", "") + "/api/v1/images/";
+        return url.startsWith(prefix);
     }
 
     Path imageDirectory() { return Path.of(System.getProperty("user.dir"), "uploads", "images"); }

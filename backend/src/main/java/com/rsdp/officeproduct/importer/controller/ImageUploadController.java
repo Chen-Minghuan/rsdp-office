@@ -2,10 +2,14 @@ package com.rsdp.officeproduct.importer.controller;
 
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.common.Result;
+import com.rsdp.officeproduct.importer.service.RsdpClient;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -31,6 +35,17 @@ public class ImageUploadController {
 
     private static final long MAX_IMAGE_SIZE = 10 * 1024 * 1024;
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
+
+    private final RsdpClient rsdpClient;
+
+    /**
+     * 主项目商品图片代理：商品图片统一存于 RSDP 主项目，office 前端引用的
+     * 同源 /api/v1/images/{imageId} 路径经此转发（主项目图片接口免登录）。
+     */
+    @GetMapping("/{imageId}")
+    public ResponseEntity<byte[]> proxyMainImage(@PathVariable String imageId) {
+        return rsdpClient.getBinary("/api/v1/images/" + imageId);
+    }
 
     @PostMapping("/upload")
     public Result<List<String>> upload(@RequestPart("files") List<MultipartFile> files,

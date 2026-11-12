@@ -1,7 +1,7 @@
 package com.rsdp.officeproduct.importer.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
-import com.rsdp.officeproduct.importer.entity.CategoryDict;
+import com.rsdp.officeproduct.importer.dto.response.CategoryDictDto;
 import com.rsdp.officeproduct.importer.service.DictService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
@@ -21,7 +21,7 @@ public class DictController {
     private final DictService dictService;
 
     @GetMapping("/{type}")
-    public Result<List<CategoryDict>> listByType(@PathVariable String type) {
+    public Result<List<CategoryDictDto>> listByType(@PathVariable String type) {
         return Result.ok(dictService.listByType(type));
     }
 }

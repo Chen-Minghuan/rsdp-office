@@ -3,8 +3,13 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.*;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.config.RsdpMainProperties;
+import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestTemplate;
+
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -16,8 +21,10 @@ import static org.mockito.Mockito.*;
 class RenderProductReferencesTest {
     private final ObjectMapper json=new ObjectMapper();
     private final OfficeService office=mock(OfficeService.class);
-    private final com.rsdp.officeproduct.importer.mapper.ImageAssetsMapper imageAssets=mock(com.rsdp.officeproduct.importer.mapper.ImageAssetsMapper.class);
-    private final RenderProductReferences references=spy(new RenderProductReferences(office,imageAssets));
+    private final RsdpCatalogGateway gateway=mock(RsdpCatalogGateway.class);
+    private final RestTemplate restTemplate=mock(RestTemplate.class);
+    private final RsdpMainProperties mainProperties=mock(RsdpMainProperties.class);
+    private final RenderProductReferences references=spy(new RenderProductReferences(office,gateway,restTemplate,mainProperties));
     private ObjectNode scene(String... ids) {
         ObjectNode scene=json.createObjectNode(); ArrayNode items=scene.putArray("furniture");
         for(String id:ids) items.addObject().put("productId",id);
@@ -25,6 +32,16 @@ class RenderProductReferencesTest {
     }
     private OfficeProductDto product(String id) {
         OfficeProductDto p=new OfficeProductDto(); p.setId(id); p.setName("所选商品"+id); p.setVariant("1400×700"); p.setImageUrl("http://localhost/uploads/images/"+id+".png"); return p;
+    }
+    private ProductDetailDto.Image image(String url, String variantId) {
+        ProductDetailDto.Image image=new ProductDetailDto.Image();
+        image.setStorageUrl(url); image.setVariantId(variantId);
+        return image;
+    }
+    private ProductDetailDto detailWithImages(List<ProductDetailDto.Image> images) {
+        ProductDetailDto detail=new ProductDetailDto();
+        detail.setImages(images);
+        return detail;
     }
     private byte[] photo() throws Exception {
         var image=new BufferedImage(400,300,BufferedImage.TYPE_INT_RGB); var g=image.createGraphics(); g.setColor(Color.RED); g.fillRect(0,0,400,300); g.dispose();
@@ -44,10 +61,10 @@ class RenderProductReferencesTest {
     @Test void usesMainAndAuxiliaryViewsButNotOtherVariantsOrDuplicatePhotos() throws Exception {
         var p=product("SKU1");p.setRspuId("SPU1");p.setVariantId("V1");
         when(office.listOfficeProducts()).thenReturn(List.of(p));
-        var extra=new com.rsdp.officeproduct.importer.entity.ImageAssets();extra.setStorageUrl("/uploads/images/side.png");extra.setVariantId("V1");
-        var duplicate=new com.rsdp.officeproduct.importer.entity.ImageAssets();duplicate.setStorageUrl("/uploads/images/duplicate.png");
-        var foreign=new com.rsdp.officeproduct.importer.entity.ImageAssets();foreign.setStorageUrl("/uploads/images/other-color.png");foreign.setVariantId("V2");
-        when(imageAssets.selectList(any())).thenReturn(List.of(extra,duplicate,foreign));
+        var extra=image("/uploads/images/side.png","V1");
+        var duplicate=image("/uploads/images/duplicate.png",null);
+        var foreign=image("/uploads/images/other-color.png","V2");
+        when(gateway.getProductDetail("SPU1")).thenReturn(detailWithImages(List.of(extra,duplicate,foreign)));
         doReturn(photo()).when(references).readImage(p.getImageUrl(),p.getName());
         var side=new BufferedImage(400,300,BufferedImage.TYPE_INT_RGB);var g=side.createGraphics();g.setColor(Color.BLUE);g.fillRect(0,0,400,300);g.dispose();
         var bytes=new ByteArrayOutputStream();ImageIO.write(side,"png",bytes);
@@ -64,8 +81,8 @@ class RenderProductReferencesTest {
     }
     @Test void fallsBackToAvailableAuxiliaryViewIfMainImageIsMissing() throws Exception {
         var p=product("SKU1");p.setRspuId("SPU1");when(office.listOfficeProducts()).thenReturn(List.of(p));
-        var extra=new com.rsdp.officeproduct.importer.entity.ImageAssets();extra.setStorageUrl("/uploads/images/side.png");
-        when(imageAssets.selectList(any())).thenReturn(List.of(extra));
+        var extra=image("/uploads/images/side.png",null);
+        when(gateway.getProductDetail("SPU1")).thenReturn(detailWithImages(List.of(extra)));
         doThrow(new BusinessException("缺失")).when(references).readImage(p.getImageUrl(),p.getName());
         doReturn(photo()).when(references).readImage(extra.getStorageUrl(),p.getName());
         var prepared=references.prepare(scene("SKU1"));

@@ -7,10 +7,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.entity.RspuMaster;
-import com.rsdp.officeproduct.importer.entity.RspuVariant;
-import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
-import com.rsdp.officeproduct.importer.mapper.RspuVariantMapper;
 import com.rsdp.officeproduct.importer.office.dto.*;
 import com.rsdp.officeproduct.importer.office.entity.OfficeAgentMessage;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
@@ -19,6 +15,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,8 +38,8 @@ public class OfficeService {
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeCartMapper cartMapper;
     private final OfficeAgentMessageMapper messageMapper;
-    private final RspuMasterMapper rspuMasterMapper;
-    private final RspuVariantMapper rspuVariantMapper;
+    private final RsdpCatalogGateway rsdpCatalogGateway;
+    private final SharedCatalogService sharedCatalogService;
     private final ObjectMapper objectMapper;
 
     private static final String DEFAULT_PROJECT_ID = "OFFICE-PROJECT-001";
@@ -244,23 +241,12 @@ public class OfficeService {
         return toAgentMessageDto(botMsg);
     }
 
+    /**
+     * 排版选品目录。数据源为主项目（RSDP）商品库的全量有效变体，
+     * viewMode 按当前用户两级公共库开关解析（full=全库只读 / own=仅本厂）。
+     */
     public List<OfficeProductDto> listOfficeProducts() {
-        List<RspuMaster> rspus = rspuMasterMapper.selectList(
-            new QueryWrapper<RspuMaster>().eq("status", "active").eq("audit_status", "approved"));
-        if (rspus.isEmpty()) {
-            return List.of();
-        }
-        List<String> rspuIds = rspus.stream().map(RspuMaster::getRspuId).collect(Collectors.toList());
-        List<RspuVariant> variants = rspuVariantMapper.selectList(
-            new QueryWrapper<RspuVariant>().in("rspu_id", rspuIds).eq("status", "active"));
-        Map<String, List<RspuVariant>> variantMap = variants.stream().collect(Collectors.groupingBy(RspuVariant::getRspuId));
-
-        List<OfficeProductDto> result = new ArrayList<>();
-        for (RspuMaster rspu : rspus) {
-            List<RspuVariant> vs = variantMap.getOrDefault(rspu.getRspuId(), List.of());
-            for (RspuVariant v : vs) result.add(toProductDto(rspu, v));
-        }
-        return result;
+        return rsdpCatalogGateway.listOfficeProducts(sharedCatalogService.resolveViewMode());
     }
 
     @Transactional
@@ -325,72 +311,6 @@ public class OfficeService {
         dto.setRole(m.getRole());
         dto.setContent(m.getContent());
         return dto;
-    }
-
-    private OfficeProductDto toProductDto(RspuMaster rspu, RspuVariant variant) {
-        OfficeProductDto dto = new OfficeProductDto();
-        dto.setId(variant != null ? variant.getVariantId() : rspu.getRspuId());
-        dto.setRspuId(rspu.getRspuId());
-        dto.setVariantId(variant != null ? variant.getVariantId() : null);
-        if (variant != null) {
-            try {
-                BigDecimal[] exact = OfficeProductMatching.dimensions(objectMapper.readTree(variant.getDimensions()));
-                dto.setWidthMm(exact[0]); dto.setDepthMm(exact[1]); dto.setHeightMm(exact[2]);
-            } catch (Exception invalidDimensions) { /* Unknown dimensions remain unknown. */ }
-        }
-        dto.setName(rspu.getProductName());
-        dto.setDesc(rspu.getDescription());
-        dto.setVariant(buildVariantText(variant));
-        dto.setPrice(resolvePrice(rspu));
-        dto.setKind("other");
-        dto.setUses(List.of("OTHER"));
-        Integer[] dims = resolveDimensions(variant);
-        dto.setWidthCm(dims[0]);
-        dto.setDepthCm(dims[1]);
-        dto.setImageUrl(rspu.getPrimaryImageUrl());
-        return dto;
-    }
-
-    private String buildVariantText(RspuVariant v) {
-        if (v == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        if (StringUtils.hasText(v.getDisplayName())) {
-            sb.append(v.getDisplayName());
-        }
-        if (StringUtils.hasText(v.getSizeText())) {
-            if (sb.length() > 0) sb.append(" / ");
-            sb.append(v.getSizeText());
-        }
-        if (StringUtils.hasText(v.getColorText())) {
-            if (sb.length() > 0) sb.append(" / ");
-            sb.append(v.getColorText());
-        }
-        if (StringUtils.hasText(v.getMaterialText())) {
-            if (sb.length() > 0) sb.append(" / ");
-            sb.append(v.getMaterialText());
-        }
-        return sb.toString();
-    }
-
-    private BigDecimal resolvePrice(RspuMaster rspu) {
-        if (rspu.getRetailPrice() != null && rspu.getRetailPrice().compareTo(BigDecimal.ZERO) > 0) {
-            return rspu.getRetailPrice();
-        }
-        return BigDecimal.ZERO;
-    }
-
-    private Integer[] resolveDimensions(RspuVariant variant) {
-        if (variant != null && StringUtils.hasText(variant.getDimensions())) {
-            try {
-                BigDecimal[] exact = OfficeProductMatching.dimensions(objectMapper.readTree(variant.getDimensions()));
-                if (exact[0] != null && exact[1] != null) return new Integer[]{
-                    exact[0].divide(BigDecimal.TEN, 0, java.math.RoundingMode.CEILING).intValueExact(),
-                    exact[1].divide(BigDecimal.TEN, 0, java.math.RoundingMode.CEILING).intValueExact()};
-            } catch (Exception invalidDimensions) { /* Preserve unknown instead of inventing dimensions. */ }
-        }
-        return new Integer[]{null, null};
     }
 
     private String writeJson(Object value) {

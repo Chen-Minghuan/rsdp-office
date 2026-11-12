@@ -27,6 +27,10 @@ const newPassword = ref('')
 const newSource = ref<'DEALER_STAFF' | 'FACTORY_SALES'>('DEALER_STAFF')
 const creating = ref(false)
 
+/** 公共库（主项目全库商品）工作区级开关，主号控制，全工作区即时生效。 */
+const sharedCatalogEnabled = ref(true)
+const catalogSaving = ref(false)
+
 onMounted(async () => {
   checking.value = true
   try {
@@ -48,10 +52,31 @@ async function loadAll() {
     const workspace = await api.getMyWorkspace()
     workspaceName.value = workspace.name
     users.value = await api.listWorkspaceUsers()
+    const catalog = await api.getSharedCatalogStatus()
+    sharedCatalogEnabled.value = catalog.workspaceEnabled
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '工作区数据加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+/** 主号切换工作区级公共库开关：关闭后全工作区仅见本厂产品（服务端强制）。 */
+async function toggleSharedCatalog() {
+  if (catalogSaving.value) return
+  catalogSaving.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const status = await api.setWorkspaceSharedCatalog(!sharedCatalogEnabled.value)
+    sharedCatalogEnabled.value = status.workspaceEnabled
+    notice.value = status.workspaceEnabled
+      ? '已开启公共库：工作区成员可在商品库看到主项目全库商品（成员可自行选择不看）'
+      : '已关闭公共库：全工作区仅显示本厂产品'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '公共库开关切换失败'
+  } finally {
+    catalogSaving.value = false
   }
 }
 
@@ -102,6 +127,27 @@ function formatTime(value: string | null) {
 
     <template v-else>
       <p v-if="workspaceName" class="mb-3 text-sm text-muted">当前工作区：<span class="font-semibold text-ink">{{ workspaceName }}</span></p>
+
+      <section class="mb-5 border border-line bg-white p-4" aria-label="公共库开关">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-sm font-semibold">公共库（主项目全库商品）</h2>
+            <p class="mt-1 text-xs text-muted">
+              开启后工作区成员可在商品库与排版选品中看到主项目全库商品（别家价格不可见），成员可自行选择不看；关闭后全工作区仅显示本厂产品，即时生效。
+            </p>
+          </div>
+          <label class="inline-flex cursor-pointer select-none items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              class="h-4 w-4 accent-[#8c6a4a]"
+              :checked="sharedCatalogEnabled"
+              :disabled="catalogSaving || loading"
+              @change="toggleSharedCatalog"
+            >
+            {{ sharedCatalogEnabled ? '已开启' : '已关闭' }}
+          </label>
+        </div>
+      </section>
 
       <form class="mb-5 border border-line bg-white p-4" @submit.prevent="createUser">
         <h2 class="mb-3 text-sm font-semibold">开通账号</h2>

@@ -63,6 +63,18 @@ interface WorkspaceUserItem {
   createdAt: string | null
 }
 
+/** 公共库（主项目全库商品）两级开关状态。 */
+interface SharedCatalogStatus {
+  /** 工作区级开关（经销商主号控制） */
+  workspaceEnabled: boolean
+  /** 当前用户是否选择不看（仅工作区级开启时生效） */
+  userHides: boolean
+  /** 当前用户是否经销商主号（可切换工作区级开关） */
+  dealer: boolean
+  /** 综合可见性（两级取与） */
+  effectiveVisible: boolean
+}
+
 interface ProductDto {
   id: string
   name: string
@@ -396,6 +408,21 @@ export function useOfficeApi() {
     return await request<WorkspaceUserItem>('POST', '/api/v1/office/workspace/users', payload)
   }
 
+  /** 公共库（主项目全库商品）两级开关状态：工作区级（主号控制）+ 当前用户偏好。 */
+  async function getSharedCatalogStatus(): Promise<SharedCatalogStatus> {
+    return await request<SharedCatalogStatus>('GET', '/api/v1/office/workspace/shared-catalog')
+  }
+
+  /** 工作区级公共库开关（仅经销商主号）。 */
+  async function setWorkspaceSharedCatalog(enabled: boolean): Promise<SharedCatalogStatus> {
+    return await request<SharedCatalogStatus>('PUT', '/api/v1/office/workspace/shared-catalog', { enabled })
+  }
+
+  /** 当前用户的公共库显示偏好（仅工作区级开启时生效）。 */
+  async function setUserHideSharedCatalog(hide: boolean): Promise<SharedCatalogStatus> {
+    return await request<SharedCatalogStatus>('PUT', '/api/v1/office/workspace/shared-catalog/me', { hide })
+  }
+
   async function createManualProduct(request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
     return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', request)
   }
@@ -478,6 +505,9 @@ export function useOfficeApi() {
     getMyWorkspace,
     listWorkspaceUsers,
     createWorkspaceUser,
+    getSharedCatalogStatus,
+    setWorkspaceSharedCatalog,
+    setUserHideSharedCatalog,
     createManualProduct,
     getProduct,
     updateProduct,

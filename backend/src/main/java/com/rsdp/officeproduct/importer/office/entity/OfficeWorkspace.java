@@ -18,6 +18,8 @@ public class OfficeWorkspace {
     private String workspaceId;
     private String name;
     private String ownerUserId;
+    /** 公共库开关（经销商主号控制）：关=工作区全员仅见本厂产品；开=成员可自行选择不看。 */
+    private Boolean sharedCatalogEnabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

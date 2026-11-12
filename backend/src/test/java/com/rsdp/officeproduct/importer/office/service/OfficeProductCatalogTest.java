@@ -1,42 +1,40 @@
 package com.rsdp.officeproduct.importer.office.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.entity.*;
-import com.rsdp.officeproduct.importer.mapper.*;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
 import com.rsdp.officeproduct.importer.office.dto.SaveCanvasRequest;
 import com.rsdp.officeproduct.importer.office.entity.*;
 import com.rsdp.officeproduct.importer.office.mapper.*;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import org.junit.jupiter.api.Test;
-import java.math.BigDecimal;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class OfficeProductCatalogTest {
-    @Test void exposesExactSkuDimensionsAndQueriesOnlyApprovedActiveProductsAndActiveVariants() {
-        var products = mock(RspuMasterMapper.class); var variants = mock(RspuVariantMapper.class);
-        var service = new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), mock(OfficeCanvasMapper.class), mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), products, variants, new ObjectMapper());
-        var master = new RspuMaster(); master.setRspuId("MASTER"); master.setProductName("办公桌"); master.setRetailPrice(BigDecimal.TEN);
-        when(products.selectList(any())).thenAnswer(call -> {
-            QueryWrapper<?> query = call.getArgument(0); assertTrue(query.getSqlSegment().contains("audit_status"));
-            assertTrue(query.getParamNameValuePairs().containsValue("active")); assertTrue(query.getParamNameValuePairs().containsValue("approved"));
-            return List.of(master);
-        });
-        var sku = new RspuVariant(); sku.setRspuId("MASTER"); sku.setVariantId("VARIANT"); sku.setDimensions("{\"widthMm\":1200.01,\"depthMm\":600,\"heightMm\":750,\"unit\":\"mm\"}");
-        when(variants.selectList(any())).thenAnswer(call -> {
-            QueryWrapper<?> query = call.getArgument(0); query.getSqlSegment(); assertTrue(query.getParamNameValuePairs().containsValue("active")); return List.of(sku);
-        });
-        var result = service.listOfficeProducts().get(0);
-        assertEquals("MASTER", result.getRspuId()); assertEquals("VARIANT", result.getVariantId());
-        assertEquals(new BigDecimal("1200.01"), result.getWidthMm()); assertEquals(121, result.getWidthCm());
-        assertEquals(new BigDecimal("750"), result.getHeightMm());
+    /** 排版选品目录已切换为主项目数据源：服务层只负责按当前用户开关解析 viewMode 并委托网关。 */
+    @Test void listOfficeProductsDelegatesToMainCatalogWithResolvedViewMode() {
+        var gateway = mock(RsdpCatalogGateway.class);
+        var sharedCatalog = mock(SharedCatalogService.class);
+        var service = new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), mock(OfficeCanvasMapper.class), mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), gateway, sharedCatalog, new ObjectMapper());
+        when(sharedCatalog.resolveViewMode()).thenReturn("own");
+        var dto = new OfficeProductDto();
+        dto.setRspuId("MASTER");
+        dto.setVariantId("VARIANT");
+        when(gateway.listOfficeProducts("own")).thenReturn(List.of(dto));
+
+        var result = service.listOfficeProducts();
+
+        assertEquals(1, result.size());
+        assertEquals("MASTER", result.get(0).getRspuId());
+        assertEquals("VARIANT", result.get(0).getVariantId());
+        verify(gateway).listOfficeProducts("own");
     }
     @Test void rejectsMultipleDrawingFilesBeforeWritingCanvas() {
         var locks = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
-        var service = new OfficeService(locks, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
+        var service = new OfficeService(locks, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
         var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setMode("overview");
         request.setFiles(List.of(Map.of("name", "first.png"), Map.of("name", "second.pdf")));
         assertEquals("一次只能上传一张图纸，请移除多余文件", assertThrows(BusinessException.class, () -> service.saveCanvas(request)).getMessage());
@@ -44,7 +42,7 @@ class OfficeProductCatalogTest {
     }
     @Test void staleDebouncedCanvasWritesCannotOverwriteNewerModuleSelections() {
         var projects = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
-        var service = new OfficeService(projects, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), new ObjectMapper());
+        var service = new OfficeService(projects, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
         var latest = new OfficeCanvas(); latest.setProjectId("P"); latest.setRevision(10); latest.setMode("overview"); latest.setObjectsJson("[]"); latest.setFilesJson("[]");
         when(canvases.selectList(any())).thenReturn(List.of(latest));
         var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setRevision(9); request.setMode("overview"); request.setObjects(List.of());

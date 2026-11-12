@@ -69,6 +69,7 @@ await context.route('**/api/v1/**', async route => {
     if (importMode === 'skipped') return respond({ totalRows: 1, successCount: 0, failedCount: 0, skippedCount: 1, failures: [], warnings: [{ rowIndex: 2, externalCode: 'EXTERNAL-1', rspuId: null, reason: '商品已存在，已跳过' }], cleansingReport: { cleanedRows: 0, issuesFound: 0, issues: [] } })
     return respond(partialResult)
   }
+  if (url.pathname === '/api/v1/office/workspace/shared-catalog') return respond({ workspaceEnabled: true, userHides: false, dealer: false, effectiveVisible: true })
   return respond(url.pathname.endsWith('/OFFICE-PROJECT-001') || url.pathname.endsWith('/canvas') ? null : [])
 })
 

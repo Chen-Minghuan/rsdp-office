@@ -3,8 +3,6 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
-import com.rsdp.officeproduct.importer.mapper.RspuVariantMapper;
 import com.rsdp.officeproduct.importer.office.dto.SaveCanvasRequest;
 import com.rsdp.officeproduct.importer.office.dto.SpaceReviewConfirmRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
@@ -12,6 +10,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -60,7 +59,7 @@ class OfficeSpaceReviewServiceTest {
         OfficeWorkspaceLockMapper locks = mock(OfficeWorkspaceLockMapper.class);
         reviewService = new OfficeSpaceReviewService(projects, access, currentUser, canvasMapper, locks, json);
         officeService = new OfficeService(locks, projects, access, canvasMapper, mock(OfficeCartMapper.class),
-            mock(OfficeAgentMessageMapper.class), mock(RspuMasterMapper.class), mock(RspuVariantMapper.class), json);
+            mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), json);
     }
 
     private String zone(String id, double origin) {
@@ -78,7 +77,8 @@ class OfficeSpaceReviewServiceTest {
         canvas.setObjectsJson(objectsJson);
         canvas.setFilesJson("[]");
         canvas.setBlank(false);
-        canvas.setCreatedAt(LocalDateTime.now());
+        // 固定基准时间 + 修订号秒偏移：低时钟精度环境下两次 now() 可能相等导致降序排序不稳定
+        canvas.setCreatedAt(LocalDateTime.of(2026, 1, 1, 0, 0).plusSeconds(revision));
         canvases.add(canvas);
     }
 

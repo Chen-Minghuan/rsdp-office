@@ -1,6 +1,6 @@
 package com.rsdp.officeproduct.importer.service;
 
-import com.rsdp.officeproduct.importer.entity.CategoryDict;
+import com.rsdp.officeproduct.importer.dto.response.CategoryDictDto;
 import com.rsdp.officeproduct.importer.util.DictNormalizes;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,13 +18,13 @@ public class DictAliasService {
         if (!StringUtils.hasText(input)) {
             return null;
         }
-        List<CategoryDict> dicts = dictService.listByType(dictType);
+        List<CategoryDictDto> dicts = dictService.listByType(dictType);
         String normalized = DictNormalizes.normalizeOrNull(input, dicts);
         if (normalized != null) {
             return normalized;
         }
         String trimmed = input.trim();
-        for (CategoryDict dict : dicts) {
+        for (CategoryDictDto dict : dicts) {
             if (StringUtils.hasText(dict.getAliases())) {
                 for (String alias : dict.getAliases().split("[,，]")) {
                     if (trimmed.equalsIgnoreCase(alias.trim())) {

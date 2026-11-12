@@ -45,6 +45,11 @@ rsdp:
     storage-directory: ${RSDP_RENDER_STORAGE_DIRECTORY:uploads/render-previews}
   cad-parser:
     url: http://127.0.0.1:8091
+  # 主项目（RSDP）连接：office 以供应商服务账号读取主库商品数据（商品/字典唯一数据源）
+  main:
+    base-url: ${RSDP_MAIN_BASE_URL:http://localhost:8081}
+    username: ${RSDP_MAIN_USERNAME:}
+    password: ${RSDP_MAIN_PASSWORD:}
   vision:
     refine-room-contours: ${RSDP_VISION_REFINE_ROOM_CONTOURS:true}
     url: ${RSDP_VISION_URL:} # 可选：已有识别接口；配置后优先使用

@@ -1,39 +1,24 @@
 package com.rsdp.officeproduct.importer.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
-import com.rsdp.officeproduct.importer.entity.RspuMaster;
-import com.rsdp.officeproduct.importer.mapper.RspuMasterMapper;
+import com.rsdp.officeproduct.importer.office.service.SharedCatalogService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * 商品列表查询。数据源为主项目（RSDP）商品库，viewMode 按当前用户两级公共库开关解析：
+ * full=全库只读（别家价格由主项目掩码），own=仅本厂已报价产品。
+ */
 @Service
 @RequiredArgsConstructor
 public class ProductQueryService {
 
-    private final RspuMasterMapper rspuMasterMapper;
+    private final RsdpCatalogGateway rsdpCatalogGateway;
+    private final SharedCatalogService sharedCatalogService;
 
     public List<ProductListItemDto> listProducts() {
-        List<RspuMaster> entities = rspuMasterMapper.selectList(
-            new QueryWrapper<RspuMaster>().orderByDesc("created_at"));
-        return entities.stream().map(this::toDto).toList();
-    }
-
-    private ProductListItemDto toDto(RspuMaster e) {
-        ProductListItemDto dto = new ProductListItemDto();
-        dto.setRspuId(e.getRspuId());
-        dto.setRspuCode(e.getRspuCode());
-        dto.setExternalCode(e.getExternalCode());
-        dto.setProductName(e.getProductName());
-        dto.setPrimaryImageUrl(e.getPrimaryImageUrl());
-        dto.setRetailPrice(e.getRetailPrice());
-        dto.setStatus(e.getStatus());
-        dto.setAuditStatus(e.getAuditStatus());
-        dto.setAuditRemark(e.getAuditRemark());
-        dto.setCreatedAt(e.getCreatedAt());
-        dto.setUpdatedAt(e.getUpdatedAt());
-        return dto;
+        return rsdpCatalogGateway.listProducts(sharedCatalogService.resolveViewMode());
     }
 }
