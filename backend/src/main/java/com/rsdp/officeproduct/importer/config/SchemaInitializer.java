@@ -53,6 +53,12 @@ public class SchemaInitializer {
             Resource workspaceRolesMigration = new ClassPathResource("db/migrations/20261106_workspace_roles.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(workspaceRolesMigration), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            Resource sharedCatalogMigration = new ClassPathResource("db/migrations/20261107_shared_catalog_toggles.sql");
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(sharedCatalogMigration), false, false, "--",
+                ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            Resource dropLocalProductCopies = new ClassPathResource("db/migrations/20261112_drop_local_product_copies.sql");
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(dropLocalProductCopies), false, false, "--",
+                ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

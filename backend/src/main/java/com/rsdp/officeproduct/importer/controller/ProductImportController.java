@@ -5,23 +5,18 @@ import com.rsdp.officeproduct.importer.dto.request.ManualProductEntryRequest;
 import com.rsdp.officeproduct.importer.dto.request.ProductImportRequest;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportPreview;
-import com.rsdp.officeproduct.importer.dto.response.BatchAuditResult;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportResult;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
-import com.rsdp.officeproduct.importer.entity.RspuMaster;
-import com.rsdp.officeproduct.importer.service.ProductAuditService;
 import com.rsdp.officeproduct.importer.service.ProductImportService;
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.util.ProductImportTemplateBuilder;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,6 +31,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 商品接口：列表/详情只读（数据源主项目）；手工录入与批量导入由 office 提供体验，
+ * 确认后转发写入主项目主库（归属服务账号本厂身份）。
+ */
 @RestController
 @RequestMapping("/api/v1/products")
 @RequiredArgsConstructor
@@ -44,42 +43,11 @@ public class ProductImportController {
 
     private final ProductImportService productImportService;
     private final ProductQueryService productQueryService;
-    private final ProductAuditService productAuditService;
+    private final RsdpCatalogGateway rsdpCatalogGateway;
 
     @GetMapping
     public Result<List<ProductListItemDto>> listProducts() {
         return Result.ok(productQueryService.listProducts());
-    }
-
-    @GetMapping("/audit/pending")
-    public Result<List<RspuMaster>> listPendingProducts() {
-        return Result.ok(productAuditService.listPending());
-    }
-
-    @PostMapping("/{rspuId}/approve")
-    public Result<RspuMaster> approveProduct(@PathVariable String rspuId) {
-        return Result.ok(productAuditService.approve(rspuId));
-    }
-
-    @PostMapping("/{rspuId}/reject")
-    public Result<RspuMaster> rejectProduct(@PathVariable String rspuId,
-                                            @RequestBody(required = false) AuditRemarkRequest request) {
-        return Result.ok(productAuditService.reject(rspuId, request != null ? request.getRemark() : null));
-    }
-
-    @PostMapping("/audit/batch-approve")
-    public Result<BatchAuditResult> batchApproveProducts(@Valid @RequestBody BatchAuditRequest request) {
-        return Result.ok(productAuditService.approveBatch(request.getRspuIds()));
-    }
-
-    @PostMapping("/audit/batch-reject")
-    public Result<BatchAuditResult> batchRejectProducts(@Valid @RequestBody BatchAuditRequest request) {
-        return Result.ok(productAuditService.rejectBatch(request.getRspuIds(), request.getRemark()));
-    }
-
-    @PostMapping("/audit/approve-all")
-    public Result<BatchAuditResult> approveAllPendingProducts() {
-        return Result.ok(productAuditService.approveAllPending());
     }
 
     @GetMapping("/import-template")
@@ -128,29 +96,6 @@ public class ProductImportController {
 
     @GetMapping("/{rspuId}")
     public Result<ProductDetailDto> getProduct(@PathVariable String rspuId) {
-        return Result.ok(productImportService.getProductDetail(rspuId));
-    }
-
-    @PutMapping("/{rspuId}")
-    public Result<Map<String, Object>> updateProduct(@PathVariable String rspuId,
-                                                     @RequestBody ManualProductEntryRequest request) {
-        return Result.ok(productImportService.updateProduct(rspuId, request));
-    }
-
-    @DeleteMapping("/{rspuId}")
-    public Result<Void> deleteProduct(@PathVariable String rspuId) {
-        productImportService.deleteProduct(rspuId);
-        return Result.ok(null);
-    }
-
-    @DeleteMapping("/batch")
-    public Result<Integer> deleteProducts(@RequestBody List<String> rspuIds) {
-        return Result.ok(productImportService.deleteProducts(rspuIds));
-    }
-
-    @PostMapping("/{rspuId}/restore")
-    public Result<Void> restoreProduct(@PathVariable String rspuId) {
-        productImportService.restoreProduct(rspuId);
-        return Result.ok(null);
+        return Result.ok(rsdpCatalogGateway.getProductDetail(rspuId));
     }
 }

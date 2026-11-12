@@ -261,29 +261,11 @@ export function useOfficeApi() {
     return await request<ImportedProduct[]>('GET', '/api/v1/products')
   }
 
-  async function loadPendingProducts(): Promise<ImportedProduct[]> {
-    return await request<ImportedProduct[]>('GET', '/api/v1/products/audit/pending')
-  }
 
-  async function approveProduct(rspuId: string): Promise<ImportedProduct> {
-    return await request<ImportedProduct>('POST', `/api/v1/products/${rspuId}/approve`, {})
-  }
 
-  async function rejectProduct(rspuId: string, remark?: string): Promise<ImportedProduct> {
-    return await request<ImportedProduct>('POST', `/api/v1/products/${rspuId}/reject`, { remark })
-  }
 
-  async function approveProductsBatch(rspuIds: string[]): Promise<BatchAuditResult> {
-    return await request<BatchAuditResult>('POST', '/api/v1/products/audit/batch-approve', { rspuIds })
-  }
 
-  async function rejectProductsBatch(rspuIds: string[], remark?: string): Promise<BatchAuditResult> {
-    return await request<BatchAuditResult>('POST', '/api/v1/products/audit/batch-reject', { rspuIds, remark })
-  }
 
-  async function approveAllPendingProducts(): Promise<BatchAuditResult> {
-    return await request<BatchAuditResult>('POST', '/api/v1/products/audit/approve-all', {})
-  }
 
   async function parseCad(file: File): Promise<unknown> {
     const formData = new FormData()
@@ -482,12 +464,6 @@ export function useOfficeApi() {
     downloadImportTemplate,
     importProducts,
     loadImportedProducts,
-    loadPendingProducts,
-    approveProduct,
-    rejectProduct,
-    approveProductsBatch,
-    rejectProductsBatch,
-    approveAllPendingProducts,
     parseCad,
     recognizeImage,
     previewImport,

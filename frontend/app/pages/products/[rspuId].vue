@@ -3,20 +3,13 @@ import type { ProductDetail } from '~/types/imported-products'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 
 const route = useRoute()
-const router = useRouter()
 const api = useOfficeApi()
 const rspuId = route.params.rspuId as string
 
 const isLoading = ref(true)
-const isSaving = ref(false)
-const isDeleting = ref(false)
 const error = ref<string | null>(null)
 const product = ref<ProductDetail | null>(null)
-const isEditing = ref(false)
 
-const imageFiles = ref<File[]>([])
-const imagePreviewUrls = ref<string[]>([])
-const selectedImageId = ref<string | null>(null)
 const form = ref<Partial<ProductDetail>>({})
 
 const galleryImages = computed(() => {
@@ -30,9 +23,9 @@ const galleryImages = computed(() => {
   if (product.value?.primaryImageUrl && !primaryWasInAssets && !images.some(image => image.url === product.value?.primaryImageUrl)) {
     images.unshift({ id: 'primary', url: product.value.primaryImageUrl, primary: true, label: '主图' })
   }
-  imagePreviewUrls.value.forEach((url, index) => images.push({ id: `new-${index}`, url, primary: false, label: '新图片' }))
   return images
 })
+const selectedImageId = ref<string | null>(null)
 const selectedImage = computed(() => galleryImages.value.find(image => image.id === selectedImageId.value) || galleryImages.value[0] || null)
 
 watch(galleryImages, images => {
@@ -44,22 +37,12 @@ async function loadProduct() {
   error.value = null
   try {
     product.value = await api.getProduct(rspuId)
-    resetForm()
+    form.value = { ...product.value, images: [...product.value.images], variants: [...product.value.variants] }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载商品失败'
   } finally {
     isLoading.value = false
   }
-}
-
-function resetForm() {
-  if (!product.value) return
-  imagePreviewUrls.value.forEach(URL.revokeObjectURL)
-  form.value = { ...product.value, images: [...product.value.images], variants: [...product.value.variants] }
-  imageFiles.value = []
-  imagePreviewUrls.value = []
-  selectedImageId.value = null
-  isEditing.value = false
 }
 
 function formatPrice(price: number | null) {
@@ -69,84 +52,6 @@ function formatPrice(price: number | null) {
 function formatDate(date: string) {
   const ts = new Date(date)
   return Number.isNaN(ts.getTime()) ? '—' : ts.toLocaleDateString('zh-CN')
-}
-
-function onImageSelect(event: Event) {
-  const files = Array.from((event.target as HTMLInputElement).files || [])
-  for (const file of files) {
-    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) continue
-    imageFiles.value.push(file)
-    imagePreviewUrls.value.push(URL.createObjectURL(file))
-  }
-  ;(event.target as HTMLInputElement).value = ''
-}
-
-function removeNewImage(index: number) {
-  URL.revokeObjectURL(imagePreviewUrls.value[index])
-  imageFiles.value.splice(index, 1)
-  imagePreviewUrls.value.splice(index, 1)
-}
-
-onUnmounted(() => imagePreviewUrls.value.forEach(URL.revokeObjectURL))
-
-function removeExistingImage(index: number) {
-  if (!form.value.images || index < 0) return
-  form.value.images.splice(index, 1)
-}
-
-async function saveProduct() {
-  if (!product.value) return
-  isSaving.value = true
-  error.value = null
-  try {
-    let imageUrls = (form.value.images || []).map(img => img.storageUrl)
-    if (imageFiles.value.length) {
-      const uploaded = await api.uploadImages(imageFiles.value)
-      imageUrls = imageUrls.concat(uploaded)
-    }
-
-    const request = {
-      productName: form.value.productName || undefined,
-      colorPrimaryName: form.value.colorPrimaryName || undefined,
-      description: form.value.description || undefined,
-      retailPrice: form.value.retailPrice ?? undefined,
-      externalCode: form.value.externalCode || undefined,
-
-      variantDisplayName: form.value.variants?.[0]?.displayName || undefined,
-      sizeCode: form.value.variants?.[0]?.sizeCode || undefined,
-      sizeText: form.value.variants?.[0]?.sizeText || undefined,
-      colorCode: form.value.variants?.[0]?.colorCode || undefined,
-      colorText: form.value.variants?.[0]?.colorText || undefined,
-      materialCode: form.value.variants?.[0]?.materialCode || undefined,
-      materialText: form.value.variants?.[0]?.materialText || undefined,
-
-      factoryPrice: form.value.variants?.[0]?.factoryPrice ?? undefined,
-      moq: form.value.variants?.[0]?.moq ?? undefined,
-      leadTimeDays: form.value.variants?.[0]?.leadTimeDays ?? undefined,
-
-      imageUrls,
-    }
-
-    await api.updateProduct(rspuId, request)
-    await loadProduct()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '保存失败'
-  } finally {
-    isSaving.value = false
-  }
-}
-
-async function deleteProduct() {
-  if (!confirm('确定要永久删除该商品吗？商品及其规格、图片和报价数据会从数据库中删除，无法恢复。')) return
-  isDeleting.value = true
-  try {
-    await api.deleteProduct(rspuId)
-    await router.push('/products')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除失败'
-  } finally {
-    isDeleting.value = false
-  }
 }
 
 onMounted(async () => {
@@ -163,7 +68,7 @@ onMounted(async () => {
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="mb-2 text-[25px] font-bold tracking-tight">{{ product?.productName || '商品详情' }}</h1>
-          <p class="text-xs text-muted">查看、编辑商品资料与规格报价。</p>
+          <p class="text-xs text-muted">查看商品资料与规格报价（商品数据由 RSDP 主项目统一维护）。</p>
         </div>
         <NuxtLink to="/products" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm hover:bg-cream">
           <AppIcon name="arrowLeft" size="4" />返回商品库
@@ -197,13 +102,6 @@ onMounted(async () => {
           <span class="rounded-md bg-bg px-2.5 py-1 text-xs text-muted">{{ product.rspuCode || product.rspuId }}</span>
           <span class="rounded-md px-2.5 py-1 text-xs" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark hover:bg-[#ebe3d8]" :class="isEditing ? 'bg-bronze text-white hover:bg-bronze-dark' : ''" @click="isEditing ? saveProduct() : isEditing = true">
-            {{ isEditing ? (isSaving ? '保存中…' : '保存') : '编辑' }}
-          </button>
-          <button type="button" class="rounded-lg bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50" :disabled="isDeleting" @click="deleteProduct">永久删除</button>
-          <button v-if="isEditing" type="button" class="rounded-lg border border-line px-4 py-2 text-sm hover:bg-cream" @click="resetForm">取消</button>
-        </div>
       </div>
 
       <div class="grid gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
@@ -218,38 +116,15 @@ onMounted(async () => {
             </button>
           </div>
           <p v-if="galleryImages.length" class="mt-1 text-xs text-muted">共 {{ galleryImages.length }} 张图片</p>
-          <div v-if="isEditing" class="mt-4 flex flex-wrap items-center gap-2">
-            <label class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted hover:bg-cream">
-              <AppIcon name="plus" size="4" />添加图片
-              <input type="file" accept="image/*" multiple class="sr-only" @change="onImageSelect">
-            </label>
-            <button v-if="selectedImage?.id?.startsWith('new-')" type="button" class="rounded-lg px-3 py-2 text-sm text-red-700 hover:bg-red-50" @click="removeNewImage(Number(selectedImage.id.slice(4)))">移除当前图片</button>
-            <button v-else-if="selectedImage && selectedImage.id !== 'primary'" type="button" class="rounded-lg px-3 py-2 text-sm text-red-700 hover:bg-red-50" @click="removeExistingImage(form.images?.findIndex(image => image.imageId === selectedImage?.id) ?? -1)">移除当前图片</button>
-          </div>
         </section>
 
         <div class="min-w-0 max-w-[900px] space-y-5">
           <section>
             <div class="mb-4 flex items-end justify-between gap-3 border-b border-line pb-3">
               <div><div class="mb-1 text-xs text-muted">商品资料</div><h2 class="text-base font-semibold">基础信息</h2></div>
-              <span v-if="!isEditing" class="text-xl font-bold text-bronze-dark">{{ formatPrice(product.retailPrice) }}</span>
+              <span class="text-xl font-bold text-bronze-dark">{{ formatPrice(product.retailPrice) }}</span>
             </div>
-            <div v-if="isEditing" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div v-for="field in [
-                { label: '商品名称', key: 'productName', type: 'text' },
-                { label: '主色', key: 'colorPrimaryName', type: 'text' },
-                { label: '外部编码', key: 'externalCode', type: 'text' },
-                { label: '零售参考价', key: 'retailPrice', type: 'number' },
-              ]" :key="field.key" class="flex flex-col gap-1.5">
-                <label class="text-xs font-medium text-muted">{{ field.label }}</label>
-                <input v-model="form[field.key as keyof typeof form]" :type="field.type" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze">
-              </div>
-              <div class="flex flex-col gap-1.5 sm:col-span-2">
-                <label class="text-xs font-medium text-muted">描述/配置说明</label>
-                <textarea v-model="form.description" rows="3" class="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" />
-              </div>
-            </div>
-            <div v-else>
+            <div>
               <dl class="grid gap-4 sm:grid-cols-2">
                 <div><dt class="mb-1 text-xs text-muted">商品名称</dt><dd class="text-sm font-semibold text-ink">{{ product.productName || '—' }}</dd></div>
                 <div><dt class="mb-1 text-xs text-muted">主色</dt><dd class="text-sm text-ink">{{ product.colorPrimaryName || '—' }}</dd></div>

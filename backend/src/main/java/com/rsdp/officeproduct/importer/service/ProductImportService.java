@@ -1,38 +1,44 @@
 package com.rsdp.officeproduct.importer.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.config.FactoryProperties;
 import com.rsdp.officeproduct.importer.config.ImportProperties;
 import com.rsdp.officeproduct.importer.dto.excel.ProductImportRow;
 import com.rsdp.officeproduct.importer.dto.request.ManualProductEntryRequest;
 import com.rsdp.officeproduct.importer.dto.request.ProductImportRequest;
-import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
+import com.rsdp.officeproduct.importer.dto.response.CategoryDictDto;
+import com.rsdp.officeproduct.importer.dto.response.ProductImportFailure;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportPreview;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportPreviewRow;
-import com.rsdp.officeproduct.importer.dto.response.ProductImportFailure;
 import com.rsdp.officeproduct.importer.dto.response.ProductImportResult;
-import com.rsdp.officeproduct.importer.entity.*;
-import com.rsdp.officeproduct.importer.mapper.*;
-import com.rsdp.officeproduct.importer.util.*;
+import com.rsdp.officeproduct.importer.util.DictNormalizes;
+import com.rsdp.officeproduct.importer.util.EmbeddedImagePreview;
+import com.rsdp.officeproduct.importer.util.EmbeddedImageStore;
+import com.rsdp.officeproduct.importer.util.ExcelFileValidator;
+import com.rsdp.officeproduct.importer.util.ImportRowCodec;
+import com.rsdp.officeproduct.importer.util.SupplierProductAdapter;
+import com.rsdp.officeproduct.importer.util.WorkbookImportSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
+/**
+ * 商品导入服务：office 侧负责 Excel/CSV 解析、清洗、预览与人机确认；
+ * 确认后的商品行转发写入主项目（RSDP 主库，归属服务账号本厂身份），office 本地不存商品。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -40,19 +46,13 @@ public class ProductImportService {
 
     private static final int MAX_ROWS = 500;
 
-    private final RspuMasterMapper rspuMasterMapper;
-    private final RspuVariantMapper rspuVariantMapper;
-    private final ImageAssetsMapper imageAssetsMapper;
-    private final FactoryProductPriceMapper factoryProductPriceMapper;
     private final DictService dictService;
     private final DictAliasService dictAliasService;
-    private final RspuCodeService rspuCodeService;
-    private final FactoryProperties factoryProperties;
     private final ImportProperties importProperties;
     private final DataCleansingService dataCleansingService;
     private final ObjectMapper objectMapper;
-    private final PlatformTransactionManager transactionManager;
     private final EmbeddedImageStore embeddedImageStore;
+    private final MainProductEntryGateway entryGateway;
 
     private static final List<String> SHARED_FIELDS = List.of(
         "productName", "colorPrimaryName", "description", "retailPrice");
@@ -96,7 +96,6 @@ public class ProductImportService {
         return preview;
     }
 
-    /** 兼容原文件导入接口，与预览确认使用同一处理逻辑。 */
     public ProductImportResult importProducts(MultipartFile file, boolean updateIfExists) {
         validateFile(file);
         ProductImportRequest request = new ProductImportRequest();
@@ -109,8 +108,10 @@ public class ProductImportService {
     public ProductImportResult importRowsWithFile(MultipartFile file, ProductImportRequest request) {
         validateFile(file);
         WorkbookImportSource.Source source = WorkbookImportSource.read(file);
-        Map<Integer, ProductImportPreviewRow> originals = source.rows().stream()
-            .collect(Collectors.toMap(ProductImportPreviewRow::getRowIndex, r -> r));
+        Map<Integer, ProductImportPreviewRow> originals = new HashMap<>();
+        for (ProductImportPreviewRow r : source.rows()) {
+            originals.put(r.getRowIndex(), r);
+        }
         if (request == null || request.getRows() == null || request.getRows().size() != originals.size())
             throw new BusinessException("预览数据与上传文件不一致，请重新预览");
         for (ProductImportPreviewRow row : request.getRows()) {
@@ -154,7 +155,7 @@ public class ProductImportService {
         return importRows(request, source);
     }
 
-    /** 同商品多行只建一次主档；每个规格行单独提交，失败不占用分组状态。 */
+    /** 同商品多行只建一次主档；每个规格行单独转发提交，失败不占用分组状态。 */
     public synchronized ProductImportResult importRows(ProductImportRequest request) {
         return importRows(request, null);
     }
@@ -165,8 +166,8 @@ public class ProductImportService {
         result.setTotalRows(prepared.preview().getRows().size());
         result.setCleansingReport(prepared.preview().getCleansingReport());
         Map<String, String> committedGroups = new HashMap<>();
-        Set<String> committedVariants = new HashSet<>();
-        Set<String> committedImageAssociations = new HashSet<>();
+        int variantCount = 0;
+        int imageCount = 0;
         for (ProductImportPreviewRow source : prepared.preview().getRows()) {
             ProductImportRow row = prepared.rows().get(source.getRowIndex());
             for (String warning : source.getImageWarnings()) {
@@ -183,32 +184,31 @@ public class ProductImportService {
                 continue;
             }
             try {
-                String committedId = committedGroups.get(source.getGroupKey());
-                RspuMaster existing = committedId != null ? rspuMasterMapper.selectById(committedId)
-                    : resolveExistingRspu(row.getRspuId(), row.getExternalCode());
-                if (existing != null && committedId == null && !request.isUpdateIfExists()) {
+                String committedRspuId = committedGroups.get(source.getGroupKey());
+                String existingRspuId = committedRspuId != null ? committedRspuId
+                    : entryGateway.findRspuIdByExternalCode(row.getExternalCode());
+                if (existingRspuId != null && committedRspuId == null && !request.isUpdateIfExists()) {
                     result.setSkippedCount(result.getSkippedCount() + 1);
                     result.getWarnings().add(new ProductImportFailure(source.getRowIndex(), row.getExternalCode(),
-                        existing.getRspuId(), "产品已存在，已跳过"));
+                        existingRspuId, "产品已存在，已跳过"));
                     continue;
                 }
                 List<EmbeddedImageStore.Saved> written = new ArrayList<>();
-                RowOutcome outcome;
+                MainProductEntryGateway.EntryResult outcome;
                 try {
                     if (workbook != null) {
                         appendEmbeddedImages(source, row,
                             workbook.images().getOrDefault(source.getRowIndex(), List.of()), written);
                     }
-                    outcome = processRowInTransaction(row, existing, prepared.dictCache(), committedId != null);
+                    outcome = forwardRow(row, existingRspuId, prepared.dictCache());
                 } catch (Exception e) {
                     written.forEach(embeddedImageStore::deleteIfCreated);
                     throw e;
                 }
                 committedGroups.put(source.getGroupKey(), outcome.rspuId());
-                if (outcome.variantId() != null) committedVariants.add(outcome.variantId());
+                variantCount++;
+                imageCount += outcome.imageCount();
                 result.setSuccessCount(result.getSuccessCount() + 1);
-                for (EmbeddedImageStore.Saved saved : written)
-                    committedImageAssociations.add(outcome.rspuId() + "\0" + saved.url());
             } catch (Exception e) {
                 log.warn("导入行失败，rowIndex={}", source.getRowIndex(), e);
                 result.getFailures().add(new ProductImportFailure(source.getRowIndex(), row.getExternalCode(),
@@ -216,10 +216,87 @@ public class ProductImportService {
             }
         }
         result.setProductCount(committedGroups.size());
-        result.setVariantCount(committedVariants.size());
-        result.setEmbeddedImageCount(committedImageAssociations.size());
+        result.setVariantCount(variantCount);
+        result.setEmbeddedImageCount(imageCount);
         result.setFailedCount(result.getFailures().size());
         return result;
+    }
+
+    /**
+     * 单行转发：新品走主项目 factory-entry（建主档+变体+报价+图片）；
+     * 更新模式（已有商品）更新基础字段 + 补变体 + 补报价。
+     */
+    private MainProductEntryGateway.EntryResult forwardRow(ProductImportRow row, String existingRspuId,
+                                                           Map<String, List<CategoryDictDto>> dictCache) {
+        MainProductEntryGateway.EntryPayload payload = toPayload(row, dictCache);
+        if (existingRspuId == null) {
+            return entryGateway.forwardFactoryEntry(payload);
+        }
+        entryGateway.updateBaseFields(existingRspuId, payload);
+        String variantId = resolveVariantId(existingRspuId, row, dictCache);
+        if (variantId == null) {
+            variantId = entryGateway.addVariant(existingRspuId, payload);
+        }
+        String rskuId = entryGateway.addQuote(existingRspuId, variantId, payload);
+        return new MainProductEntryGateway.EntryResult(existingRspuId, variantId, rskuId, null, 0);
+    }
+
+    /** 更新模式下匹配已有变体：先按显示名，再按 尺寸+颜色+材质 签名。 */
+    private String resolveVariantId(String rspuId, ProductImportRow row, Map<String, List<CategoryDictDto>> dictCache) {
+        var variants = entryGateway.listVariants(rspuId);
+        if (!variants.isArray()) {
+            return null;
+        }
+        String targetName = trim(row.getVariantDisplayName());
+        String targetSignature = variantSignature(row, dictCache);
+        String fallback = null;
+        for (var variant : variants) {
+            if (!"active".equals(variant.path("status").asText("active"))) continue;
+            String displayName = variant.path("displayName").asText("");
+            if (targetName != null && targetName.equals(displayName)) {
+                return variant.path("variantId").asText();
+            }
+            String signature = writeJsonListOrNull(List.of(
+                variant.path("sizeText").asText(variant.path("sizeCode").asText("")),
+                variant.path("colorText").asText(variant.path("colorCode").asText("")),
+                variant.path("materialText").asText(variant.path("materialCode").asText(""))));
+            if (signature.equals(targetSignature)) {
+                fallback = variant.path("variantId").asText();
+            }
+        }
+        return fallback;
+    }
+
+    /** 行 → 转发载荷（字典码未归一时尝试用原文归一，仍失败则原文随 text 字段透传）。 */
+    private MainProductEntryGateway.EntryPayload toPayload(ProductImportRow row, Map<String, List<CategoryDictDto>> dictCache) {
+        List<String> imageUrls = new ArrayList<>();
+        if (StringUtils.hasText(row.getPrimaryImageUrl())) imageUrls.add(row.getPrimaryImageUrl().trim());
+        imageUrls.addAll(splitCsv(row.getDetailImageUrls()));
+        return new MainProductEntryGateway.EntryPayload(
+            trim(row.getExternalCode()),
+            trim(row.getProductName()),
+            trim(row.getColorPrimaryName()),
+            trim(row.getDescription()),
+            row.getRetailPrice(),
+            trim(row.getVariantDisplayName()),
+            resolveCodeOrNull("size", row.getSizeCode(), dictCache.get("size")),
+            StringUtils.hasText(row.getSizeText()) ? row.getSizeText().trim() : null,
+            row.getWidthMm(), row.getDepthMm(), row.getHeightMm(),
+            resolveCodeOrNull("color", row.getColorCode(), dictCache.get("color")),
+            StringUtils.hasText(row.getColorText()) ? row.getColorText().trim() : null,
+            // 主项目要求变体主材质码必填：材质码缺失时用材质原文再归一一次，仍失败用默认材质码（板式）
+            entryGateway.effectiveMaterialCode(
+                firstNonNull(resolveCodeOrNull("material", row.getMaterialCode(), dictCache.get("material")),
+                    resolveCodeOrNull("material", row.getMaterialText(), dictCache.get("material")))),
+            StringUtils.hasText(row.getMaterialText()) ? row.getMaterialText().trim() : null,
+            row.getFactoryPrice(),
+            row.getMoq(),
+            row.getLeadTimeDays(),
+            imageUrls);
+    }
+
+    private String firstNonNull(String first, String second) {
+        return first != null ? first : second;
     }
 
     private void appendEmbeddedImages(ProductImportPreviewRow source, ProductImportRow row,
@@ -244,20 +321,19 @@ public class ProductImportService {
     }
 
     private record PreparedImport(ProductImportPreview preview, Map<Integer, ProductImportRow> rows,
-                                  Map<String, List<CategoryDict>> dictCache) { }
-    private record RowOutcome(String rspuId, String variantId) { }
+                                  Map<String, List<CategoryDictDto>> dictCache) { }
 
     private PreparedImport prepare(ProductImportRequest request) {
         if (request == null || request.getRows() == null || request.getRows().isEmpty()) {
             throw new BusinessException("没有可导入的商品行");
         }
-        if (request.getRows().size() > MAX_ROWS) throw new BusinessException("单次导入不能超过 500 行");
+        if (request.getRows().size() > MAX_ROWS) throw new BusinessException("单次导入不能超过 " + MAX_ROWS + " 行");
         ProductImportPreview preview = new ProductImportPreview();
         preview.setColumns(ImportRowCodec.columns());
-        Map<String, List<CategoryDict>> dicts = preloadDicts();
+        Map<String, List<CategoryDictDto>> dicts = preloadDicts();
         Map<Integer, ProductImportRow> typed = new LinkedHashMap<>();
         Map<String, List<ProductImportPreviewRow>> groups = new LinkedHashMap<>();
-        Map<String, RspuMaster> existingGroups = new HashMap<>();
+        Map<String, String> existingGroups = new HashMap<>();
         Set<Integer> rowNumbers = new HashSet<>();
         for (ProductImportPreviewRow input : request.getRows()) {
             if (input == null || input.getFields() == null || input.getRowIndex() < 2
@@ -291,19 +367,17 @@ public class ProductImportService {
             dataCleansingService.cleanse(row, source.getRowIndex(), preview.getCleansingReport());
             normalizeRow(row, dicts);
             ImportRowCodec.encode(row, source);
-            RspuMaster existing = null;
-            try { existing = resolveExistingRspu(row.getRspuId(), row.getExternalCode()); }
-            catch (BusinessException e) { source.getErrors().add(e.getMessage()); }
-            String key = existing != null ? "id:" + existing.getRspuId()
+            String existingRspuId = entryGateway.findRspuIdByExternalCode(row.getExternalCode());
+            String key = existingRspuId != null ? "id:" + existingRspuId
                 : StringUtils.hasText(row.getExternalCode()) ? "code:" + row.getExternalCode()
                 : "row:" + source.getRowIndex();
             source.setGroupKey(key);
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(source);
-            if (existing != null) existingGroups.put(key, existing);
+            if (existingRspuId != null) existingGroups.put(key, existingRspuId);
         }
         for (var entry : groups.entrySet()) {
             List<ProductImportPreviewRow> members = entry.getValue();
-            RspuMaster existing = existingGroups.get(entry.getKey());
+            String existingRspuId = existingGroups.get(entry.getKey());
             Map<String, String> shared = new HashMap<>();
             Set<String> conflicts = new LinkedHashSet<>();
             for (ProductImportPreviewRow member : members) {
@@ -334,9 +408,8 @@ public class ProductImportService {
                 for (String decodeError : decodeSource.getErrors()) {
                     if (!member.getErrors().contains(decodeError)) member.getErrors().add(decodeError);
                 }
-                if (!StringUtils.hasText(row.getProductName()) && existing != null) row.setProductName(existing.getProductName());
                 normalizeRow(row, dicts);
-                String error = validateRow(row, dicts);
+                String error = validateRow(row);
                 if (error != null) member.getErrors().add(error);
                 if (member.getSourceRowIndex() > 0) {
                     int[] exact = SupplierProductAdapter.exactDimensions(row.getSizeText());
@@ -345,19 +418,19 @@ public class ProductImportService {
                         || (row.getHeightMm() != null && !row.getHeightMm().equals(exact[2]))))
                         member.getErrors().add("结构化尺寸与三段尺寸原文不一致，请核对毫米值");
                 }
-                if (member.getErrors().isEmpty() && (existing == null || request.isUpdateIfExists())) {
+                if (member.getErrors().isEmpty() && (existingRspuId == null || request.isUpdateIfExists())) {
                     String signature = variantSignature(row, dicts);
                     if (!variants.add(signature)) member.getErrors().add("同一商品存在重复规格（尺寸、颜色、材质），请合并或跳过重复行");
                 }
                 ImportRowCodec.encode(row, member);
                 addReviewWarnings(member, row);
                 typed.put(member.getRowIndex(), row);
-                member.setAction(existing != null ? (request.isUpdateIfExists() ? "更新已有商品" : "跳过已有商品")
+                member.setAction(existingRspuId != null ? (request.isUpdateIfExists() ? "更新已有商品" : "跳过已有商品")
                     : members.indexOf(member) == 0 ? "新增商品" : "新增规格");
                 if (!member.getErrors().isEmpty()) preview.setInvalidRows(preview.getInvalidRows() + 1);
             }
             if (members.stream().anyMatch(r -> r.getErrors().isEmpty())
-                && (existing == null || request.isUpdateIfExists())) preview.setProductCount(preview.getProductCount() + 1);
+                && (existingRspuId == null || request.isUpdateIfExists())) preview.setProductCount(preview.getProductCount() + 1);
         }
         return new PreparedImport(preview, typed, dicts);
     }
@@ -379,7 +452,7 @@ public class ProductImportService {
         if (member.getEmbeddedImageCount() == 0) warnings.add("未关联内嵌图片，请核对图片归属或稍后补图");
     }
 
-    private String variantSignature(ProductImportRow row, Map<String, List<CategoryDict>> dicts) {
+    private String variantSignature(ProductImportRow row, Map<String, List<CategoryDictDto>> dicts) {
         String size = effectiveOf(resolveCodeOrNull("size", row.getSizeCode(), dicts.get("size")), row.getSizeText());
         return writeJsonListOrNull(List.of(
             size.isEmpty() ? rowDimensionKey(row) : size,
@@ -388,17 +461,7 @@ public class ProductImportService {
     }
 
     private String rowDimensionKey(ProductImportRow row) {
-        return String.valueOf(row.getWidthMm()) + "/" + row.getDepthMm() + "/" + row.getHeightMm();
-    }
-
-    private String variantDimensionKey(RspuVariant variant) {
-        if (!StringUtils.hasText(variant.getDimensions())) return "null/null/null";
-        try {
-            Map<?, ?> dimensions = objectMapper.readValue(variant.getDimensions(), Map.class);
-            return dimensions.get("widthMm") + "/" + dimensions.get("depthMm") + "/" + dimensions.get("heightMm");
-        } catch (Exception e) {
-            return "null/null/null";
-        }
+        return String.valueOf(row.getWidthMm()) + "/" + String.valueOf(row.getDepthMm()) + "/" + String.valueOf(row.getHeightMm());
     }
 
     private void validateFile(MultipartFile file) {
@@ -414,190 +477,19 @@ public class ProductImportService {
         }
     }
 
-    private Map<String, List<CategoryDict>> preloadDicts() {
-        Map<String, List<CategoryDict>> cache = new HashMap<>();
+    private Map<String, List<CategoryDictDto>> preloadDicts() {
+        Map<String, List<CategoryDictDto>> cache = new HashMap<>();
         cache.put("material", safeList(dictService.listByType("material")));
         cache.put("size", safeList(dictService.listByType("size")));
         cache.put("color", safeList(dictService.listByType("color")));
         return cache;
     }
 
-    private List<CategoryDict> safeList(List<CategoryDict> list) {
+    private List<CategoryDictDto> safeList(List<CategoryDictDto> list) {
         return list == null ? List.of() : list;
     }
 
-    private RspuMaster resolveExistingRspu(String rspuId, String externalCode) {
-        RspuMaster byId = StringUtils.hasText(rspuId) ? rspuMasterMapper.selectById(rspuId.trim()) : null;
-        if (StringUtils.hasText(rspuId) && byId == null) throw new BusinessException("RSPU ID 不存在: " + rspuId);
-        List<RspuMaster> byCode = StringUtils.hasText(externalCode) ? rspuMasterMapper.selectList(
-            new QueryWrapper<RspuMaster>().eq("external_code", externalCode.trim())) : List.of();
-        if (byCode.size() > 1) throw new BusinessException("外部编码对应多个商品，请先整理重复商品或移除外部编码并填写 RSPU ID");
-        RspuMaster match = byCode.isEmpty() ? null : byCode.getFirst();
-        if (byId != null && match != null && !byId.getRspuId().equals(match.getRspuId())) {
-            throw new BusinessException("RSPU ID 与外部编码指向不同商品");
-        }
-        if (byId != null && StringUtils.hasText(externalCode) && StringUtils.hasText(byId.getExternalCode())
-            && !externalCode.trim().equals(byId.getExternalCode())) throw new BusinessException("外部编码与已有商品不一致");
-        return byId != null ? byId : match;
-    }
-
-    private RowOutcome processRowInTransaction(ProductImportRow row, RspuMaster existing,
-                                               Map<String, List<CategoryDict>> dictCache, boolean groupCommitted) {
-        DefaultTransactionDefinition def = new DefaultTransactionDefinition();
-        TransactionStatus status = transactionManager.getTransaction(def);
-        try {
-            RspuMaster rspu = existing;
-            if (!groupCommitted) {
-                rspu = existing != null ? updateRspu(existing, row) : createRspu(row);
-            }
-            RspuVariant variant = shouldCreateVariant(row) || hasFactoryPrice(row)
-                ? createVariantIfNotExists(rspu.getRspuId(), row, dictCache) : null;
-            saveImages(rspu.getRspuId(), row);
-            saveFactoryPrice(rspu.getRspuId(), variant != null ? variant.getVariantId() : null, row);
-            transactionManager.commit(status);
-            return new RowOutcome(rspu.getRspuId(), variant != null ? variant.getVariantId() : null);
-        } catch (Exception e) {
-            if (!status.isCompleted()) transactionManager.rollback(status);
-            if (e instanceof DataIntegrityViolationException constraint) {
-                throw new BusinessException(ConstraintViolations.toUserMessage(constraint, "产品编码或规格冲突"));
-            }
-            throw e;
-        }
-    }
-
-    private RspuMaster createRspu(ProductImportRow row) {
-        String rspuId = IdGenerator.rspuId();
-        RspuMaster rspu = buildRspuFromRow(new RspuMaster(), row, false);
-        rspu.setRspuId(rspuId);
-        rspu.setExternalCode(trim(row.getExternalCode()));
-        rspu.setStatus("active");
-        rspu.setAuditStatus("pending");
-        rspu.setCreatedBy(CurrentUserContext.currentUsername());
-        rspu.setCreatedAt(LocalDateTime.now());
-        rspu.setUpdatedAt(LocalDateTime.now());
-        rspuMasterMapper.insert(rspu);
-
-        rspuCodeService.assignCode(rspuId);
-
-        return rspu;
-    }
-
-    private RspuMaster updateRspu(RspuMaster rspu, ProductImportRow row) {
-        buildRspuFromRow(rspu, row, true);
-        if (!StringUtils.hasText(rspu.getExternalCode()) && StringUtils.hasText(row.getExternalCode())) rspu.setExternalCode(row.getExternalCode());
-        rspu.setAuditStatus("pending");
-        rspu.setUpdatedAt(LocalDateTime.now());
-        rspuMasterMapper.updateById(rspu);
-        return rspu;
-    }
-
-    private RspuMaster buildRspuFromRow(RspuMaster rspu, ProductImportRow row, boolean isUpdate) {
-        if (!isUpdate || StringUtils.hasText(row.getProductName())) {
-            rspu.setProductName(trim(row.getProductName()));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getColorPrimaryName())) {
-            rspu.setColorPrimaryName(trim(row.getColorPrimaryName()));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getDescription())) {
-            rspu.setDescription(trim(row.getDescription()));
-        }
-        if (!isUpdate || row.getRetailPrice() != null) {
-            rspu.setRetailPrice(row.getRetailPrice());
-        }
-        if (!isUpdate || StringUtils.hasText(row.getPrimaryImageUrl())) {
-            rspu.setPrimaryImageUrl(trim(row.getPrimaryImageUrl()));
-        }
-        if (!isUpdate || StringUtils.hasText(row.getDetailImageUrls())) {
-            rspu.setDetailImageUrls(writeJsonListOrNull(splitCsv(row.getDetailImageUrls())));
-        }
-        return rspu;
-    }
-
-    private boolean shouldCreateVariant(ProductImportRow row) {
-        return StringUtils.hasText(row.getVariantDisplayName())
-            || StringUtils.hasText(row.getSizeCode())
-            || StringUtils.hasText(row.getSizeText())
-            || StringUtils.hasText(row.getColorCode())
-            || StringUtils.hasText(row.getColorText())
-            || StringUtils.hasText(row.getMaterialCode())
-            || StringUtils.hasText(row.getMaterialText())
-            || row.getWidthMm() != null || row.getDepthMm() != null || row.getHeightMm() != null
-            || row.getPackageCount() != null || row.getPackageVolumeCbm() != null || row.getGrossWeight() != null;
-    }
-
-    private RspuVariant createVariantIfNotExists(String rspuId, ProductImportRow row,
-                                          Map<String, List<CategoryDict>> dictCache) {
-        String sizeCode = resolveCodeOrNull("size", row.getSizeCode(), dictCache.get("size"));
-        String colorCode = resolveCodeOrNull("color", row.getColorCode(), dictCache.get("color"));
-        String materialCode = resolveCodeOrNull("material", row.getMaterialCode(), dictCache.get("material"));
-
-        String effSize = effectiveOf(sizeCode, row.getSizeText());
-        String effColor = effectiveOf(colorCode, row.getColorText());
-        String effMaterial = effectiveOf(materialCode, row.getMaterialText());
-
-        List<RspuVariant> existing = rspuVariantMapper.selectList(
-            new QueryWrapper<RspuVariant>().eq("rspu_id", rspuId));
-        RspuVariant duplicate = existing.stream().filter(v ->
-            effSize.equals(effectiveOf(v.getSizeCode(), v.getSizeText()))
-                && (!effSize.isEmpty() || rowDimensionKey(row).equals(variantDimensionKey(v)))
-                && effColor.equals(effectiveOf(v.getColorCode(), v.getColorText()))
-                && effMaterial.equals(effectiveOf(v.getMaterialCode(), v.getMaterialText())))
-            .findFirst().orElse(null);
-        if (duplicate != null) {
-            if (StringUtils.hasText(row.getVariantDisplayName())) duplicate.setDisplayName(row.getVariantDisplayName());
-            String dimensions = dimensionsJson(row, duplicate.getDimensions());
-            if (dimensions != null) duplicate.setDimensions(dimensions);
-            if (row.getPackageCount() != null) duplicate.setPackageCount(row.getPackageCount());
-            if (row.getPackageVolumeCbm() != null) duplicate.setPackageVolumeCbm(row.getPackageVolumeCbm());
-            if (row.getGrossWeight() != null) duplicate.setGrossWeight(row.getGrossWeight());
-            duplicate.setUpdatedAt(LocalDateTime.now());
-            rspuVariantMapper.updateById(duplicate);
-            return duplicate;
-        }
-
-        String variantId = "VAR-" + UUID.randomUUID().toString().toUpperCase(Locale.ROOT);
-
-        RspuVariant variant = new RspuVariant();
-        variant.setVariantId(variantId);
-        variant.setRspuId(rspuId);
-        variant.setDisplayName(StringUtils.hasText(row.getVariantDisplayName())
-            ? row.getVariantDisplayName().trim()
-            : "默认变体");
-        variant.setSizeCode(sizeCode);
-        variant.setSizeText(row.getSizeText());
-        variant.setDimensions(dimensionsJson(row, null));
-        variant.setPackageCount(row.getPackageCount());
-        variant.setPackageVolumeCbm(row.getPackageVolumeCbm());
-        variant.setGrossWeight(row.getGrossWeight());
-        variant.setColorCode(colorCode);
-        variant.setColorText(row.getColorText());
-        variant.setMaterialCode(materialCode);
-        variant.setMaterialText(row.getMaterialText());
-        variant.setStatus("active");
-        variant.setCreatedAt(LocalDateTime.now());
-        variant.setUpdatedAt(LocalDateTime.now());
-        rspuVariantMapper.insert(variant);
-        return variant;
-    }
-
-    private String dimensionsJson(ProductImportRow row, String existingJson) {
-        if (row.getWidthMm() == null && row.getDepthMm() == null && row.getHeightMm() == null) return null;
-        Map<String, Object> dimensions = new LinkedHashMap<>();
-        if (StringUtils.hasText(existingJson)) {
-            try { dimensions.putAll(objectMapper.readValue(existingJson, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {})); }
-            catch (Exception ignored) { /* Invalid old JSON is replaced by confirmed values. */ }
-        }
-        if (row.getWidthMm() != null) dimensions.put("widthMm", row.getWidthMm());
-        if (row.getDepthMm() != null) dimensions.put("depthMm", row.getDepthMm());
-        if (row.getHeightMm() != null) dimensions.put("heightMm", row.getHeightMm());
-        if (StringUtils.hasText(row.getSourceSizeText())) dimensions.put("sourceSizeText", row.getSourceSizeText());
-        dimensions.put("unit", "mm");
-        dimensions.put("source", "import_confirmed");
-        try { return objectMapper.writeValueAsString(dimensions); }
-        catch (Exception e) { throw new IllegalStateException("无法保存规格尺寸", e); }
-    }
-
-    private String resolveCodeOrNull(String dictType, String raw, List<CategoryDict> dicts) {
+    private String resolveCodeOrNull(String dictType, String raw, List<CategoryDictDto> dicts) {
         if (!StringUtils.hasText(raw)) {
             return null;
         }
@@ -616,84 +508,7 @@ public class ProductImportService {
         return StringUtils.hasText(text) ? text.trim() : "";
     }
 
-    private void saveImages(String rspuId, ProductImportRow row) {
-        LinkedHashSet<String> urls = new LinkedHashSet<>();
-        if (StringUtils.hasText(row.getPrimaryImageUrl())) urls.add(row.getPrimaryImageUrl().trim());
-        urls.addAll(splitCsv(row.getDetailImageUrls()));
-        // A product without images has nothing to synchronize. Otherwise the final
-        // updateById contains only the ID and MyBatis-Plus emits an empty SET clause.
-        if (urls.isEmpty()) return;
-        List<ImageAssets> existing = imageAssetsMapper.selectList(new QueryWrapper<ImageAssets>().eq("rspu_id", rspuId));
-        Map<String, ImageAssets> byUrl = existing.stream().collect(Collectors.toMap(ImageAssets::getStorageUrl,
-            a -> a, (a, b) -> a));
-        // 显式主图替换时同步资产的主图标记；重复 URL 复用现有资产。
-        boolean hasPrimary = existing.stream().anyMatch(a -> Boolean.TRUE.equals(a.getPrimary()));
-        if (StringUtils.hasText(row.getPrimaryImageUrl())) {
-            String primary = row.getPrimaryImageUrl().trim();
-            for (ImageAssets image : existing) {
-                boolean isPrimary = primary.equals(image.getStorageUrl());
-                if (!Objects.equals(image.getPrimary(), isPrimary)) {
-                    image.setPrimary(isPrimary);
-                    image.setImageType(isPrimary ? "primary" : "detail");
-                    imageAssetsMapper.updateById(image);
-                }
-            }
-            hasPrimary = byUrl.containsKey(primary);
-        }
-        for (String url : urls) {
-            if (byUrl.containsKey(url)) continue;
-            ImageAssets image = new ImageAssets();
-            image.setImageId(IdGenerator.imageId());
-            image.setRspuId(rspuId);
-            boolean primary = !hasPrimary;
-            image.setImageType(primary ? "primary" : "detail");
-            image.setStorageUrl(url);
-            image.setPrimary(primary);
-            image.setUploadedBy(CurrentUserContext.currentUsername());
-            image.setCreatedAt(LocalDateTime.now());
-            imageAssetsMapper.insert(image);
-            hasPrimary |= primary;
-        }
-
-        // 同步主档图片字段，方便列表缩略图与旧接口读取
-        List<ImageAssets> allImages = imageAssetsMapper.selectList(
-            new QueryWrapper<ImageAssets>().eq("rspu_id", rspuId).orderByAsc("created_at"));
-        String primaryUrl = allImages.stream().filter(a -> Boolean.TRUE.equals(a.getPrimary()))
-            .map(ImageAssets::getStorageUrl).findFirst().orElse(null);
-        if (primaryUrl == null && !allImages.isEmpty()) {
-            primaryUrl = allImages.get(0).getStorageUrl();
-        }
-        final String finalPrimaryUrl = primaryUrl;
-        List<String> detailUrls = allImages.stream()
-            .filter(a -> !a.getStorageUrl().equals(finalPrimaryUrl))
-            .map(ImageAssets::getStorageUrl).toList();
-        RspuMaster rspu = new RspuMaster();
-        rspu.setRspuId(rspuId);
-        rspu.setPrimaryImageUrl(primaryUrl);
-        rspu.setDetailImageUrls(writeJsonListOrNull(detailUrls));
-        rspuMasterMapper.updateById(rspu);
-    }
-
-    private boolean hasFactoryPrice(ProductImportRow row) {
-        return row.getFactoryPrice() != null || row.getMoq() != null || row.getLeadTimeDays() != null;
-    }
-
-    private void saveFactoryPrice(String rspuId, String variantId, ProductImportRow row) {
-        if (!hasFactoryPrice(row)) return;
-        if (factoryProperties.getFactoryId() == null) throw new BusinessException("默认工厂尚未初始化");
-        if (variantId == null) throw new BusinessException("报价必须关联商品规格");
-        FactoryProductPrice price = new FactoryProductPrice();
-        price.setRspuId(rspuId);
-        price.setVariantId(variantId);
-        price.setFactoryId(factoryProperties.getFactoryId());
-        price.setFactoryPrice(row.getFactoryPrice());
-        price.setMoq(row.getMoq());
-        price.setLeadTimeDays(row.getLeadTimeDays());
-        price.setEffectiveDate(LocalDate.now());
-        factoryProductPriceMapper.upsert(price);
-    }
-
-    private String validateRow(ProductImportRow row, Map<String, List<CategoryDict>> dictCache) {
+    private String validateRow(ProductImportRow row) {
         if (!StringUtils.hasText(row.getProductName())) return "商品名称不能为空";
         if (row.getFactoryPrice() != null && (row.getFactoryPrice().signum() < 0
             || row.getFactoryPrice().compareTo(new BigDecimal("9999999999.99")) > 0)) return "工厂价必须在 0~9999999999.99 之间";
@@ -724,9 +539,6 @@ public class ProductImportService {
             return "宽度和进深必须同时填写毫米值";
         if (StringUtils.hasText(row.getColorText()) && row.getColorText().length() > 100) return "颜色原文不能超过 100 字符";
         if (StringUtils.hasText(row.getMaterialText()) && row.getMaterialText().length() > 255) return "材质原文不能超过 255 字符";
-        if (StringUtils.hasText(row.getRspuId()) && row.getRspuId().trim().length() > 64) {
-            return "RSPU ID 长度不能超过 64";
-        }
         if (StringUtils.hasText(row.getExternalCode()) && row.getExternalCode().trim().length() > 64) {
             return "外部编码 长度不能超过 64";
         }
@@ -743,154 +555,29 @@ public class ProductImportService {
     private boolean validImageUrl(String value) {
         try {
             var uri = java.net.URI.create(value);
+            // office 本地上传的内嵌图片是 /uploads/images/ 相对路径，转发时从磁盘读取
+            if (value.startsWith("/uploads/")) return value.length() <= 500;
             return value.length() <= 500 && ("http".equalsIgnoreCase(uri.getScheme())
                 || "https".equalsIgnoreCase(uri.getScheme())) && uri.getHost() != null;
         } catch (IllegalArgumentException e) { return false; }
     }
 
-    // ==================== 手工录入与商品维护 ====================
+    // ==================== 手工录入 ====================
 
-    @Transactional
+    /** 手工录入：校验后转发主项目 factory-entry（落主库、归属本厂）。 */
     public Map<String, Object> createManualEntry(ManualProductEntryRequest request) {
         ProductImportRow row = toImportRow(request);
-        Map<String, List<CategoryDict>> dictCache = preloadDicts();
+        Map<String, List<CategoryDictDto>> dictCache = preloadDicts();
         normalizeRow(row, dictCache);
-        String error = validateRow(row, dictCache);
+        String error = validateRow(row);
         if (error != null) throw new BusinessException(error);
 
-        RspuMaster rspu = new RspuMaster();
-        buildRspuFromRow(rspu, row, false);
-        rspu.setRspuId(IdGenerator.rspuId());
-        rspu.setExternalCode(trim(row.getExternalCode()));
-        rspu.setStatus("active");
-        rspu.setAuditStatus("pending");
-        rspu.setCreatedBy(CurrentUserContext.currentUsername());
-        rspu.setCreatedAt(LocalDateTime.now());
-        rspu.setUpdatedAt(LocalDateTime.now());
-        rspuMasterMapper.insert(rspu);
-
-        rspuCodeService.assignCode(rspu.getRspuId());
-
-        RspuVariant variant = createVariantIfNotExists(rspu.getRspuId(), row, dictCache);
-        saveImages(rspu.getRspuId(), row);
-        saveFactoryPrice(rspu.getRspuId(), variant.getVariantId(), row);
-
-        return Map.of(
-            "rspuId", rspu.getRspuId(),
-            "variantId", variant.getVariantId(),
-            "message", "手工录入产品成功"
-        );
-    }
-
-    @Transactional
-    public Map<String, Object> updateProduct(String rspuId, ManualProductEntryRequest request) {
-        RspuMaster existing = rspuMasterMapper.selectById(rspuId);
-        if (existing == null) throw new BusinessException("商品不存在: " + rspuId);
-
-        ProductImportRow row = toImportRow(request);
-        Map<String, List<CategoryDict>> dictCache = preloadDicts();
-        normalizeRow(row, dictCache);
-        String error = validateRow(row, dictCache);
-        if (error != null) throw new BusinessException(error);
-
-        buildRspuFromRow(existing, row, true);
-        if (StringUtils.hasText(row.getExternalCode())) existing.setExternalCode(row.getExternalCode());
-        if (StringUtils.hasText(request.getDescription())) existing.setDescription(request.getDescription().trim());
-        existing.setUpdatedAt(LocalDateTime.now());
-        rspuMasterMapper.updateById(existing);
-
-        List<RspuVariant> variants = rspuVariantMapper.selectList(
-            new QueryWrapper<RspuVariant>().eq("rspu_id", rspuId).orderByAsc("created_at"));
-        RspuVariant variant = variants.isEmpty() ? null : variants.get(0);
-        if (variant == null) {
-            variant = createVariantIfNotExists(rspuId, row, dictCache);
-        } else {
-            if (StringUtils.hasText(row.getVariantDisplayName())) variant.setDisplayName(row.getVariantDisplayName());
-            if (StringUtils.hasText(row.getSizeCode())) variant.setSizeCode(row.getSizeCode());
-            if (StringUtils.hasText(row.getSizeText())) variant.setSizeText(row.getSizeText());
-            String dimensions = dimensionsJson(row, variant.getDimensions());
-            if (dimensions != null) variant.setDimensions(dimensions);
-            if (StringUtils.hasText(row.getColorCode())) variant.setColorCode(row.getColorCode());
-            if (StringUtils.hasText(row.getColorText())) variant.setColorText(row.getColorText());
-            if (StringUtils.hasText(row.getMaterialCode())) variant.setMaterialCode(row.getMaterialCode());
-            if (StringUtils.hasText(row.getMaterialText())) variant.setMaterialText(row.getMaterialText());
-            variant.setUpdatedAt(LocalDateTime.now());
-            rspuVariantMapper.updateById(variant);
-        }
-
-        saveImages(rspuId, row);
-        saveFactoryPrice(rspuId, variant.getVariantId(), row);
-
-        return Map.of("rspuId", rspuId, "message", "商品更新成功");
-    }
-
-    @Transactional
-    public void deleteProduct(String rspuId) {
-        deleteProducts(List.of(rspuId));
-    }
-
-    /**
-     * Permanently removes products. This intentionally bypasses MyBatis-Plus
-     * logical deletion so that the product and its owned rows are gone from
-     * the database after the transaction commits.
-     */
-    @Transactional
-    public int deleteProducts(Collection<String> rspuIds) {
-        List<String> ids = rspuIds == null ? List.of() : rspuIds.stream()
-            .filter(Objects::nonNull)
-            .map(String::trim)
-            .filter(id -> !id.isEmpty())
-            .distinct()
-            .toList();
-        if (ids.isEmpty()) throw new BusinessException("请选择要删除的商品");
-        int deleted = rspuMasterMapper.hardDeleteByRspuIds(ids);
-        if (deleted != ids.size()) throw new BusinessException("部分商品不存在或已删除，批量删除已取消，请刷新商品库后重试");
-        return deleted;
-    }
-
-    @Transactional
-    public void restoreProduct(String rspuId) {
-        int rows = rspuMasterMapper.restoreById(rspuId);
-        if (rows == 0) throw new BusinessException("商品不存在或未被删除: " + rspuId);
-    }
-
-    public ProductDetailDto getProductDetail(String rspuId) {
-        RspuMaster rspu = rspuMasterMapper.selectById(rspuId);
-        if (rspu == null) throw new BusinessException("商品不存在: " + rspuId);
-        return toDetailDto(rspu);
-    }
-
-    private ProductDetailDto toDetailDto(RspuMaster rspu) {
-        ProductDetailDto dto = new ProductDetailDto();
-        org.springframework.beans.BeanUtils.copyProperties(rspu, dto);
-
-        List<RspuVariant> variants = rspuVariantMapper.selectList(
-            new QueryWrapper<RspuVariant>().eq("rspu_id", rspu.getRspuId()).orderByAsc("created_at"));
-        List<FactoryProductPrice> prices = factoryProductPriceMapper.selectList(
-            new QueryWrapper<FactoryProductPrice>().eq("rspu_id", rspu.getRspuId()));
-        Map<String, FactoryProductPrice> priceByVariant = prices.stream()
-            .collect(Collectors.toMap(FactoryProductPrice::getVariantId, p -> p, (a, b) -> a));
-
-        for (RspuVariant v : variants) {
-            ProductDetailDto.Variant vd = new ProductDetailDto.Variant();
-            org.springframework.beans.BeanUtils.copyProperties(v, vd);
-            FactoryProductPrice price = priceByVariant.get(v.getVariantId());
-            if (price != null) {
-                vd.setFactoryPrice(price.getFactoryPrice());
-                vd.setMoq(price.getMoq());
-                vd.setLeadTimeDays(price.getLeadTimeDays());
-            }
-            dto.getVariants().add(vd);
-        }
-
-        List<ImageAssets> images = imageAssetsMapper.selectList(
-            new QueryWrapper<ImageAssets>().eq("rspu_id", rspu.getRspuId()).orderByDesc("is_primary").orderByAsc("created_at"));
-        for (ImageAssets img : images) {
-            ProductDetailDto.Image id = new ProductDetailDto.Image();
-            org.springframework.beans.BeanUtils.copyProperties(img, id);
-            dto.getImages().add(id);
-        }
-        return dto;
+        MainProductEntryGateway.EntryResult result = entryGateway.forwardFactoryEntry(toPayload(row, dictCache));
+        Map<String, Object> response = new HashMap<>();
+        response.put("rspuId", result.rspuId());
+        response.put("variantId", result.variantId());
+        response.put("message", "手工录入产品成功");
+        return response;
     }
 
     private ProductImportRow toImportRow(ManualProductEntryRequest request) {
@@ -922,7 +609,7 @@ public class ProductImportService {
         return row;
     }
 
-    private void normalizeRow(ProductImportRow row, Map<String, List<CategoryDict>> dictCache) {
+    private void normalizeRow(ProductImportRow row, Map<String, List<CategoryDictDto>> dictCache) {
         row.setRspuId(trim(row.getRspuId()));
         row.setExternalCode(trim(row.getExternalCode()));
         row.setProductName(trim(row.getProductName()));
@@ -946,32 +633,24 @@ public class ProductImportService {
             && !StringUtils.hasText(row.getMaterialText())) row.setMaterialText(row.getMaterialCode());
     }
 
+    private String trim(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
     private List<String> splitCsv(String value) {
+        if (!StringUtils.hasText(value)) return List.of();
         List<String> result = new ArrayList<>();
-        if (!StringUtils.hasText(value)) {
-            return result;
-        }
-        for (String part : value.split("[,，;；]")) {
-            if (StringUtils.hasText(part)) {
-                result.add(part.trim());
-            }
+        for (String part : value.split(",")) {
+            if (StringUtils.hasText(part)) result.add(part.trim());
         }
         return result;
     }
 
     private String writeJsonListOrNull(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
         try {
             return objectMapper.writeValueAsString(values);
         } catch (Exception e) {
-            log.warn("JSON 序列化失败", e);
             return null;
         }
-    }
-
-    private String trim(String value) {
-        return value != null ? value.trim() : null;
     }
 }

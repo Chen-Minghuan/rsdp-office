@@ -55,97 +55,12 @@ create table if not exists office_render_preview (
 );
 create index if not exists idx_render_preview_history on office_render_preview(project_id, zone_id, created_at desc);
 
--- 品类字典
-create table if not exists category_dict (
-    dict_type varchar(50) not null,
-    dict_code varchar(50) not null,
-    dict_name varchar(100) not null,
-    dict_name_en varchar(100),
-    parent_code varchar(50),
-    sort_order int default 0,
-    status varchar(20) default 'active',
-    aliases text,
-    primary key (dict_type, dict_code)
-);
-
--- 六维定义表保留已有资料；新商品录入不使用。
-create table if not exists six_dim_schema (
-    id bigserial primary key,
-    category_code varchar(50) not null,
-    dim_code char(1) not null,
-    dim_name varchar(50) not null,
-    allowed_values text,
-    unique (category_code, dim_code)
-);
-
--- 产品主档
-create table if not exists rspu_master (
-    rspu_id varchar(64) primary key,
-    rspu_code varchar(50) unique,
-    external_code varchar(100),
-    product_name varchar(255),
-    color_primary_name varchar(64),
-    description text,
-    retail_price decimal(12,2),
-    primary_image_url varchar(500),
-    detail_image_urls jsonb,
-    status varchar(20) default 'active',
-    audit_status varchar(20) default 'pending',
-    audit_remark text,
-    created_by varchar(64),
-    created_at timestamp default now(),
-    updated_at timestamp default now(),
-    deleted_at timestamp
-);
-
--- 兼容已创建的表：新增审核字段
-alter table if exists rspu_master add column if not exists audit_status varchar(20) default 'pending';
-alter table if exists rspu_master add column if not exists audit_remark text;
-
--- 默认变体
-create table if not exists rspu_variant (
-    variant_id varchar(64) primary key,
-    rspu_id varchar(64) not null references rspu_master(rspu_id),
-    display_name varchar(255),
-    size_code varchar(64),
-    size_text varchar(100),
-    dimensions jsonb,
-    package_count integer,
-    package_volume_cbm numeric(18,9),
-    gross_weight numeric(14,3),
-    color_code varchar(64),
-    color_text varchar(100),
-    material_code varchar(128),
-    material_text varchar(255),
-    status varchar(20) default 'active',
-    created_at timestamp default now(),
-    updated_at timestamp default now(),
-    deleted_at timestamp
-);
-
--- 旧关联表保留已有资料；新商品录入不写入。
-create table if not exists rspu_style (
-    rspu_id varchar(64) not null references rspu_master(rspu_id),
-    dict_type varchar(50) not null,
-    style_code varchar(50) not null,
-    is_primary boolean default false,
-    created_at timestamp default now(),
-    primary key (rspu_id, style_code)
-);
-
-create table if not exists rspu_scene (
-    rspu_id varchar(64) not null references rspu_master(rspu_id),
-    dict_type varchar(50) not null,
-    scene_code varchar(50) not null,
-    created_at timestamp default now(),
-    primary key (rspu_id, scene_code)
-);
-
--- 图片资产
+-- 图片资产（office 自有图纸/上传文件登记；商品图片统一存主项目，本表不再关联商品表）
 create table if not exists image_assets (
     image_id varchar(64) primary key,
-    rspu_id varchar(64) references rspu_master(rspu_id),
-    variant_id varchar(64) references rspu_variant(variant_id),
+    -- 历史商品关联字段（主项目 rspu/variant id，弱关联不加外键）
+    rspu_id varchar(64),
+    variant_id varchar(64),
     image_type varchar(50),
     storage_url varchar(500),
     file_size bigint,
@@ -158,86 +73,6 @@ create table if not exists image_assets (
     deleted_at timestamp
 );
 
--- 单工厂信息
-create table if not exists factory_master (
-    id bigserial primary key,
-    factory_code varchar(50) unique not null,
-    factory_name varchar(100),
-    contact_info text
-);
-
--- 单工厂产品报价
-create table if not exists factory_product_price (
-    id bigserial primary key,
-    rspu_id varchar(64) not null references rspu_master(rspu_id),
-    variant_id varchar(64) references rspu_variant(variant_id),
-    factory_id bigint not null references factory_master(id),
-    factory_price decimal(12,2) default 0,
-    moq int default 1,
-    lead_time_days int default 0,
-    effective_date date default current_date,
-    unique (rspu_id, variant_id, factory_id)
-);
-
--- 初始化办公品类字典
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('category', 'OF', '办公家具', null, 1),
-('category', 'DK', '办公桌', 'OF', 2),
-('category', 'CH', '办公椅', 'OF', 3),
-('category', 'CB', '文件柜', 'OF', 4),
-('category', 'SO', '沙发', 'OF', 5),
-('category', 'TB', '茶几', 'OF', 6),
-('category', 'MT', '会议桌', 'OF', 7),
-('category', 'MC', '会议椅', 'OF', 8),
-('category', 'PA', '屏风/隔断', 'OF', 9)
-on conflict (dict_type, dict_code) do nothing;
-
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('style', 'MC', '现代简约', null, 1),
-('style', 'BZ', '商务正装', null, 2),
-('style', 'GY', '工业风', null, 3),
-('style', 'SN', '北欧风', null, 4)
-on conflict (dict_type, dict_code) do nothing;
-
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('scene', 'OPEN', '开放办公区', null, 1),
-('scene', 'MEET', '会议室', null, 2),
-('scene', 'RECEP', '前台接待', null, 3),
-('scene', 'LOUNGE', '休闲区', null, 4),
-('scene', 'EXEC', '高管办公室', null, 5)
-on conflict (dict_type, dict_code) do nothing;
-
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('material', 'LEATHER', '真皮', null, 1),
-('material', 'MESH', '网布', null, 2),
-('material', 'FABRIC', '布艺', null, 3),
-('material', 'WOOD', '实木', null, 4),
-('material', 'METAL', '金属', null, 5),
-('material', 'PLASTIC', '塑料', null, 6)
-on conflict (dict_type, dict_code) do nothing;
-
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('color', 'BK', '黑色', null, 1),
-('color', 'WH', '白色', null, 2),
-('color', 'GY', '灰色', null, 3),
-('color', 'BR', '棕色', null, 4),
-('color', 'BE', '米色', null, 5)
-on conflict (dict_type, dict_code) do nothing;
-
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('size', 'S', '小号', null, 1),
-('size', 'M', '中号', null, 2),
-('size', 'L', '大号', null, 3),
-('size', 'XL', '特大号', null, 4)
-on conflict (dict_type, dict_code) do nothing;
-
-insert into category_dict (dict_type, dict_code, dict_name, parent_code, sort_order) values
-('factory_level', 'A', 'A级', null, 1),
-('factory_level', 'B', 'B级', null, 2),
-('factory_level', 'C', 'C级', null, 3)
-on conflict (dict_type, dict_code) do nothing;
-
--- 办公设计项目与楼层；既有业务表的 project_id 对应楼层 ID。
 create table if not exists office_design_project (
     project_id varchar(64) primary key,
     name varchar(200) not null,
