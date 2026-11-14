@@ -1,5 +1,9 @@
 # 开发进度与下一步
 
+2026-11-14 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 工厂可见性体系一期落地（rsdp 侧，方案 C：office 工厂身份不拆分、继续看全库）：rsdp `3b68ca3`——V28 迁移（owner_type/owner_factory_code 归属回填、厂级公共库开关、factory_catalog_grant/block 两表，双路径校验零差异）；`CatalogVisibilityService` 收口"自家已报价∪整批放行∪开关ON全量−黑名单（不遮蔽自家已报价）"并接入列表/详情，替换旧能力覆盖自动隐藏口径；上下架/元数据改按 owner 判定（谁录入谁负责），三处建档打标；`FactoryCatalogController` 开关/放行/黑名单接口（工厂管理员仅本厂）；SecurityConfig 修复 DELETE 误落平台专属 factory:delete。验证：rsdp `mvn test` 2261/0/0/0；真实链路三工厂正反用例全过（167→拉黑剩12→开关关=0→放行=155→黑名单优先=0→详情404→越权400→维护权400/200）；office 回归商品库 167 全量可见。未覆盖：导出/AI 匹配读取入口接入、product-feed、office 代理/投影（均列入文档待办）。详见 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 验证记录。
+
+
+
 2026-11-14 录入端端到端打通（office→主项目转发链路激活与两处纠错）：SHARED-003 代码已具备但运行环境未就位——主项目 8081 未启动、开发库无 rsdp-office 服务账号（此前记录"已建"但实际缺失）、office `.env` 未配 `RSDP_MAIN_*`、8082 跑着 11-09 的旧进程。本次落地：①主项目开发库建工厂 A034 + 服务账号 rsdp-office（FACTORY_ADMIN + 绑定 A034 + view_full_catalog，bcrypt 密码 `rsdp-office-dev-2026!` 仅存 office `.env`）+ 能力等级声明 A(主)/B（office 默认按 B 级录入，未声明会被主项目拦截）；②office `.env` 增 `RSDP_MAIN_BASE_URL/USERNAME/PASSWORD`；③主项目 `seed_dev_data.sql` 固化上述账号/工厂/能力（幂等，`make seed-dev` 可重建；rsdp 仓库未提交）。**两处转发纠错**：手工录入同 externalCode 重复提交会重复建档——`createManualEntry` 改走 `forwardRow` 更新路径（查 externalCode→更新基础字段+匹配/补变体+补报价，响应带 `updated` 标记）；更新路径补报价撞主项目"同厂同变体同供应配置"唯一约束报 400——`MainProductEntryGateway.addQuote` 捕获后回退查本厂既有 RSKU 并 PUT 出厂价更新。新增 `ProductImportManualEntryTest`/`MainProductEntryGatewayTest` 各 2 例。验证：`mvn test` 268 运行/0 失败/3 跳过；真实链路实测（8082→8081）：手工录入「联调验证-会议桌」→主库落 RSPU（OF-TBD-0001，归属 A034、出厂价 AES 密文、毫米尺寸）→office 列表/详情回读一致；同码重交（零售价 2680→2980、出厂价 1280→1480）→不重复建档、字段更新、变体按名匹配不增；联调产生的重复测试档已清理（主库该码仅剩 1 条）。改动为纯后端，未跑前端构建/e2e。另发现主项目种子既有缺陷（与本改动无关）：`seed_dev_data.sql` 演示 RSKU 段未提供 `supplier_configuration_key`（现为 NOT NULL），重跑种子到该段报错，其前的服务账号段不受影响。office admin 开发库密码重置为 `.env` 引导值（原哈希与引导值不符）。未提交。
 
 
