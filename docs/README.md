@@ -27,6 +27,8 @@
 | [当前图纸进入对应空间](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 上传 ID/识别绑定、后台空间入口、旧底图/模板/家具隔离与空稿恢复 |
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
+| [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
+| [商品主档统一](tasks/INTEG-001-product-master-integration.md) | 商品主档归 rsdp、工厂可见性（放行/黑名单）、office 只读投影（跨仓库方案） |
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |
 | [本轮文档任务](tasks/DOC-001-project-baseline.md) | 本次需求与规范整理的过程及验证 |
 | [空间数据任务](tasks/GEOM-001-scene-canvas-contract.md) | 下一项核心工作如何拆分和验收 |

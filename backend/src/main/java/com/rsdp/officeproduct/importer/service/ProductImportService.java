@@ -564,7 +564,8 @@ public class ProductImportService {
 
     // ==================== 手工录入 ====================
 
-    /** 手工录入：校验后转发主项目 factory-entry（落主库、归属本厂）。 */
+    /** 手工录入：校验后转发主项目（落主库、归属本厂）。外部编码已存在时按更新处理
+     *  （更新基础字段 + 匹配/补变体 + 补报价），避免同码重复建档。 */
     public Map<String, Object> createManualEntry(ManualProductEntryRequest request) {
         ProductImportRow row = toImportRow(request);
         Map<String, List<CategoryDictDto>> dictCache = preloadDicts();
@@ -572,11 +573,13 @@ public class ProductImportService {
         String error = validateRow(row);
         if (error != null) throw new BusinessException(error);
 
-        MainProductEntryGateway.EntryResult result = entryGateway.forwardFactoryEntry(toPayload(row, dictCache));
+        String existingRspuId = entryGateway.findRspuIdByExternalCode(row.getExternalCode());
+        MainProductEntryGateway.EntryResult result = forwardRow(row, existingRspuId, dictCache);
         Map<String, Object> response = new HashMap<>();
         response.put("rspuId", result.rspuId());
         response.put("variantId", result.variantId());
-        response.put("message", "手工录入产品成功");
+        response.put("updated", existingRspuId != null);
+        response.put("message", existingRspuId != null ? "外部编码已存在，已更新商品" : "手工录入产品成功");
         return response;
     }
 

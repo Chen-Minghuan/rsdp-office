@@ -152,21 +152,53 @@ public class MainProductEntryGateway {
         return data.path("variantId").asText();
     }
 
-    /** 给主项目已有商品/变体追加本厂报价，返回 rskuId。 */
+    /** 给主项目已有商品/变体追加本厂报价，返回 rskuId。
+     *  本厂同变体同供应配置已有报价时（主项目唯一约束），改为更新既有报价的出厂价。 */
     public String addQuote(String rspuId, String variantId, EntryPayload payload) {
         if (payload.factoryPrice() == null) {
             return null;
         }
+        String factoryCode = rsdpClient.mainFactoryCode();
         Map<String, Object> request = new HashMap<>();
-        request.put("factoryCode", rsdpClient.mainFactoryCode());
+        request.put("factoryCode", factoryCode);
         request.put("variantId", variantId);
         request.put("factoryPrice", payload.factoryPrice());
         request.put("materialCode", payload.materialCode());
         request.put("materialDescription", payload.materialText());
         request.put("leadTimeDays", payload.leadTimeDays());
         request.put("moq", payload.moq());
-        JsonNode data = rsdpClient.postJson("/api/v1/products/" + rspuId + "/rsku", request);
-        return data.path("rskuId").asText(null);
+        try {
+            JsonNode data = rsdpClient.postJson("/api/v1/products/" + rspuId + "/rsku", request);
+            return data.path("rskuId").asText(null);
+        } catch (BusinessException e) {
+            if (!e.getMessage().contains("同一供应配置已有报价")) {
+                throw e;
+            }
+            String existingRskuId = findOwnRskuId(rspuId, variantId, factoryCode);
+            if (existingRskuId == null) {
+                throw e;
+            }
+            Map<String, Object> patch = new HashMap<>();
+            patch.put("factoryPrice", payload.factoryPrice());
+            patch.put("changeReason", "office 录入转发更新");
+            rsdpClient.putJson("/api/v1/products/" + rspuId + "/rsku/" + existingRskuId + "/price", patch);
+            return existingRskuId;
+        }
+    }
+
+    /** 查本厂在某变体上的既有报价 ID（更新出厂价用）。 */
+    private String findOwnRskuId(String rspuId, String variantId, String factoryCode) {
+        JsonNode rows = rsdpClient.get("/api/v1/products/" + rspuId + "/rsku");
+        if (!rows.isArray()) {
+            return null;
+        }
+        for (JsonNode row : rows) {
+            if (variantId.equals(row.path("variantId").asText())
+                && factoryCode.equals(row.path("factoryCode").asText())) {
+                return row.path("rskuId").asText(null);
+            }
+        }
+        return null;
     }
 
     /** 更新主项目已有商品的基础字段（更新模式）。 */
