@@ -35,6 +35,10 @@ try {
     ['SMALL', '小尺寸边桌', 600, 300, 400], ['ROTATED', '旋转适配长桌', 550, 1150, 900],
     ['QUOTE', '待报价办公桌', 1100, 500, 0],
   ].map(([id, name, widthMm, depthMm, price]) => ({ id, rspuId: 'MASTER-' + id, variantId: id, name, widthMm, depthMm, price, widthCm: widthMm / 10, depthCm: depthMm / 10, desc: '', variant: '真实规格 API 模拟', kind: 'other', uses: ['OTHER'] }))
+  products.push(...Array.from({ length: 30 }, (_, index) => ({
+    id: `FILL-${index}`, rspuId: `MASTER-FILL-${index}`, variantId: `FILL-${index}`, name: `滚动候选 ${index + 1}`,
+    widthMm: 1190, depthMm: 590, price: 100 + index, widthCm: 119, depthCm: 59, desc: '', variant: '滚动回归模拟', kind: 'other', uses: ['OTHER'],
+  })))
   await context.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname
     const respond = (data, status = 200, message = '成功') => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message, data }) })
@@ -147,6 +151,17 @@ try {
   const panel = page.getByTestId('module-product-recommendations')
   const card = id => panel.locator('[data-product-id="' + id + '"]')
   await card('EXACT').waitFor()
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const recommendationList = panel.locator('div.flex-1.overflow-auto')
+  await page.waitForTimeout(100)
+  const scrollMetrics = await recommendationList.evaluate(element => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }))
+  assert.ok(scrollMetrics.clientHeight > 0 && scrollMetrics.clientHeight < 900, '推荐列表必须受侧栏剩余高度约束')
+  assert.ok(scrollMetrics.scrollHeight > scrollMetrics.clientHeight, '多候选时应形成列表内部滚动区域')
+  await recommendationList.hover()
+  await page.mouse.wheel(0, 600)
+  await page.waitForTimeout(200)
+  assert.ok(await recommendationList.evaluate(element => element.scrollTop > 0), '滚轮必须实际滚动推荐列表')
+  await recommendationList.evaluate(element => { element.scrollTop = 0 })
   assert.equal(await card('ROTATED').count(), 1)
   assert.match(await card('ROTATED').innerText(), /需旋转 90°/)
   assert.equal(await card('QUOTE').getByRole('button', { name: '待补报价' }).isDisabled(), true)

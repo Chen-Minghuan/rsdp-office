@@ -17,8 +17,8 @@ function backToOverview() {
 </script>
 
 <template>
-  <div :class="['flex-none bg-white flex flex-col overflow-hidden transition-all duration-300', embedded ? 'w-full flex-1 min-h-0' : collapsed ? 'w-12 border-y border-r border-line' : 'w-[360px] border-y border-r border-line']">
-    <div v-show="!collapsed" :class="[embedded ? 'w-full' : 'w-[360px]', 'h-full flex flex-col']">
+  <div :class="['bg-white flex flex-col overflow-hidden transition-all duration-300', embedded ? 'w-full flex-1 min-h-0' : collapsed ? 'flex-none w-12 border-y border-r border-line' : 'flex-none w-[360px] border-y border-r border-line']">
+    <div v-show="!collapsed" :class="[embedded ? 'w-full' : 'w-[360px]', 'h-full min-h-0 flex flex-col']">
       <!-- Header -->
       <div v-if="!embedded" class="relative px-4 py-4 border-b border-line flex-none">
         <button class="absolute top-3 right-3 p-1 rounded-none hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="collapsed = true">

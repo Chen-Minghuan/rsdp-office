@@ -49,6 +49,7 @@
 | [按空间用途分流排版](tasks/LAYOUT-011-space-layout-profiles.md) | 会议室单桌居中与开放办公区多排工位的流程分流 |
 | [排版画布尺寸标注](tasks/LAYOUT-012-layout-dimensions.md) | 单空间画布显示空间外接尺寸、模块规格、排布总长与排间净距 |
 | [排版面板操作体验](tasks/LAYOUT-013-layout-panel-ux.md) | 模块、排布、参数三步导航与紧凑操作区 |
+| [推荐列表内部滚动](tasks/LAYOUT-041-recommendation-list-scroll.md) | 推荐侧栏 flex 高度约束、多候选滚轮回归与真实页面验证 |
 | [按标注修正开放分区](tasks/GEOM-008-annotated-open-zones.md) | 当前方案五处分区、比例保留、修正包及真实 API 保存记录 |
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |
 | [沿墙轮廓修正](tasks/GEOM-006-wall-contour-correction.md) | 入口/退台完整边界、补转折点、沿墙重描与撤销恢复 |

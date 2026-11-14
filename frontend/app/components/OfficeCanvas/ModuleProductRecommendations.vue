@@ -101,7 +101,7 @@ async function choose(candidate: ModuleProductCandidate) {
       <div class="flex gap-1 flex-wrap"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key">{{ entry.name }}<span v-if="result"> ({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
       <p class="text-[10px] text-muted">贴合度取宽、深占比中较低值；档位仅供排序；仅查询上架且审核通过的规格。高度、结构与家具用途请结合商品详情核对。</p>
     </div>
-    <div class="flex-1 overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
+    <div class="flex-1 min-h-0 overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
       <p v-if="!allConfirmed" class="text-xs text-muted py-5">请先确认当前空间的全部排版</p>
       <p v-else-if="loading" role="status" class="text-xs text-muted py-5">正在读取真实商品规格…</p>
       <p v-if="error" role="alert" class="text-xs text-red-700 p-2 bg-red-50 rounded">{{ error }}</p>
