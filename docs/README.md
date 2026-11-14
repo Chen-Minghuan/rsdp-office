@@ -36,6 +36,7 @@
 | [商品图片提取任务](tasks/CAT-002-workbook-image-ingest.md) | 系统导入时提取内嵌图片的实现与验证 |
 | [供应商尺寸导入任务](tasks/CAT-003-supplier-size-import.md) | 供应商目录的毫米尺寸、价格和预览复核 |
 | [商品图片展示任务](tasks/CAT-005-product-image-gallery.md) | 商品详情大图、缩略图与列表悬停放大查看 |
+| [主项目变体尺寸归一化](tasks/SHARED-004-main-variant-dimension-normalization.md) | 主项目真实尺寸格式、单位兼容、8 并发与网络重试及真实推荐验证 |
 | [单位模块删除](tasks/LAYOUT-006-delete-modules.md) | 画布选中删除、快捷键/撤销、确认失效与目录独立删除 |
 | [家具多选与整组操作](tasks/LAYOUT-008-multi-furniture-selection.md) | Shift/Ctrl 点选、框选、组移/批删及边界与撤销校验 |
 | [楼层树下切换空间](tasks/LAYOUT-009-design-space-switcher.md) | 楼层下空间列表/折叠、前后选择、排版状态、家具保留与单空间隔离 |

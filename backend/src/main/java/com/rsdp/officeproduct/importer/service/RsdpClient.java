@@ -12,6 +12,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
@@ -32,6 +33,7 @@ import java.util.Map;
 public class RsdpClient {
 
     private static final String COOKIE_NAME = "rsdp_token";
+    private static final int GET_NETWORK_MAX_ATTEMPTS = 3;
 
     private final RestTemplate restTemplate;
     private final RsdpMainProperties properties;
@@ -48,20 +50,39 @@ public class RsdpClient {
      */
     public JsonNode get(String path) {
         ensureConfigured();
-        try {
-            return doGet(path);
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == 401) {
-                log.info("主项目会话失效，重新登录后重试: {}", path);
-                login();
+        int networkAttempt = 1;
+        boolean renewedSession = false;
+        while (true) {
+            try {
                 return doGet(path);
+            } catch (RestClientResponseException e) {
+                if (e.getStatusCode().value() == 401 && !renewedSession) {
+                    renewedSession = true;
+                    log.info("主项目会话失效，重新登录后重试: {}", path);
+                    login();
+                    continue;
+                }
+                throw translateError(path, e);
+            } catch (BusinessException e) {
+                throw e;
+            } catch (Exception e) {
+                if (e instanceof ResourceAccessException && networkAttempt < GET_NETWORK_MAX_ATTEMPTS) {
+                    log.warn("主项目 GET 瞬时网络失败，进行第 {} 次重试: {}", networkAttempt, path);
+                    networkBackoff(networkAttempt++);
+                    continue;
+                }
+                throw unavailable(e, path);
             }
-            throw translateError(path, e);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("调用主项目失败: {}", path, e);
-            throw new BusinessException("主项目数据服务不可用，请确认 RSDP 后端已启动");
+        }
+    }
+
+    /** 仅幂等 GET 使用：100ms、200ms 短退避；中断时不继续请求。 */
+    private void networkBackoff(int attempt) {
+        try {
+            Thread.sleep(attempt * 100L);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("主项目请求已中断", e);
         }
     }
 

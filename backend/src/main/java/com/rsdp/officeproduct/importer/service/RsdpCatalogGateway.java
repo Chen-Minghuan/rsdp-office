@@ -2,6 +2,7 @@ package com.rsdp.officeproduct.importer.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
@@ -22,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 /**
  * 主项目商品数据网关：把 RSDP 主库的产品/变体/报价/字典响应映射为 office 既有 DTO，
@@ -33,6 +35,7 @@ public class RsdpCatalogGateway {
 
     /** 主项目一次拉取的页大小（循环翻页直到取完）。 */
     private static final int PAGE_SIZE = 500;
+    private static final int VARIANT_FETCH_MAX_CONCURRENCY = 8;
 
     private final RsdpClient rsdpClient;
     private final ObjectMapper objectMapper;
@@ -42,6 +45,8 @@ public class RsdpCatalogGateway {
     private final Map<String, CacheEntry> officeProductsCache = new ConcurrentHashMap<>();
 
     private record CacheEntry(List<OfficeProductDto> data, long fetchedAt) {}
+
+    private final Semaphore variantFetchPermits = new Semaphore(VARIANT_FETCH_MAX_CONCURRENCY);
 
     /** 排版选品目录：主项目全量产品的有效变体平铺（含尺寸/价格/图片），30s 缓存。 */
     public List<OfficeProductDto> listOfficeProducts(String viewMode) {
@@ -75,7 +80,19 @@ public class RsdpCatalogGateway {
     }
 
     private Future<List<OfficeProductDto>> submitVariantFetch(ExecutorService executor, ProductListItemDto product) {
-        return executor.submit(() -> toOfficeProductDtos(product));
+        return executor.submit(() -> {
+            try {
+                variantFetchPermits.acquire();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
+            try {
+                return toOfficeProductDtos(product);
+            } finally {
+                variantFetchPermits.release();
+            }
+        });
     }
 
     private List<OfficeProductDto> toOfficeProductDtos(ProductListItemDto product) {
@@ -123,13 +140,14 @@ public class RsdpCatalogGateway {
         }
     }
 
-    /** 尺寸 JSON（{"w":560,"d":580,"h":780,"unit":"mm"}）→ 毫米 + 厘米上取整。 */
+    /** 主项目尺寸 JSON → 毫米 + 厘米上取整；支持当前 w/d/h 短键和既有 widthMm/widthCm 长键。 */
     private void applyDimensions(OfficeProductDto dto, String dimensions) {
         if (dimensions == null || dimensions.isBlank()) {
             return;
         }
         try {
-            BigDecimal[] exact = OfficeProductMatching.dimensions(objectMapper.readTree(dimensions));
+            JsonNode source = objectMapper.readTree(dimensions);
+            BigDecimal[] exact = OfficeProductMatching.dimensions(normalizeMainDimensions(source));
             dto.setWidthMm(exact[0]);
             dto.setDepthMm(exact[1]);
             dto.setHeightMm(exact[2]);
@@ -139,6 +157,27 @@ public class RsdpCatalogGateway {
             }
         } catch (Exception ignored) {
             // 尺寸未知保持为空，不臆造
+        }
+    }
+
+    /** 主项目短键按毫米契约解释（含缺省 unit 的旧记录）；unit=cm 时改走厘米长键，其他单位仍由匹配器拒绝。 */
+    private JsonNode normalizeMainDimensions(JsonNode source) {
+        if (!source.isObject() || source.has("widthMm") || source.has("depthMm") || source.has("heightMm")
+            || source.has("widthCm") || source.has("depthCm") || source.has("heightCm")
+            || !(source.has("w") || source.has("d") || source.has("h"))) {
+            return source;
+        }
+        String suffix = "cm".equalsIgnoreCase(source.path("unit").asText("")) ? "Cm" : "Mm";
+        ObjectNode normalized = source.deepCopy();
+        copyDimension(source, normalized, "w", "width" + suffix);
+        copyDimension(source, normalized, "d", "depth" + suffix);
+        copyDimension(source, normalized, "h", "height" + suffix);
+        return normalized;
+    }
+
+    private void copyDimension(JsonNode source, ObjectNode target, String shortKey, String longKey) {
+        if (source.has(shortKey)) {
+            target.set(longKey, source.get(shortKey));
         }
     }
 
