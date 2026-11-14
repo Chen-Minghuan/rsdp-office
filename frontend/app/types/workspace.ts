@@ -44,16 +44,3 @@ export interface CreateProjectRequest {
 }
 
 export const DEFAULT_WORKSPACE_ID = 'OFFICE-PROJECT-001'
-
-export function defaultWorkspaceProject(): WorkspaceProject {
-  return {
-    projectId: DEFAULT_WORKSPACE_ID,
-    projectName: '默认办公项目',
-    customerRequirements: '',
-    requirementsRevision: 1,
-    leader: null,
-    collaborators: [],
-    referenceImages: [],
-    floors: [{ floorId: DEFAULT_WORKSPACE_ID, projectId: DEFAULT_WORKSPACE_ID, floorName: '默认楼层', sortOrder: 1 }],
-  }
-}

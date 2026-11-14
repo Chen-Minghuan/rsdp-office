@@ -40,6 +40,7 @@ try {
     if (path === '/api/v1/office/projects' && request.method() === 'POST') {
       const body = request.postDataJSON()
       const project = { projectId: 'OPRJ-TEST', name: body.name, customerRequirements: body.customerRequirements, requirementsRevision: 1,
+        leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
         floors: body.floors.map((floor, index) => ({ projectId: 'OPRJ-TEST', floorId: `OFLR-${index + 1}`, name: floor.name, sortOrder: index + 1 })) }
       projects.push(project)
       return respond(project)
@@ -127,7 +128,7 @@ try {
   await page.getByRole('heading', { name: '首层 · 上传办公图纸', exact: true }).waitFor()
   assert.equal(await page.getByRole('region', { name: '项目设计流程' }).getByText('first.png', { exact: true }).count(), 0)
   assert.match(page.url(), /floorId=OFLR-1/)
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:OFLR-1')).files[0].name), 'first.png')
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFLR-1')).files[0].name), 'first.png')
 
   await page.getByRole('button', { name: /首层 当前/ }).dblclick()
   await page.getByRole('textbox', { name: '双击编辑楼层名称', exact: true }).fill('一层')
@@ -147,7 +148,7 @@ try {
   await page.waitForURL(/floorId=OFLR-2/)
   await page.getByRole('button', { name: '一层', exact: true }).click()
   await page.waitForURL(/floorId=OFLR-1/)
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:OFLR-1')).files[0].name), 'first.png')
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFLR-1')).files[0].name), 'first.png')
 
   await page.getByRole('button', { name: '＋ 添加新楼层', exact: true }).click()
   await page.getByRole('textbox', { name: '新楼层名称' }).fill('3F')

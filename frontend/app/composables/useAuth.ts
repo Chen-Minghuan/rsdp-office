@@ -29,6 +29,9 @@ export class LoginError extends Error {
 }
 
 export function useAuth() {
+  const user = useState<AuthUser | null>('rsdp-auth-user', () => null)
+  const storageScope = computed(() => authEnabled ? user.value?.userId || 'anonymous' : 'local-dev')
+
   async function login(username: string, password: string, options: LoginOptions = {}): Promise<AuthUser> {
     try {
       const response = await $fetch<ApiResponse<AuthUser>>(`${API_BASE}/api/auth/login`, {
@@ -37,6 +40,7 @@ export function useAuth() {
         credentials: 'include',
       })
       if (response.code !== 200) throw new Error(response.message || '登录失败')
+      user.value = response.data
       return response.data
     } catch (cause: any) {
       if (cause instanceof LoginError) throw cause
@@ -47,15 +51,21 @@ export function useAuth() {
   async function me(): Promise<AuthUser | null> {
     try {
       const response = await $fetch<ApiResponse<AuthUser>>(`${API_BASE}/api/auth/me`, { credentials: 'include' })
-      return response.code === 200 ? response.data : null
+      user.value = response.code === 200 ? response.data : null
+      return user.value
     } catch {
+      user.value = null
       return null
     }
   }
 
   async function logout(): Promise<void> {
-    await $fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' })
+    try {
+      await $fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' })
+    } finally {
+      user.value = null
+    }
   }
 
-  return { login, me, logout }
+  return { login, me, logout, user, storageScope }
 }

@@ -8,6 +8,7 @@ import { sameOriginAssetUrl } from '~/utils/apiBase'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const api = useOfficeApi()
+const auth = useAuth()
 const floorPlanApi = useFloorPlanApi()
 const fileInput = ref<HTMLInputElement | null>(null)
 const recognitionPanel = ref<HTMLElement | null>(null)
@@ -22,7 +23,7 @@ const activeFile = ref<string | null>(null)
 const recognitionSource = ref<'cad' | 'vision' | null>(null)
 const analysisId = ref<string | null>(null)
 const pdfPages = reactive<Record<string, number>>({})
-const taskStorageKey = () => `rsdp-office-recognition-task-v1:${api.projectId}`
+const taskStorageKey = () => `rsdp-office-recognition-task-v1:${auth.storageScope.value}:${api.projectId}`
 const isRecognitionRunning = recognitionRunning
 const hasRunningResult = computed(() => isRecognitionRunning(recognitionResult.value))
 let recognitionSequence = 0
@@ -124,6 +125,10 @@ function openFileDB(): Promise<IDBDatabase> {
 }
 
 function fileStorageId(name: string, drawingId?: string) {
+  return `${auth.storageScope.value}:${api.projectId}:${drawingId || name}`
+}
+
+function legacyFileStorageId(name: string, drawingId?: string) {
   return `${api.projectId}:${drawingId || name}`
 }
 
@@ -141,7 +146,7 @@ async function persistFile(file: File, drawingId?: string): Promise<void> {
   try {
     const db = await openFileDB()
     const tx = db.transaction(DB_STORE, 'readwrite')
-    tx.objectStore(DB_STORE).put({ id: fileStorageId(file.name, drawingId), floorId: api.projectId, name: file.name, type: file.type, size: file.size, blob: file })
+    tx.objectStore(DB_STORE).put({ id: fileStorageId(file.name, drawingId), floorId: api.projectId, storageScope: auth.storageScope.value, name: file.name, type: file.type, size: file.size, blob: file })
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
@@ -154,7 +159,18 @@ async function persistFile(file: File, drawingId?: string): Promise<void> {
 async function loadPersistedFile(name: string, drawingId?: string): Promise<File | null> {
   try {
     const db = await openFileDB()
-    const record = await readRecord(db, DB_STORE, fileStorageId(name, drawingId)) || await readRecord(db, LEGACY_DB_STORE, name)
+    let record = await readRecord(db, DB_STORE, fileStorageId(name, drawingId))
+    if (!record) {
+      record = await readRecord(db, DB_STORE, legacyFileStorageId(name, drawingId)) || await readRecord(db, LEGACY_DB_STORE, name)
+      if (record?.blob) {
+        const tx = db.transaction(DB_STORE, 'readwrite')
+        tx.objectStore(DB_STORE).put({ ...record, id: fileStorageId(name, drawingId), storageScope: auth.storageScope.value })
+        await new Promise<void>((resolve, reject) => {
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(tx.error)
+        })
+      }
+    }
     if (!record?.blob) return null
     return new File([record.blob], record.name, { type: record.type })
   } catch (e) {

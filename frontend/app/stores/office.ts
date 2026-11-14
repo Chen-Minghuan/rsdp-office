@@ -48,13 +48,25 @@ import { layoutRegionProblem, layoutRegionRing, measureLayoutRegionWallOffsets }
 import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilities'
 import { planTieredLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
+import { authEnabled, useAuth } from '~/composables/useAuth'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
 const DEFAULT_WORKSPACE_ID = 'OFFICE-PROJECT-001'
 
-function storageKey(workspaceId: string) {
+function legacyStorageKey(workspaceId: string) {
   return workspaceId === DEFAULT_WORKSPACE_ID ? STORAGE_KEY : `${STORAGE_KEY}:${workspaceId}`
+}
+
+function storageKey(workspaceId: string) {
+  return authEnabled ? `${STORAGE_KEY}:${useAuth().storageScope.value}:${workspaceId}` : legacyStorageKey(workspaceId)
+}
+
+function canMigrateLegacyDefaultDraft(workspaceId: string) {
+  if (!authEnabled || workspaceId !== DEFAULT_WORKSPACE_ID) return false
+  const user = useAuth().user.value
+  const project = useWorkspaceStore().currentProject
+  return !!user && project?.projectId === DEFAULT_WORKSPACE_ID && project.leader?.userId === user.userId
 }
 
 interface OfficeState {
@@ -94,7 +106,7 @@ interface OfficeState {
 
 function defaultState(): OfficeState {
   return {
-    workspaceId: DEFAULT_WORKSPACE_ID,
+    workspaceId: '',
     files: [],
     objects: [],
     blank: false,
@@ -136,8 +148,9 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
   if (typeof window === 'undefined') return {}
   try {
     const key = storageKey(workspaceId)
-    const current = localStorage.getItem(key)
-    const raw = current || (workspaceId === DEFAULT_WORKSPACE_ID ? localStorage.getItem(LEGACY_STORAGE_KEY) : null)
+    let raw = localStorage.getItem(key)
+    const migrateLegacy = !raw && canMigrateLegacyDefaultDraft(workspaceId)
+    if (migrateLegacy) raw = localStorage.getItem(legacyStorageKey(workspaceId)) || localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw, (key, value) => {
       if (key === 'project' || key === 'projectContext') return undefined
@@ -157,7 +170,12 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
       parsed.submitted = null
     }
     localStorage.setItem(key, JSON.stringify(parsed))
-    if (workspaceId === DEFAULT_WORKSPACE_ID) localStorage.removeItem(LEGACY_STORAGE_KEY)
+    if (migrateLegacy) {
+      localStorage.removeItem(legacyStorageKey(workspaceId))
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+    } else if (workspaceId === DEFAULT_WORKSPACE_ID && !authEnabled) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+    }
     const { undoStack, ...rest } = parsed
     return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null }
   } catch {
@@ -240,8 +258,13 @@ export const useOfficeStore = defineStore('office', {
   actions: {
     async init() {
       if (this.loading || this.initialized) return
-      const workspaceId = useWorkspaceStore().currentFloorId || DEFAULT_WORKSPACE_ID
+      const workspaceId = useWorkspaceStore().currentFloorId
+      if (!workspaceId) {
+        this.$patch({ ...defaultState(), initialized: true })
+        return
+      }
       this.workspaceId = workspaceId
+      const storageScope = useAuth().storageScope.value
       this.$patch(loadLocalState(workspaceId))
       this.loading = true
       const api = useOfficeApi()
@@ -252,7 +275,7 @@ export const useOfficeStore = defineStore('office', {
           api.loadMessages().catch(() => [] as AgentMessage[]),
           api.loadProducts().catch(() => [] as Product[]),
         ])
-        if (this.workspaceId !== workspaceId) return
+        if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
 
         this.apiReady = canvasResult.available
         const canvas = canvasResult.canvas
@@ -273,6 +296,7 @@ export const useOfficeStore = defineStore('office', {
         this.products = products.length ? products : SAMPLE_PRODUCTS
         this.combos = SAMPLE_COMBOS
       } catch (e) {
+        if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
         console.warn('后端不可用，使用本地演示数据', e)
         this.apiReady = false
         this.products = SAMPLE_PRODUCTS
@@ -291,13 +315,14 @@ export const useOfficeStore = defineStore('office', {
       if (templateId?.startsWith('STPL-') && this.zones.every(zone => zone.spaceTemplateId === templateId) && !this.spaceTemplateCurrent) {
         try {
           const saved = await useSpaceTemplateApi().get(templateId)
-          if (saved?.scene && templateMatches(saved, this.zones, this.floorPlan)) this.spaceTemplate = { ...saved, storage: 'SAVED' }
+          if (storageScope === useAuth().storageScope.value && saved?.scene && templateMatches(saved, this.zones, this.floorPlan)) this.spaceTemplate = { ...saved, storage: 'SAVED' }
         } catch { /* Keep the editable canvas even if its saved template cannot currently be fetched. */ }
       }
       if (this.layoutEntryBlocker) {
         this.canvasMode = 'overview'
         this.designZoneId = null
       }
+      if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
       this.loading = false
       this.initialized = true
     },
@@ -315,7 +340,7 @@ export const useOfficeStore = defineStore('office', {
     },
 
     saveLocal() {
-      if (typeof window === 'undefined') return
+      if (typeof window === 'undefined' || !this.workspaceId) return
       const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, reviewFocusZoneId, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(storageKey(this.workspaceId), JSON.stringify(payload))
@@ -331,6 +356,7 @@ export const useOfficeStore = defineStore('office', {
     _persistToApi: debounce(async function (this: any) {
       const api = useOfficeApi()
       const workspaceId = this.workspaceId
+      const storageScope = useAuth().storageScope.value
       if (!this.apiReady) {
         this.syncState = 'saved'
         return
@@ -344,12 +370,12 @@ export const useOfficeStore = defineStore('office', {
           revision: this.canvasRevision,
           blank: this.blank,
         }, workspaceId)
-        if (this.workspaceId !== workspaceId) return
+        if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
         if (saved?.objects) this.mergeServerReviewConfirmations(saved.objects)
         this.syncState = 'saved'
         this.syncError = null
       } catch (e) {
-        if (this.workspaceId !== workspaceId) return
+        if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
         this.syncState = 'error'
         this.syncError = e instanceof Error ? e.message : '远端保存失败'
         console.warn('同步到后端失败', e)

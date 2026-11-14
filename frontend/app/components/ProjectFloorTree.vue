@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { authEnabled } from '~/composables/useAuth'
+
 withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
 const office = useOfficeStore()
+const auth = useAuth()
+const canCreateProject = computed(() => !authEnabled || auth.user.value?.role !== 'ADMIN')
 const route = useRoute()
 const router = useRouter()
 const showCreate = ref(false)
@@ -90,7 +94,7 @@ async function selectSpace(zoneId: string) {
   <section class="project-floor-tree" aria-label="项目与楼层">
     <div class="mb-1 flex items-center justify-between px-1">
       <span class="text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
-      <button class="rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream" @click="showCreate = true">＋ 新建项目</button>
+      <button v-if="canCreateProject" class="rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream" @click="showCreate = true">＋ 新建项目</button>
     </div>
     <div class="grid">
       <article v-for="project in workspace.projects" :key="project.projectId" class="border-y border-line bg-white">
@@ -128,6 +132,7 @@ async function selectSpace(zoneId: string) {
         </div>
       </article>
     </div>
+    <p v-if="workspace.initialized && !workspace.projects.length" class="border-y border-line px-2 py-3 text-[11px] leading-5 text-muted">当前账号暂无可访问项目</p>
     <form v-if="addingFloor" class="mt-1.5 flex gap-1" @submit.prevent="addFloor">
       <input v-model="floorName" class="min-w-0 flex-1 rounded-none border border-line bg-white px-2 py-1.5 text-xs" placeholder="如 3F / B1F" aria-label="新楼层名称">
       <button class="rounded-none bg-bronze px-2 text-xs text-white disabled:opacity-50" :disabled="savingFloor">添加</button>

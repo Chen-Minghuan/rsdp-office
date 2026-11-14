@@ -38,6 +38,11 @@ try {
   await context.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname
     const respond = (data, status = 200, message = '成功') => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message, data }) })
+    if (path === '/api/v1/office/projects' && route.request().method() === 'GET') return respond([{
+      projectId: 'OFFICE-PROJECT-001', name: '推荐测试项目', customerRequirements: '', requirementsRevision: 1,
+      leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+    }])
     if (path.endsWith('/canvas')) {
       if (route.request().method() === 'PUT') { saved = route.request().postDataJSON(); return respond(saved) }
       return respond(saved)
@@ -80,7 +85,7 @@ try {
   })
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     state.objects = [
       { id: 'Z', kind: 'zone', x: 0, y: 0, w: 6000, h: 4000, name: '推荐测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[0,0],[6000,0],[6000,4000],[0,4000]] },
       ...['A', 'B'].map((id, index) => ({ id, kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '职员桌 ' + id, x: 500 + index * 2000, y: 500, w: 1200, h: 600, rotation: 0, productId: '', layoutConfirmed: true })),
@@ -88,17 +93,17 @@ try {
       { id: 'OTHER', kind: 'furniture', zoneId: 'OTHER', furnitureTemplateId: 'chair-office', x: 10000, y: 0, w: 650, h: 650, rotation: 0, productId: 'KEEP', layoutConfirmed: true },
     ]
     state.canvasRevision = 9; state.canvasMode = 'design'; state.designZoneId = 'Z'; state.cart = []; state.floorPlan = null; state.spaceTemplate = null
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=Z', { waitUntil: 'networkidle' })
   await page.getByLabel('布局房间类型').selectOption('MEETING_ROOM')
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(item => item.id === 'Z').zoneType), 'MEETING_ROOM')
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'Z').zoneType), 'MEETING_ROOM')
   await page.getByTestId('tab-product-selection').click()
   await page.locator('[data-furniture-id="A"]').click()
   await page.getByTestId('product-copy-furniture').click()
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').length), 4)
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').length), 4)
   await page.getByRole('button', { name: '撤销', exact: true }).click()
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').length), 3)
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').length), 3)
   await page.locator('[data-furniture-id="A"]').click()
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
@@ -106,12 +111,12 @@ try {
     store.cart = [{ id: 'OLD-MODULE-LINE', productId: 'OLD-MODULE-PRODUCT', zoneId: 'Z', zoneName: '推荐测试空间', qty: 1 }]
     store.saveLocal()
   })
-  const beforeReplace = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const beforeReplace = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const staffCatalog = page.getByTestId('unit-module-catalog').locator('details').filter({ hasText: '职员桌' })
   if (!(await staffCatalog.getAttribute('open'))) await staffCatalog.locator('summary').click()
   await page.getByTestId('unit-module-catalog').locator('[data-module-id="desk-l"]').click()
   await page.getByRole('status').filter({ hasText: '已替换为' }).waitFor()
-  const replaced = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const replaced = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const oldA = beforeReplace.objects.find(item => item.id === 'A'), newA = replaced.objects.find(item => item.id === 'A')
   assert.equal(newA.furnitureTemplateId, 'desk-l')
   assert.equal(newA.x + newA.w / 2, oldA.x + oldA.w / 2, 'replacement preserves the furniture center')
@@ -122,7 +127,7 @@ try {
   assert.equal(replaced.cart.length, 0, 'replacement removes the old product selection from the cart')
   assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true', 'manual replacement stays in product selection')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
-  const restored = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const restored = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   assert.deepEqual(restored.objects, beforeReplace.objects, 'one undo restores module, geometry, confirmation and old product')
   assert.deepEqual(restored.cart, beforeReplace.cart)
   await page.evaluate(() => {
@@ -134,7 +139,7 @@ try {
   await page.locator('[data-furniture-id="A"]').click()
   await page.getByTestId('product-item-width').fill('1250')
   await page.getByTestId('product-item-resize').click()
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(item => item.id === 'A').w), 1250)
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'A').w), 1250)
   await page.getByTestId('product-item-width').fill('1200')
   await page.getByTestId('product-item-resize').click()
   await page.screenshot({ path: outDir + '/00-product-layout-editor.png', animations: 'disabled' })
@@ -151,10 +156,10 @@ try {
   assert.equal(await card('SMALL').count(), 1)
   await panel.getByRole('button', { name: /^全部兼容/ }).click()
   await page.screenshot({ path: outDir + '/01-size-tiers.png', animations: 'disabled' })
-  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects)
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects)
   await card('EXACT').getByRole('button', { name: '应用到 2 个模块' }).click()
   await panel.getByText('已为 2 个模块匹配商品，模块占地保持不变').waitFor()
-  let state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  let state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   for (const id of ['A','B']) {
     const item = state.objects.find(item => item.id === id), old = before.find(item => item.id === id)
     for (const key of ['w','h','x','y','rotation','layoutConfirmed']) assert.deepEqual(item[key], old[key])
@@ -167,7 +172,7 @@ try {
   unavailable = true
   await card('MEDIUM').getByRole('button', { name: '应用到 2 个模块' }).click()
   await panel.getByRole('alert').filter({ hasText: '商品已下架' }).waitFor()
-  state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   assert.equal(state.cart.every(item => item.productId === 'EXACT'), true)
   unavailable = false
   delayA = true
@@ -199,7 +204,7 @@ try {
   await page.getByTestId('tab-product-selection').click()
   await page.locator('[data-furniture-id="A"]').click()
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
-  assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').every(item => item.layoutConfirmed)), '座椅侧净空不足不阻止确认')
+  assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').every(item => item.layoutConfirmed)), '座椅侧净空不足不阻止确认')
   await page.getByTestId('layout-review-notice').waitFor()
   assert.match(await page.getByTestId('layout-review-notice').innerText(), /座椅一侧离墙净空不足 560mm，请现场复核/)
   assert.deepEqual(errors, [])

@@ -25,7 +25,10 @@ const avatarChar = computed(() => (displayName.value.trim()[0] || '设').toUpper
 
 async function logout() {
   await auth.logout()
-  await navigateTo('/login')
+  useWorkspaceStore().$reset()
+  useOfficeStore().$reset()
+  // 认证边界使用完整跳转，确保旧页面组件和异步任务不会留在新登录页。
+  window.location.assign(useRouter().resolve('/login').href)
 }
 </script>
 

@@ -38,11 +38,17 @@ const importPreview = {
 
 await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
 const reviewMock = createReviewConfirmMock()
+const defaultProject = {
+  projectId: 'OFFICE-PROJECT-001', name: '默认办公项目', customerRequirements: '', requirementsRevision: 1,
+  leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+  floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+}
 await context.route('**/api/v1/**', async route => {
   if (fulfillReviewConfirm(reviewMock, route)) return
   const request = route.request()
   const url = new URL(request.url())
   const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: status === 200 ? '成功' : '服务暂不可用', data }) })
+  if (url.pathname === '/api/v1/office/projects' && request.method() === 'GET') return respond([defaultProject])
   if (url.pathname.startsWith('/api/v1/products/') && request.method() === 'GET') {
     const found = products.find(item => url.pathname.endsWith('/' + item.rspuId))
     if (found) return respond(found)

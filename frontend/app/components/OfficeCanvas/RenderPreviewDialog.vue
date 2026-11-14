@@ -8,6 +8,7 @@ const show = defineModel<boolean>('show', { default: false })
 const props = withDefaults(defineProps<{ viewImage?: string }>(), { viewImage: '' })
 const dialogElement = ref<HTMLElement | null>(null)
 const store = useOfficeStore()
+const auth = useAuth()
 const api = useRenderPreviewApi()
 const zoneId = computed(() => store.designZoneId || '')
 const snapshot = computed(() => renderPreviewSnapshot(store.objects, zoneId.value))
@@ -29,7 +30,7 @@ const time = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12
 let sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 // Persist an uncertain submission's ID across reopening/reload. Retrying it cannot create a second billed task.
-const pendingStorageKey = () => 'rsdp-render-request:' + useOfficeApi().projectId + ':' + zoneId.value
+const pendingStorageKey = () => 'rsdp-render-request:' + auth.storageScope.value + ':' + useOfficeApi().projectId + ':' + zoneId.value
 let pending: RenderPreviewRequest | null = null
 
 function remember(value: RenderPreviewRequest | null, key = pendingStorageKey()) {

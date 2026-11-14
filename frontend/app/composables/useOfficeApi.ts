@@ -3,7 +3,6 @@ import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, Design
 import type { ImportedProduct, BatchAuditResult, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
-const PROJECT_ID = 'OFFICE-PROJECT-001'
 
 interface ApiResponse<T> {
   code: number
@@ -111,10 +110,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export function useOfficeApi() {
-  const currentProjectId = () => useWorkspaceStore().currentFloorId || PROJECT_ID
+  const selectedProjectId = () => useWorkspaceStore().currentFloorId || ''
+  const requireProjectId = () => {
+    const projectId = selectedProjectId()
+    if (!projectId) throw new Error('请先创建或选择项目与楼层')
+    return projectId
+  }
 
   async function loadCanvas(): Promise<{ objects: OfficeObject[]; files: ProjectFile[]; mode: 'overview' | 'design'; designZoneId: string | null; revision: number; blank: boolean } | null> {
-    const dto = await request<CanvasDto | null>('GET', `/api/v1/office/projects/${currentProjectId()}/canvas`)
+    const dto = await request<CanvasDto | null>('GET', `/api/v1/office/projects/${requireProjectId()}/canvas`)
     if (!dto) return null
     return {
       objects: dto.objects || [],
@@ -133,7 +137,7 @@ export function useOfficeApi() {
     designZoneId: string | null
     revision: number
     blank: boolean
-  }, workspaceId = currentProjectId()): Promise<CanvasDto | null> {
+  }, workspaceId = requireProjectId()): Promise<CanvasDto | null> {
     return await request<CanvasDto>('PUT', `/api/v1/office/projects/${workspaceId}/canvas`, {
       projectId: workspaceId,
       revision: payload.revision,
@@ -146,12 +150,12 @@ export function useOfficeApi() {
   }
 
   /** 设计复核确认（SPACE_REVIEW）：服务端基于当前画布签发凭据，baseCanvasRevision 必须等于服务端当前修订。 */
-  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId = currentProjectId()): Promise<SpaceReviewConfirmItem> {
+  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId = requireProjectId()): Promise<SpaceReviewConfirmItem> {
     return await request('POST', `/api/v1/office/floors/${workspaceId}/spaces/${zoneId}/review-confirm`, { baseCanvasRevision })
   }
 
   /** 一键复核：服务端对当前楼层全部空间逐签确认凭据，无法确认的空间逐个返回原因。 */
-  async function confirmAllSpaceReviews(baseCanvasRevision: number, workspaceId = currentProjectId()): Promise<{
+  async function confirmAllSpaceReviews(baseCanvasRevision: number, workspaceId = requireProjectId()): Promise<{
     canvasRevision: number
     confirmed: SpaceReviewConfirmItem[]
     alreadyConfirmed: SpaceReviewConfirmItem[]
@@ -161,12 +165,12 @@ export function useOfficeApi() {
   }
 
   async function loadCart(): Promise<CartItem[]> {
-    const list = await request<Array<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>>('GET', `/api/v1/office/projects/${currentProjectId()}/cart`)
+    const list = await request<Array<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>>('GET', `/api/v1/office/projects/${requireProjectId()}/cart`)
     return list.map(c => ({ id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }))
   }
 
   async function addCartItem(item: CartItem): Promise<CartItem> {
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${currentProjectId()}/cart`, {
+    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${requireProjectId()}/cart`, {
       lineId: item.id,
       projectId: item.projectId,
       zoneId: item.zoneId,
@@ -178,25 +182,25 @@ export function useOfficeApi() {
   }
 
   async function updateCartItemQty(lineId: string, qty: number): Promise<CartItem | null> {
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${currentProjectId()}/cart/${lineId}?qty=${qty}`, {})
+    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${requireProjectId()}/cart/${lineId}?qty=${qty}`, {})
     if (!c) return null
     return { id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }
   }
 
   async function deleteCartItem(lineId: string): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/projects/${currentProjectId()}/cart/${lineId}`)
+    await request<void>('DELETE', `/api/v1/office/projects/${requireProjectId()}/cart/${lineId}`)
   }
 
   async function clearCart(): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/projects/${currentProjectId()}/cart`)
+    await request<void>('DELETE', `/api/v1/office/projects/${requireProjectId()}/cart`)
   }
 
   async function loadMessages(): Promise<AgentMessage[]> {
-    return await request<AgentMessage[]>('GET', `/api/v1/office/projects/${currentProjectId()}/agent-messages`)
+    return await request<AgentMessage[]>('GET', `/api/v1/office/projects/${requireProjectId()}/agent-messages`)
   }
 
   async function sendMessage(content: string): Promise<AgentMessage> {
-    return await request<AgentMessage>('POST', `/api/v1/office/projects/${currentProjectId()}/agent-messages`, { role: 'user', content })
+    return await request<AgentMessage>('POST', `/api/v1/office/projects/${requireProjectId()}/agent-messages`, { role: 'user', content })
   }
 
   async function loadProducts(): Promise<Product[]> {
@@ -217,15 +221,15 @@ export function useOfficeApi() {
   }
 
   async function recommendModule(requestBody: ModuleRecommendationRequest): Promise<ModuleRecommendation> {
-    return await request('POST', `/api/v1/office/projects/${currentProjectId()}/module-recommendations`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody)
   }
 
   async function selectModuleProduct(requestBody: ModuleRecommendationRequest): Promise<ModuleProductSelection> {
-    return await request('POST', `/api/v1/office/projects/${currentProjectId()}/module-products`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-products`, requestBody)
   }
 
   async function exportProposal(): Promise<Blob> {
-    const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${currentProjectId()}/proposal/export`), {
+    const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${requireProjectId()}/proposal/export`), {
       method: 'POST',
       credentials: 'include',
     })
@@ -233,7 +237,7 @@ export function useOfficeApi() {
   }
 
   async function resetProject(): Promise<void> {
-    await request<void>('POST', `/api/v1/office/projects/${currentProjectId()}/reset`, {})
+    await request<void>('POST', `/api/v1/office/projects/${requireProjectId()}/reset`, {})
   }
 
   async function downloadImportTemplate(): Promise<Blob> {
@@ -444,7 +448,7 @@ export function useOfficeApi() {
   }
 
   return {
-    get projectId() { return currentProjectId() },
+    get projectId() { return selectedProjectId() },
     loadCanvas,
     saveCanvas,
     confirmSpaceReview,

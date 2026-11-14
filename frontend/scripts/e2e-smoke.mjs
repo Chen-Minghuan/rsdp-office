@@ -12,9 +12,17 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 if (process.env.MOCK_API === '1') {
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
+  const defaultProject = {
+    projectId: 'OFFICE-PROJECT-001', name: '默认办公项目', customerRequirements: '', requirementsRevision: 1,
+    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+    floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+  }
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const url = new URL(route.request().url())
+    if (url.pathname === '/api/v1/office/projects' && route.request().method() === 'GET') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 200, message: '成功', data: [defaultProject] }) })
+    }
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
