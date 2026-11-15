@@ -288,7 +288,7 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
 
 /**
  * 标准使用当前间距；紧凑/舒适按相对标准的毫米差值联动计算，固定标准优先。
- * 几何相同的档位去重，放不下的档位在 warnings 说明；预览与应用共用此入口。
+ * 几何相同的档位去重，放不下的档位在 warnings 说明；应用直接提交当前预览快照。
  */
 export function planTieredMixedLayout(zone: ZoneObject, existing: FurnitureObject[], categoryIds: string[], spacing: OfficeLayoutSpacing, targetSeats = 0, options: MixedLayoutOptions = {}): LayoutProposal {
   const variants = officeLayoutSpacingVariants(spacing)

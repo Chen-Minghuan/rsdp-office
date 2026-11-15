@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import type { FurnitureObject, ZoneObject } from '~/types/office'
+import type { ZoneObject } from '~/types/office'
+import type { LayoutPreview } from '~/types/layoutPlanning'
 import type { OfficeModuleTemplate } from '~/types/officeModule'
 import { furnitureById } from '~/utils/manualFurniture'
 import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
-/** 画布上实时（可能已被用户拖动调整）的组合预览，应用时需以它为准覆盖生成位置。 */
-defineProps<{ currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
-const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null] }>()
+/** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
+const props = defineProps<{ currentPreview?: LayoutPreview | null }>()
+const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
-type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void; applyAutoLayout: () => void }
+type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void }
 const activePage = ref<WorkflowPage>('auto')
 const collapsed = ref(false), autoLayout = ref<AutoLayoutPanel | null>(null), actionMessage = ref('')
 const pages: Array<{ id: WorkflowPage; label: string; testId: string }> = [
@@ -50,7 +51,7 @@ function selectCategory(id: string) {
   const module = category ? furnitureById.get(category.moduleId) : null
   if (module) {
     selectedCatalogId.value = module.id
-    if (selectedCategories.value.length === 1) autoLayout.value?.selectModule(module)
+    if (selectedCategories.value.length === 1) nextTick(() => autoLayout.value?.selectModule(module))
   }
 }
 function selectModule(module: OfficeModuleTemplate) {
@@ -61,6 +62,10 @@ function selectModule(module: OfficeModuleTemplate) {
 }
 function confirmAndRecommend() {
   if (!zone.value) return
+  if (props.currentPreview?.zoneId === zone.value.id && props.currentPreview.furniture.length) {
+    actionMessage.value = '当前预览尚未应用，请先应用当前预览，再确认排版'
+    return
+  }
   const problem = store.layoutConfirmProblem(zone.value.id)
   if (problem) { actionMessage.value = problem; return }
   if (store.confirmLayout(zone.value.id) === false) { actionMessage.value = '当前家具存在越界、重叠或约束冲突，请调整后确认'; return }

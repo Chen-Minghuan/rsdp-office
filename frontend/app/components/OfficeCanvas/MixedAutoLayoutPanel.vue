@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import type { FurnitureObject } from '~/types/office'
+import type { LayoutPreview, LayoutProposal } from '~/types/layoutPlanning'
 import type { OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { defaultLayoutPreferences } from '~/utils/layoutPlanning'
 import { planTieredMixedLayout, MIXED_LAYOUT_CATEGORIES, MIXED_CATEGORY_IDS } from '~/utils/mixedLayout'
 import { AREA_PER_SEAT_HINT_M2, zoneNetAreaMm2 } from '~/utils/layoutWarnings'
 
-const props = defineProps<{ categoryIds: string[]; currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>()
-const emit = defineEmits<{ preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null] }>()
+const props = defineProps<{ categoryIds: string[]; currentPreview?: LayoutPreview | null }>()
+const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 const store = useOfficeStore()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const preferences = reactive(defaultLayoutPreferences())
@@ -39,17 +39,16 @@ function generate() {
   previewReady.value = true
 }
 /** 预览在家具 id 不变（未重新生成）时可能已被用户在画布上拖动，应用时以预览位置为准。 */
-function withPreviewPositions<T extends { furniture: FurnitureObject[]; candidates?: Array<{ furniture: FurnitureObject[] }> }>(base: T): T {
+function withPreviewPositions(base: LayoutProposal): LayoutProposal {
   const live = props.currentPreview
   if (!live || live.zoneId !== zone.value?.id || !live.furniture.length) return base
   const positions = new Map(live.furniture.map(item => [item.id, item] as const))
-  const merge = (items: FurnitureObject[]) => items.map(item => positions.has(item.id) ? { ...item, x: positions.get(item.id)!.x, y: positions.get(item.id)!.y } : item)
-  return { ...base, furniture: merge(base.furniture), candidates: base.candidates?.map(candidate => ({ ...candidate, furniture: merge(candidate.furniture) })) }
+  return { ...base, furniture: base.furniture.map(item => positions.get(item.id) || item) }
 }
 function apply() {
   if (!zone.value || !activeProposal.value || activeProposal.value.problem || !previewReady.value) return
   const savedPreferences = { ...JSON.parse(JSON.stringify(preferences)), channels: JSON.parse(JSON.stringify(zone.value.layoutPreferences?.channels || [])) }
-  if (!store.applyMixedLayoutProposal(zone.value.id, withPreviewPositions(activeProposal.value), savedPreferences, selectedCandidateIndex.value)) { applicationMessage.value = '当前空间或家具已变化，请重新生成组合'; return }
+  if (!store.applyLayoutProposal(zone.value.id, withPreviewPositions(activeProposal.value), savedPreferences)) { applicationMessage.value = '预览已过期或存在越界、重叠、约束冲突，请重新生成或调整'; return }
   applicationMessage.value = `已生成 ${activeProposal.value.furniture.length} 件家具的组合布局，可在产品选型中继续调整`
 }
 </script>
@@ -111,12 +110,13 @@ function apply() {
             </div>
           </div>
         </Teleport>
+        <p v-if="currentPreview?.manuallyAdjusted" data-testid="mixed-preview-manually-adjusted" class="mt-2 text-[10px] text-[#4d713d]">已手动调整 · 应用时保留当前预览位置</p>
         <p v-if="applicationMessage" role="status" class="mt-2 text-[10px] leading-relaxed text-[#56636e]">{{ applicationMessage }}</p>
       </div>
     </div>
     <div class="flex-none space-y-1.5 border-t border-line bg-white p-3">
       <button v-if="!previewReady" data-testid="mixed-layout-generate" class="w-full rounded-none border border-dashed border-[#8bc66b] bg-[#e9f8df] px-3 py-2.5 text-xs font-semibold text-[#38682d] disabled:cursor-not-allowed disabled:opacity-50" :disabled="!categoryIds.length" @click="generate">生成组合预览</button>
-      <button v-else data-testid="mixed-layout-apply" class="w-full rounded-none border border-dashed border-[#8bc66b] bg-[#e9f8df] px-3 py-2.5 text-xs font-semibold text-[#38682d] disabled:cursor-not-allowed disabled:opacity-50" :disabled="!categoryIds.length || !!activeProposal?.problem" @click="apply">应用所选组合</button>
+      <button v-else data-testid="mixed-layout-apply" class="w-full rounded-none border border-dashed border-[#8bc66b] bg-[#e9f8df] px-3 py-2.5 text-xs font-semibold text-[#38682d] disabled:cursor-not-allowed disabled:opacity-50" :disabled="!categoryIds.length || !!activeProposal?.problem" @click="apply">{{ currentPreview?.manuallyAdjusted ? '应用当前预览（含手动调整）' : '应用所选组合' }}</button>
     </div>
   </section>
 </template>

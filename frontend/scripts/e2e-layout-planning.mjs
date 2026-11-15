@@ -39,10 +39,14 @@ try {
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
+      const project = { projectId: 'OFFICE-PROJECT-001', name: '排版规划测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
+    }
     const data = path.endsWith('/floor-plan/MEETING-TEST') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
-  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const catalog = page.getByTestId('unit-module-catalog')
   await page.goto(`${baseUrl}/canvas?analysisId=MEETING-TEST`, { waitUntil: 'networkidle' })
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
@@ -123,12 +127,12 @@ try {
   await page.getByTestId('objective-target-seats').click()
   assert.equal(await page.getByRole('spinbutton', { name: '目标人数', exact: true }).inputValue(), '8', '切回目标人数后已填数值保留')
   await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))
     const zone = draft.objects.find(item => item.id === 'MEETING-ROOM')
     draft.objects.push({ id: 'KEEP-CABINET', kind: 'furniture', zoneId: zone.id, productId: '', furnitureTemplateId: 'cabinet-mobile', x: zone.x + 300, y: zone.y + 300, w: 420, h: 500, rotation: 0, layoutConfirmed: false })
     draft.objects.find(item => item.layoutRole === 'primary').productId = 'SELECTED-OLD'
     draft.cart = [{ id: 'CART-OLD', productId: 'SELECTED-OLD', zoneId: zone.id, zoneName: zone.name, qty: 1 }, { id: 'CART-EXTRA', productId: 'EXTRA-MANUAL', zoneId: zone.id, zoneName: zone.name, qty: 2 }]
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(draft))
   })
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('functional-category-meeting').click()
@@ -153,7 +157,7 @@ try {
     store.$onAction(({ name, args }) => { if (name === 'applyLayoutProposal') window.candidateApplyArgs = JSON.parse(JSON.stringify(args)) })
   })
   await page.getByTestId('apply-layout').click()
-  assert.equal(await page.evaluate(() => window.candidateApplyArgs?.[3]), 1, '应用携带候选索引')
+  assert.match(await page.evaluate(() => window.candidateApplyArgs?.[1]?.label || ''), /^(紧凑|舒适)/, '应用快照来自选中的非默认候选')
   await page.waitForFunction(n => [...document.querySelectorAll('[data-testid="office-design-canvas"] .board-element[data-id]')].filter(el => el.getAttribute('data-id') !== 'KEEP-CABINET' && el.querySelector('[data-furniture-template]')).length === n, candidatePreview.length)
   const placedCandidate = await page.locator('[data-testid="office-design-canvas"] .board-element[data-id]:not([data-id="KEEP-CABINET"])').filter({ has: page.locator('[data-furniture-template]') }).evaluateAll(nodes => nodes.map(n => ({ x: n.style.left, y: n.style.top, w: n.style.width, h: n.style.height, transform: n.style.transform })))
   assert.deepEqual(placedCandidate, candidatePreview, '选中候选的预览与应用几何一致')
@@ -168,13 +172,13 @@ try {
   await catalog.locator('[data-auto-module-id="table-conference-rect"]').click()
   // GEOM-013：面板只读；空间核对标注的禁放区（建筑约束）常显并阻止应用，移除后恢复。
   await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))
     const room = draft.objects.find(item => item.id === 'MEETING-ROOM')
     const xs = room.polygon.map(point => point[0]), ys = room.polygon.map(point => point[1])
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
     // obstacle 几何存储 y 取反（毫米空间），覆盖整个房间画布范围。
     room.obstacles = [{ obstacleId: 'OBS-ALL', kind: 'NO_PLACEMENT', spaceId: 'MEETING-ROOM', label: '整间禁放', excludesFloorArea: false, source: 'MANUAL', geometry: { type: 'POLYGON', coordinateSystem: 'WORLD_MM', outer: [[minX, -minY], [maxX, -minY], [maxX, -maxY], [minX, -maxY]], outerVertexIds: [], holes: [], holeVertexIds: [] } }]
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(draft))
   })
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('functional-category-meeting').click()
@@ -184,9 +188,9 @@ try {
   assert.equal(await page.getByRole('button', { name: '添加入口或禁放区', exact: true }).count(), 0)
   assert.equal(await page.getByTestId('design-obstacles').locator(':scope > div').count(), 1)
   await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))
     draft.objects.find(item => item.id === 'MEETING-ROOM').obstacles = []
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(draft))
   })
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('functional-category-meeting').click()
