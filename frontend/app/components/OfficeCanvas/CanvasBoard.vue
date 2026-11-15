@@ -14,13 +14,13 @@ import { rectangleObstacle, moveObstacle, reshapeObstacle, obstacleExclusion, ob
 import type { SpatialObstacle, SpatialObstacleKind, LayoutRegion, SpatialFacility, SpatialFacilityKind } from '~/types/spatial'
 import { layoutRegionRing, layoutRegionWorldRing, layoutRegionsForZone, layoutRegionProblem, layoutRegionEdgeMeasurements, moveLayoutRegion, moveLayoutRegionVertex, nextLayoutRegionName, setPrimaryLayoutRegion, removeLayoutRegion } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityFootprintRing, facilityClearanceRing, facilityLabel, facilityShape, facilitiesForZone } from '~/utils/spatial/facilities'
-import type { LayoutChannel, LayoutExclusion } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutExclusion, LayoutPreview } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
 import { channelRects, channelOffsetRange, channelTravelSpan, channelTravelDeltaRange, shiftChannelTravel, clampChannelTravelEndpoint, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 
 
 const store = useOfficeStore()
-const layoutPreview = defineModel<{ zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null>('layoutPreview', { default: null })
+const layoutPreview = defineModel<LayoutPreview | null>('layoutPreview', { default: null })
 const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
 const viewRotation = defineModel<number>('viewRotation', { default: 0 })
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
@@ -1397,7 +1397,7 @@ function onPointerUp(e: PointerEvent) {
     const dx = d.dx || 0, dy = d.dy || 0
     if (dx || dy) {
       const preview = activePreview.value
-      layoutPreview.value = { ...preview, furniture: preview.furniture.map(item => item.id === d.id ? { ...item, x: Math.round(item.x + dx), y: Math.round(item.y + dy) } : item) }
+      layoutPreview.value = { ...preview, manuallyAdjusted: true, furniture: preview.furniture.map(item => item.id === d.id ? { ...item, x: Math.round(item.x + dx), y: Math.round(item.y + dy) } : item) }
     }
   } else if (d.mode === 'channel' && d.channelId && store.designZoneId) {
     // 松手一次性提交（走 store 的失效与撤销路径）：垂直分量改位置，走向分量平移起止窗口（LAYOUT-040）。

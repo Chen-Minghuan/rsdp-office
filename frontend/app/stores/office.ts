@@ -41,12 +41,12 @@ import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFrom
 import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
-import type { LayoutChannel, LayoutPreferences, LayoutProposal, LayoutRequest } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutPreferences, LayoutProposal } from '~/types/layoutPlanning'
 import type { LayoutRegion, SpatialFacility, SpatialObstacle } from '~/types/spatial'
 import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } from '~/utils/spatial/obstacles'
 import { layoutRegionProblem, layoutRegionRing, measureLayoutRegionWallOffsets } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilities'
-import { planTieredLayoutProposal, layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
+import { layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 import { authEnabled, useAuth } from '~/composables/useAuth'
 
@@ -1613,50 +1613,16 @@ export const useOfficeStore = defineStore('office', {
       return true
     },
 
-    applyLayoutProposal(zoneId: string, request: LayoutRequest, sourceKey: string, candidateIndex = 0, positionOverrides?: Array<{ id: string; x: number; y: number }>) {
-      const zone = this.zones.find(zone => zone.id === zoneId)
-      if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
-      const existing = this.furnitureForZone(zoneId)
-      if (sourceKey !== layoutSourceKey(zone, existing)) return false
-      const template = this.customModules.find(module => module.id === request.module.id) || furnitureById.get(request.module.id)
-      if (!template) return false
-      const proposal = planTieredLayoutProposal(zone, existing, { ...request, module: template })
-      if (proposal.problem || !proposal.furniture.length) return false
-      // LAYOUT-034：应用用户在面板上选中的候选；索引越界时回落到评分最高的默认方案。
-      const chosen = candidateIndex > 0 ? proposal.candidates?.[candidateIndex] : undefined
-      let chosenFurniture = chosen?.furniture || proposal.furniture
-      // 预览阶段用户在画布上拖动过预览家具时，按预览位置覆盖（生成是确定性的，id 可对上）。
-      if (positionOverrides?.length) {
-        const overrides = new Map(positionOverrides.map(item => [item.id, item] as const))
-        chosenFurniture = chosenFurniture.map(item => overrides.has(item.id) ? { ...item, x: overrides.get(item.id)!.x, y: overrides.get(item.id)!.y } : item)
-      }
-      this.cancelFurniturePlacement()
-      if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
-      this.objectUpdate(() => {
-        const removedProducts = new Map<string, number>()
-        for (const item of existing) if (proposal.replaceIds.includes(item.id) && item.productId) removedProducts.set(item.productId, (removedProducts.get(item.productId) || 0) + 1)
-        this.objects = this.objects.filter(object => !proposal.replaceIds.includes(object.id))
-        for (const furniture of chosenFurniture) this.objects.push({ ...furniture, id: uid('f'), spaceTemplateId: this.spaceTemplate!.templateId, templateSpaceId: zoneId })
-        zone.layoutPreferences = JSON.parse(JSON.stringify(request.preferences))
-        this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
-        this.submitted = null
-        this.cart = this.cart.flatMap(item => {
-          const removed = item.zoneId === zoneId ? removedProducts.get(item.productId) || 0 : 0
-          if (!removed) return [item]
-          const deduction = Math.min(item.qty, removed)
-          removedProducts.set(item.productId, removed - deduction)
-          return item.qty > deduction ? [{ ...item, qty: item.qty - deduction }] : []
-        })
-      })
-      return true
-    },
-
-    applyMixedLayoutProposal(zoneId: string, proposal: LayoutProposal, preferences: LayoutPreferences, candidateIndex = 0) {
+    applyLayoutProposal(zoneId: string, proposal: LayoutProposal, preferences: LayoutPreferences) {
       const zone = this.zones.find(zone => zone.id === zoneId)
       if (!zone || this.canvasMode !== 'design' || this.designZoneId !== zoneId || !this.canEnterLayout) return false
       const existing = this.furnitureForZone(zoneId)
       if (proposal.sourceKey !== layoutSourceKey(zone, existing) || proposal.problem || !proposal.furniture.length) return false
-      const chosenFurniture = candidateIndex > 0 ? proposal.candidates?.[candidateIndex]?.furniture || proposal.furniture : proposal.furniture
+      const chosenFurniture = proposal.furniture
+      if (new Set(chosenFurniture.map(item => item.id)).size !== chosenFurniture.length) return false
+      const retained = existing.filter(item => !proposal.replaceIds.includes(item.id))
+      // 预览被手动调整后就是最终设计稿；只校验，不重新求解或重排。
+      if (confirmedLayoutProblem(zone, [...retained, ...chosenFurniture])) return false
       this.cancelFurniturePlacement()
       if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
       this.objectUpdate(() => {

@@ -4,7 +4,7 @@ import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFu
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
-import type { LayoutChannel, LayoutPreferences, LayoutRequest } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutPreferences, LayoutPreview, LayoutRequest } from '~/types/layoutPlanning'
 import { defaultLayoutPreferences, layoutCandidateKey, planTieredLayoutProposal, proposalDifference } from '~/utils/layoutPlanning'
 import { layoutPanelWarnings, layoutWarningTestId, zoneNetAreaMm2, AREA_PER_SEAT_HINT_M2, type LayoutWarningLevel } from '~/utils/layoutWarnings'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
@@ -13,9 +13,9 @@ import { moduleGlyphId } from '~/utils/officeModules'
 import { formatDimensionMm, officeLayoutClearances } from '~/utils/officeDimensionAnnotations'
 import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
 
-const props = withDefaults(defineProps<{ embedded?: boolean; moduleId?: string; currentPreview?: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null }>(), { embedded: false, moduleId: '', currentPreview: null })
+const props = withDefaults(defineProps<{ embedded?: boolean; moduleId?: string; currentPreview?: LayoutPreview | null }>(), { embedded: false, moduleId: '', currentPreview: null })
 const emit = defineEmits<{
-  preview: [value: { zoneId: string; furniture: FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null]
+  preview: [value: LayoutPreview | null]
   confirmed: []
 }>()
 const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
@@ -211,6 +211,7 @@ const panelWarnings = computed(() => {
 const warningLevelClass: Record<LayoutWarningLevel, string> = { error: 'text-[#a65e4c]', warning: 'text-amber-600', info: 'text-muted' }
 const preferencesChanged = computed(() => JSON.stringify(request.value.preferences) !== JSON.stringify(zone.value?.layoutPreferences || defaultLayoutPreferences()))
 const draftApplied = computed(() => difference.value === '与当前布局一致' && !preferencesChanged.value)
+const previewReady = computed(() => !!zone.value && props.currentPreview?.zoneId === zone.value.id && !!props.currentPreview.furniture.length)
 const differenceText = computed(() => difference.value === '与当前布局一致' && preferencesChanged.value ? '需求或预留参数已变化，应用后保存新参数' : difference.value)
 const plan = computed(() => proposal.value ? { slots: proposal.value.furniture, rows: proposal.value.rows || new Set(proposal.value.furniture.filter(f => f.layoutRole === 'primary').map(f => Math.round(f.y))).size, columns: proposal.value.columns || 0, rotated: proposal.value.rotated || false, problem: proposal.value.problem } : null)
 const autoPlan = plan
@@ -286,25 +287,23 @@ function addToCanvas() {
 
 function applyLayout() {
   if (!zone.value || !proposal.value || proposal.value.problem || draftApplied.value) return
-  const planned = proposal.value
-  // 预览可能已在画布上被拖动调整：同空间且家具 id 对得上时，以预览位置覆盖生成位置。
   const live = props.currentPreview
-  const overrides = live && live.zoneId === zone.value.id && live.furniture.length
-    ? live.furniture.map(({ id, x, y }) => ({ id, x, y }))
-    : undefined
-  const applied = store.applyLayoutProposal(zone.value.id, request.value, planned.sourceKey, selectedCandidateIndex.value, overrides)
-  if (!applied) { applicationMessage.value = '空间或家具已变化，请重新预览后应用'; return }
-  nextTick(() => { applicationMessage.value = '已应用：' + planned.furniture.length + ' 件，保留 ' + planned.retainedIds.length + ' 件' })
-}
-
-function applyAutoLayout() {
-  applyLayout()
+  if (!live || live.zoneId !== zone.value.id || !live.furniture.length) {
+    applicationMessage.value = '请先显示并核对当前方案预览，再应用'
+    return
+  }
+  // 当前预览就是用户确认的几何快照，包含画布上的手动位置调整。
+  const applied = store.applyLayoutProposal(zone.value.id, { ...proposal.value, furniture: live.furniture, replaceIds: live.replaceIds }, request.value.preferences)
+  if (!applied) { applicationMessage.value = '预览已过期或存在越界、重叠、约束冲突，请重新生成或调整'; return }
+  showPreview.value = false
+  nextTick(() => { applicationMessage.value = `已应用当前预览：${live.furniture.length} 件${live.manuallyAdjusted ? '，包含手动位置调整' : ''}，保留 ${proposal.value?.retainedIds.length || 0} 件` })
 }
 
 /** 确认排版的实时阻塞原因，展示在按钮上方，点击确认时同样使用。 */
 const confirmProblem = computed(() => zone.value && store.furnitureForZone(zone.value.id).length > 0 && !layoutConfirmed.value ? store.layoutConfirmProblem(zone.value.id) : null)
 function confirmLayout() {
   if (!zone.value) return
+  if (previewReady.value) { applicationMessage.value = '当前预览尚未应用，请先应用当前预览，再确认排版'; return }
   const problem = store.layoutConfirmProblem(zone.value.id)
   if (problem) { applicationMessage.value = problem; return }
   if (store.confirmLayout(zone.value.id) === false) { applicationMessage.value = '当前家具存在越界、重叠、禁放区冲突或目标不足，请检查后确认'; return }
@@ -323,7 +322,7 @@ function clearLayout() {
   store.unconfirmLayout(zone.value.id)
 }
 
-defineExpose({ selectModule, applyAutoLayout })
+defineExpose({ selectModule })
 </script>
 
 <template>
@@ -571,6 +570,7 @@ defineExpose({ selectModule, applyAutoLayout })
           </div>
           <p v-if="isMeetingLayout && proposal?.furniture.length" class="mt-1 text-[10px] text-muted">本次桌面实际 {{ Math.round(proposal.furniture[0]!.w) }} × {{ Math.round(proposal.furniture[0]!.h) }} mm</p>
           <p v-if="draftApplied" data-testid="layout-unchanged" class="mt-1 text-[10px] text-green">与当前布局一致</p>
+          <p v-if="previewReady && currentPreview?.manuallyAdjusted" data-testid="preview-manually-adjusted" class="mt-1 text-[10px] text-[#4d713d]">已手动调整 · 应用时保留当前预览位置</p>
           <p v-if="applicationMessage" role="status" class="mt-1 text-[10px] text-[#56636e]">{{ applicationMessage }}</p>
           <p v-if="plan?.problem" role="status" class="mt-1 text-[10px] text-[#a65e4c]">{{ plan.problem }}</p>
           <ul v-if="proposal?.problem && proposal.problemAdvice?.length" class="mt-1 list-inside list-disc text-[10px] leading-relaxed text-muted" data-testid="layout-problem-advice">
@@ -588,11 +588,11 @@ defineExpose({ selectModule, applyAutoLayout })
           <button
             data-testid="apply-layout"
             class="w-full px-4 py-2 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="!autoPlan?.slots.length || !!proposal?.problem || draftApplied"
-            @click="applyAutoLayout"
+            :disabled="!autoPlan?.slots.length || !!proposal?.problem || draftApplied || !previewReady"
+            @click="applyLayout"
           >
             <AppIcon name="cube" size="3.5" />
-            <span>{{ draftApplied ? '与当前布局一致' : isMeetingLayout && preferences.strategy === 'recommended' ? '应用自动推荐方案' : '应用当前方案' }}</span>
+            <span>{{ draftApplied ? '与当前布局一致' : currentPreview?.manuallyAdjusted && previewReady ? '应用当前预览（含手动调整）' : isMeetingLayout && preferences.strategy === 'recommended' ? '应用自动推荐方案' : '应用当前方案' }}</span>
           </button>
           <div v-if="!embedded" class="grid grid-cols-2 gap-1.5">
             <button :class="['px-2.5 py-2 rounded-none text-[11px] border font-semibold', store.furniturePlacement ? 'border-bronze bg-[#f7f0e8] text-bronze' : 'border-line hover:bg-[#f9f7f4]']" @click="addToCanvas">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>

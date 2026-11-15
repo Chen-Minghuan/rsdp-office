@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-11-15 [LAYOUT-042](tasks/LAYOUT-042-apply-edited-preview.md) 手动预览应用修复：单模块原“应用”会重新求解再按临时 ID 回填位置，现与组合布局统一为直接提交当前 `LayoutPreview` 快照，不再重排；提交前检查 sourceKey、临时 ID 唯一性和最终硬约束，成功后退出预览并使确认失效。新增手动调整提示、未应用预览确认拦截；修复首次单选品类时子面板未挂载导致预览未开启。删除 `applyMixedLayoutProposal` 及旧候选索引/位置覆盖参数，共用替换自动组、清单扣减和确认失效逻辑。验证：最终 `pnpm build`、`test:layout-planning`、`test:mixed-layout`、`e2e:preview-drag`（空空间/已有排版/刷新/组合）、`e2e:layout-planning`、`e2e:auto-layout`、`e2e:module-selection`、`e2e:module-recommendations`、`git diff --check` 通过；UI 均为模拟 API，未操作真实画布，真实业务复核待执行。未提交、未部署。
+
 2026-11-14 录入端端到端打通（office→主项目转发链路激活与两处纠错）：SHARED-003 代码已具备但运行环境未就位——主项目 8081 未启动、开发库无 rsdp-office 服务账号（此前记录"已建"但实际缺失）、office `.env` 未配 `RSDP_MAIN_*`、8082 跑着 11-09 的旧进程。本次落地：①主项目开发库建工厂 A034 + 服务账号 rsdp-office（FACTORY_ADMIN + 绑定 A034 + view_full_catalog，bcrypt 密码 `rsdp-office-dev-2026!` 仅存 office `.env`）+ 能力等级声明 A(主)/B（office 默认按 B 级录入，未声明会被主项目拦截）；②office `.env` 增 `RSDP_MAIN_BASE_URL/USERNAME/PASSWORD`；③主项目 `seed_dev_data.sql` 固化上述账号/工厂/能力（幂等，`make seed-dev` 可重建；rsdp 仓库未提交）。**两处转发纠错**：手工录入同 externalCode 重复提交会重复建档——`createManualEntry` 改走 `forwardRow` 更新路径（查 externalCode→更新基础字段+匹配/补变体+补报价，响应带 `updated` 标记）；更新路径补报价撞主项目"同厂同变体同供应配置"唯一约束报 400——`MainProductEntryGateway.addQuote` 捕获后回退查本厂既有 RSKU 并 PUT 出厂价更新。新增 `ProductImportManualEntryTest`/`MainProductEntryGatewayTest` 各 2 例。验证：`mvn test` 268 运行/0 失败/3 跳过；真实链路实测（8082→8081）：手工录入「联调验证-会议桌」→主库落 RSPU（OF-TBD-0001，归属 A034、出厂价 AES 密文、毫米尺寸）→office 列表/详情回读一致；同码重交（零售价 2680→2980、出厂价 1280→1480）→不重复建档、字段更新、变体按名匹配不增；联调产生的重复测试档已清理（主库该码仅剩 1 条）。改动为纯后端，未跑前端构建/e2e。另发现主项目种子既有缺陷（与本改动无关）：`seed_dev_data.sql` 演示 RSKU 段未提供 `supplier_configuration_key`（现为 NOT NULL），重跑种子到该段报错，其前的服务账号段不受影响。office admin 开发库密码重置为 `.env` 引导值（原哈希与引导值不符）。未提交。
 
 
@@ -359,6 +361,7 @@
 | LAYOUT-014 | 用途匹配与分组排版 | 已实现并通过构建、算法、专项 UI mock；会议桌椅/目标人数、自动推荐、保留手动家具、入口禁放区、预览与应用一致及撤销，见[任务记录](tasks/LAYOUT-014-layout-planning-review.md) | 连续通道、真实建筑约束与真实服务验收待补；启发式不保证全局最优 | P1 |
 | LAYOUT-015 | 严格按四张参考图排布 | 已实现，构建、全部 10 预设坐标/镜像/间距与专项 UI mock 通过；T 型 12 件、C 型 8 件、十字 16 件，座席朝向与整组保留见[任务记录](tasks/LAYOUT-015-exact-reference-presets.md) | 用户实际空间待核对；旧布局需显式重新应用，不静默改写 | P1 |
 | LAYOUT-016 | 按场地自适应参考样式 | 已实现，构建、算法与专项 UI mock 通过；样式不变，数量/方向按轮廓与障碍计算，同尺寸矩形测试 6 件上限修正为 36 件，见[任务记录](tasks/LAYOUT-016-space-adaptive-reference-layout.md) | 用户纠正覆盖 LAYOUT-015 固定示例件数；真实建筑与全局最优不扩大验收 | P1 |
+| LAYOUT-042 | 应用手动调整后的排版预览 | 已编码待验证；单/组合预览直接提交、硬校验、确认失效与重复提交逻辑清理完成，构建/纯函数及相关 UI mock 通过，见[任务记录](tasks/LAYOUT-042-apply-edited-preview.md) | 真实用户空间的拖动应用与数据库保存回读待业务复核 | P1 |
 | RECOMMEND-002 | 单位模块向下兼容尺寸推荐 | 已实现并通过专项验证；精确毫米/三档/旋转、真实 SKU、同规格批量选择与独立快照；Java 97 项、构建、专项及相关 UI mock 通过，见[任务记录](tasks/RECOMMEND-002-module-size-matching.md) | 当前本地库商品均待审核；真实服务集成、品类/结构与整体方案另行验收 | P1 |
 | RECOMMEND-001 | 已确认排版后的真实商品推荐 | 部分实现；模块宽深匹配及真实变体选择已按 RECOMMEND-002 落地，旧候选入口仍兼容 | 完整品类/结构与使用约束、方案确认、旧清单失效/复核及真实服务集成 | P1 |
 | RENDER-001 | 已确认方案效果图 | 正式已确认商品方案生成仍待开始；独立概念预览见 RENDER-002 | 正式方案条件核验、商品外观资源与精确对应验收 | P2 |

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
+import type { LayoutPreview } from '~/types/layoutPlanning'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 const store = useOfficeStore()
@@ -9,7 +10,7 @@ const router = useRouter()
 
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
-const layoutPreview = ref<{ zoneId: string; furniture: import('~/types/office').FurnitureObject[]; replaceIds: string[]; seatClearanceMm: number } | null>(null)
+const layoutPreview = ref<LayoutPreview | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
