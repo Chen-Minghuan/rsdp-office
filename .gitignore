@@ -5,6 +5,9 @@
 .idea/
 *.iml
 
+# Claude 本地配置与生成产物
+.claude*/
+
 # Backend
 backend/target/
 backend/*.log
