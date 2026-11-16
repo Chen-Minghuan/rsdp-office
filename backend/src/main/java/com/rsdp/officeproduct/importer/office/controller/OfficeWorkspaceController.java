@@ -42,23 +42,16 @@ public class OfficeWorkspaceController {
         return Result.ok(workspaceService.createWorkspaceUser(request));
     }
 
-    /** 公共库开关状态（工作区级 + 当前用户级 + 是否主号），前端回显用。 */
+    /** 公共库开关状态（工作区级 + 是否主号），前端回显用。 */
     @GetMapping("/shared-catalog")
     public Result<SharedCatalogStatus> sharedCatalogStatus() {
         return Result.ok(sharedCatalogService.currentStatus());
     }
 
-    /** 工作区级公共库开关（仅经销商主号；关闭后全工作区仅见本厂产品）。 */
+    /** 工作区级公共库开关（仅经销商主号；关闭后全工作区仅见本厂产品，成员无个人开关）。 */
     @PutMapping("/shared-catalog")
     public Result<SharedCatalogStatus> setWorkspaceSharedCatalog(@RequestBody Map<String, Boolean> request) {
         sharedCatalogService.setWorkspaceSharedCatalog(Boolean.TRUE.equals(request.get("enabled")));
-        return Result.ok(sharedCatalogService.currentStatus());
-    }
-
-    /** 用户级公共库偏好（成员自选不看；仅工作区级开启时生效）。 */
-    @PutMapping("/shared-catalog/me")
-    public Result<SharedCatalogStatus> setUserHideSharedCatalog(@RequestBody Map<String, Boolean> request) {
-        sharedCatalogService.setUserHideSharedCatalog(Boolean.TRUE.equals(request.get("hide")));
         return Result.ok(sharedCatalogService.currentStatus());
     }
 }

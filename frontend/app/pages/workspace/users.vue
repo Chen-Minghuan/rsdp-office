@@ -71,8 +71,8 @@ async function toggleSharedCatalog() {
     const status = await api.setWorkspaceSharedCatalog(!sharedCatalogEnabled.value)
     sharedCatalogEnabled.value = status.workspaceEnabled
     notice.value = status.workspaceEnabled
-      ? '已开启公共库：工作区成员可在商品库看到主项目全库商品（成员可自行选择不看）'
-      : '已关闭公共库：全工作区仅显示本厂产品'
+      ? '已开启公共库：全工作区（含负责人/协作者）可在商品库看到主项目全库商品'
+      : '已关闭公共库：全工作区仅显示本厂产品，成员跟随此设置'
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '公共库开关切换失败'
   } finally {
@@ -133,7 +133,7 @@ function formatTime(value: string | null) {
           <div>
             <h2 class="text-sm font-semibold">公共库（主项目全库商品）</h2>
             <p class="mt-1 text-xs text-muted">
-              开启后工作区成员可在商品库与排版选品中看到主项目全库商品（别家价格不可见），成员可自行选择不看；关闭后全工作区仅显示本厂产品，即时生效。
+              开启后全工作区（含负责人/协作者）可在商品库与排版选品中看到主项目全库商品（别家价格不可见）；关闭后全工作区仅显示本厂产品，即时生效。开关仅主号可设置，成员跟随此设置。
             </p>
           </div>
           <label class="inline-flex cursor-pointer select-none items-center gap-2 text-sm">

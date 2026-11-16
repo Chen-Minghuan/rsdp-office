@@ -59,6 +59,9 @@ public class SchemaInitializer {
             Resource dropLocalProductCopies = new ClassPathResource("db/migrations/20261112_drop_local_product_copies.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(dropLocalProductCopies), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            Resource dropUserSharedCatalogToggle = new ClassPathResource("db/migrations/20261114_drop_user_shared_catalog_toggle.sql");
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(dropUserSharedCatalogToggle), false, false, "--",
+                ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

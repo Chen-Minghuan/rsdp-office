@@ -2,7 +2,6 @@ package com.rsdp.officeproduct.importer.office.service;
 
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
-import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
 import com.rsdp.officeproduct.importer.office.entity.OfficeWorkspace;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceMapper;
 import org.junit.jupiter.api.Test;
@@ -11,14 +10,13 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * 公共库两级开关判定测试：工作区级（主号控制）与用户级（成员自选）取"与"。
+ * 公共库工作区级单开关判定测试：仅经销商主号可切换，成员（负责人/协作者）无个人开关、完全跟随。
  */
 class SharedCatalogServiceTest {
 
     private final CurrentUserService currentUserService = mock(CurrentUserService.class);
-    private final OfficeUserMapper userMapper = mock(OfficeUserMapper.class);
     private final OfficeWorkspaceMapper workspaceMapper = mock(OfficeWorkspaceMapper.class);
-    private final SharedCatalogService service = new SharedCatalogService(currentUserService, userMapper, workspaceMapper);
+    private final SharedCatalogService service = new SharedCatalogService(currentUserService, workspaceMapper);
 
     @Test
     void authDisabledDefaultsToFull() {
@@ -28,40 +26,28 @@ class SharedCatalogServiceTest {
 
     @Test
     void userWithoutWorkspaceSeesFull() {
-        OfficeUser admin = user(null, "ADMIN", false);
+        OfficeUser admin = user(null, "ADMIN");
         assertTrue(service.canViewSharedCatalog(admin));
     }
 
     @Test
-    void userWithoutWorkspaceCanStillHideForHimself() {
-        // 无工作区账号（如系统管理员）不受工作区开关约束，但用户级"不看"偏好仍然生效
-        OfficeUser admin = user(null, "ADMIN", true);
-        assertFalse(service.canViewSharedCatalog(admin));
-    }
-
-    @Test
-    void workspaceOnAndUserNotHidingSeesFull() {
+    void workspaceOnSeesFull() {
         workspace("WS1", true);
-        assertTrue(service.canViewSharedCatalog(user("WS1", "USER", false)));
+        assertTrue(service.canViewSharedCatalog(user("WS1", "USER")));
+        assertTrue(service.canViewSharedCatalog(user("WS1", "DEALER")));
     }
 
     @Test
-    void workspaceOffBlocksEveryoneEvenUserNotHiding() {
+    void workspaceOffBlocksEveryone() {
         workspace("WS1", false);
-        assertFalse(service.canViewSharedCatalog(user("WS1", "USER", false)));
-        assertFalse(service.canViewSharedCatalog(user("WS1", "DEALER", false)));
+        assertFalse(service.canViewSharedCatalog(user("WS1", "USER")));
+        assertFalse(service.canViewSharedCatalog(user("WS1", "DEALER")));
     }
 
     @Test
-    void workspaceOnButUserHidesSeesOwn() {
-        workspace("WS1", true);
-        assertFalse(service.canViewSharedCatalog(user("WS1", "USER", true)));
-    }
-
-    @Test
-    void onlyDealerCanToggleWorkspaceSwitch() {
+    void memberCannotToggleWorkspaceSwitch() {
         when(currentUserService.authEnabled()).thenReturn(true);
-        when(currentUserService.currentUser()).thenReturn(user("WS1", "USER", false));
+        when(currentUserService.currentUser()).thenReturn(user("WS1", "USER"));
         assertThrows(AccessDeniedException.class, () -> service.setWorkspaceSharedCatalog(false));
     }
 
@@ -69,7 +55,7 @@ class SharedCatalogServiceTest {
     void dealerTogglePersistsWorkspaceSwitch() {
         OfficeWorkspace ws = workspace("WS1", true);
         when(currentUserService.authEnabled()).thenReturn(true);
-        when(currentUserService.currentUser()).thenReturn(user("WS1", "DEALER", false));
+        when(currentUserService.currentUser()).thenReturn(user("WS1", "DEALER"));
 
         service.setWorkspaceSharedCatalog(false);
 
@@ -77,14 +63,26 @@ class SharedCatalogServiceTest {
         verify(workspaceMapper).updateById(ws);
     }
 
-    private OfficeUser user(String workspaceId, String role, boolean hideSharedCatalog) {
+    @Test
+    void memberStatusFollowsWorkspaceSwitch() {
+        workspace("WS1", false);
+        when(currentUserService.authEnabled()).thenReturn(true);
+        when(currentUserService.currentUser()).thenReturn(user("WS1", "USER"));
+
+        SharedCatalogService.SharedCatalogStatus status = service.currentStatus();
+
+        assertFalse(status.workspaceEnabled());
+        assertFalse(status.dealer());
+        assertFalse(status.effectiveVisible());
+    }
+
+    private OfficeUser user(String workspaceId, String role) {
         OfficeUser user = new OfficeUser();
         user.setUserId("U1");
         user.setUsername("u1");
         user.setRole(role);
         user.setStatus("active");
         user.setWorkspaceId(workspaceId);
-        user.setHideSharedCatalog(hideSharedCatalog);
         return user;
     }
 

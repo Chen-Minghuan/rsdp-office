@@ -15,9 +15,8 @@ const pageInput = ref(1)
 const pageSizeOptions = [10, 20, 50, 100]
 const selectedProduct = ref<ImportedProduct | null>(null)
 const detailDialog = ref<HTMLDialogElement | null>(null)
-/** 公共库两级开关状态（工作区级由主号控制；此处为成员自己的"不看"偏好） */
-const catalogStatus = ref<{ workspaceEnabled: boolean; userHides: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
-const catalogSaving = ref(false)
+/** 公共库工作区级开关状态（仅经销商主号可切换；成员无个人开关，完全跟随主号设置） */
+const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
 const activeCount = computed(() => products.value.filter(product => product.status === 'active').length)
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
 const filteredProducts = computed(() => {
@@ -70,23 +69,8 @@ async function loadCatalogStatus() {
   try {
     catalogStatus.value = await api.getSharedCatalogStatus()
   } catch {
-    // 状态拉取失败不阻断商品列表，开关不展示
+    // 状态拉取失败不阻断商品列表，提示不展示
     catalogStatus.value = null
-  }
-}
-
-/** 成员切换自己的公共库显示偏好（仅工作区级开启时展示）。 */
-async function toggleSharedCatalog() {
-  if (!catalogStatus.value || catalogSaving.value) return
-  catalogSaving.value = true
-  actionError.value = null
-  try {
-    catalogStatus.value = await api.setUserHideSharedCatalog(!catalogStatus.value.userHides)
-    await loadProducts()
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : '切换公共库失败'
-  } finally {
-    catalogSaving.value = false
   }
 }
 
@@ -145,17 +129,7 @@ onMounted(() => {
     <div class="flex flex-none flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted" aria-live="polite">
       <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? products.length : '—' }}</strong></span>
       <span>在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
-      <label v-if="catalogStatus?.workspaceEnabled" class="inline-flex cursor-pointer select-none items-center gap-2">
-        <input
-          type="checkbox"
-          class="h-3.5 w-3.5 accent-[#8c6a4a]"
-          :checked="!catalogStatus.userHides"
-          :disabled="catalogSaving"
-          @change="toggleSharedCatalog"
-        >
-        公共库（主项目全库商品）
-      </label>
-      <span v-else-if="catalogStatus && !catalogStatus.workspaceEnabled">公共库已被工作区主号关闭，当前仅显示本厂商品</span>
+      <span v-if="catalogStatus && !catalogStatus.workspaceEnabled">公共库已被工作区主号关闭，当前仅显示本厂商品</span>
     </div>
 
     <section class="flex-none overflow-hidden rounded-xl border border-line bg-white shadow-panel" aria-label="商品列表">

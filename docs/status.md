@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-11-14 公共库开关收口为工作区级单开关（按用户定稿：只有经销商主号能设置是否可看公共库，其下负责人/协作者等成员完全跟随、无个人开关）：移除 SHARED-001/002 的用户级「自选不看」层——`SharedCatalogService` 判定改为仅查工作区开关（无工作区账号/认证关闭仍默认全库），删除 `setUserHideSharedCatalog` 与 `PUT /api/v1/office/workspace/shared-catalog/me` 端点，`SharedCatalogStatus` 去掉 `userHides`（现 {workspaceEnabled, dealer, effectiveVisible}）；`OfficeUser.hideSharedCatalog` 字段与 `office_user.hide_shared_catalog` 列经迁移 `20261114_drop_user_shared_catalog_toggle.sql` 下线（已在 SchemaInitializer 登记）。前端：商品库页成员个人开关移除（仅保留「公共库已被工作区主号关闭」被动提示），工作区账号页主号开关保留并更新文案（成员跟随设置），`useOfficeApi` 删 `setUserHideSharedCatalog`，e2e-workflows mock 同步。验证：`mvn test` 272 运行/0 失败/3 跳过（SharedCatalogServiceTest 改写为单开关口径 7 例）、`pnpm build` 通过；8082 重启后实测 admin 状态接口/商品列表正常、`/shared-catalog/me` 返回 404、开发库列已删。未提交。
+
 2026-11-14 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 工厂可见性体系一期落地（rsdp 侧，方案 C：office 工厂身份不拆分、继续看全库）：rsdp `3b68ca3`——V28 迁移（owner_type/owner_factory_code 归属回填、厂级公共库开关、factory_catalog_grant/block 两表，双路径校验零差异）；`CatalogVisibilityService` 收口"自家已报价∪整批放行∪开关ON全量−黑名单（不遮蔽自家已报价）"并接入列表/详情，替换旧能力覆盖自动隐藏口径；上下架/元数据改按 owner 判定（谁录入谁负责），三处建档打标；`FactoryCatalogController` 开关/放行/黑名单接口（工厂管理员仅本厂）；SecurityConfig 修复 DELETE 误落平台专属 factory:delete。验证：rsdp `mvn test` 2261/0/0/0；真实链路三工厂正反用例全过（167→拉黑剩12→开关关=0→放行=155→黑名单优先=0→详情404→越权400→维护权400/200）；office 回归商品库 167 全量可见。未覆盖：导出/AI 匹配读取入口接入、product-feed、office 代理/投影（均列入文档待办）。详见 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 验证记录。
 
 
