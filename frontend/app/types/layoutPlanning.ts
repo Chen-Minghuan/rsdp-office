@@ -106,6 +106,15 @@ export interface LayoutCandidate {
   /** 三档间距候选（2026-11-02 定稿 v2）：该候选由哪个间距档求出；standard 即当前间距基准。 */
   spacingTier?: 'compact' | 'standard' | 'comfort'
 }
+/** 画布中可拖动的待应用排版；手动调整后，应用必须提交这份快照而不是重新求解。 */
+export interface LayoutPreview {
+  zoneId: string
+  furniture: FurnitureObject[]
+  replaceIds: string[]
+  seatClearanceMm: number
+  manuallyAdjusted?: boolean
+}
+
 export interface LayoutProposal {
   rows?: number
   columns?: number
