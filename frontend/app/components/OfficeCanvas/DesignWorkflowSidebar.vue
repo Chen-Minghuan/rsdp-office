@@ -1,18 +1,29 @@
 <script setup lang="ts">
 import type { ZoneObject } from '~/types/office'
 import type { LayoutPreview } from '~/types/layoutPlanning'
+import type { LayoutReferenceEditing } from '~/types/layoutPlanning'
 import type { OfficeModuleTemplate } from '~/types/officeModule'
 import { furnitureById } from '~/utils/manualFurniture'
 import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
+const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { required: true })
 /** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
 const props = defineProps<{ currentPreview?: LayoutPreview | null }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void }
 const activePage = ref<WorkflowPage>('auto')
+watch(activePage, () => store.cancelFurniturePlacement())
+function openFurniture(id: string, fromGroup: boolean) {
+  if (!store.designZoneId || !store.furnitureForZone(store.designZoneId).some(item => item.id === id)) return
+  if (fromGroup && activePage.value !== 'recommendations') return
+  selectedId.value = id
+  if (activePage.value !== 'recommendations') activePage.value = 'products'
+  collapsed.value = false
+}
+defineExpose({ openFurniture })
 const collapsed = ref(false), autoLayout = ref<AutoLayoutPanel | null>(null), actionMessage = ref('')
 const pages: Array<{ id: WorkflowPage; label: string; testId: string }> = [
   { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },
@@ -144,12 +155,12 @@ function clearAutomaticLayout() {
     </template>
 
     <div v-show="!collapsed" class="flex min-h-0 flex-1 flex-col">
-      <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="emit('preview', $event)" />
+      <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="emit('preview', $event)" />
       <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="selectedCatalogId" :current-preview="currentPreview" @preview="emit('preview', $event)" />
       <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @navigate="activePage = 'auto'" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
-      <OfficeCanvasDesignSidebar v-else embedded :selected-id="selectedId" />
+      <OfficeCanvasDesignSidebar v-else embedded v-model:selected-id="selectedId" />
     </div>
-    <div v-if="activePage === 'auto' && hasLayout" v-show="!collapsed" class="flex-none border-t border-line bg-[#fafbf7] px-3 py-2.5" data-testid="auto-layout-next-actions">
+    <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-[#fafbf7] px-3 py-2.5" data-testid="auto-layout-next-actions">
       <p class="mb-2 text-[9px] leading-relaxed text-muted">可直接确认并推荐款式，也可进入产品选型手动调整，无需按固定顺序操作。</p>
       <div class="grid grid-cols-2 gap-1.5">
         <button data-testid="auto-manual-layout" class="rounded-none border border-line bg-white px-2 py-2 text-[10px] font-semibold text-[#596252]" @click="activePage = 'products'">产品选型 · 手动调整</button>

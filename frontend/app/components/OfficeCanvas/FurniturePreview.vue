@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ManualFurnitureGlyph from './ManualFurnitureGlyph.vue'
-import { furnitureById } from '~/utils/manualFurniture'
+import { furnitureById, furnitureTemplateShowsSeat } from '~/utils/manualFurniture'
 import { furnitureGlyphItem } from '~/utils/officeFurniture'
 
 const props = withDefaults(defineProps<{
@@ -18,7 +18,7 @@ const item = computed(() => template.value ? {
   ...furnitureGlyphItem(template.value, props.widthMm, props.depthMm),
   ...(props.wingWidthMm ? { wingWidthMm: props.wingWidthMm } : {}),
 } : null)
-const seatVisible = computed(() => props.showSeat ?? (!!template.value && ['职员桌', '主管桌', '高管桌'].includes(template.value.category)))
+const seatVisible = computed(() => props.showSeat ?? furnitureTemplateShowsSeat(template.value))
 const viewBox = computed(() => {
   if (!item.value) return '0 0 1 1'
   const { widthMm: w, depthMm: d } = item.value

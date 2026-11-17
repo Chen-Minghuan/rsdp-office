@@ -87,7 +87,7 @@ export function confirmedLayoutProblem(zone: ZoneObject, furniture: FurnitureObj
   const channelBlockers = savedChannels.length ? channelRects(zone, savedChannels, firstBlockDepthMm) : []
   for (const item of furniture) {
     const others = furniture.filter(other => other.id !== item.id)
-    const saved = item.layoutGroupId ? item.layoutSettings?.spacing : undefined
+    const saved = item.layoutGroupId && !item.mixedBundleId ? item.layoutSettings?.spacing : undefined
     const problem = officePlacementHardProblem(zone, item, others, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
     if (problem) return problem
     if (channelBlockers.some(rect => rectOverlapsBlocker(officeFurnitureFootprint(item), rect))) return '家具压占通道，请调整家具或通道位置'

@@ -1,56 +1,49 @@
 <script setup lang="ts">
-import type { FurnitureObject } from '~/types/office'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import type { ModuleRecommendation, ModuleProductCandidate } from '~/types/moduleRecommendation'
 import { applyModuleProductSelection } from '~/utils/moduleProductSelection'
 import { money } from '~/utils/helpers'
 
-const props = defineProps<{ selectedId?: string | null }>()
+const selectedId = defineModel<string | null>('selectedId')
 const store = useOfficeStore()
 const api = useOfficeApi()
-const moduleId = ref('')
 const allowRotation = ref(true)
-const applyToSameModules = ref(true)
+const applyToSameModules = ref(false)
 const tier = ref('ALL')
 const result = ref<ModuleRecommendation | null>(null)
 const loading = ref(false), applying = ref(false), error = ref(''), feedback = ref('')
 const modules = computed(() => store.furnitureForZone(store.designZoneId || ''))
-const groups = computed(() => {
-  const list: Array<{ key: string; ids: string[]; item: FurnitureObject }> = []
-  for (const item of modules.value) {
-    const signature = JSON.stringify([item.furnitureTemplateId, item.moduleSnapshot, item.w, item.h, item.heightMm])
-    const group = list.find(group => group.key === signature)
-    if (group) group.ids.push(item.id)
-    else list.push({ key: signature, ids: [item.id], item })
-  }
-  return list
-})
-const module = computed(() => modules.value.find(item => item.id === moduleId.value) || modules.value[0])
-const group = computed(() => groups.value.find(group => group.ids.includes(module.value?.id || '')))
+const module = computed(() => modules.value.find(item => item.id === selectedId.value))
+const sameModuleCount = computed(() => result.value?.sameModuleCount || 0)
 const allConfirmed = computed(() => modules.value.length > 0 && modules.value.every(item => item.layoutConfirmed))
-const signature = computed(() => JSON.stringify([store.designZoneId, store.canvasRevision, module.value?.id, modules.value, allowRotation.value]))
+const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.designZoneId, store.canvasRevision, allConfirmed.value]))
+const signature = computed(() => JSON.stringify([layoutContext.value, module.value?.id, allowRotation.value]))
 const candidates = computed(() => (result.value?.candidates || []).filter(item => tier.value === 'ALL' || item.tier === tier.value))
 const tiers = [{ key: 'ALL', name: '全部兼容' }, { key: 'CLOSE', name: '贴合 ≥85%' }, { key: 'RELAXED', name: '宽松 60–85%' }, { key: 'SMALL', name: '偏小 <60%' }]
 let sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
 const number = (value: number) => Number(value.toFixed(2)).toLocaleString()
 const message = (failure: any) => failure?.data?.message || failure?.message || '读取失败，请重试'
 
-watch(() => props.selectedId, id => {
-  if (modules.value.some(item => item.id === id)) moduleId.value = id!
-}, { immediate: true })
+watch(() => module.value?.id, () => {
+  applyToSameModules.value = false
+  tier.value = 'ALL'
+})
 
 async function refresh() {
+  if (applying.value) return
   const ticket = ++sequence, current = signature.value, item = module.value
   result.value = null; error.value = ''; feedback.value = ''
   if (!item || !allConfirmed.value) { loading.value = false; return }
   loading.value = true
-  const revision = store.canvasRevision, zoneId = store.designZoneId!
+  const revision = store.canvasRevision, zoneId = item.zoneId, rotation = allowRotation.value
   try {
     // Flush the exact reviewed draft; the server reads saved geometry and checks its revision.
     await api.saveCanvas({ objects: JSON.parse(JSON.stringify(store.objects)), files: store.files, mode: store.canvasMode,
       designZoneId: store.designZoneId, revision, blank: store.blank })
-    const response = await api.recommendModule({ zoneId, moduleId: item.id, canvasRevision: revision, allowRotation: allowRotation.value })
+    if (ticket !== sequence || current !== signature.value) return
+    const response = await api.recommendModule({ zoneId, moduleId: item.id, canvasRevision: revision, allowRotation: rotation })
     if (ticket !== sequence || current !== signature.value) return
     if (!response || response.moduleId !== item.id || response.zoneId !== zoneId || response.canvasRevision !== revision || !Array.isArray(response.candidates)) throw new Error('商品推荐接口尚未就绪，请启动最新后端')
     result.value = response
@@ -60,49 +53,68 @@ async function refresh() {
 }
 watch(signature, () => {
   sequence++; clearTimeout(timer); result.value = null; error.value = ''; feedback.value = ''; loading.value = false
-  timer = setTimeout(refresh, 250)
+  if (!applying.value && module.value && allConfirmed.value) {
+    loading.value = true
+    timer = setTimeout(refresh, 250)
+  }
 }, { immediate: true })
-onBeforeUnmount(() => { sequence++; clearTimeout(timer) })
+onBeforeUnmount(() => { disposed = true; sequence++; clearTimeout(timer) })
 
 async function choose(candidate: ModuleProductCandidate) {
-  if (!result.value || !module.value || applying.value) return
+  const recommendation = result.value
+  if (!recommendation || recommendation.moduleId !== module.value?.id || recommendation.canvasRevision !== store.canvasRevision || applying.value) return
   const current = signature.value
+  const context = layoutContext.value
+  let appliedCount: number | undefined
+  let selectionError = ''
   applying.value = true; error.value = ''; feedback.value = ''
   try {
-    const response = await api.selectModuleProduct({ zoneId: result.value.zoneId, moduleId: result.value.moduleId,
-      canvasRevision: result.value.canvasRevision, allowRotation: allowRotation.value, productId: candidate.product.id,
-      applyToSameModules: applyToSameModules.value })
-    if (current !== signature.value) { error.value = '布局已变更，请重新匹配，已保存的商品选择请在方案中核对'; return }
+    const response = await api.selectModuleProduct({ zoneId: recommendation.zoneId, moduleId: recommendation.moduleId,
+      canvasRevision: recommendation.canvasRevision, allowRotation: allowRotation.value, productId: candidate.product.id,
+      applyToSameModules: applyToSameModules.value && sameModuleCount.value > 1 })
+    if (context !== layoutContext.value) throw new Error('布局已变更，请重新匹配，已保存的商品选择请在方案中核对')
     if (!response?.canvas || !Array.isArray(response.cartItems)) throw new Error('保存结果无效，请重新读取')
     applyModuleProductSelection(store, response)
-    await nextTick()
+    appliedCount = response.cartItems.length
+  } catch (failure) {
+    selectionError = message(failure)
+  }
+  finally { applying.value = false }
+  await nextTick()
+  if (disposed) return
+  const refreshed = signature.value
+  if (current !== refreshed || !result.value) {
     clearTimeout(timer)
     await refresh()
-    feedback.value = `已为 ${response.cartItems.length} 个模块匹配商品，模块占地保持不变`
-  } catch (failure) { error.value = message(failure) }
-  finally { applying.value = false }
+  }
+  if (refreshed !== signature.value || module.value?.id !== recommendation.moduleId) return
+  if (selectionError) error.value = selectionError
+  if (appliedCount !== undefined) feedback.value = `已为 ${appliedCount} 个模块匹配商品，模块占地保持不变`
 }
 </script>
 
 <template>
   <section data-testid="module-product-recommendations" class="flex flex-col flex-1 min-h-0">
     <div class="p-3 border-b border-line space-y-2 flex-none">
-      <div class="flex items-center justify-between"><h3 class="text-sm font-bold">按模块尺寸推荐</h3><button class="text-xs text-bronze" :disabled="loading || applying" @click="refresh">重新匹配</button></div>
-      <label class="block text-[11px] text-muted">匹配模块
-        <select aria-label="匹配单位模块" :value="group?.item.id" :disabled="applying" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="moduleId = ($event.target as HTMLSelectElement).value">
-          <option v-for="entry in groups" :key="entry.key" :value="entry.item.id">{{ entry.item.label || '单位模块' }} · {{ number(entry.item.w) }} × {{ number(entry.item.h) }} mm · {{ entry.ids.length }} 件</option>
+      <div class="flex items-center justify-between"><h3 class="text-sm font-bold">按家具品类和尺寸推荐</h3><button class="text-xs text-bronze disabled:opacity-50" :disabled="!module || loading || applying" @click="refresh">重新匹配</button></div>
+      <label class="block text-[11px] text-muted">当前家具
+        <select aria-label="匹配单位模块" :value="module?.id || ''" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="selectedId = ($event.target as HTMLSelectElement).value || null">
+          <option value="" disabled>选择家具</option>
+          <option v-for="(item, index) in modules" :key="item.id" :value="item.id">{{ index + 1 }}. {{ item.label || '单位模块' }} · {{ number(item.w) }} × {{ number(item.h) }} mm</option>
         </select>
       </label>
-      <div v-if="module" class="rounded-none bg-[#f7f3ee] p-2 text-xs leading-relaxed">商品宽 ≤ {{ number(module.w) }} mm，深 ≤ {{ number(module.h) }} mm<br><span class="text-[10px] text-muted">按实际毫米尺寸向下兼容，不按面积代替宽深比较</span></div>
-      <div class="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+      <div v-if="module" class="rounded-none bg-[#f7f3ee] p-2 text-xs leading-relaxed"><div v-if="result?.targetCategory">推荐品类：{{ result.targetCategory }}</div>商品宽 ≤ {{ number(module.w) }} mm，深 ≤ {{ number(module.h) }} mm</div>
+      <div v-if="module" class="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
         <label><input v-model="allowRotation" type="checkbox" :disabled="applying"> 允许旋转 90°</label>
-        <label v-if="(group?.ids.length || 0) > 1"><input v-model="applyToSameModules" type="checkbox" :disabled="applying"> 同步 {{ group?.ids.length }} 个同规格模块</label>
+        <label v-if="sameModuleCount > 1"><input v-model="applyToSameModules" type="checkbox" :disabled="applying"> 同步 {{ sameModuleCount }} 个同规格模块</label>
       </div>
-      <div class="flex gap-1 flex-wrap"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key">{{ entry.name }}<span v-if="result"> ({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
-      <p class="text-[10px] text-muted">贴合度取宽、深占比中较低值；档位仅供排序；仅查询上架且审核通过的规格。高度、结构与家具用途请结合商品详情核对。</p>
+      <div v-if="result" class="flex gap-1 flex-wrap"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key">{{ entry.name }} <span>({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
+      <p v-if="module" class="text-[10px] text-muted">按品类相关性和尺寸贴合度排序。上方档位筛选尺寸贴合度，取宽、深占比中的较低值。</p>
     </div>
-    <div class="flex-1 min-h-0 overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
+    <div :key="module?.id" class="flex-1 min-h-0 overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
       <p v-if="!allConfirmed" class="text-xs text-muted py-5">请先确认当前空间的全部排版</p>
+      <p v-else-if="!module" class="text-xs text-muted py-5">点击画布上的家具，或从上方列表选择。</p>
+      <p v-else-if="applying && !result" role="status" class="text-xs text-muted py-5">正在保存刚才的商品选择…</p>
       <p v-else-if="loading" role="status" class="text-xs text-muted py-5">正在读取真实商品规格…</p>
       <p v-if="error" role="alert" class="text-xs text-red-700 p-2 bg-red-50 rounded">{{ error }}</p>
       <p v-if="feedback" role="status" class="text-xs text-green-700 p-2 bg-green-50 rounded">{{ feedback }}</p>
@@ -113,13 +125,15 @@ async function choose(candidate: ModuleProductCandidate) {
             <img v-if="candidate.product.imageUrl" :src="sameOriginAssetUrl(candidate.product.imageUrl)" alt="" class="w-14 h-14 object-contain rounded-none bg-[#f7f4f0]">
             <div class="min-w-0"><div class="text-xs font-bold">{{ candidate.product.name }}</div><div class="text-[10px] text-muted">{{ candidate.product.variant }}</div><div class="text-xs mt-1">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</div></div>
           </div>
-          <div class="text-[10px] text-bronze">{{ Math.floor(candidate.fitRatio * 100) }}% 贴合<span v-if="candidate.rotationDeg"> · 需旋转 90°</span> · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</div>
+          <div v-if="candidate.relevanceScore != null" data-testid="product-relevance" class="text-[11px] font-semibold text-bronze">适配度 {{ number(candidate.relevanceScore) }} / 100 · {{ candidate.matchReason }}</div>
+          <div class="text-[10px] text-muted">尺寸 {{ Math.floor(candidate.fitRatio * 100) }}% 贴合<span v-if="candidate.rotationDeg"> · 需旋转 90°</span> · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</div>
           <div class="text-[10px] text-muted">剩余宽 {{ number(candidate.remainingWidthMm) }} / 深 {{ number(candidate.remainingDepthMm) }} mm<span v-if="candidate.product.heightMm"> · 商品高 {{ number(candidate.product.heightMm) }} mm</span></div>
-          <div class="flex items-center justify-between gap-1"><strong class="text-sm text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</strong><NuxtLink :to="'/products/' + candidate.product.rspuId" class="text-[10px] text-muted hover:underline">详情</NuxtLink><button :disabled="applying || candidate.product.price <= 0" class="text-[10px] px-2 py-1.5 rounded-none bg-bronze text-white disabled:opacity-50" @click="choose(candidate)">{{ candidate.product.price <= 0 ? '待补报价' : applying ? '保存中…' : applyToSameModules && (group?.ids.length || 0) > 1 ? `应用到 ${group?.ids.length} 个模块` : '加入该模块方案' }}</button></div>
+          <div class="flex items-center justify-between gap-1"><strong class="text-sm text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</strong><NuxtLink :to="'/products/' + candidate.product.rspuId" class="text-[10px] text-muted hover:underline">详情</NuxtLink><button :disabled="applying || candidate.product.price <= 0" class="text-[10px] px-2 py-1.5 rounded-none bg-bronze text-white disabled:opacity-50" @click="choose(candidate)">{{ candidate.product.price <= 0 ? '待补报价' : applying ? '保存中…' : applyToSameModules && sameModuleCount > 1 ? `应用到 ${sameModuleCount} 个模块` : '应用到当前家具' }}</button></div>
         </article>
         <div v-if="!candidates.length" class="text-xs text-muted py-5 space-y-2">
-          <template v-if="result.eligibleVariantCount === 0"><p>暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。</p><NuxtLink to="/products/audit" class="text-bronze underline">前往商品审核</NuxtLink></template>
-          <p v-else>{{ result.candidates.length ? '该尺寸档暂无商品，可切换其他档位。' : '暂无宽深均可容纳的在售商品。可补齐商品尺寸或调整模块后重新匹配。' }}</p>
+          <p v-if="result.targetCategory === null">当前家具品类未确定。可回到「产品选型」选择对应的家具图例，再确认排版。</p>
+          <template v-else-if="result.eligibleVariantCount === 0"><p>暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。</p><NuxtLink to="/products/audit" class="text-bronze underline">前往商品审核</NuxtLink></template>
+          <p v-else>{{ result.candidates.length ? '该尺寸档暂无商品，可切换其他档位。' : '暂无品类相关且尺寸可容纳的在售商品。' }}</p>
         </div>
       </template>
     </div>

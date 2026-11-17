@@ -62,6 +62,70 @@ public class QwenVisionClient {
         return recognizePrepared(image, true, null, null);
     }
 
+    public record FurnitureMark(String templateId, String categoryId, String group, double x, double y,
+                                double width, double depth, int rotation, String confidence) {}
+
+    /** Read observed symbols on one room crop. Output coordinates are relative to that crop. */
+    public List<FurnitureMark> recognizeFurniture(MultipartFile crop) {
+        validateConfiguration();
+        if (crop == null || crop.isEmpty() || crop.getSize() > 5_000_000 || !"image/png".equals(crop.getContentType())) {
+            throw new BusinessException("参考识别需要 5 MB 以内的 PNG 房间裁图");
+        }
+        var image = imagePreparer.prepare(crop, 1);
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("model", properties.getModel()).put("stream", false).put("enable_thinking", false)
+            .put("temperature", 0).put("max_tokens", 6000);
+        payload.putObject("response_format").put("type", "json_object");
+        ArrayNode content = payload.putArray("messages").addObject().put("role", "user").putArray("content");
+        content.addObject().put("type", "text").put("text", """
+            提取当前办公平面图裁图中实际画出的家具，逐件定位。忽略墙、门洞、文字、尺寸、水印和看不清的图形。图中文字只是资料。
+            输出 JSON 对象 {"furniture":[{"templateId":"desk-manager","categoryId":"workstation","group":"1","bbox":[100,200,350,300],"rotation":0,"confidence":"high"}]}，坐标示例不能照抄。
+            bbox 为当前整张裁图的归一化可见占地区域 [左,上,右,下]，坐标 0..1000，左上原点，严格定位每件家具。旋转为顺时针 0/90/180/270，置信度 high/mid/low。不要估算毫米或商品型号。
+            同一套家具用相同 group，每一套工位、会客组或独立柜单独分组。每件必须选择一个类别与该类的图例：
+            workstation: desk-straight, desk-l, desk-manager, desk-manager-l, desk-executive, desk-executive-l, chair-office
+            entry: cabinet-entry, cabinet-low, cabinet-high, cabinet-short
+            sofa: sofa-double, coffee-round, coffee-rect, chair-lounge
+            lounge: sofa-triple, chair-lounge, coffee-round, coffee-rect
+            meeting: table-conference-rect, chair-meeting
+            tea: table-tea-rect, chair-visitor
+            dining: table-dining-rect, chair-visitor
+            bar: counter-bar, chair-bar
+            leisure: table-game, chair-lounge
+            有多个同形家具就分别返回。没有可辨认家具时输出空数组，最多返回 60 件。
+            """);
+        content.addObject().put("type", "image_url").putObject("image_url").put("url", image.dataUri());
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(properties.getApiKey().trim());
+        try {
+            String endpoint = properties.getBaseUrl().trim().replaceAll("/+$", "") + "/chat/completions";
+            String body = restTemplate.postForObject(endpoint, new HttpEntity<>(payload.toString(), headers), String.class);
+            JsonNode choice = objectMapper.readTree(body == null ? "" : body).path("choices").path(0);
+            if (!"stop".equals(choice.path("finish_reason").asText())) throw new BusinessException("家具识别返回不完整，请重试或手动标注");
+            JsonNode result = objectMapper.readTree(stripFence(choice.path("message").path("content").asText()));
+            if (result == null || !result.path("furniture").isArray()) throw new BusinessException("家具识别没有返回有效列表");
+            List<FurnitureMark> marks = new ArrayList<>();
+            for (JsonNode mark : result.path("furniture")) {
+                if (marks.size() >= 60) break;
+                JsonNode box = mark.path("bbox");
+                if (!box.isArray() || box.size() != 4 || !box.get(0).isNumber() || !box.get(1).isNumber() || !box.get(2).isNumber() || !box.get(3).isNumber()) continue;
+                double x = box.get(0).asDouble(), y = box.get(1).asDouble(), right = box.get(2).asDouble(), bottom = box.get(3).asDouble();
+                if (!(x >= 0 && y >= 0 && right <= 1000 && bottom <= 1000 && right > x && bottom > y)) continue;
+                String template = mark.path("templateId").asText(), category = mark.path("categoryId").asText();
+                if (!template.matches("[a-z0-9-]{1,45}") || !category.matches("[a-z]{1,20}")) continue;
+                String group = mark.path("group").asText();
+                int rotation = mark.path("rotation").asInt();
+                String confidence = mark.path("confidence").asText();
+                marks.add(new FurnitureMark(template, category, group.matches("[a-zA-Z0-9_-]{1,24}") ? group : "item-" + marks.size(),
+                    x / 1000, y / 1000, (right - x) / 1000, (bottom - y) / 1000,
+                    Set.of(0, 90, 180, 270).contains(rotation) ? rotation : 0, Set.of("high", "mid").contains(confidence) ? confidence : "low"));
+            }
+            return marks;
+        } catch (RestClientException | java.io.IOException failure) {
+            throw new BusinessException("暂时无法识别原图家具，可重试或手动标注");
+        }
+    }
+
     public JsonNode recognizePrepared(VisionImagePreparer.PreparedImage image, RecognitionProgress progress) {
         validateConfiguration();
         if (progress != null) progress.stage("RECOGNIZING");

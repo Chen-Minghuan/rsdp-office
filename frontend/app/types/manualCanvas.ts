@@ -108,5 +108,7 @@ export interface FurnitureTemplate {
   heightMm?: number
   heightMinMm?: number
   heightMaxMm?: number
+  /** Desk-only preset sharing the dimensions and desk geometry of this built-in template. */
+  seatlessOf?: string
   catalogHidden?: true
 }

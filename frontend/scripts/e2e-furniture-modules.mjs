@@ -39,10 +39,14 @@ try {
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/office/projects') return route.fulfill({ json: { code: 200, data: [{
+      projectId: 'OFFICE-PROJECT-001', name: '家具图例测试',
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+    }] } })
     const data = path.endsWith('/floor-plan/MODULE-TEST') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
-  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const furniture = async () => (await state()).objects.filter(object => object.kind === 'furniture')
   const layout = async () => {
     const meetingLayout = page.getByRole('button', { name: '应用单桌居中', exact: true })
@@ -89,7 +93,7 @@ try {
     comments.forEach(node => node.remove())
     return { id: card.dataset.moduleId, name: card.getAttribute('aria-label'), geometry: glyph.innerHTML }
   }))
-  assert.equal(modules.length, 35)
+  assert.equal(modules.length, 45)
   assert.equal(await catalog().locator('details').count(), 9)
   assert.ok(modules.every(module => module.name && module.geometry.includes('<')), '每个目录项都有名称与参数化线稿')
   assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '不暴露隐藏目录项')
@@ -156,7 +160,7 @@ try {
   await page.getByTestId('tab-style-recommendation').click()
   await page.getByText('排版已确认', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('单位模块 UI 通过：35 个可见图例/9 类均带名称与参数化线稿、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。')
+  console.log(`单位模块 UI 通过：${modules.length} 个可见图例/9 类均带名称与参数化线稿、全部图例按毫米排版、无需绑定商品、规格/自定义尺寸、圆角 L 桌、旋转宽深、无效/超大尺寸保护及撤销/刷新/确认。全部 API 模拟。`)
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

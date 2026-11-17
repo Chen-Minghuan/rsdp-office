@@ -1,5 +1,6 @@
 package com.rsdp.officeproduct.importer.office.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -15,6 +16,11 @@ public class OfficeProductDto {
     private BigDecimal depthMm;
     private BigDecimal heightMm;
     private String name;
+    private List<String> categoryPath;
+    @JsonIgnore
+    private List<String> furnitureTags;
+    @JsonIgnore
+    private String variantName;
     private String desc;
     private String variant;
     private BigDecimal price;

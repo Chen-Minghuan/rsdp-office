@@ -29,6 +29,8 @@ try {
     analysisId: 'PREVIEW-DRAG', analysisRevision: 1, status: 'awaiting_confirm', sourceName: '预览拖动测试.dxf',
     inputMode: 'cad', geometrySource: 'cad_geometry', evidenceKind: 'REAL_SERVICE',
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
+    previewUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500"><rect width="800" height="500" fill="white"/><rect x="96" y="110" width="128" height="55" fill="silver"/><rect x="504" y="260" width="64" height="40" fill="silver"/></svg>'),
+    drawingBounds: { minX: 0, minY: 0, maxX: 16000, maxY: 10000 },
     rooms: [{ roomId: 'DRAG-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0, 0], [16000, 0], [16000, 10000], [0, 10000]] }],
   }
   let floorPlanRequests = 0
@@ -37,6 +39,15 @@ try {
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/layout-reference/source')) return route.fulfill({ contentType: 'image/svg+xml', body: decodeURIComponent(source.previewUrl.split(',')[1]) })
+    if (path.endsWith('/layout-reference/recognize')) {
+      assert.equal(route.request().method(), 'POST')
+      return route.fulfill({ json: { code: 200, data: [
+        { templateId: 'desk-straight', categoryId: 'workstation', group: 'office', x: 0.12, y: 0.22, width: 0.16, depth: 0.11, rotation: 0, confidence: 'high' },
+        { templateId: 'chair-office', categoryId: 'workstation', group: 'office', x: 0.165, y: 0.35, width: 0.04, depth: 0.05, rotation: 0, confidence: 'low' },
+        { templateId: 'coffee-round', categoryId: 'sofa', group: 'guest', x: 0.63, y: 0.52, width: 0.08, depth: 0.08, rotation: 0, confidence: 'high' },
+      ] } })
+    }
     if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
       const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
@@ -132,8 +143,13 @@ try {
   await previewItems.first().waitFor()
   // 刷新会恢复默认吸附；组合拖动仍使用无吸附的精确位移。
   await page.getByRole('button', { name: '家具吸附', exact: true }).click()
-  const mixed = await dragFirstPreview(60, 30)
+  await dragFirstPreview(60, 30)
   await page.getByTestId('mixed-preview-manually-adjusted').waitFor()
+  assert.equal(await page.getByTestId('mixed-layout-apply').isDisabled(), true, '越界的组合预览不能提交')
+  const cards = page.getByTestId('mixed-layout-candidate')
+  await cards.nth(1).click()
+  await cards.first().click()
+  const mixed = await dragFirstPreview(60, -30)
 
   // 未应用前不写入已排版家具。
   assert.equal((await state()).objects.filter(object => object.kind === 'furniture').length, 0, '拖动预览不写入已排版家具')
@@ -143,8 +159,125 @@ try {
   await page.waitForFunction(() => (JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
   await assertAppliedAtPreview(mixed.after, mixed.count)
 
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  assert.equal(await page.getByRole('dialog', { name: '参考原图摆位' }).count(), 0)
+  const referenceLayer = page.getByTestId('reference-canvas-layer')
+  await referenceLayer.waitFor()
+  await page.getByTestId('reference-recognize').click()
+  const suggestedDesk = referenceLayer.locator('[data-reference-index="0"]')
+  await suggestedDesk.locator('svg[data-furniture-template="desk-straight"]').waitFor()
+  const deskBox = await suggestedDesk.boundingBox()
+  const beforeDeskX = await suggestedDesk.evaluate(el => parseFloat(el.style.left))
+  const referenceZoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
+  await page.mouse.move(deskBox.x + deskBox.width / 2, deskBox.y + deskBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(deskBox.x + deskBox.width / 2 + 100 * referenceZoom, deskBox.y + deskBox.height / 2, { steps: 5 })
+  await page.mouse.up()
+  assert.ok(Math.abs(await suggestedDesk.evaluate(el => parseFloat(el.style.left)) - beforeDeskX - 100) <= 2, '参考图例使用画布的毫米坐标拖动')
+  assert.equal(await suggestedDesk.getAttribute('data-reference-confidence'), 'manual')
+  assert.equal((await state()).objects.filter(item => item.layoutReference).length, 0, '参考草稿独立于已应用排版')
+  await page.getByRole('button', { name: '家具吸附', exact: true }).click()
+  const movingDesk = await suggestedDesk.boundingBox()
+  const movingDeskX = await suggestedDesk.evaluate(el => parseFloat(el.style.left))
+  await page.mouse.move(movingDesk.x + movingDesk.width / 2, movingDesk.y + movingDesk.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(movingDesk.x + movingDesk.width / 2 + (30 - movingDeskX) * referenceZoom, movingDesk.y + movingDesk.height / 2, { steps: 5 })
+  assert.equal(await page.getByTestId('snap-guide-x').evaluate(el => parseFloat(el.style.left)), 0, '参考拖动吸附左墙并显示引导线')
+  await page.mouse.up()
+  assert.ok(Math.abs(await suggestedDesk.evaluate(el => parseFloat(el.style.left))) < 0.01, '落点与吸附预览一致')
+  await page.keyboard.press('Space')
+  assert.equal(await suggestedDesk.evaluate(el => el.style.transform), 'rotate(90deg)')
+  await page.getByTestId('rotate-selection').click()
+  assert.equal(await suggestedDesk.evaluate(el => el.style.transform), 'rotate(180deg)', '参考家具复用画布旋转按钮')
+  for (let i = 0; i < 2; i++) await page.keyboard.press('Space')
+  assert.equal(await suggestedDesk.evaluate(el => el.style.transform), '')
+  await page.getByRole('button', { name: '应用当前方案', exact: true }).click()
+  await page.getByText('还有 1 件家具待确认，请确认或删除后再应用', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 3, '校验失败保留全部编辑家具')
+  await referenceLayer.locator('[data-reference-confidence="low"]').click()
+  await page.getByRole('button', { name: '确认', exact: true }).click()
+  await page.getByRole('combobox', { name: '标注功能' }).selectOption('entry')
+  await page.getByLabel('纳入原图中其他功能的家具').check()
+  const coffeeBox = await referenceLayer.locator('[data-reference-index="2"]').boundingBox()
+  await page.getByTestId('reference-add').click()
+  await page.mouse.click(coffeeBox.x + coffeeBox.width / 2, coffeeBox.y + coffeeBox.height / 2)
+  await page.getByTestId('reference-apply').click()
+  await page.getByText('此位置与已有家具重叠或间距不足', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 4, '重叠校验不会挪动或删掉家具')
+  assert.equal((await state()).objects.filter(item => item.layoutReference).length, 0)
+  await page.keyboard.press('Delete')
+  await page.getByTestId('reference-add').click()
+  await page.keyboard.press('Space')
+  const cabinetClick = { x: coffeeBox.x + coffeeBox.width / 2 + 5080 * referenceZoom, y: coffeeBox.y + coffeeBox.height / 2 + 1600 * referenceZoom }
+  await page.mouse.move(cabinetClick.x, cabinetClick.y)
+  assert.equal(await page.getByTestId('reference-placement-preview').evaluate(el => el.style.transform), 'rotate(90deg)')
+  assert.equal(await page.getByTestId('snap-guide-x').evaluate(el => parseFloat(el.style.left)), 16000, '参考点放吸附右墙')
+  await page.mouse.click(cabinetClick.x, cabinetClick.y)
+  const addedCabinet = referenceLayer.getByRole('button', { name: '玄关柜' })
+  await addedCabinet.waitFor()
+  await page.keyboard.press('Delete')
+  await addedCabinet.waitFor({ state: 'detached' })
+  await page.getByTestId('reference-add').click()
+  await page.keyboard.press('Space')
+  await page.mouse.click(cabinetClick.x, cabinetClick.y)
+  await addedCabinet.waitFor()
+  await page.getByRole('button', { name: /玄关柜.*人工确认/ }).waitFor()
+  const readGeometry = el => [parseFloat(el.style.left), parseFloat(el.style.top), parseFloat(el.style.width), parseFloat(el.style.height), Number(el.style.transform.match(/rotate\((\d+)deg\)/)?.[1] || 0)]
+  const deskEdited = await suggestedDesk.evaluate(readGeometry)
+  const cabinetEdited = await addedCabinet.evaluate(readGeometry)
+  await page.getByTestId('reference-apply').click()
+  await page.getByText('已应用当前方案，共 4 件参考家具', { exact: true }).waitFor()
+  assert.equal(await page.getByTestId('mixed-layout-candidates').count(), 0, '原图编辑直接应用，不跳到组合候选')
+  assert.equal(await previewItems.count(), 0)
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || [])
+    .some(object => object.layoutReference?.evidence === 'MANUAL'))
+  const referenceFurniture = (await state()).objects.filter(object => object.kind === 'furniture')
+  assert.ok(referenceFurniture.some(item => item.layoutReference?.evidence === 'ESTIMATED'))
+  assert.equal(referenceFurniture.filter(item => item.layoutReference).length, 4)
+  for (const [templateId, expected] of [['desk-straight', deskEdited], ['cabinet-entry', cabinetEdited]]) {
+    const applied = referenceFurniture.find(item => item.furnitureTemplateId === templateId)
+    assert.ok([applied.x, applied.y, applied.w, applied.h, applied.rotation].every((value, i) => Math.abs(value - expected[i]) < 0.01), '位置、规格和朝向原样写入')
+  }
+
+  // A 90° cabinet starts flush against the left wall. Shrinking along its local width must not move the footprint outside.
+  const cabinetId = referenceFurniture.find(item => item.furnitureTemplateId === 'cabinet-entry').id
+  await page.evaluate(id => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const cabinet = store.objects.find(item => item.id === id)
+    const room = store.zones.find(item => item.id === cabinet.zoneId)
+    const minX = Math.min(...room.polygon.map(([x]) => x))
+    const maxY = Math.max(...room.polygon.map(([, y]) => y))
+    store.moveFurnitureGroup([id], room.id, minX + (cabinet.h - cabinet.w) / 2 - cabinet.x, maxY - 3000 + (cabinet.w - cabinet.h) / 2 - cabinet.y)
+  }, cabinetId)
+  await page.getByTestId('auto-confirm-recommend').click()
+  await page.getByTestId('tab-style-recommendation').waitFor()
+  assert.equal(await page.getByTestId('tab-style-recommendation').getAttribute('aria-selected'), 'true')
+  await page.locator('[data-id="' + cabinetId + '"]').click()
+  assert.equal(await page.getByTestId('tab-style-recommendation').getAttribute('aria-selected'), 'true')
+  assert.equal(await page.getByLabel('匹配单位模块').inputValue(), cabinetId)
+  await page.getByTestId('tab-product-selection').click()
+  assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
+  await page.getByTestId('product-item-editor').getByText('玄关柜', { exact: true }).waitFor()
+  assert.equal(await page.getByTestId('product-item-width').inputValue(), '1200')
+  await page.getByTestId('product-item-width').fill('30000')
+  await page.getByTestId('product-item-resize').click()
+  await page.getByText('此位置超出空间边界', { exact: true }).waitFor()
+  assert.equal((await state()).objects.find(item => item.id === cabinetId).w, 1200)
+  assert.equal((await state()).objects.find(item => item.id === cabinetId).layoutConfirmed, true)
+  await page.getByTestId('product-item-width').fill('1000')
+  await page.getByTestId('product-item-resize').click()
+  const resizedCabinet = (await state()).objects.find(item => item.id === cabinetId)
+  const cabinetRoom = (await state()).objects.find(item => item.id === resizedCabinet.zoneId)
+  assert.equal(resizedCabinet.w, 1000)
+  assert.equal(resizedCabinet.h, 350)
+  assert.equal(resizedCabinet.rotation, 90)
+  assert.ok(Math.abs(resizedCabinet.x + (resizedCabinet.w - resizedCabinet.h) / 2 - Math.min(...cabinetRoom.polygon.map(([x]) => x))) < 0.01)
+  assert.ok((await state()).objects.filter(item => item.kind === 'furniture' && item.zoneId === cabinetRoom.id).every(item => !item.layoutConfirmed))
+  assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
+
   assert.deepEqual(errors, [], '页面无脚本错误')
-  console.log('预览拖动 E2E 通过：单模块空空间/已有排版与组合预览均按手动调整后的快照应用。')
+  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入。')
 } finally {
   if (browser) await browser.close()
   app.kill()

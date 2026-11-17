@@ -19,6 +19,7 @@ export function customModuleDefinition(id: string, input: OfficeModuleInput): Cu
   const source = furnitureById.get(input.glyphTemplateId)!
   return { id, name: input.name.trim(), custom: true, glyphTemplateId: source.id, category: source.category,
     kind: source.kind, widthMm: input.widthMm, depthMm: input.depthMm,
+    ...(source.seatlessOf ? { seatlessOf: source.seatlessOf } : {}),
     ...(input.heightMm !== undefined ? { heightMm: input.heightMm } : {}) }
 }
 

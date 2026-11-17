@@ -34,7 +34,8 @@ export function workstationSeats(furniture: FurnitureObject[]): WorkstationSeat[
   const seats: WorkstationSeat[] = []
   const matches: Array<{ seat: WorkstationSeat; chair: FurnitureObject; distance: number }> = []
   for (const desk of furniture) {
-    const template = furnitureById.get(desk.furnitureTemplateId || '')
+    const template = furnitureById.get(desk.moduleSnapshot?.glyphTemplateId || desk.furnitureTemplateId || '')
+    if (template?.seatlessOf) continue
     const category = desk.moduleSnapshot?.category || template?.category
     if (!category || !['职员桌', '主管桌', '高管桌'].includes(category)) continue
     const geometry = workstationSeatGeometry(desk, kindOf(desk) || '')

@@ -64,9 +64,9 @@ export function officeArrangementPreset(id?: string): OfficeArrangementPreset | 
   return id ? presetMap.get(id as OfficeArrangementPresetId) : undefined
 }
 
-export function productStyleForTemplate(template: Pick<FurnitureTemplate, 'kind' | 'name'> & Partial<Pick<FurnitureTemplate, 'id' | 'category'>> & { glyphTemplateId?: string }): OfficeProductStyleId {
+export function productStyleForTemplate(template: Pick<FurnitureTemplate, 'kind' | 'name'> & Partial<Pick<FurnitureTemplate, 'id' | 'category' | 'seatlessOf'>> & { glyphTemplateId?: string }): OfficeProductStyleId {
   if ('category' in template && template.category === '会议与洽谈') return 'meeting-table'
-  const sourceId = template.glyphTemplateId || template.id
+  const sourceId = template.seatlessOf || template.glyphTemplateId || template.id
   if (sourceId === 'desk-screen-l') return 'l-screen'
   if (sourceId === 'desk-screen-straight') return 'straight-screen'
   if (template.category && template.category !== '职员桌') return 'general'

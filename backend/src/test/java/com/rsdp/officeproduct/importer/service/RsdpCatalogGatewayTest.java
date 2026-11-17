@@ -27,7 +27,7 @@ class RsdpCatalogGatewayTest {
 
         JsonNode list = json.readTree("""
             {"total":1,"page":1,"size":500,"rows":[{
-              "rspuId":"RSPU-1","rspuCode":"OF-MC-0001","productName":"办公桌",
+              "rspuId":"RSPU-1","rspuCode":"OF-MC-0001","productName":"办公桌","categoryPath":"[\\"家具\\",\\"办公桌\\"]",
               "retailPrice":10,"status":"active","primaryImageUrl":"/api/v1/images/IMG-1",
               "createdAt":"2026-11-05T09:54:58.953677","updatedAt":"2026-11-05T09:54:58.953677"}]}
             """);
@@ -48,11 +48,43 @@ class RsdpCatalogGatewayTest {
         OfficeProductDto dto = result.get(0);
         assertEquals("RSPU-1", dto.getRspuId());
         assertEquals("VARIANT", dto.getVariantId());
+        assertEquals(List.of("家具", "办公桌"), dto.getCategoryPath());
+        assertEquals("标准款", dto.getVariantName());
         assertEquals(new BigDecimal("1200.01"), dto.getWidthMm());
         assertEquals(new BigDecimal("750"), dto.getHeightMm());
         assertEquals(121, dto.getWidthCm());
         assertEquals("http://rsdp.test/api/v1/images/IMG-1", dto.getImageUrl());
         assertEquals(new BigDecimal("10"), dto.getPrice());
+        verify(client, never()).get("/api/v1/products/RSPU-1");
+    }
+
+    @Test
+    void officeProductsReadSixDimensionalEvidenceFromAmbiguousProductDetail() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        var list = json.readTree("""
+            {"total":2,"rows":[{"rspuId":"OPEN","productName":"WG-1","categoryPath":["办公家具"],"status":"active"},
+            {"rspuId":"HIDDEN","productName":"椅子","status":"inactive"}]}
+            """);
+        var variants = json.readTree("""
+            [{"variantId":"V","status":"active","dimensions":"{\\"w\\":450,\\"d\\":490}"}]
+            """);
+        var detail = json.readTree("""
+            {"rspu":{"categoryPath":["办公家具"],"sixDimTags":{"A":"圆形茶几","B":["圆形台面"],"E":"实木"}}}
+            """);
+        when(client.get(anyString())).thenAnswer(call -> switch (call.<String>getArgument(0)) {
+            case "/api/v1/products/OPEN/variants" -> variants;
+            case "/api/v1/products/OPEN" -> detail;
+            default -> list;
+        });
+
+        var results = gateway.listOfficeProducts("full");
+        assertEquals(1, results.size());
+        assertEquals(List.of("圆形茶几", "圆形台面"), results.get(0).getFurnitureTags());
+        assertEquals(List.of("办公家具"), results.get(0).getCategoryPath());
+        gateway.listOfficeProducts("full");
+        verify(client).get("/api/v1/products/OPEN");
+        verify(client, never()).get("/api/v1/products/HIDDEN/variants");
     }
 
     @Test

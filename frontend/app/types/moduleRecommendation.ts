@@ -12,6 +12,8 @@ export interface ModuleProductCandidate {
   product: Product
   tier: 'CLOSE' | 'RELAXED' | 'SMALL'
   fitRatio: number
+  relevanceScore?: number
+  matchReason?: string
   rotationDeg: number
   remainingWidthMm: number
   remainingDepthMm: number
@@ -22,6 +24,7 @@ export interface ModuleRecommendation {
   canvasRevision: number
   widthMm: number
   depthMm: number
+  targetCategory?: string | null
   sameModuleCount: number
   missingDimensions: number
   eligibleVariantCount: number

@@ -29,6 +29,7 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   let saved = null, empty = false, fail = false, unavailable = false, delayA = false, noCatalog = false
+  let waitForSelection
   const selections = [], queries = []
   const products = [
     ['EXACT', '精确尺寸办公桌', 1200, 600, 1000], ['MEDIUM', '宽松办公桌', 1000, 500, 800],
@@ -62,10 +63,14 @@ try {
         if (!options.length) return []
         options.sort((a, b) => Math.min(b[0] / current.w, b[1] / current.h) - Math.min(a[0] / current.w, a[1] / current.h))
         const [w, d, rotationDeg] = options[0], fitRatio = Math.min(w / current.w, d / current.h)
-        return [{ product, rotationDeg, fitRatio, remainingWidthMm: current.w - w, remainingDepthMm: current.h - d, tier: fitRatio >= .85 ? 'CLOSE' : fitRatio >= .6 ? 'RELAXED' : 'SMALL' }]
-      }).sort((a, b) => b.fitRatio - a.fitRatio)
+        const tagOnly = product.id === 'ROTATED'
+        return [{ product, rotationDeg, fitRatio, relevanceScore: (tagOnly ? 32 : 80) + fitRatio * 15,
+          matchReason: tagOnly ? '六维标签相关 · 桌类' : '同品类 · 商品名称或规格名',
+          remainingWidthMm: current.w - w, remainingDepthMm: current.h - d, tier: fitRatio >= .85 ? 'CLOSE' : fitRatio >= .6 ? 'RELAXED' : 'SMALL' }]
+      }).sort((a, b) => b.relevanceScore - a.relevanceScore)
       if (path.endsWith('/module-products')) {
         selections.push(body)
+        if (waitForSelection) await waitForSelection
         if (unavailable) return respond(null, 400, '商品已下架，请重新选择')
         const match = candidates.find(item => item.product.id === body.productId)
         assert.ok(match)
@@ -80,7 +85,7 @@ try {
         return respond({ canvas: saved, cartItems, match })
       }
       queries.push(body)
-      const response = { zoneId: body.zoneId, moduleId: body.moduleId, canvasRevision: body.canvasRevision, widthMm: current.w, depthMm: current.h, sameModuleCount: current.id === 'C' ? 1 : 2, missingDimensions: noCatalog ? 0 : 1, eligibleVariantCount: noCatalog ? 0 : products.length + 1, candidates: empty || noCatalog ? [] : candidates }
+      const response = { zoneId: body.zoneId, moduleId: body.moduleId, canvasRevision: body.canvasRevision, widthMm: current.w, depthMm: current.h, targetCategory: '办公桌', sameModuleCount: current.id === 'C' ? 1 : 2, missingDimensions: noCatalog ? 0 : 1, eligibleVariantCount: noCatalog ? 0 : products.length + 1, candidates: empty || noCatalog ? [] : candidates }
       if (delayA && body.moduleId === 'A' && !body.allowRotation) await new Promise(resolve => setTimeout(resolve, 900))
       if (fail) return respond(null, 503, '推荐服务暂不可用')
       return respond(response)
@@ -150,7 +155,43 @@ try {
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   const panel = page.getByTestId('module-product-recommendations')
   const card = id => panel.locator('[data-product-id="' + id + '"]')
+  const matchingModule = panel.getByLabel('匹配单位模块')
+  const furniture = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
   await card('EXACT').waitFor()
+  assert.equal(await matchingModule.inputValue(), 'A', '进入推荐时使用画布已选的家具')
+  await page.keyboard.press('Escape')
+  await panel.getByText('点击画布上的家具，或从上方列表选择。').waitFor()
+  assert.equal(await card('EXACT').count(), 0, '清除画布选择时不保留旧候选')
+  await furniture('A').click()
+  await furniture('B').click({ modifiers: ['Shift'] })
+  await furniture('B').click()
+  await card('MEDIUM').waitFor()
+  assert.equal(await page.getByTestId('tab-style-recommendation').getAttribute('aria-selected'), 'true', '点击画布家具时留在款式推荐')
+  assert.equal(await matchingModule.inputValue(), 'B', '规格相同也要定位到实际点中的实例')
+  assert.equal(queries.at(-1).moduleId, 'B')
+  assert.equal(await panel.getByLabel('同步 2 个同规格模块').isChecked(), false)
+  let releaseSelection
+  waitForSelection = new Promise(resolve => { releaseSelection = resolve })
+  const saving = page.waitForRequest(request => request.url().endsWith('/module-products'))
+  await card('MEDIUM').getByRole('button', { name: '应用到当前家具' }).click()
+  await saving
+  await furniture('C').click()
+  await panel.getByText('正在保存刚才的商品选择…').waitFor()
+  assert.equal(await matchingModule.inputValue(), 'C')
+  assert.equal(await card('MEDIUM').count(), 0, '切换时不展示上一件家具的旧候选')
+  releaseSelection()
+  waitForSelection = undefined
+  await card('SMALL').waitFor()
+  assert.equal(queries.at(-1).moduleId, 'C')
+  assert.equal(selections[0].moduleId, 'B')
+  assert.equal(selections[0].applyToSameModules, false)
+  const single = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
+  assert.equal(single.objects.find(item => item.id === 'A').productId, '')
+  assert.equal(single.objects.find(item => item.id === 'B').productId, 'MEDIUM')
+  assert.equal(single.cart.length, 1)
+  await matchingModule.selectOption('A')
+  await card('EXACT').waitFor()
+  assert.equal(await furniture('A').locator('.manual-furniture-glyph.selected').count(), 1)
   await page.setViewportSize({ width: 1600, height: 900 })
   const recommendationList = panel.locator('div.flex-1.overflow-auto')
   await page.waitForTimeout(100)
@@ -164,6 +205,10 @@ try {
   await recommendationList.evaluate(element => { element.scrollTop = 0 })
   assert.equal(await card('ROTATED').count(), 1)
   assert.match(await card('ROTATED').innerText(), /需旋转 90°/)
+  await panel.getByText('推荐品类：办公桌').waitFor()
+  assert.match(await card('ROTATED').getByTestId('product-relevance').innerText(), /适配度 .*六维标签相关/)
+  const rankedIds = await panel.locator('[data-product-id]').evaluateAll(cards => cards.map(item => item.dataset.productId))
+  assert.ok(rankedIds.indexOf('SMALL') < rankedIds.indexOf('ROTATED'), '界面保留服务端的综合分顺序')
   assert.equal(await card('QUOTE').getByRole('button', { name: '待补报价' }).isDisabled(), true)
   assert.equal(await panel.getByText('四人工位组合', { exact: true }).count(), 0)
   await panel.getByRole('button', { name: /^偏小/ }).click()
@@ -172,6 +217,7 @@ try {
   await panel.getByRole('button', { name: /^全部兼容/ }).click()
   await page.screenshot({ path: outDir + '/01-size-tiers.png', animations: 'disabled' })
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects)
+  await panel.getByLabel('同步 2 个同规格模块').check()
   await card('EXACT').getByRole('button', { name: '应用到 2 个模块' }).click()
   await panel.getByText('已为 2 个模块匹配商品，模块占地保持不变').waitFor()
   let state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
@@ -183,7 +229,7 @@ try {
   assert.equal(state.cart.length, 2)
   assert.equal(state.cart.every(item => item.qty === 1), true)
   assert.deepEqual(state.objects.find(item => item.id === 'OTHER'), before.find(item => item.id === 'OTHER'))
-  assert.equal(selections[0].applyToSameModules, true)
+  assert.equal(selections[1].applyToSameModules, true)
   unavailable = true
   await card('MEDIUM').getByRole('button', { name: '应用到 2 个模块' }).click()
   await panel.getByRole('alert').filter({ hasText: '商品已下架' }).waitFor()
@@ -193,14 +239,14 @@ try {
   delayA = true
   await panel.getByLabel('允许旋转 90°').uncheck()
   await page.waitForTimeout(350)
-  await panel.getByLabel('匹配单位模块').selectOption('C')
+  await furniture('C').click()
   await card('SMALL').waitFor()
   await page.waitForTimeout(1000)
   assert.equal(await card('EXACT').count(), 0)
-  assert.equal(await panel.getByLabel('匹配单位模块').inputValue(), 'C')
+  assert.equal(await matchingModule.inputValue(), 'C')
   empty = true
   await panel.getByRole('button', { name: '重新匹配' }).click()
-  await panel.getByText(/暂无宽深均可容纳的在售商品/).waitFor()
+  await panel.getByText(/暂无品类相关且尺寸可容纳的在售商品/).waitFor()
   assert.equal(await panel.locator('[data-product-id]').count(), 0)
   noCatalog = true
   await panel.getByRole('button', { name: '重新匹配' }).click()
@@ -223,7 +269,7 @@ try {
   await page.getByTestId('layout-review-notice').waitFor()
   assert.match(await page.getByTestId('layout-review-notice').innerText(), /座椅一侧离墙净空不足 560mm，请现场复核/)
   assert.deepEqual(errors, [])
-  console.log('模块尺寸推荐 UI 通过：真实规格独立入口、毫米/三档/旋转、待报价、同规格批量应用及几何保留、下架拒绝、切换/旧响应、空结果和失败。全部 API 模拟。')
+  console.log('模块尺寸推荐 UI 通过：画布与下拉双向联动、同规格单件及可选批量应用、保存中切换、旧响应拦截、几何保留、尺寸分档和旋转、待报价、下架拒绝、空结果和失败。全部 API 模拟。')
 } catch (failure) {
   if (page) await page.screenshot({ path: outDir + '/failure.png', animations: 'disabled' }).catch(() => {})
   throw failure

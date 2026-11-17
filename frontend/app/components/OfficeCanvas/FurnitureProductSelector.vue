@@ -72,7 +72,7 @@ watch([show, () => props.item?.id], ([open]) => { if (open) void refresh() })
         <header class="flex flex-none items-center justify-between border-b border-line px-4 py-3">
           <div>
             <h2 class="text-sm font-bold">替换商品 · {{ item?.label || '家具' }}</h2>
-            <p class="mt-0.5 text-[10px] text-muted">仅展示同类别、尺寸兼容、在售且审核通过的真实商品规格</p>
+            <p class="mt-0.5 text-[10px] text-muted">按品类相关性和尺寸贴合度推荐在售规格</p>
           </div>
           <button aria-label="关闭替换商品" class="px-2 py-1 text-muted" @click="show = false">✕</button>
         </header>
@@ -97,6 +97,7 @@ watch([show, () => props.item?.id], ([open]) => { if (open) void refresh() })
                 </div>
               </div>
               <div class="mt-1.5 text-[10px] text-muted">
+                <div v-if="candidate.relevanceScore != null" class="font-semibold text-bronze">适配度 {{ number(candidate.relevanceScore) }} / 100 · {{ candidate.matchReason }}</div>
                 尺寸差异：剩余宽 {{ number(candidate.remainingWidthMm) }} / 深 {{ number(candidate.remainingDepthMm) }}mm
                 <span v-if="candidate.rotationDeg" class="text-amber-700"> · 商品需旋转 90° 放置</span>
               </div>
@@ -108,7 +109,7 @@ watch([show, () => props.item?.id], ([open]) => { if (open) void refresh() })
               </div>
             </article>
             <p v-if="!result.candidates.length" class="py-6 text-center text-muted">
-              {{ result.eligibleVariantCount === 0 ? '暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。' : '暂无宽深均可容纳的在售商品。可补齐商品尺寸或调整模块后重新匹配。' }}
+              {{ result.targetCategory === null ? '当前家具品类未确定，请先在产品选型中选择对应图例。' : result.eligibleVariantCount === 0 ? '暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。' : '暂无品类相关且尺寸可容纳的在售商品。' }}
             </p>
           </template>
         </div>

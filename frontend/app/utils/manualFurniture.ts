@@ -1,7 +1,7 @@
 import type { ManualFurnitureItem, ManualLayoutRect, ManualLayoutRoom, FurnitureCategory, FurnitureKind, FurnitureTemplate } from '~/types/manualCanvas'
 import { manualRectContainedByUnion } from '~/utils/manualLayoutGeometry'
 
-export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
+const builtInFurniture: FurnitureTemplate[] = [
   { id: 'desk-straight', name: '职员直线桌', category: '职员桌', kind: 'desk', widthMm: 1200, depthMm: 600,
     sizeOptions: [[1200, 600], [1400, 600], [1400, 700], [1600, 700]] },
   { id: 'desk-screen-straight', name: '一字屏风卡位', category: '职员桌', kind: 'desk', widthMm: 1200, depthMm: 600,
@@ -27,6 +27,7 @@ export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
   { id: 'counter-straight', name: '直线前台', category: '前台', kind: 'counter', widthMm: 2200, depthMm: 700 },
   { id: 'counter-l', name: 'L 形前台', category: '前台', kind: 'l-desk', widthMm: 2200, depthMm: 1500 },
   { id: 'chair-office', name: '办公转椅', category: '座椅', kind: 'chair', widthMm: 650, depthMm: 650 },
+  { id: 'chair-executive', name: '总裁椅', category: '座椅', kind: 'chair', widthMm: 740, depthMm: 780, heightMm: 1200 },
   { id: 'chair-meeting', name: '会议椅', category: '座椅', kind: 'chair', widthMm: 550, depthMm: 580 },
   { id: 'chair-visitor', name: '访客椅', category: '座椅', kind: 'chair', widthMm: 620, depthMm: 620 },
   { id: 'chair-lounge', name: '休闲单椅', category: '座椅', kind: 'chair', widthMm: 850, depthMm: 850 },
@@ -55,7 +56,17 @@ export const MANUAL_FURNITURE_TEMPLATES: FurnitureTemplate[] = [
   { id: 'whiteboard', name: '白板', category: '设备辅助', kind: 'wall', widthMm: 1800, depthMm: 100 },
 ]
 
-export const furnitureById = new Map(MANUAL_FURNITURE_TEMPLATES.map(template => [template.id, template]))
+export function furnitureTemplateShowsSeat(template?: FurnitureTemplate) {
+  return !!template && !template.seatlessOf && ['职员桌', '主管桌', '高管桌'].includes(template.category)
+}
+
+export const MANUAL_FURNITURE_TEMPLATES = builtInFurniture.flatMap(template =>
+  !template.catalogHidden && furnitureTemplateShowsSeat(template) ? [
+    template,
+    { ...template, id: template.id + '-desk-only', name: template.name + '（单桌）', seatlessOf: template.id },
+  ] : [template])
+
+export const furnitureById = new Map<string, FurnitureTemplate>(MANUAL_FURNITURE_TEMPLATES.map(template => [template.id, template]))
 export const furnitureCatalogTemplates = MANUAL_FURNITURE_TEMPLATES.filter(template => !template.catalogHidden)
 export const furnitureCategories: FurnitureCategory[] = [
   '职员桌', '主管桌', '高管桌', '前台', '座椅', '会议与洽谈', '收纳', '接待休闲', '设备辅助',

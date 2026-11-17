@@ -9,19 +9,25 @@ import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveP
 import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
-import { canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld, rotateCanvasVector } from '~/utils/officeCanvasView'
+import { deleteReferenceSelection, mixedPlacementProblem, referenceFurniture, rotateReferenceSelection } from '~/utils/mixedLayout'
+import { furnitureById } from '~/utils/manualFurniture'
+import { layoutRectInsideRing } from '~/utils/officeAutoLayout'
+import { canvasDrawingRect, canvasObjectsForView, canvasZoneBounds, fitCanvasZone, canvasPointerWorld, rotateCanvasVector } from '~/utils/officeCanvasView'
 import { rectangleObstacle, moveObstacle, reshapeObstacle, obstacleExclusion, obstacleLabel, snapObstacleToZone, windowLinePoints, windowOnWall, resizeWindowOnWall } from '~/utils/spatial/obstacles'
 import type { SpatialObstacle, SpatialObstacleKind, LayoutRegion, SpatialFacility, SpatialFacilityKind } from '~/types/spatial'
 import { layoutRegionRing, layoutRegionWorldRing, layoutRegionsForZone, layoutRegionProblem, layoutRegionEdgeMeasurements, moveLayoutRegion, moveLayoutRegionVertex, nextLayoutRegionName, setPrimaryLayoutRegion, removeLayoutRegion } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityFootprintRing, facilityClearanceRing, facilityLabel, facilityShape, facilitiesForZone } from '~/utils/spatial/facilities'
-import type { LayoutChannel, LayoutExclusion, LayoutPreview } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutExclusion, LayoutPreview, LayoutReferenceEditing, LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
 import { channelRects, channelOffsetRange, channelTravelSpan, channelTravelDeltaRange, shiftChannelTravel, clampChannelTravelEndpoint, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
 
 
 const store = useOfficeStore()
+const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean] }>()
 const layoutPreview = defineModel<LayoutPreview | null>('layoutPreview', { default: null })
 const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
+const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { default: null })
+const activeReference = computed(() => referenceEditing.value?.zoneId === store.designZoneId ? referenceEditing.value : null)
 const viewRotation = defineModel<number>('viewRotation', { default: 0 })
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const tool = defineModel<string>('tool', { default: 'select' })
@@ -77,12 +83,13 @@ const worldBounds = computed(() => {
 })
 
 const hintText = computed(() => {
-  if (placing.value) return placementMessage.value || placementProblem.value || '点击空间内逐件放置 · R 旋转 · Esc 结束'
+  if (placing.value) return placementMessage.value || placementProblem.value || '点击空间内逐件放置 · 空格旋转 · Esc 或右键结束'
   if (moveProblem.value) return moveProblem.value
   if (deleteFeedback.value) return deleteFeedback.value
   if (regionMessage.value) return regionMessage.value
   if (facilityMessage.value) return facilityMessage.value
   if (constraintMessage.value) return constraintMessage.value
+  if (activeReference.value && tool.value === 'select') return activeReference.value.placement ? '点击画布放置家具 · 空格旋转 · Esc 或右键取消' : '点击选中参考家具 · 拖动调整位置 · 空格旋转 · Delete 删除'
   if (mode.value === 'design' && tool.value === 'select') return activePreview.value ? '预览家具可直接拖动调整，应用时按调整后的位置生成 · 空白处框选已排版家具' : '点击选中 · Shift/Ctrl 点选多个 · 空白处框选 · 拖动选中家具一起移动'
   if (isConstraintTool.value) return constraintKind.value === 'WINDOW' ? '沿墙拖出窗线，自动贴墙；拖动端点调整长度，Esc 取消' : constraintKind.value === 'DOOR_CLEARANCE' ? '从门扇铰链角拖向开启区域，Esc 取消' : '在当前空间底图上拖出矩形标注，Esc 取消'
   if (tool.value === 'region-rect') return '在当前空间内拖出矩形布置区，Esc 取消'
@@ -379,20 +386,26 @@ const placementPreview = computed(() => placing.value && placementPointer.value
   ? manualOfficeFurniture(store.furniturePlacement!, placementPointer.value.x, placementPointer.value.y) : null)
 // Manual arranging snaps to walls and other modules within the tolerance.
 const placementSnap = computed(() => {
-  if (!placementPreview.value || !designZone.value || !snapEnabled.value) return { item: placementPreview.value, guides: { x: null as number | null, y: null as number | null } }
-  const item = placementPreview.value
-  const fp = officeFurnitureFootprint(item)
-  const snapped = snapFurnitureEdges(fp, designZone.value, furniture.value.map(officeFurnitureFootprint), FURNITURE_SNAP_TOLERANCE_MM)
-  return { item: { ...item, x: item.x + snapped.x - fp.x, y: item.y + snapped.y - fp.y }, guides: { x: snapped.guideX, y: snapped.guideY } }
+  return placementPreview.value ? snapFurniturePosition(placementPreview.value, furniture.value) : { item: null, guides: { x: null, y: null } }
 })
 const placementShown = computed(() => placementSnap.value.item)
-const activeSnapGuides = computed(() => placing.value ? placementSnap.value.guides : dragSnapGuides.value)
+const referencePlacement = computed(() => activeReference.value?.placement && tool.value === 'select' && placementPointer.value
+  ? referencePlacementAt(placementPointer.value) : null)
+const activeSnapGuides = computed(() => referencePlacement.value?.guides ?? (placing.value ? placementSnap.value.guides : dragSnapGuides.value))
 const placementProblem = computed(() => placementPreview.value && designZone.value
   ? officePlacementHardProblem(designZone.value, placementShown.value!, furniture.value, store.furniturePlacement!.spacing) : null)
+const visiblePlacement = computed(() => referencePlacement.value?.item || placementShown.value)
+const visiblePlacementInvalid = computed(() => referencePlacement.value ? !referencePlacement.value.valid : !!placementProblem.value)
 watch(() => store.furniturePlacement, draft => {
   placementPointer.value = null
   placementMessage.value = ''
-  if (draft) { tool.value = 'select'; selectedId.value = null; selectedFurnitureIds.value = []; selectedChannelId.value = null }
+  if (draft) {
+    tool.value = 'select'; selectedId.value = null; selectedFurnitureIds.value = []; selectedChannelId.value = null
+    canvasWindow.value?.focus({ preventScroll: true })
+  }
+})
+watch(() => activeReference.value?.placement?.templateId, id => {
+  if (id) canvasWindow.value?.focus({ preventScroll: true })
 })
 watch(tool, value => {
   selectedFurnitureIds.value = []
@@ -419,9 +432,8 @@ const alignedImageStyle = computed(() => {
   if (!canonicalPlan.value) return { left: '230px', top: '170px', width: '1090px', height: '640px' }
   const bounds = floorPlan.value?.previewBounds || floorPlan.value?.drawingBounds
   if (!bounds) return { display: 'none' }
-  const scale = zones.value[0]?.mmPerSourceUnit || 1
-  const top = zones.value[0]?.sourceYAxis === 'up' ? -bounds.maxY : bounds.minY
-  return { left: bounds.minX * scale + 'px', top: top * scale + 'px', width: (bounds.maxX - bounds.minX) * scale + 'px', height: (bounds.maxY - bounds.minY) * scale + 'px' }
+  const rect = canvasDrawingRect(bounds, zones.value[0]?.mmPerSourceUnit || 1, zones.value[0]?.sourceYAxis)
+  return rect ? { left: rect.x + 'px', top: rect.y + 'px', width: rect.w + 'px', height: rect.h + 'px' } : { display: 'none' }
 })
 const floorPlanBounds = computed<FloorPlanDrawingBounds | null>(() => {
   const plan = floorPlan.value
@@ -530,6 +542,7 @@ interface DragState {
   edge?: 'min' | 'max'
   constraintHandle?: string
   vertexIndex?: number
+  referenceMark?: LayoutReferenceMark
 }
 
 const drag = ref<DragState | null>(null)
@@ -550,14 +563,40 @@ function setNoteEditor(element: unknown) {
 const selectedChannelId = ref<string | null>(null)
 const selectedFurnitureItems = computed(() => furniture.value.filter(item => selectedFurnitureIds.value.includes(item.id)))
 const moveProblem = ref('')
+const referenceFeedback = ref('')
+watch(() => activeReference.value?.zoneId, () => {
+  if (drag.value?.mode === 'furniture') drag.value = null
+  dragSnapGuides.value = { x: null, y: null }
+  placementPointer.value = null
+  referenceFeedback.value = ''
+  if (activeReference.value) {
+    selectedFurnitureIds.value = []
+    selectedId.value = null
+  }
+})
+const referenceFurnitureItems = computed(() => {
+  const state = activeReference.value
+  if (!state?.crop) return []
+  return state.marks.flatMap((mark, index) => {
+    const item = referenceFurniture(mark, state.crop!, state.zoneId, 'reference-' + index)
+    return item ? [{ item, index, mark }] : []
+  })
+})
+const selectedReference = computed(() => referenceFurnitureItems.value.find(entry => entry.index === activeReference.value?.selected)?.item)
+const editableFurniture = computed(() => activeReference.value ? referenceFurnitureItems.value.map(entry => entry.item) : furniture.value)
+function dragFurnitureItem(item: FurnitureObject) {
+  const d = drag.value
+  return d?.mode === 'furniture' && d.ids?.includes(item.id) ? { ...item, x: item.x + (d.dx || 0), y: item.y + (d.dy || 0) } : item
+}
 const dragSnapGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
 watch(selectedId, id => {
-  if (id && furniture.value.some(item => item.id === id) && !selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
+  if (id && furniture.value.some(item => item.id === id)) selectedFurnitureIds.value = [id]
 })
 const lastDeletedFurnitureId = ref<string | null>(null)
 const deleteFeedback = computed(() => lastDeletedFurnitureId.value && !store.objects.some(item => item.id === lastDeletedFurnitureId.value) ? '已删除模块，可点击工具栏撤销恢复' : '')
 
 function deleteSelection() {
+  if (activeReference.value) { deleteReferenceSelection(activeReference.value); return }
   if (mode.value === 'design' && selectedFurnitureIds.value.length > 1 && store.designZoneId) {
     const ids = [...selectedFurnitureIds.value]
     if (store.deleteFurnitureGroup(ids, store.designZoneId)) {
@@ -617,6 +656,7 @@ function onNotePointerDown(note: NoteObject, event: PointerEvent) {
 }
 
 function rotateSelection() {
+  if (activeReference.value) { rotateReferenceSelection(activeReference.value); return }
   if (mode.value !== 'design' || !store.designZoneId || !selectedFurnitureIds.value.length) return
   moveProblem.value = store.rotateFurnitureGroup(selectedFurnitureIds.value, store.designZoneId) || ''
 }
@@ -981,6 +1021,75 @@ function previewDragItem(item: FurnitureObject): FurnitureObject {
   return d?.mode === 'preview-furniture' && d.id === item.id ? { ...item, x: item.x + (d.dx || 0), y: item.y + (d.dy || 0) } : item
 }
 
+function referenceCenterInRoom(p: { x: number; y: number }) {
+  return layoutRectInsideRing({ x: p.x - 0.5, y: p.y - 0.5, w: 1, h: 1 }, designZone.value?.polygon || [])
+}
+
+function onReferencePointerDown(index: number, e: PointerEvent) {
+  const state = activeReference.value
+  const mark = state?.marks[index]
+  if (tool.value === 'pan' || state?.placement) { onPointerDown(e); return }
+  if (e.button !== 0 || !mark || !canvasWindow.value || !state) return
+  e.preventDefault()
+  canvasWindow.value.focus({ preventScroll: true })
+  state.selected = index
+  referenceFeedback.value = ''
+  beginFurnitureDrag(e, point(e), ['reference-' + index], { referenceMark: mark })
+}
+
+function beginFurnitureDrag(e: PointerEvent, p: { x: number; y: number }, ids: string[], target: { id: string } | { referenceMark: LayoutReferenceMark }) {
+  canvasWindow.value?.focus({ preventScroll: true })
+  drag.value = { mode: 'furniture', cx: p.x, cy: p.y, ids, dx: 0, dy: 0, ...target }
+  canvasWindow.value?.setPointerCapture(e.pointerId)
+  moveProblem.value = ''
+}
+
+function snapFurniturePosition(item: FurnitureObject, others: FurnitureObject[]) {
+  if (!snapEnabled.value || !designZone.value) return { item, guides: { x: null, y: null } }
+  const rect = officeFurnitureFootprint(item)
+  const snapped = snapFurnitureEdges(rect, designZone.value, others.map(officeFurnitureFootprint), FURNITURE_SNAP_TOLERANCE_MM)
+  return { item: { ...item, x: item.x + snapped.x - rect.x, y: item.y + snapped.y - rect.y }, guides: { x: snapped.guideX, y: snapped.guideY } }
+}
+
+function furnitureDragDelta(d: DragState, p: { x: number; y: number }) {
+  const dx = p.x - (d.cx || 0), dy = p.y - (d.cy || 0)
+  const item = editableFurniture.value.find(item => item.id === d.ids?.[0])
+  if (!item || (!dx && !dy)) return { dx, dy, guides: { x: null, y: null } }
+  const others = editableFurniture.value.filter(item => !d.ids?.includes(item.id))
+  const snapped = snapFurniturePosition({ ...item, x: item.x + dx, y: item.y + dy }, activeReference.value ? [...others, ...furniture.value] : others)
+  return { dx: snapped.item.x - item.x, dy: snapped.item.y - item.y, guides: snapped.guides }
+}
+
+function referencePlacementAt(p: { x: number; y: number }) {
+  const state = activeReference.value
+  if (!state?.crop || !state.placement) return null
+  const { crop, placement } = state
+  const template = furnitureById.get(placement.templateId)
+  if (!template) return null
+  const [w, h] = placement.rotation % 180 === 0 ? [template.widthMm, template.depthMm] : [template.depthMm, template.widthMm]
+  const mark: LayoutReferenceMark = { ...placement, x: (p.x - crop.x - w / 2) / crop.w, y: (p.y - crop.y - h / 2) / crop.h,
+    width: w / crop.w, depth: h / crop.h, confidence: 'manual' }
+  const item = referenceFurniture(mark, crop, state.zoneId, 'placement')
+  if (!item) return null
+  const snapped = snapFurniturePosition(item, [...editableFurniture.value, ...furniture.value])
+  mark.x += (snapped.item.x - item.x) / crop.w
+  mark.y += (snapped.item.y - item.y) / crop.h
+  return { mark, ...snapped, valid: referenceCenterInRoom({ x: snapped.item.x + item.w / 2, y: snapped.item.y + item.h / 2 }) }
+}
+
+function placeReferenceAt(p: { x: number; y: number }) {
+  const state = activeReference.value, draft = referencePlacementAt(p)
+  if (!state || !draft) return
+  if (!draft.valid) {
+    referenceFeedback.value = '请在当前房间内放置家具'
+    return
+  }
+  state.selected = state.marks.length
+  state.marks.push(draft.mark)
+  state.placement = null
+  placementPointer.value = null
+}
+
 function onPointerDown(e: PointerEvent) {
   if (e.button !== 0 || !canvasWindow.value) return
   const target = e.target as HTMLElement
@@ -990,6 +1099,15 @@ function onPointerDown(e: PointerEvent) {
   if (tool.value === 'pan') {
     drag.value = { mode: 'pan', cx: e.clientX, cy: e.clientY, px: store.panX, py: store.panY }
     canvasWindow.value.setPointerCapture(e.pointerId)
+    return
+  }
+
+  if (activeReference.value) {
+    e.preventDefault()
+    canvasWindow.value.focus({ preventScroll: true })
+    referenceFeedback.value = ''
+    if (activeReference.value.placement) placeReferenceAt(p)
+    else activeReference.value.selected = null
     return
   }
 
@@ -1060,9 +1178,7 @@ function onPointerDown(e: PointerEvent) {
         }
         if (!selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
         selectedId.value = selectedFurnitureIds.value.length === 1 ? id : null
-        drag.value = { mode: 'furniture', cx: p.x, cy: p.y, ids: [...selectedFurnitureIds.value], dx: 0, dy: 0 }
-        canvasWindow.value.setPointerCapture(e.pointerId)
-        moveProblem.value = ''
+        beginFurnitureDrag(e, p, [...selectedFurnitureIds.value], { id })
         return
       }
       selectedFurnitureIds.value = []
@@ -1124,6 +1240,7 @@ function updatePreview(a: { x: number; y: number }, b: { x: number; y: number })
 
 function onPointerMove(e: PointerEvent) {
   if (placing.value && canvasWindow.value) { placementPointer.value = point(e); placementMessage.value = '' }
+  if (activeReference.value?.placement && canvasWindow.value && tool.value === 'select') placementPointer.value = point(e)
   if (sketchActive.value && sketchPoints.value.length && canvasWindow.value) {
     const hover = point(e)
     sketchHover.value = [hover.x, hover.y]
@@ -1135,22 +1252,14 @@ function onPointerMove(e: PointerEvent) {
     store.panY = (d.py || 0) + (e.clientY - (d.cy || 0))
     placeBoard()
   } else if (d.mode === 'furniture' && d.ids?.length && designZone.value) {
-    const p = point(e)
-    d.dx = p.x - (d.cx || 0)
-    d.dy = p.y - (d.cy || 0)
-    const ids = new Set(d.ids)
-    if (snapEnabled.value) {
-      const anchor = furniture.value.find(item => item.id === d.ids![0])
-      if (anchor) {
-        const fp = officeFurnitureFootprint(anchor)
-        const snapped = snapFurnitureEdges({ x: fp.x + d.dx, y: fp.y + d.dy, w: fp.w, h: fp.h }, designZone.value, furniture.value.filter(item => !ids.has(item.id)).map(officeFurnitureFootprint), FURNITURE_SNAP_TOLERANCE_MM)
-        d.dx = snapped.x - fp.x
-        d.dy = snapped.y - fp.y
-        dragSnapGuides.value = { x: snapped.guideX, y: snapped.guideY }
-      }
-    } else dragSnapGuides.value = { x: null, y: null }
-    const candidates = furniture.value.filter(item => ids.has(item.id)).map(item => ({ ...item, x: item.x + d.dx!, y: item.y + d.dy! }))
-    moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, furniture.value) || ''
+    const delta = furnitureDragDelta(d, point(e))
+    d.dx = delta.dx
+    d.dy = delta.dy
+    dragSnapGuides.value = delta.guides
+    if (!d.referenceMark) {
+      const candidates = furniture.value.filter(item => d.ids?.includes(item.id)).map(dragFurnitureItem)
+      moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, furniture.value) || ''
+    }
   } else if (d.mode === 'preview-furniture' && d.id && activePreview.value && designZone.value) {
     const p = point(e)
     d.dx = p.x - (d.cx || 0)
@@ -1169,7 +1278,9 @@ function onPointerMove(e: PointerEvent) {
       dragSnapGuides.value = { x: snapped.guideX, y: snapped.guideY }
     } else dragSnapGuides.value = { x: null, y: null }
     const candidates = previewAll.map(item => item.id === d.id ? { ...item, x: item.x + d.dx!, y: item.y + d.dy! } : item)
-    moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, [...displayedFurniture.value, ...previewAll]) || ''
+    const spacing = activePreview.value.mixedSpacing
+    moveProblem.value = officeFurnitureMoveProblem(designZone.value, candidates, [...displayedFurniture.value, ...previewAll])
+      || (spacing ? mixedPlacementProblem(designZone.value, [...displayedFurniture.value, ...candidates], spacing) : null) || ''
   } else if (d.mode === 'channel' && d.channelId) {
     const p = point(e)
     let dx = d.orientation === 'vertical' ? p.x - (d.cx || 0) : p.y - (d.cy || 0)
@@ -1390,14 +1501,30 @@ function onPointerUp(e: PointerEvent) {
       selectedId.value = selectedFurnitureIds.value.length === 1 ? selectedFurnitureIds.value[0]! : null
     }
   } else if (d.mode === 'furniture' && d.ids?.length && store.designZoneId) {
-    const dx = d.dx || 0, dy = d.dy || 0
-    if (dx || dy) moveProblem.value = store.moveFurnitureGroup(d.ids, store.designZoneId, dx, dy) || ''
+    const p = point(e)
+    const { dx, dy } = furnitureDragDelta(d, p)
+    if (d.id && p.x === d.cx && p.y === d.cy) emit('editFurniture', d.id, d.ids.length > 1)
+    if (dx || dy) {
+      if (d.referenceMark) {
+        const state = activeReference.value, mark = d.referenceMark
+        if (state?.crop && state.marks.includes(mark)) {
+          const crop = state.crop
+          const x = mark.x + dx / crop.w, y = mark.y + dy / crop.h
+          if (referenceCenterInRoom({ x: crop.x + (x + mark.width / 2) * crop.w, y: crop.y + (y + mark.depth / 2) * crop.h })) {
+            Object.assign(mark, { x, y, confidence: 'manual' })
+          } else referenceFeedback.value = '请将家具留在当前房间内'
+        }
+      } else moveProblem.value = store.moveFurnitureGroup(d.ids, store.designZoneId, dx, dy) || ''
+    }
   } else if (d.mode === 'preview-furniture' && d.id && activePreview.value) {
     // 预览拖动不触碰已排版家具，只把调整后的位置写回预览模型，应用组合时生效。
     const dx = d.dx || 0, dy = d.dy || 0
     if (dx || dy) {
       const preview = activePreview.value
-      layoutPreview.value = { ...preview, manuallyAdjusted: true, furniture: preview.furniture.map(item => item.id === d.id ? { ...item, x: Math.round(item.x + dx), y: Math.round(item.y + dy) } : item) }
+      layoutPreview.value = { ...preview, manuallyAdjusted: true, furniture: preview.furniture.map(item => item.id === d.id ? {
+        ...item, x: Math.round(item.x + dx), y: Math.round(item.y + dy),
+        ...(item.layoutReference ? { layoutReference: { ...item.layoutReference, adjusted: true } } : {}),
+      } : item) }
     }
   } else if (d.mode === 'channel' && d.channelId && store.designZoneId) {
     // 松手一次性提交（走 store 的失效与撤销路径）：垂直分量改位置，走向分量平移起止窗口（LAYOUT-040）。
@@ -1446,6 +1573,7 @@ function onPointerUp(e: PointerEvent) {
 }
 
 function onPointerCancel() {
+  dragSnapGuides.value = { x: null, y: null }
   const d = drag.value
   if (d?.mode === 'move' && d.id) {
     const object = store.objects.find(item => item.id === d.id)
@@ -1466,9 +1594,30 @@ function onPointerCancel() {
   moveProblem.value = ''
 }
 
+function stopPlacing() {
+  if (activeReference.value?.placement) activeReference.value.placement = null
+  else store.cancelFurniturePlacement()
+}
+
+function onCanvasContextMenu(e: MouseEvent) {
+  if (!placing.value && !activeReference.value?.placement) return
+  e.preventDefault()
+  stopPlacing()
+}
+
+function rotatePlacement() {
+  if (activeReference.value?.placement) rotateReferenceSelection(activeReference.value)
+  else store.rotateFurniturePlacement()
+}
+
 function onKeydown(e: KeyboardEvent) {
   const active = document.activeElement as HTMLElement
   const typing = active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)
+  if (activeReference.value && e.key === 'Escape') {
+    if (activeReference.value.placement) stopPlacing()
+    else referenceEditing.value = null
+    return
+  }
   if (e.key === 'Escape') {
     store.cancelFurniturePlacement()
     if (sketchPoints.value.length) { sketchPoints.value = []; sketchHover.value = null; return }
@@ -1487,15 +1636,24 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (typing || showSubmit.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return
-  if (e.key === 'Enter' && sketchPoints.value.length) { e.preventDefault(); finishSketch(); return }
-  if (placing.value) {
-    if (e.key.toLowerCase() === 'r') { e.preventDefault(); store.rotateFurniturePlacement() }
+  if (activeReference.value && (drag.value || e.ctrlKey || e.metaKey || e.altKey)) return
+  const placementActive = placing.value || !!activeReference.value?.placement
+  if ((e.code === 'Space' || e.key === ' ') && !drag.value && !e.ctrlKey && !e.metaKey && !e.altKey
+    && !active?.closest('button, a, [role="button"]')
+    && (placementActive || mode.value === 'design' && (selectedFurnitureIds.value.length || selectedReference.value))) {
+    e.preventDefault()
+    if (!e.repeat) {
+      if (placementActive) rotatePlacement()
+      else rotateSelection()
+    }
     return
   }
-  if (e.key.toLowerCase() === 'r' && mode.value === 'design' && selectedFurnitureIds.value.length) { e.preventDefault(); rotateSelection(); return }
-  if (['Delete', 'Backspace'].includes(e.key) && (selectedId.value || selectedFurnitureIds.value.length || selectedChannelId.value || selectedConstraintId.value || selectedRegionId.value || selectedFacilityId.value)) {
+  if (e.key === 'Enter' && sketchPoints.value.length) { e.preventDefault(); finishSketch(); return }
+  if (placing.value) return
+  if (['Delete', 'Backspace'].includes(e.key) && (selectedReference.value || selectedId.value || selectedFurnitureIds.value.length || selectedChannelId.value || selectedConstraintId.value || selectedRegionId.value || selectedFacilityId.value)) {
     e.preventDefault()
-    if (selectedConstraintId.value) removeSelectedConstraint()
+    if (activeReference.value) deleteSelection()
+    else if (selectedConstraintId.value) removeSelectedConstraint()
     else if (selectedChannelId.value) removeSelectedChannel()
     else if (selectedRegionId.value) removeSelectedRegion()
     else if (selectedFacilityId.value) removeSelectedFacility()
@@ -1530,7 +1688,11 @@ watch(() => store.objects.length, () => {
   nextTick(placeBoard)
 })
 
-watch([mode, designZone], () => {
+// A server save can replace the zone object even when its geometry is unchanged.
+watch([mode, () => store.workspaceId, () => {
+  const zone = designZone.value
+  return zone ? JSON.stringify([zone.id, zone.x, zone.y, zone.w, zone.h, zone.polygon]) : null
+}], () => {
   if (store.furniturePlacement && store.furniturePlacement.zoneId !== store.designZoneId) store.cancelFurniturePlacement()
   selectedId.value = null
   selectedFurnitureIds.value = []
@@ -1608,6 +1770,7 @@ function furnitureProduct(o: FurnitureObject) {
 <template>
   <div
     ref="canvasWindow"
+    tabindex="-1"
     data-testid="office-design-canvas"
     class="relative flex-1 overflow-hidden bg-[#faf9f7] cursor-crosshair touch-none"
     style="background-image: radial-gradient(#dfdad4 1px, transparent 1px); background-size: 18px 18px;"
@@ -1616,6 +1779,7 @@ function furnitureProduct(o: FurnitureObject) {
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerCancel"
+    @contextmenu="onCanvasContextMenu"
     @pointerleave="placementPointer = null"
     @dblclick="onDoubleClick"
   >
@@ -2119,7 +2283,7 @@ function furnitureProduct(o: FurnitureObject) {
             selectedFurnitureIds.includes(f.id) ? 'ring-[3px] ring-[#306fcb]/30 z-10' : '',
             mode === 'overview' ? 'opacity-50' : 'opacity-100',
           ]"
-          :style="{ ...furnitureStyle(f), left: `${f.x + (drag?.mode === 'furniture' && drag.ids?.includes(f.id) ? drag.dx || 0 : 0)}px`, top: `${f.y + (drag?.mode === 'furniture' && drag.ids?.includes(f.id) ? drag.dy || 0 : 0)}px`, outline: drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined }"
+          :style="{ ...furnitureStyle(dragFurnitureItem(f)), outline: drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined }"
           @pointerdown.stop="onPointerDown"
         >
           <OfficeCanvasFurniturePreview v-if="officeFurnitureTemplateId(f, furnitureProduct(f))"
@@ -2142,16 +2306,28 @@ function furnitureProduct(o: FurnitureObject) {
         </div>
       </div>
 
+      <div v-if="activeReference" class="absolute inset-0 pointer-events-none" data-testid="reference-canvas-layer">
+        <div class="absolute inset-0 pointer-events-auto" :class="activeReference.placement ? 'cursor-crosshair' : tool === 'pan' ? 'cursor-grab' : 'cursor-default'" @pointerdown.stop="onPointerDown" />
+        <button v-for="{ item, index, mark } in referenceFurnitureItems" :key="item.id" type="button"
+          :data-reference-index="index" :data-reference-confidence="mark.confidence" :aria-label="item.label"
+          :aria-pressed="activeReference.selected === index"
+          class="pointer-events-auto cursor-move border-0 p-0" :class="activeReference.selected === index ? 'bg-green-100/70' : mark.confidence === 'low' ? 'bg-amber-100/70 opacity-80' : 'bg-transparent'"
+          :style="furnitureStyle(dragFurnitureItem(item))" @pointerdown.stop="onReferencePointerDown(index, $event)"
+          @click="$event.detail === 0 && !activeReference.placement && (activeReference.selected = index)">
+          <OfficeCanvasFurniturePreview :template-id="item.furnitureTemplateId!" :width-mm="item.w" :depth-mm="item.h" :stroke-scale="1 / store.zoom" :show-seat="false" :selected="activeReference.selected === index" />
+        </button>
+      </div>
+
       <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />
 
-      <div v-if="placementShown" data-testid="furniture-placement-preview" class="absolute pointer-events-none opacity-60"
-        :data-valid="!placementProblem" :style="{ ...furnitureStyle(placementShown), outline: `${2 / store.zoom}px dashed ${placementProblem ? '#c45c4c' : '#306fcb'}` }">
-        <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(placementShown)!" :width-mm="placementShown.w" :depth-mm="placementShown.h" :stroke-scale="1 / store.zoom" />
+      <div v-if="visiblePlacement" :data-testid="referencePlacement ? 'reference-placement-preview' : 'furniture-placement-preview'" class="absolute pointer-events-none opacity-60"
+        :data-valid="!visiblePlacementInvalid" :style="{ ...furnitureStyle(visiblePlacement), outline: referencePlacement && !visiblePlacementInvalid ? undefined : `${2 / store.zoom}px dashed ${visiblePlacementInvalid ? '#c45c4c' : '#306fcb'}` }">
+        <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(visiblePlacement)!" :width-mm="visiblePlacement.w" :depth-mm="visiblePlacement.h" :stroke-scale="1 / store.zoom" :show-seat="referencePlacement ? false : undefined" />
+      </div>
       <template v-if="mode === 'design'">
         <div v-if="activeSnapGuides.x !== null" data-testid="snap-guide-x" class="absolute pointer-events-none" :style="{ left: activeSnapGuides.x + 'px', top: worldBounds.minY + 'px', height: (worldBounds.maxY - worldBounds.minY) + 'px', width: '0px', borderLeft: `${1.5 / store.zoom}px dashed #306fcb`, opacity: 0.7 }" />
         <div v-if="activeSnapGuides.y !== null" data-testid="snap-guide-y" class="absolute pointer-events-none" :style="{ top: activeSnapGuides.y + 'px', left: worldBounds.minX + 'px', width: (worldBounds.maxX - worldBounds.minX) + 'px', height: '0px', borderTop: `${1.5 / store.zoom}px dashed #306fcb`, opacity: 0.7 }" />
       </template>
-      </div>
       <!-- 逐点绘制预览（GEOM-016 多边形布置区 / GEOM-018 踢脚线） -->
       <svg v-if="sketchPoints.length" :width="worldBounds.width" :height="worldBounds.height" class="absolute inset-0 pointer-events-none overflow-visible" data-testid="sketch-preview">
         <polyline :points="[...sketchPoints, ...(sketchHover ? [sketchHover] : [])].map(pt => pt.join(',')).join(' ')" fill="none" :stroke="sketchColor" :stroke-width="1.5 / store.zoom" :stroke-dasharray="`${6 / store.zoom} ${4 / store.zoom}`" />
@@ -2165,10 +2341,16 @@ function furnitureProduct(o: FurnitureObject) {
       </div>
     </div>
 
-    <div v-if="selectedFurnitureItems.length && !placing" class="absolute right-4 top-4 z-10 max-w-[60%] flex items-center gap-2 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-sm" @pointerdown.stop>
-      <span class="text-xs truncate">{{ selectedFurnitureItems.length === 1 ? (selectedFurniture?.label || '已选家具模块') : `已选 ${selectedFurnitureItems.length} 件模块` }}</span>
-      <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="旋转 90°（R）" data-testid="rotate-selection" @click.stop="rotateSelection">旋转 90°</button>
-      <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="水平镜像" data-testid="mirror-selection" @click.stop="mirrorSelection">水平镜像</button>
+    <p v-if="referenceFeedback && activeReference" class="pointer-events-none absolute bottom-12 left-3 z-20 border border-line bg-white/95 px-2 py-1 text-xs text-[#a65e4c]" role="status">{{ referenceFeedback }}</p>
+    <div v-if="placing || activeReference?.placement" class="absolute left-1/2 top-3 z-20 flex max-w-[70%] -translate-x-1/2 items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-xs" @pointerdown.stop>
+      <span class="min-w-0 truncate px-1" aria-live="polite">正在放置 {{ store.furniturePlacement?.template.name || furnitureById.get(activeReference!.placement!.templateId)?.name }}</span>
+      <button type="button" class="shrink-0 rounded px-2 py-1 hover:bg-[#f3efe9]" title="空格旋转" @click="rotatePlacement">旋转 90°</button>
+      <button type="button" data-testid="canvas-stop-placement" class="shrink-0 rounded bg-[#e9f8df] px-2 py-1 font-semibold text-[#38682d]" @click="stopPlacing">结束放置 <kbd class="ml-0.5 font-sans text-[10px]">Esc</kbd></button>
+    </div>
+    <div v-if="(selectedFurnitureItems.length || selectedReference) && !placing && !activeReference?.placement" class="absolute right-4 top-4 z-10 max-w-[60%] flex items-center gap-2 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-sm" @pointerdown.stop>
+      <span class="text-xs truncate">{{ selectedReference?.label || (selectedFurnitureItems.length === 1 ? (selectedFurniture?.label || '已选家具模块') : `已选 ${selectedFurnitureItems.length} 件模块`) }}</span>
+      <button class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="旋转 90°（空格）" data-testid="rotate-selection" @click.stop="rotateSelection">旋转 90°</button>
+      <button v-if="!selectedReference" class="flex-none rounded-lg px-2 py-1 text-xs text-[#5b5751] hover:bg-[#f3efe9]" title="水平镜像" data-testid="mirror-selection" @click.stop="mirrorSelection">水平镜像</button>
       <button class="flex-none rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="Delete / Backspace" @click.stop="deleteSelection">删除选中模块</button>
     </div>
     <div v-if="selectedNote && !placing" data-testid="note-actions" class="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-sm" @pointerdown.prevent.stop>
