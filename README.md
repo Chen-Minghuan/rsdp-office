@@ -56,6 +56,16 @@ pnpm dev --port 3001
 
 访问 `http://localhost:3001`，前端默认调用本地 `8082` 后端。
 
+## 初始化本地测试账号
+
+在本地 `.env` 设置 `RSDP_AUTH_ENABLED=true`，并启动 Java 后端以完成建表和迁移。随后在仓库根目录执行：
+
+```bash
+docker compose exec -T postgres psql -X -U postgres -d office < scripts/seed-dev-accounts.sql
+```
+
+脚本创建经销商主号 `dealer`、项目负责人 `lead`、设计师协作者 `designer` 和厂家业务员协作者 `factory`，并准备一个带 1F 楼层的示例项目。库里尚无系统管理员时，脚本会创建 `admin`。首次创建时终端会显示各账号独立生成的密码，请在本机保存。再次执行会保留已存在账号的密码和项目成员。早期脚本生成的测试账号会去掉登录名的 `dev_` 前缀，原密码继续有效。脚本仅用于各开发者本机的 Compose 数据库。
+
 ## 状态和日志
 
 服务器 Jenkins 流水线、生产容器、`.env` 路径及 HTTPS 接入说明见 [部署文档](docs/deployment.md)。生产入口为 `compose.deploy.yaml`，本地开发仍使用上面的原有命令。

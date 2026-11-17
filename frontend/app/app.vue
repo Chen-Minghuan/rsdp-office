@@ -2,15 +2,16 @@
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const { isProjectWorkflow } = useWorkspaceNavigation()
-const route = useRoute()
-const isLoginPage = computed(() => route.path === '/login')
-const isSpatialWorkbench = computed(() => route.path === '/spatial-canvas')
+// 应用外壳先决定挂载哪个页面，不能等 NuxtPage 渲染完成后才读取路由。
+const route = useRouter().currentRoute
+const isLoginPage = computed(() => route.value.name === 'login')
+const isSpatialWorkbench = computed(() => route.value.path === '/spatial-canvas')
 async function initializeWorkspace() {
   if (isLoginPage.value || (workspace.initialized && store.initialized)) return
   await workspace.init()
   if (!store.initialized) await store.init()
 }
-watch(() => route.query.floorId, floorId => {
+watch(() => route.value.query.floorId, floorId => {
   if (workspace.initialized && typeof floorId === 'string' && floorId !== workspace.currentFloorId) void workspace.activateFloor(floorId)
 })
 onMounted(() => { void initializeWorkspace() })
@@ -18,7 +19,7 @@ watch(isLoginPage, (loginPage, wasLoginPage) => {
   if (wasLoginPage && !loginPage) void initializeWorkspace()
 })
 // 初始化曾失败（未锁定 initialized）时，切换路由自动重试加载真实工作区
-watch(() => route.path, () => {
+watch(() => route.value.path, () => {
   if (!workspace.initialized && !isLoginPage.value) void initializeWorkspace()
 })
 </script>

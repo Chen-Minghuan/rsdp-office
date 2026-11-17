@@ -1,11 +1,11 @@
 export function useWorkspaceNavigation() {
-  const route = useRoute()
+  const route = useRouter().currentRoute
   const store = useOfficeStore()
   const lastProjectRoute = useState<string>('office-last-project-route', () => '/')
-  const isProjectWorkflow = computed(() => ['/', '/canvas', '/proposal', '/agent'].includes(route.path))
+  const isProjectWorkflow = computed(() => ['/', '/canvas', '/proposal', '/agent'].includes(route.value.path))
 
-  watch(() => route.fullPath, (path) => {
-    if (isProjectWorkflow.value && route.path !== '/agent') lastProjectRoute.value = path
+  watch(() => route.value.fullPath, (path) => {
+    if (isProjectWorkflow.value && route.value.path !== '/agent') lastProjectRoute.value = path
   }, { immediate: true })
 
   const designRoute = computed(() => ({
@@ -27,9 +27,9 @@ export function useWorkspaceNavigation() {
 
   const currentStep = computed(() => {
     if (!isProjectWorkflow.value) return -1
-    if (route.path === '/proposal') return 4
-    if (route.path === '/agent' || (route.path === '/canvas' && route.query.mode === 'design')) return 3
-    return route.path === '/canvas' ? 2 : 1
+    if (route.value.path === '/proposal') return 4
+    if (route.value.path === '/agent' || (route.value.path === '/canvas' && route.value.query.mode === 'design')) return 3
+    return route.value.path === '/canvas' ? 2 : 1
   })
 
   return { isProjectWorkflow, lastProjectRoute, projectSteps, currentStep }

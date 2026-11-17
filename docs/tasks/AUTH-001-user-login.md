@@ -22,7 +22,7 @@ RSDP_AUTH_COOKIE_SECURE=true
 
 应用启动完成后，如果该账号不存在，就将密码 PBKDF2 加盐哈希后写入 `office_user`。后续启动不会覆盖已有用户密码；初始化完成后可以移除 `RSDP_BOOTSTRAP_PASSWORD`。
 
-前端同源部署时设置 `VITE_AUTH_ENABLED=1` 和 `VITE_API_BASE_URL=` 后重新构建。`VITE_API_BASE_URL` 为空表示浏览器通过当前域名访问 `/api`；不能在公网构建中保留 `http://localhost:8082`。
+前端默认开启认证。仅本地开发服务器读取 `VITE_AUTH_ENABLED=0` 作为显式免登录开关，部署构建始终执行认证。同源部署时设置 `VITE_API_BASE_URL=` 后重新构建。`VITE_API_BASE_URL` 为空表示浏览器通过当前域名访问 `/api`；不能在公网构建中保留 `http://localhost:8082`。
 
 ## 接口与行为
 
@@ -54,5 +54,20 @@ RSDP_AUTH_COOKIE_SECURE=true
 - `pnpm build` 通过；`mvn -f backend/pom.xml test` 154 通过 / 3 跳过。
 - 本地真实集成：前端 dev(:3000, `VITE_AUTH_ENABLED=1`) + 后端(:8082, `RSDP_AUTH_ENABLED=true` + 引导账号) + docker PostgreSQL。启动自动创建 `office_user` 表与引导用户；匿名访问 `/api/auth/me`、`/api/v1/**`、`/uploads/**` 均 401；错误密码 401；数据库置为 disabled 后登录 401、恢复 active 后 200；登录返回 HttpOnly 会话、刷新保持；退出后 `/api/auth/me` 回到 401。
 - Playwright 真实接口端到端（一次性脚本，未入库）8 项通过：首页跳登录、表单渲染、错误密码提示、登录进首页、会话有效、顶栏退出按钮、退出后 401、再次访问重跳登录。
+
+## 2026-11-17 首次访问登录页修复
+
+- 本地复现：匿名访问首页后，路由守卫收到 401 并更新地址到 `/login?redirect=/`，页面仍挂着工作区外壳并发起项目请求。外壳读取的 Nuxt `useRoute()` 会等页面渲染后才同步，而挂载登录页又依赖外壳识别到登录路由。前端环境变量缺失时，旧开关还会直接跳过会话检查。
+- 应用外壳和工作区导航现在读取 Vue Router 当前路由，登录页按路由名识别，支持 `/login/`。部署构建始终认证，本地开发默认认证。顶栏直接读取会话用户，免登录开发模式显示「本地开发」。
+- 真实本地验证：无 Cookie 的 Chromium 在开发服务和新生产预览直达 `/`、`/canvas?mode=design`、`/products`，均收到真实 `/api/auth/me` 401 后显示登录表单并保留目标地址，未请求工作区 API；直达 `/login/` 正常。
+- 构建与模拟回归：`corepack pnpm build`、`corepack pnpm e2e:workspace-isolation`、`corepack pnpm e2e:workflows`、`MOCK_API=1 corepack pnpm e2e:smoke` 通过。账号隔离专项新增匿名入口回归。首轮直接调用 PATH 上的 pnpm 触发依赖目录清理提示，改用现有 Corepack 执行，未变更依赖。未部署公网。
+
+## 2026-11-17 本地测试账号初始化
+
+- Java 后端完成数据库迁移后，按[本地开发说明](../../README.md#初始化本地测试账号)手动执行[种子脚本](../../scripts/seed-dev-accounts.sql)。脚本在事务中创建开发工作区、示例项目和楼层。经销商主号拥有工作区，负责人及两名协作者通过项目成员关系分配。
+- 仅在库内无 `ADMIN` 时创建 `admin`。新账号密码随机且各自独立，首次创建时输出，账号表保存与 Java `PasswordHasher` 一致的 PBKDF2 哈希。重复运行保留已有账号状态、密码和现有项目成员，同名冲突回滚。
+- 在独立的 PostgreSQL 16 容器中验证空库建号、工作区和项目关系、已有管理员保留、重复执行、并发执行及冲突回滚。使用仓库 Java `PasswordHasher` 验证五个新账号的密码均可通过，错误密码均被拒绝。
+- 按用户要求在本机 Compose 开发库执行脚本，新增四个测试账号和示例项目，保留唯一在用系统管理员。Chromium 通过本机前端和真实后端逐个验证四个账号登录、访问示例项目和退出。部署环境未执行。
+- 按用户要求去掉开发测试账号登录名的 `dev_` 前缀。脚本通过原用户 ID 识别旧种子账号并原地改名，保留密码和角色。本机账号和密码文件已同步更新。
 
 仍待执行：公网 HTTPS 反向代理部署与正式环境数据库迁移；多用户管理和角色权限不在首期范围；上述本地核对不等于正式业务验收。

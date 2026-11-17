@@ -43,6 +43,28 @@ try {
   }
   assert.ok(ready)
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
+  const anonymous = await browser.newContext()
+  try {
+    let workspaceRequests = 0
+    await anonymous.route('**/api/auth/me', route => route.fulfill({ status: 401, json: { code: 401, data: null } }))
+    await anonymous.route('**/api/v1/**', route => {
+      workspaceRequests += 1
+      return route.abort()
+    })
+    const page = await anonymous.newPage()
+    for (const destination of ['/', '/canvas?mode=design', '/products']) {
+      await page.goto(baseUrl + destination)
+      await page.getByRole('heading', { name: '登录办公空间智能设计平台', exact: true }).waitFor({ timeout: 10000 })
+      const url = new URL(page.url())
+      assert.equal(url.pathname, '/login')
+      assert.equal(url.searchParams.get('redirect'), destination)
+      assert.equal(await page.getByRole('navigation', { name: '工作区导航' }).count(), 0)
+    }
+    assert.equal(workspaceRequests, 0, '匿名访问不应加载工作区 API')
+  } finally {
+    await anonymous.close()
+  }
+
   const context = await browser.newContext({ viewport: { width: 1500, height: 950 } })
   let currentUser = users.designer
   let failProjects = true

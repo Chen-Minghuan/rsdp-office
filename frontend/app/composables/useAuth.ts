@@ -1,6 +1,6 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082').replace(/\/$/, '')
 
-export const authEnabled = import.meta.env.VITE_AUTH_ENABLED === '1'
+export const authEnabled = !import.meta.dev || import.meta.env.VITE_AUTH_ENABLED !== '0'
 
 interface ApiResponse<T> {
   code: number
