@@ -6,6 +6,7 @@ import { workstationSeatGeometry } from '~/utils/furniture3d/workstationSeating'
 
 const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number; showSeat?: boolean }>()
 const template = computed(() => furnitureById.get(props.item.templateId))
+const deskTemplateId = computed(() => template.value?.seatlessOf || props.item.templateId)
 const w = computed(() => props.item.widthMm)
 const d = computed(() => props.item.depthMm)
 const wing = computed(() => Math.min(props.item.wingWidthMm ?? 550, w.value / 2, d.value / 2))
@@ -13,20 +14,20 @@ const transform = computed(() => `translate(${props.item.xMm} ${props.item.yMm})
 const sofaSeats = computed(() => props.item.templateId === 'sofa-triple' ? 3 : props.item.templateId === 'sofa-double' ? 2 : 1)
 const isReferenceStraightDesk = computed(() => [
   'desk-straight', 'desk-screen-straight', 'desk-manager', 'desk-manager-double', 'desk-executive',
-].includes(props.item.templateId))
+].includes(deskTemplateId.value))
 const isReferenceLDesk = computed(() => [
   'desk-l', 'desk-l-rounded', 'desk-screen-l', 'desk-manager-l',
   'desk-executive-l',
-].includes(props.item.templateId))
+].includes(deskTemplateId.value))
 const rightPanel = computed(() => [
   'desk-straight', 'desk-screen-straight', 'desk-l', 'desk-manager', 'desk-manager-double',
   'desk-manager-l', 'desk-executive', 'desk-executive-l',
-].includes(props.item.templateId))
+].includes(deskTemplateId.value))
 const leftPanel = computed(() => [
   'desk-manager-double', 'desk-executive',
-].includes(props.item.templateId))
+].includes(deskTemplateId.value))
 const panelWidth = computed(() => Math.min(w.value * 0.24, 340))
-const seatGeometry = computed(() => workstationSeatGeometry({ w: w.value, h: d.value, wingWidthMm: props.item.wingWidthMm, furnitureTemplateId: props.item.templateId }, template.value?.kind || ''))
+const seatGeometry = computed(() => workstationSeatGeometry({ w: w.value, h: d.value, wingWidthMm: props.item.wingWidthMm, furnitureTemplateId: deskTemplateId.value }, template.value?.kind || ''))
 const desktopDepth = computed(() => seatGeometry.value?.desktopDepth ?? Math.min(d.value * 0.48, 650))
 const innerRadius = computed(() => Math.min(wing.value * 0.9, desktopDepth.value * 0.9))
 const seatX = computed(() => seatGeometry.value?.cx ?? 0)
@@ -70,10 +71,45 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <line :x1="wing" :y1="wing * 0.45" :x2="w - wing" :y2="wing * 0.45" />
     </template>
     <template v-else-if="template.kind === 'chair'">
-      <rect :x="w * 0.12" :y="d * 0.14" :width="w * 0.76" :height="d * 0.64" :rx="Math.min(w, d) * 0.1" />
-      <path :d="`M ${w * 0.16} ${d * 0.8} Q ${w / 2} ${d * 0.98} ${w * 0.84} ${d * 0.8}`" />
-      <line v-if="item.templateId !== 'chair-meeting'" :x1="w * 0.06" :y1="d * 0.27" :x2="w * 0.06" :y2="d * 0.58" />
-      <line v-if="item.templateId !== 'chair-meeting'" :x1="w * 0.94" :y1="d * 0.27" :x2="w * 0.94" :y2="d * 0.58" />
+      <g :transform="`scale(${w / 100} ${d / 100})`" :data-chair-glyph="template.id">
+        <template v-if="template.id === 'chair-office'">
+          <path d="M 50 52 L 50 8 M 50 52 L 5 45 M 50 52 L 18 90 M 50 52 L 82 90 M 50 52 L 95 45" fill="none" />
+          <rect x="22" y="21" width="56" height="54" rx="11" />
+          <path d="M 23 65 Q 23 82 50 85 Q 77 82 77 65" />
+          <path d="M 14 33 V 62 M 86 33 V 62" fill="none" stroke-linecap="round" />
+          <circle v-for="[x, y] in [[50, 8], [5, 45], [18, 90], [82, 90], [95, 45]]" :key="x" :cx="x" :cy="y" r="3" />
+        </template>
+        <template v-else-if="template.id === 'chair-meeting'">
+          <path d="M 23 17 H 77 L 82 70 H 18 Z" />
+          <path d="M 23 70 L 19 83 M 77 70 L 81 83" fill="none" />
+          <rect x="17" y="73" width="66" height="12" rx="3" />
+        </template>
+        <template v-else-if="template.id === 'chair-visitor'">
+          <path d="M 12 71 V 24 Q 12 13 23 13 H 77 Q 88 13 88 24 V 71" fill="none" />
+          <rect x="24" y="20" width="52" height="51" rx="5" />
+          <path d="M 23 66 Q 50 73 77 66 V 82 Q 50 92 23 82 Z" />
+        </template>
+        <template v-else-if="template.id === 'chair-lounge'">
+          <path d="M 7 36 Q 7 14 30 13 Q 50 21 70 13 Q 93 14 93 36 V 65 Q 93 90 68 92 H 32 Q 7 90 7 65 Z" />
+          <path d="M 22 32 Q 50 24 78 32 V 62 Q 78 77 50 77 Q 22 77 22 62 Z" />
+          <path d="M 10 48 L 22 44 M 90 48 L 78 44" fill="none" />
+        </template>
+        <template v-else-if="template.id === 'chair-bar'">
+          <circle cx="50" cy="50" r="41" />
+          <path d="M 20 24 L 80 76 M 80 24 L 20 76" fill="none" />
+          <circle cx="50" cy="50" r="29" />
+        </template>
+        <template v-else-if="template.id === 'chair-executive'">
+          <path d="M 50 49 L 50 5 M 50 49 L 7 52 M 50 49 L 20 94 M 50 49 L 80 94 M 50 49 L 93 52" fill="none" />
+          <path d="M 20 20 Q 50 10 80 20 L 75 57 H 25 Z" />
+          <path d="M 23 53 L 18 75 Q 34 87 50 81 Q 66 87 82 75 L 77 53 Z" />
+          <path d="M 29 73 Q 50 65 71 73" fill="none" />
+          <rect x="31" y="77" width="38" height="13" rx="6" />
+          <rect x="7" y="33" width="12" height="32" rx="5" />
+          <rect x="81" y="33" width="12" height="32" rx="5" />
+        </template>
+        <rect v-else x="15" y="15" width="70" height="70" rx="12" />
+      </g>
     </template>
     <template v-else-if="template.kind === 'round-table' || template.kind === 'plant'">
       <ellipse :cx="w / 2" :cy="d / 2" :rx="w / 2" :ry="d / 2" />
@@ -135,7 +171,7 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
 
 <style scoped>
 .manual-furniture-glyph { fill: #fff; stroke: #78736d; stroke-width: 1.3; stroke-linejoin: round; vector-effect: non-scaling-stroke; cursor: move; }
-.manual-furniture-glyph :is(rect, path, ellipse, line) { vector-effect: non-scaling-stroke; }
+.manual-furniture-glyph :is(rect, path, ellipse, line, circle) { vector-effect: non-scaling-stroke; }
 .manual-furniture-glyph .reference-guide { fill: none; stroke-dasharray: 4 3; }
 .manual-furniture-glyph.selected { stroke: #306fcb; stroke-width: 2; }
 .manual-furniture-glyph.invalid { stroke: #c45c4c; }

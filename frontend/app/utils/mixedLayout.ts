@@ -413,7 +413,7 @@ export function planMixedLayout(zone: ZoneObject, existing: FurnitureObject[], c
 
 
 export const REFERENCE_TEMPLATES: Record<string, string[]> = {
-  workstation: ['desk-straight', 'desk-l', 'desk-manager', 'desk-manager-l', 'desk-executive', 'desk-executive-l', 'chair-office'],
+  workstation: ['desk-straight', 'desk-l', 'desk-manager', 'desk-manager-l', 'desk-executive', 'desk-executive-l', 'chair-office', 'chair-executive'],
   entry: ['cabinet-entry', 'cabinet-low', 'cabinet-high', 'cabinet-short'],
   sofa: ['sofa-double', 'coffee-round', 'coffee-rect', 'chair-lounge'],
   lounge: ['sofa-triple', 'chair-lounge', 'coffee-round', 'coffee-rect'],

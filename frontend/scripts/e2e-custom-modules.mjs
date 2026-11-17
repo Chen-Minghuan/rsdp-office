@@ -40,6 +40,10 @@ try {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
+    if (path === '/api/v1/office/projects') return respond([{
+      projectId: 'OFFICE-PROJECT-001', name: '自定义模块测试',
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+    }])
     if (path.endsWith('/floor-plan/CUSTOM-TEST')) return respond(source)
     if (path.endsWith('/canvas')) {
       if (route.request().method() === 'PUT') { remoteCanvas = route.request().postDataJSON(); return respond(remoteCanvas) }
@@ -49,7 +53,7 @@ try {
   }
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', api)
-  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const placed = async () => (await state()).objects.filter(item => item.kind === 'furniture')
   const dialog = () => page.getByRole('dialog', { name: /单位模块$/ })
   const save = () => dialog().getByRole('button', { name: '保存模块', exact: true }).click()
@@ -123,7 +127,7 @@ try {
   await clickWorld(room.x + 100, room.y + 100)
   assert.equal((await placed()).length, 1, '占地超出空间边界不得放置')
   await page.getByRole('status').filter({ hasText: '超出空间边界' }).waitFor()
-  await page.keyboard.press('r')
+  await page.keyboard.press('Space')
   await clickWorld(room.x + 4500, room.y + 1500)
   const two = await placed()
   assert.equal(two.length, 2)
@@ -139,7 +143,48 @@ try {
   assert.ok((await placed()).every(item => item.layoutConfirmed))
   // Add a built-in chair without replacing either custom desk, then undo.
   await page.getByTestId('tab-product-selection').click()
-  await page.getByTestId('unit-module-catalog').locator('summary').filter({ hasText: /^座椅/ }).click()
+  const catalog = page.getByTestId('unit-module-catalog')
+  const deskOnlyIds = await catalog.locator('[data-module-id$="-desk-only"]').evaluateAll(cards => cards.map(card => card.dataset.moduleId))
+  assert.equal(deskOnlyIds.length, 9)
+  for (const id of deskOnlyIds) {
+    assert.equal(await catalog.locator(`[data-module-id="${id}"] .layout-seat`).count(), 0)
+    assert.equal(await catalog.locator(`[data-module-id="${id.replace(/-desk-only$/, '')}"] .layout-seat`).count(), 1)
+  }
+  const executives = catalog.locator('details').filter({ hasText: /^高管桌/ })
+  if (!(await executives.getAttribute('open'))) await executives.locator('summary').click()
+  const placeDeskOnly = page.getByRole('button', { name: '逐件添加 高管直线桌（单桌）', exact: true })
+  await placeDeskOnly.click()
+  await clickWorld(room.x + 2000, room.y + 4400, true)
+  await page.keyboard.press('Space')
+  const deskGhost = page.getByTestId('furniture-placement-preview')
+  assert.equal(await deskGhost.evaluate(el => el.style.transform), 'rotate(90deg)')
+  assert.equal(await deskGhost.locator('.layout-seat').count(), 0)
+  await clickWorld(room.x + 2000, room.y + 4400)
+  const addedDesk = (await placed()).find(item => item.furnitureTemplateId === 'desk-executive-desk-only')
+  assert.equal(addedDesk.rotation, 90)
+  assert.equal(await page.locator('[data-id="' + addedDesk.id + '"] .layout-seat').count(), 0)
+  await page.getByTestId('canvas-stop-placement').click()
+  await deskGhost.waitFor({ state: 'detached' })
+  assert.equal((await placed()).length, 3, '结束放置保留已添加家具')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await placeDeskOnly.click()
+  const deskBoard = page.getByTestId('office-design-canvas')
+  await deskBoard.click({ button: 'right' })
+  assert.equal(await page.getByTestId('canvas-stop-placement').count(), 0, '右键结束连续放置')
+  assert.equal((await placed()).length, 2)
+  const chairs = catalog.locator('details').filter({ hasText: /^座椅/ })
+  await chairs.locator('summary').click()
+  const chairDrawings = await catalog.locator('[data-chair-glyph]').evaluateAll(nodes => nodes.map(node => ({ id: node.getAttribute('data-chair-glyph'), glyph: node.innerHTML })))
+  assert.equal(chairDrawings.length, 6)
+  assert.equal(new Set(chairDrawings.map(item => item.glyph)).size, 6, '六种座椅有不同的实际线稿')
+  await chairs.screenshot({ path: outDir + '/04-chair-presets.png', animations: 'disabled' })
+  await page.getByRole('button', { name: '逐件添加 总裁椅', exact: true }).click()
+  await clickWorld(room.x + 4700, room.y + 4200)
+  const executiveChair = (await placed()).find(item => item.furnitureTemplateId === 'chair-executive')
+  assert.equal(executiveChair.heightMm, 1200)
+  assert.equal(await deskBoard.locator('[data-id="' + executiveChair.id + '"] [data-chair-glyph="chair-executive"]').count(), 1)
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
   await page.getByRole('button', { name: '办公转椅', exact: true }).click()
   await page.getByRole('button', { name: '逐件添加', exact: true }).click()
   await clickWorld(room.x + 4500, room.y + 4000)
@@ -182,7 +227,7 @@ try {
   assert.deepEqual(await placed(), beforeEdit)
   assert.equal(await page.getByTestId('office-design-canvas').locator('[data-furniture-template="desk-l"]').count(), 2)
   assert.deepEqual((await state()).objects.find(item => item.id === room.id), geometry)
-  await page.waitForFunction(() => !JSON.parse(localStorage.getItem('rsdp-office-v01')).furniturePlacement)
+  await page.waitForFunction(() => !JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).furniturePlacement)
   const freshContext = await browser.newContext({ viewport: { width: 1750, height: 1150 } })
   await freshContext.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await freshContext.route('**/api/v1/**', api)
@@ -196,7 +241,7 @@ try {
   console.log('自定义/逐件添加 UI 通过：名称尺寸校验、本机目录/刷新、毫米快照、点击/连续放置、旋转、越界/重叠拒绝、保留旧家具/确认失效/撤销、目录编辑移除不改实例、自动排版及无本机目录时从保存快照恢复线稿。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
-  if (debugPage) console.error(await debugPage.evaluate(() => ({ text: document.body.innerText.slice(-1600), draft: JSON.parse(localStorage.getItem('rsdp-office-v01'))?.customModules })).catch(() => null))
+  if (debugPage) console.error(await debugPage.evaluate(() => ({ text: document.body.innerText.slice(-1600), draft: JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))?.customModules })).catch(() => null))
   throw failure
 } finally {
   try { await browser?.close() } finally {

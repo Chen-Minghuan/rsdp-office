@@ -4,7 +4,7 @@ import { planMeetingFurniture, planOfficeFurniture, OFFICE_LAYOUT_SPACING } from
 import { planAdaptiveArrangement } from '~/utils/officeAdaptiveLayout'
 import type { OfficeLayoutMode, OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import type { LayoutRect } from '~/utils/layout'
-import { furnitureById } from '~/utils/manualFurniture'
+import { furnitureById, furnitureTemplateShowsSeat } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import type { OfficeModuleTemplate } from '~/types/officeModule'
 import type { OfficeLayoutSettingsMeta } from '~/types/officeArrangement'
@@ -20,9 +20,10 @@ export function furnitureGlyphItem(template: FurnitureTemplate, widthMm = templa
 
 /** Keep old product-bound instances readable without rewriting their saved data. */
 export function officeFurnitureTemplateId(item: FurnitureObject, product?: Product): string | undefined {
-  if (!item.moduleSnapshot && !item.furnitureTemplateId?.startsWith('desk-screen-') && item.layoutSettings?.productStyleId === 'l-screen') return 'desk-l-rounded'
+  const template = furnitureById.get(item.furnitureTemplateId || '')
+  if (!item.moduleSnapshot && !template?.seatlessOf && !item.furnitureTemplateId?.startsWith('desk-screen-') && item.layoutSettings?.productStyleId === 'l-screen') return 'desk-l-rounded'
   if (item.moduleSnapshot && furnitureById.has(item.moduleSnapshot.glyphTemplateId)) return item.moduleSnapshot.glyphTemplateId
-  if (item.furnitureTemplateId && furnitureById.has(item.furnitureTemplateId)) return item.furnitureTemplateId
+  if (template) return template.id
   const legacy: Partial<Record<Product['kind'], string>> = {
     workstation: 'desk-straight', desk: 'desk-executive', chair: 'chair-office',
     meeting: 'table-conference-rect', sofa: 'sofa-double', cabinet: 'cabinet-mobile',
@@ -34,7 +35,7 @@ export function officeFurnitureTemplateId(item: FurnitureObject, product?: Produ
 export function officeFurnitureShowsSeat(item: FurnitureObject): boolean {
   if (item.layoutReference) return false
   const template = furnitureById.get(officeFurnitureTemplateId(item) || '')
-  return !!template && ['职员桌', '主管桌', '高管桌'].includes(template.category)
+  return furnitureTemplateShowsSeat(template)
 }
 
 export function furnitureTemplateArrangement(zone: ZoneObject, widthMm: number, depthMm: number, arrangement: OfficeLayoutMode, spacing?: OfficeLayoutSpacing, context: 'meeting' | 'workstation' | 'other' = 'workstation', productStyleId?: OfficeLayoutSettingsMeta['productStyleId'], arrangementPresetId?: OfficeLayoutSettingsMeta['arrangementPresetId'], seatClearanceMm?: number) {

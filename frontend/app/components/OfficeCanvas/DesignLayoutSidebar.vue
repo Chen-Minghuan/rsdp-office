@@ -100,7 +100,7 @@ watch(() => zone.value?.id, () => {
   const settings = item?.layoutSettings
   let template = modules.value.find(template => template.id === item?.furnitureTemplateId) || builtInModules.find(template => template.id === item?.moduleSnapshot?.glyphTemplateId)
   // Migrate legacy screen choices to explicit modules; custom modules retain their source.
-  if (template && !('custom' in template) && ['straight-screen', 'l-screen'].includes(settings?.productStyleId || '')) template = builtInModules.find(module => module.id === (settings?.productStyleId === 'l-screen' ? 'desk-screen-l' : 'desk-screen-straight')) || template
+  if (template && !template.seatlessOf && !('custom' in template) && ['straight-screen', 'l-screen'].includes(settings?.productStyleId || '')) template = builtInModules.find(module => module.id === (settings?.productStyleId === 'l-screen' ? 'desk-screen-l' : 'desk-screen-straight')) || template
   if (template) {
     selectedModule.value = template
     unitW.value = item!.w

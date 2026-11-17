@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-11-16 [LAYOUT-005 放置操作和家具图例](tasks/LAYOUT-005-custom-and-manual-modules.md) 逐件放置支持画布顶部按钮、右键和 Esc 退出，空格旋转。九种桌型增加单桌预设，六种座椅使用各自的二维线稿，含新增总裁椅。前端构建、白模及排布规则测试、五项 UI mock 通过。
+
 2026-11-16 [LAYOUT-043 家具尺寸入口](tasks/LAYOUT-043-reference-and-mixed-layout.md) 画布点已排家具直接进入产品选型详情，调整旋转家具尺寸时保留实际占地锚点。UI mock 验证已确认排版的贴墙柜缩小、越界拒绝和确认失效。
 
 2026-11-16 [LAYOUT-043 直接应用参考方案](tasks/LAYOUT-043-reference-and-mixed-layout.md) 在原图编辑中一次提交当前家具摆位，保留精确坐标和朝向；失败保留整组编辑。前端构建、组合算法及两项 UI mock 通过。

@@ -137,6 +137,7 @@ assert.equal(JSON.stringify(furniture), seatingSnapshot, '派生椅位不修改�
 const duplicates = workstationSeats([furniture[0], { ...furniture[0], id: 'A2' }, actualChair])
 assert.equal(duplicates.filter(seat => seat.existingChairId).length, 1, '同一把椅不会同时配给两个工位')
 assert.equal(workstationSeats([{ ...furniture[0], furnitureTemplateId: 'counter-l' }]).length, 0, '前台不自动增加办公椅')
+assert.equal(workstationSeats([{ ...furniture[0], furnitureTemplateId: 'desk-executive-desk-only' }]).length, 0, '单桌预设不派生椅子')
 for (const id of ['desk-manager', 'desk-executive', 'desk-screen-straight', 'desk-l', 'desk-screen-l', 'desk-manager-l', 'desk-executive-l']) {
   const desk = { ...furniture[0], furnitureTemplateId: id, w: 1600, h: id.endsWith('-l') ? 1400 : 700 }
   const normal = workstationSeats([desk])[0], mirrored = workstationSeats([{ ...desk, mirrorX: true }])[0]

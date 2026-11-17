@@ -35,3 +35,11 @@
 | 界面与文档 | 已查看 `/tmp/rsdp-custom-modules/01-custom-module-dialog.png`、`02-manual-custom-placement.png`，自定义表单及不同旋转的两件独立 L 桌显示正常。6 份相关文档 91 个相对链接有效，`git diff --check` 通过。 |
 
 本轮没有改 Java/CAD 或数据库，也未运行真实服务集成/识别验收；API 保存/跨浏览器恢复属于模拟证据。完整团队共享目录、自由绘制家具图形、门窗与通达性校验仍为后续能力。
+
+## 2026-11-16 画布放置与家具图例
+
+- 画布顶部提示正在放置的家具，提供旋转和结束按钮；右键和 Esc 同样可退出，保留此前已经放置的家具。画布选中与放置中用空格旋转，输入框和已有键盘控件保留默认行为。
+- 九种内置桌型图例各增加一个「单桌」预设，继承源桌的尺寸、桌面轮廓和排布方式。单桌可以逐件添加、用于自动布局或替换当前模块，二维和白模均不派生示意椅。
+- 办公转椅、会议椅、访客椅、休闲单椅和吧椅分别使用独立线稿；新增总裁椅（740 × 780 mm，预设高度 1200 mm）。
+
+验证通过 `pnpm build`、`pnpm test:white-model`、`pnpm test:arrangement-presets`、`pnpm test:layout-planning`、`pnpm e2e:custom-modules`、`pnpm e2e:furniture-modules`、`pnpm e2e:multi-furniture`、`pnpm e2e:preview-drag` 和 `pnpm e2e:layout-planning`。UI 使用模拟 API，覆盖九款单桌图例、六种座椅线稿、总裁椅落位、45 款图例自动排布及画布快捷键。已查看座椅目录截图，本次未运行真实服务集成验收。
