@@ -1,4 +1,5 @@
 import type { AssignableUser, CreateProjectRequest, ProjectReferenceImage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
+import { apiBase } from '~/utils/apiBase'
 
 interface ApiResponse<T> {
   code: number
@@ -6,10 +7,8 @@ interface ApiResponse<T> {
   data: T
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
-
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const response = await $fetch<ApiResponse<T>>(`${API_BASE}${path}`, {
+  const response = await $fetch<ApiResponse<T>>(`${apiBase}${path}`, {
     method: method as any,
     body: body as any,
     credentials: 'include',
