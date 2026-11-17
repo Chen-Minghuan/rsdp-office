@@ -76,6 +76,12 @@
 | 2026-11-06 | 工作区 | `pnpm e2e:workflows`（自建 3001 生产预览） | 通过 | 同上 |
 | 2026-11-06 | 工作区 | `git diff --check` | 通过 | - |
 
+## 2026-11-17 账号和项目角色称呼
+
+- 普通账号（`USER`）尚未加入任何可访问的项目时，顶栏称「设计师」。进入项目后，顶栏根据所选项目的成员关系显示「项目负责人」或「项目协作者」。账号管理列表的系统角色列统一显示「普通账号」。
+- 本地测试账号 `designer` 的默认显示名称改为「开发项目协作者」。脚本仅更新仍使用旧默认名称的测试账号。
+- `corepack pnpm build`、`corepack pnpm e2e:workspace-isolation` 和 `corepack pnpm e2e:workflows` 通过。无项目账号的「设计师」称呼由模拟回归覆盖。用真实本地账号验证了系统管理员、经销商主号、负责人和两名协作者的顶栏显示。未部署公网。
+
 ## 交付与下一步
 
 - 后端：迁移 `20261106_workspace_roles.sql`（SchemaInitializer 已注册）；`OfficeWorkspace`/`OfficeAuditLog` 实体与 Mapper；`OfficeAuditService`（同事务审计）；`OfficeWorkspaceService` + `OfficeWorkspaceAdminController`（`/admin/workspaces`）+ `OfficeWorkspaceController`（`/workspace/me|users`）；`OfficeProjectAccessService` 工作区归属判定；`OfficeProjectService` 创建归属/成员工作区校验/assignable 收缩/替换审计；`OfficeUserAdminService` 主号删除拒绝。

@@ -64,7 +64,7 @@ pnpm dev --port 3001
 docker compose exec -T postgres psql -X -U postgres -d office < scripts/seed-dev-accounts.sql
 ```
 
-脚本创建经销商主号 `dealer`、项目负责人 `lead`、设计师协作者 `designer` 和厂家业务员协作者 `factory`，并准备一个带 1F 楼层的示例项目。库里尚无系统管理员时，脚本会创建 `admin`。首次创建时终端会显示各账号独立生成的密码，请在本机保存。再次执行会保留已存在账号的密码和项目成员。早期脚本生成的测试账号会去掉登录名的 `dev_` 前缀，原密码继续有效。脚本仅用于各开发者本机的 Compose 数据库。
+脚本创建经销商主号 `dealer`、项目负责人 `lead`、项目协作者 `designer` 和厂家业务员账号 `factory`，并准备一个带 1F 楼层的示例项目，其中 `factory` 也担任项目协作者。库里尚无系统管理员时，脚本会创建 `admin`。首次创建时终端会显示各账号独立生成的密码，请在本机保存。再次执行会保留已存在账号的密码和项目成员。早期脚本生成的测试账号会去掉登录名的 `dev_` 前缀，原密码继续有效。脚本仅用于各开发者本机的 Compose 数据库。
 
 ## 状态和日志
 

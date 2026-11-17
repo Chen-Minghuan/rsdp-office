@@ -51,7 +51,7 @@ BEGIN
         (1, 'admin',    '开发系统管理员', 'ADMIN', NULL),
         (2, 'dealer',   '开发经销商主号', 'DEALER', 'DEALER_STAFF'),
         (3, 'lead',     '开发项目负责人', 'USER', 'DEALER_STAFF'),
-        (4, 'designer', '开发设计师',     'USER', 'DEALER_STAFF'),
+        (4, 'designer', '开发项目协作者', 'USER', 'DEALER_STAFF'),
         (5, 'factory',  '开发厂家业务员', 'USER', 'FACTORY_SALES')
     ) AS accounts(position, username, display_name, role, source) ORDER BY position LOOP
         account_id := 'DEV-OFFICE-DEV_' || upper(account.username);
@@ -113,6 +113,11 @@ BEGIN
     END IF;
 END;
 $$;
+
+UPDATE office_user
+SET display_name = '开发项目协作者', updated_at = CURRENT_TIMESTAMP
+WHERE user_id = 'DEV-OFFICE-DEV_DESIGNER' AND username = 'designer'
+    AND display_name = '开发设计师';
 
 COMMIT;
 

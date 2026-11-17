@@ -199,7 +199,7 @@ function formatTime(value: string | null) {
 function roleLabel(role: string) {
   if (role === 'ADMIN') return '系统管理员'
   if (role === 'DEALER') return '经销商主号'
-  return '设计师'
+  return '普通账号'
 }
 </script>
 
@@ -207,7 +207,7 @@ function roleLabel(role: string) {
   <div class="mx-auto w-full max-w-4xl p-6">
     <header class="mb-4">
       <h1 class="text-lg font-bold">用户管理</h1>
-      <p class="mt-1 text-xs text-muted">系统管理员唯一：创建经销商主号（随工作区）与设计师账号，停用/启用、重置密码与删除只作用于设计师和经销商主号。项目负责人在项目内从本工作区账号中指定成员。</p>
+      <p class="mt-1 text-xs text-muted">系统管理员可创建经销商工作区和普通账号，并管理经销商主号及普通账号。项目角色在具体项目中分配。</p>
     </header>
 
     <p v-if="checking" class="text-sm text-muted">正在核验管理员身份…</p>
@@ -251,7 +251,7 @@ function roleLabel(role: string) {
 
       <form class="mb-5 border border-line bg-white p-4" @submit.prevent="createUser">
         <h2 class="mb-1 text-sm font-semibold">创建设计师账号</h2>
-        <p class="mb-3 text-xs text-muted">普通用户（设计师）：可登录并可被经销商主号或负责人加入项目。</p>
+        <p class="mb-3 text-xs text-muted">新账号可以登录，工作区归属和项目角色按实际分配显示。</p>
         <div class="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
           <input v-model="newUsername" class="border border-line bg-white px-2 py-1.5 text-sm" placeholder="用户名（登录用）" aria-label="新用户名" maxlength="32">
           <input v-model="newDisplayName" class="border border-line bg-white px-2 py-1.5 text-sm" placeholder="显示名称" aria-label="新用户显示名称" maxlength="64">
@@ -269,7 +269,7 @@ function roleLabel(role: string) {
             <tr class="border-b border-line text-left text-xs text-muted">
               <th class="px-3 py-2 font-medium">用户名</th>
               <th class="px-3 py-2 font-medium">显示名称</th>
-              <th class="px-3 py-2 font-medium">角色</th>
+              <th class="px-3 py-2 font-medium">系统角色</th>
               <th class="px-3 py-2 font-medium">状态</th>
               <th class="px-3 py-2 font-medium">最近登录</th>
               <th class="px-3 py-2 font-medium">操作</th>
