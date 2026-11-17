@@ -1,4 +1,5 @@
 import type { OfficeObject, ZoneObject } from '~/types/office'
+import type { FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { polygonBoundsMm } from '~/utils/floorPlan'
 
 /** A view filters the scene without deleting or relocating design data. */
@@ -10,6 +11,17 @@ export function canvasObjectsForView(objects: OfficeObject[], mode: 'overview' |
 
 export function canvasZoneBounds(zone: ZoneObject) {
   return polygonBoundsMm(zone.polygon) || { minX: zone.x, minY: zone.y, maxX: zone.x + zone.w, maxY: zone.y + zone.h }
+}
+
+/** The preview's source bounds in the canvas's millimetre, Y-down coordinate system. */
+export function canvasDrawingRect(bounds: FloorPlanDrawingBounds, scale: number, sourceYAxis?: string) {
+  if (!Number.isFinite(scale) || scale <= 0 || !(bounds.maxX > bounds.minX && bounds.maxY > bounds.minY)) return null
+  return {
+    x: bounds.minX * scale,
+    y: (sourceYAxis === 'up' ? -bounds.maxY : bounds.minY) * scale,
+    w: (bounds.maxX - bounds.minX) * scale,
+    h: (bounds.maxY - bounds.minY) * scale,
+  }
 }
 
 /** Camera values are screen pixels; all bounds and geometry remain in world units. */

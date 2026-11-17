@@ -32,6 +32,7 @@ export function officeFurnitureTemplateId(item: FurnitureObject, product?: Produ
 
 /** Reference chairs are seat illustrations attached to each workstation module. */
 export function officeFurnitureShowsSeat(item: FurnitureObject): boolean {
+  if (item.layoutReference) return false
   const template = furnitureById.get(officeFurnitureTemplateId(item) || '')
   return !!template && ['职员桌', '主管桌', '高管桌'].includes(template.category)
 }

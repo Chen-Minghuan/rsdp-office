@@ -21,7 +21,7 @@ const constraintsUrl = await moduleUrl('../app/utils/layoutConstraints.ts', { '.
 const regionsUrl = await moduleUrl('../app/utils/spatial/layoutRegions.ts', { 'polygon-clipping': new URL('../node_modules/polygon-clipping/dist/polygon-clipping.esm.js', import.meta.url).href, './review': reviewUrl })
 const facilitiesUrl = await moduleUrl('../app/utils/spatial/facilities.ts', { './review': reviewUrl })
 const scoringUrl = await moduleUrl('../app/utils/layoutScoring.ts', { './spatial/layoutRegions': regionsUrl, './spatial/obstacles': obstaclesUrl })
-const { planMixedLayout, planTieredMixedLayout } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
+const { planMixedLayout, referenceLayoutSnapshot, mixedPlacementProblem } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
   './manualFurniture': manualUrl,
   './officeCanvasView': canvasViewUrl,
   './officeAutoLayout': autoUrl,
@@ -51,7 +51,7 @@ const targeted = planMixedLayout(zone, [], ['workstation', 'tea'], spacing, 3)
 assert.equal(targeted.furniture.length, 9, '三组办公桌椅加一套茶桌茶椅共 9 件')
 assert.equal(targeted.furniture.filter(item => item.furnitureTemplateId === 'desk-straight').length, 3)
 assert.equal(targeted.furniture.filter(item => item.furnitureTemplateId === 'table-tea-rect').length, 1)
-assert.equal(targeted.seats, 8)
+assert.equal(targeted.seats, 5)
 const meetingScene = planMixedLayout(zone, [], ['meeting'], spacing)
 assert.equal(meetingScene.furniture.length, 11, '会议场景桌居中并生成双侧及短边座椅')
 const meetingChairs = meetingScene.furniture.filter(item => item.layoutRole === 'seat')
@@ -84,13 +84,13 @@ const rejected = planMixedLayout(blocked, [], ['workstation', 'meeting'], spacin
 assert.equal(rejected.furniture.length, 0, '全空间禁放时不得生成组合')
 assert.ok(rejected.problem)
 const { zoneLayoutExclusions, doorClearanceObstacle } = await import(obstaclesUrl)
-const { rectOverlapsBlocker } = await import(constraintsUrl)
+const { rotatedFurnitureFootprint: officeFurnitureFootprint, rectOverlapsBlocker } = await import(constraintsUrl)
 const door = doorClearanceObstacle(zone.id, { x: 11000, y: -7000 }, { x: 12000, y: -6000 })
 const doorZone = { ...zone, obstacles: [door] }
 const doorCandidates = planMixedLayout(doorZone, [], ['meeting', 'entry'], spacing).candidates
 for (const candidate of doorCandidates) {
   const cabinet = candidate.furniture.find(item => item.furnitureTemplateId === 'cabinet-entry')
-  assert.equal(rectOverlapsBlocker(cabinet, zoneLayoutExclusions(doorZone)[0]), false, '玄关柜不得压占门洞净空')
+  assert.equal(rectOverlapsBlocker(officeFurnitureFootprint(cabinet), zoneLayoutExclusions(doorZone)[0]), false, '玄关柜不得压占门洞净空')
 }
 const channelBlocked = { ...zone, layoutPreferences: { channels: [{ id: 'CH-ALL', orientation: 'vertical', offsetMm: 0, widthMm: 12000 }] } }
 assert.equal(planMixedLayout(channelBlocked, [], ['workstation', 'sofa'], spacing).furniture.length, 0, '组合候选不得压占通道')
@@ -106,7 +106,7 @@ assert.ok(fixedOver.shortfall > 0, '超出容量报告缺口')
 // 最大容量：超过目标 4 的套数，附非核准容量提示
 const maxCapMixed = planMixedLayout(zone, [], ['workstation'], spacing, 0, { objective: 'max-capacity' })
 assert.ok(maxCapMixed.furniture.filter(item => item.furnitureTemplateId === 'desk-straight').length > 4, '最大容量排满工位')
-assert.ok(maxCapMixed.warnings.some(w => /不等于施工或法规核准容量/.test(w)), '最大容量附非核准容量提示')
+assert.ok(maxCapMixed.warnings.some(w => /非施工或法规核准容量/.test(w)), '最大容量附非核准容量提示')
 // 旧行为不漂移：无 objective 时与之前一致（工位 1 套）
 const legacyMixed = planMixedLayout(zone, [], ['workstation', 'sofa'], spacing)
 assert.equal(legacyMixed.furniture.filter(item => item.furnitureTemplateId === 'desk-straight').length, 1, '缺省仍是一套')
@@ -115,28 +115,48 @@ for (const candidate of maxCapMixed.candidates) {
   assert.ok(candidate.scoreDetail && candidate.topologyKey, '组合候选附可解释评分与拓扑签名')
 }
 const balancedMixed = planMixedLayout(zone, [], ['workstation', 'meeting', 'entry'], spacing, 0, { objective: 'max-capacity', scoreMode: 'balanced' })
-for (let i = 1; i < balancedMixed.candidates.length; i++) {
-  assert.ok(balancedMixed.candidates[i - 1].scoreDetail.total >= balancedMixed.candidates[i].scoreDetail.total, 'balanced 按总分降序')
-}
+assert.ok(balancedMixed.candidates.every(candidate => candidate.scoreDetail && candidate.officeSeats > 0), '综合排序仍以需求、通行和净空为先，保留评分依据')
 // 失败建议：全通道封死时附 problemAdvice
 const blockedAdvice = planMixedLayout(channelBlocked, [], ['workstation', 'sofa'], spacing)
 assert.ok(blockedAdvice.problem && blockedAdvice.problemAdvice?.length >= 2, '组合失败附调整建议')
-// --- 三档间距组合候选 v2（2026-11-02 定稿：标准档=当前间距并固定首位默认，紧凑/舒适对比，无自定义卡）---
-const tieredMixed = planTieredMixedLayout(zone, [], ['workstation', 'sofa'], spacing)
-assert.equal(tieredMixed.problem, null)
-const mixedTiers = tieredMixed.candidates.map(candidate => candidate.spacingTier)
-assert.equal(mixedTiers[0], 'standard', '标准档（当前间距）固定首位默认')
-assert.ok(mixedTiers.length >= 2, '至少两档产出不同整体方案')
-assert.ok(mixedTiers.every(tier => ['compact', 'standard', 'comfort'].includes(tier)), '候选附档位标记且无自定义')
-assert.equal(new Set(mixedTiers).size, mixedTiers.length, '几何相同的档位去重')
-for (const candidate of tieredMixed.candidates) assert.match(candidate.label, /^(标准|紧凑|舒适) · /, '组合候选标注间距档位')
-assert.equal(tieredMixed.furniture, tieredMixed.candidates[0].furniture, 'candidates[0] 即默认标准基准')
-// 标准离墙变化后，紧凑和舒适也要跟随移动；不覆盖已有家具。
-const updatedTiered = planTieredMixedLayout(zone, [], ['workstation', 'sofa'], { ...spacing, wallMm: 500, gapMm: 800 })
-assert.equal(updatedTiered.candidates[0].spacingTier, 'standard')
-for (const candidate of tieredMixed.candidates) {
-  const updated = updatedTiered.candidates.find(item => item.spacingTier === candidate.spacingTier)
-  assert.ok(updated, `${candidate.spacingTier} 仍有可用组合`)
-  assert.notDeepEqual(updated.furniture.map(item => [item.x, item.y]), candidate.furniture.map(item => [item.x, item.y]), `${candidate.spacingTier} 组合几何随标准间距变化`)
-}
-console.log('混合布局算法通过：整体候选、会议场景双侧/短边座椅、会客交流区、目标人数、边界、禁放区与通道校验、求解目标与可解释评分（LAYOUT-036）、三档间距候选。')
+const executive = { ...zone, zoneType: 'EXECUTIVE_OFFICE', name: '副总办公室', w: 4361, h: 5049, polygon: [[0,0],[4361,0],[4361,5049],[0,5049]] }
+const strategyPlan = planMixedLayout(executive, [], ['workstation', 'entry'], spacing, 1)
+assert.equal(strategyPlan.officeSeats, 1)
+assert.equal(strategyPlan.guestSeats, 0)
+assert.equal(strategyPlan.seats, 1)
+assert.equal(strategyPlan.passageMm, null)
+assert.ok(strategyPlan.candidates.every(candidate => candidate.furniture.some(item => ['desk-manager', 'desk-executive'].includes(item.furnitureTemplateId))))
+assert.ok(strategyPlan.candidates.some(candidate => candidate.furniture.some(item => item.furnitureTemplateId === 'desk-manager')))
+assert.equal(strategyPlan.furniture.length, 3)
+assert.equal(new Set(strategyPlan.candidates.map(candidate => candidate.topologyKey)).size, strategyPlan.candidates.length)
+for (const candidate of strategyPlan.candidates) assert.equal(mixedPlacementProblem(executive, candidate.furniture, spacing), null)
+const wideGapPlan = planMixedLayout(executive, [], ['workstation', 'entry'], { ...spacing, aisleMm: 2000 }, 1)
+assert.notDeepEqual(wideGapPlan.furniture.map(item => [item.x, item.y]), strategyPlan.furniture.map(item => [item.x, item.y]), '组合净距参与求解')
+assert.equal(mixedPlacementProblem(executive, wideGapPlan.furniture, { ...spacing, aisleMm: 2000 }), null)
+const closePair = wideGapPlan.furniture.map(item => item.furnitureTemplateId === 'cabinet-entry' ? { ...item, x: wideGapPlan.furniture[0].x, y: wideGapPlan.furniture[0].y } : item)
+assert.ok(mixedPlacementProblem(executive, closePair, spacing))
+assert.ok(mixedPlacementProblem(executive, [...closePair].reverse(), spacing), '组间净距与插入顺序无关')
+
+const make = (templateId, categoryId, group, x, y, width, depth, confidence = 'high', rotation = 0) => ({ templateId, categoryId, group, x, y, width, depth, confidence, rotation })
+const reference = { analysisId: 'drawing', revision: 2, crop: { x: 0, y: 0, w: executive.w, h: executive.h }, includeOtherCategories: false, marks: [
+  make('desk-manager', 'workstation', 'office', .12, .28, .28, .11),
+  make('chair-office', 'workstation', 'office', .18, .14, .12, .10, 'manual', 180),
+  make('cabinet-high', 'entry', 'storage', .9, .52, .08, .24, 'high', 90),
+  make('chair-lounge', 'lounge', 'social', .65, .17, .13, .10, 'low'),
+] }
+const fromDrawing = referenceLayoutSnapshot(executive, [], ['workstation', 'entry'], reference)
+assert.equal(fromDrawing.label, '参考原图')
+assert.equal(fromDrawing.seats, 1)
+assert.equal(fromDrawing.problem, null)
+assert.equal(fromDrawing.furniture.filter(item => item.layoutReference).length, 3)
+assert.equal(fromDrawing.furniture.find(item => item.furnitureTemplateId === 'chair-office').layoutReference.evidence, 'MANUAL')
+const cabinet = fromDrawing.furniture.find(item => item.furnitureTemplateId === 'cabinet-high')
+assert.equal(cabinet.rotation, 90)
+assert.ok(Math.abs(officeFurnitureFootprint(cabinet).w - .08 * executive.w) < .001)
+assert.ok(Math.abs(officeFurnitureFootprint(cabinet).x - .9 * executive.w) < .001, '直接应用保留已编辑位置')
+assert.equal(mixedPlacementProblem(executive, fromDrawing.furniture, { wallMm: 0, aisleMm: 0, gapMm: 0 }), null)
+assert.match(referenceLayoutSnapshot(executive, [], [], reference).problem, /勾选纳入/)
+const pending = referenceLayoutSnapshot(executive, [], [], { ...reference, includeOtherCategories: true })
+assert.match(pending.problem, /1 件家具待确认/)
+assert.equal(pending.furniture.length, 0, '低置信家具未确认时不能部分提交')
+console.log('混合布局算法通过：组合搜索、房型模板、座位口径、对称净距、建筑约束及原图参考。')

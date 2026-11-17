@@ -580,7 +580,7 @@ defineExpose({ selectModule })
 
         <!-- Actions -->
         <div class="px-3 py-2 mt-auto border-t border-line flex flex-col gap-1.5 flex-none bg-white">
-          <div v-if="!embedded && store.furniturePlacement" class="text-[10px] text-muted">点击空间内放置，R 旋转，Esc 结束。<button class="ml-1 text-bronze underline" @click="store.rotateFurniturePlacement()">旋转 90°</button></div>
+          <div v-if="!embedded && store.furniturePlacement" class="text-[10px] text-muted">点击空间内放置，空格旋转，Esc 或右键结束。<button class="ml-1 text-bronze underline" @click="store.rotateFurniturePlacement()">旋转 90°</button></div>
           <div v-if="autoPlan?.slots.length" class="flex items-center justify-between rounded-none bg-[#faf7f3] px-2.5 py-1.5 text-[10px] text-muted">
             <span>{{ proposal?.label || '当前方案' }}</span>
             <strong data-testid="auto-layout-capacity" class="text-[#5d554c]">{{ autoPlan.slots.length }} 件</strong>

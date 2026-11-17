@@ -29,7 +29,7 @@ import { createTemplateFurniture } from '~/utils/officeFurniture'
 import type { CustomOfficeModule, OfficeModuleInput } from '~/types/officeModule'
 import type { OfficeLayoutSettingsMeta } from '~/types/officeArrangement'
 import { customModuleDefinition, moduleInputProblem, restoreCustomModules } from '~/utils/officeModules'
-import { manualOfficeFurniture, officePlacementHardProblem, officePlacementSoftWarning, officeFurnitureMoveProblem, officeFurnitureMoveWarning, identifyManualFurniture } from '~/utils/officeManualPlacement'
+import { manualOfficeFurniture, officePlacementHardProblem, officePlacementSoftWarning, officeFurnitureFootprint, officeFurnitureMoveProblem, officeFurnitureMoveWarning, identifyManualFurniture } from '~/utils/officeManualPlacement'
 import type { OfficeFurniturePlacement } from '~/utils/officeManualPlacement'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { normalizePolygon, polygonBoundsMm, mapRoomType } from '~/utils/floorPlan'
@@ -47,6 +47,7 @@ import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } fr
 import { layoutRegionProblem, layoutRegionRing, measureLayoutRegionWallOffsets } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilities'
 import { layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
+import { mixedOfficeSeats, mixedPlacementProblem } from '~/utils/mixedLayout'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 import { authEnabled, useAuth } from '~/composables/useAuth'
 
@@ -696,19 +697,24 @@ export const useOfficeStore = defineStore('office', {
       if (!item || !Number.isFinite(widthMm) || !Number.isFinite(depthMm) || widthMm < 10 || depthMm < 10) return '家具尺寸无效'
       const zone = this.zones.find(zone => zone.id === item.zoneId)
       if (!zone) return '家具所属空间无效'
+      if (item.w === widthMm && item.h === depthMm) return null
       const current = this.furnitureForZone(zone.id)
-      const candidates = current.map(candidate => candidate.id === id ? { ...candidate, w: widthMm, h: depthMm } : candidate)
-      const problem = officeFurnitureMoveProblem(zone, candidates, current)
+      const resized = { ...item, w: widthMm, h: depthMm }
+      // Keep the visible footprint's anchor so a rotated module stays against the wall.
+      const before = officeFurnitureFootprint(item)
+      const after = officeFurnitureFootprint(resized)
+      resized.x += before.x - after.x
+      resized.y += before.y - after.y
+      const problem = officeFurnitureMoveProblem(zone, [resized], current)
       if (problem) return problem
       this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
       this.objectUpdate(() => {
-        item.w = widthMm
-        item.h = depthMm
+        Object.assign(item, { x: resized.x, y: resized.y, w: widthMm, h: depthMm })
         current.forEach(entry => { entry.layoutConfirmed = false })
         this.submitted = null
       })
-      const warning = officeFurnitureMoveWarning(zone, current)
-      return warning ? `已调整尺寸；提示：${warning}，确认排版时会被拦截` : null
+      const warning = officeFurnitureMoveWarning(zone, [resized])
+      return warning ? `已调整尺寸；请复核：${warning}` : null
     },
 
     replaceFurnitureModule(id: string, templateId: string): string | null {
@@ -765,6 +771,7 @@ export const useOfficeStore = defineStore('office', {
       const copy: FurnitureObject = {
         ...item, id: uid('f'), x: item.x + 200, y: item.y + 200,
         label: `${item.label || '家具'} 副本`, layoutGroupId: undefined, layoutClusterId: undefined,
+        mixedBundleId: undefined, layoutReference: undefined,
         productSelection: undefined, layoutConfirmed: false,
       }
       const problem = officeFurnitureMoveProblem(zone, [...current, copy], current)
@@ -1184,8 +1191,18 @@ export const useOfficeStore = defineStore('office', {
       if (!zone) return '空间不存在'
       if (!this.canEnterLayout) return this.layoutBlocker
       if (!items.length) return '当前空间还没有已放置家具'
-      const problem = confirmedLayoutProblem(zone, items)
+      const mixed = zone.layoutPreferences?.mixed
+      const problem = confirmedLayoutProblem(zone, items) || (mixed ? mixedPlacementProblem(zone, items, mixed.spacing) : null)
       if (problem) return problem
+      if (mixed) {
+        const preferences = zone.layoutPreferences!
+        if (preferences.objective === 'fixed-quantity') {
+          const count = mixedOfficeSeats(items.filter(item => item.mixedBundleId))
+          return count < (preferences.fixedQuantity || 0) ? `目标 ${preferences.fixedQuantity} 套，当前仅 ${count} 套` : null
+        }
+        const count = mixedOfficeSeats(items)
+        return preferences.objective !== 'max-capacity' && count < preferences.targetSeats ? `目标 ${preferences.targetSeats} 人，当前仅 ${count} 个办公工位` : null
+      }
       const target = zone.layoutPreferences?.targetSeats || 0
       const primary = items.find(item => item.layoutRole === 'primary')
       const seats = primary?.layoutSettings?.layoutContext === 'other' ? items.filter(item => item.furnitureTemplateId === primary.furnitureTemplateId).length : furnitureSeatCount(items, items.some(item => item.layoutSettings?.layoutContext === 'meeting'))
@@ -1199,13 +1216,7 @@ export const useOfficeStore = defineStore('office', {
     },
 
     confirmLayout(zoneId: string) {
-      const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
-      const zone = this.zones.find(zone => zone.id === zoneId)
-      if (!zone || !this.canEnterLayout || !items.length || confirmedLayoutProblem(zone, items)) return false
-      const target = zone.layoutPreferences?.targetSeats || 0
-      const primary = items.find(item => item.layoutRole === 'primary')
-      const seats = primary?.layoutSettings?.layoutContext === 'other' ? items.filter(item => item.furnitureTemplateId === primary.furnitureTemplateId).length : furnitureSeatCount(items, items.some(item => item.layoutSettings?.layoutContext === 'meeting'))
-      if (target && seats < target) return false
+      if (this.layoutConfirmProblem(zoneId)) return false
       this.objectUpdate(() => {
         for (const o of this.objects) {
           if (o.kind === 'furniture' && o.zoneId === zoneId) {
@@ -1622,7 +1633,8 @@ export const useOfficeStore = defineStore('office', {
       if (new Set(chosenFurniture.map(item => item.id)).size !== chosenFurniture.length) return false
       const retained = existing.filter(item => !proposal.replaceIds.includes(item.id))
       // 预览被手动调整后就是最终设计稿；只校验，不重新求解或重排。
-      if (confirmedLayoutProblem(zone, [...retained, ...chosenFurniture])) return false
+      const finalFurniture = [...retained, ...chosenFurniture]
+      if (confirmedLayoutProblem(zone, finalFurniture) || (preferences.mixed && mixedPlacementProblem(zone, finalFurniture, preferences.mixed.spacing))) return false
       this.cancelFurniturePlacement()
       if (!this.spaceTemplateCurrent && !this.enterDesign(zoneId)) return false
       this.objectUpdate(() => {

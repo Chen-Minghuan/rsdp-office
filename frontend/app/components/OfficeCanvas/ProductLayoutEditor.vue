@@ -12,6 +12,8 @@ const zone = computed(() => store.zones.find(item => item.id === store.designZon
 const items = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
 const catalogCategories = computed(() => zone.value?.zoneType === 'MEETING_ROOM' ? ['会议与洽谈', ...furnitureCategories.filter(category => category !== '会议与洽谈')] : furnitureCategories)
 const selectedItem = computed(() => items.value.find(item => item.id === selectedId.value) || null)
+const itemEditor = ref<HTMLElement | null>(null)
+watch(itemEditor, editor => editor?.scrollIntoView({ block: 'nearest' }), { flush: 'post' })
 const confirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
 const confirmProblem = computed(() => zone.value && items.value.length && !confirmed.value ? store.layoutConfirmProblem(zone.value.id) : null)
 const editWidth = ref(0), editDepth = ref(0), message = ref('')
@@ -57,9 +59,10 @@ function clearLayout() {
 }
 function addModule(module: OfficeModuleTemplate) {
   if (!zone.value) return
-  if (store.furniturePlacement) { store.cancelFurniturePlacement(); return }
+  selectedCatalogId.value = module.id
+  if (store.furniturePlacement?.template.id === module.id) { store.cancelFurniturePlacement(); return }
   const started = store.beginFurniturePlacement(zone.value.id, module.id, module.widthMm, module.depthMm, { ...OFFICE_LAYOUT_SPACING })
-  message.value = started ? `请在画布中点击放置「${module.name}」，R 旋转，Esc 结束` : '当前空间或模块尺寸无法用于逐件添加'
+  message.value = started ? '' : '当前空间或模块尺寸无法用于逐件添加'
 }
 function chooseModule(module: OfficeModuleTemplate) {
   selectedCatalogId.value = module.id
@@ -153,7 +156,8 @@ function confirmLayout() {
             </button>
           </div>
 
-          <div v-if="selectedItem" class="mt-2 border border-[#d8e5cf] bg-[#fafcf7] p-2.5" data-testid="product-item-editor">
+          <div v-if="selectedItem" :key="selectedItem.id" ref="itemEditor" class="mt-2 border border-[#d8e5cf] bg-[#fafcf7] p-2.5" data-testid="product-item-editor">
+            <p class="mb-2 text-[11px] font-semibold text-[#4f493f]">{{ selectedItem.label || '单位模块' }}</p>
             <div class="grid grid-cols-2 gap-2">
               <label class="text-[10px] text-muted">宽度 mm<input v-model.number="editWidth" data-testid="product-item-width" type="number" min="10" step="50" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-1.5 text-[11px]"></label>
               <label class="text-[10px] text-muted">深度 mm<input v-model.number="editDepth" data-testid="product-item-depth" type="number" min="10" step="50" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-1.5 text-[11px]"></label>
@@ -193,7 +197,7 @@ function confirmLayout() {
             </div>
           </div>
         </details>
-        <p v-if="store.furniturePlacement" class="mb-2 bg-[#eef8e7] px-2 py-1.5 text-[10px] text-[#4d713d]">正在逐件添加：点击画布放置，R 旋转，Esc 结束。</p>
+        <p v-if="store.furniturePlacement" class="mb-2 bg-[#eef8e7] px-2 py-1.5 text-[10px] text-[#4d713d]">正在逐件添加：点击画布放置，空格旋转，Esc 或右键结束。</p>
         <details v-for="category in catalogCategories" :key="category" :open="category === catalogCategories[0]" class="mb-1.5">
           <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">{{ category }} <span class="text-muted">{{ furnitureCatalogTemplates.filter(module => module.category === category).length }} 款</span></summary>
           <div class="grid grid-cols-3 gap-1.5">
@@ -222,7 +226,7 @@ function confirmLayout() {
 
     <div class="flex-none border-t border-line bg-white px-3 py-2.5">
       <p v-if="message" role="status" class="mb-1.5 text-[10px] leading-relaxed text-[#66745e]">{{ message }}</p>
-      <button v-if="selectedCatalogModule" class="mb-1.5 w-full rounded-none border border-line bg-white px-3 py-2 text-[11px] font-semibold text-[#4d713d]" @click="addModule(selectedCatalogModule)">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
+      <button v-if="store.furniturePlacement || selectedCatalogModule" class="mb-1.5 w-full rounded-none border border-line bg-white px-3 py-2 text-[11px] font-semibold text-[#4d713d]" @click="store.furniturePlacement ? store.cancelFurniturePlacement() : selectedCatalogModule && addModule(selectedCatalogModule)">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
       <p v-if="confirmProblem" data-testid="confirm-problem" class="mb-1.5 text-[10px] leading-relaxed text-amber-600">暂不能确认：{{ confirmProblem }}</p>
       <button v-if="items.length && !confirmed" class="w-full rounded-none bg-[#83d94f] px-3 py-2 text-[11px] font-semibold text-[#214326]" @click="confirmLayout">确认当前排版</button>
       <button v-else-if="confirmed" class="w-full rounded-none border border-line px-3 py-2 text-[11px] font-semibold text-[#596252]" @click="store.unconfirmLayout(zone!.id)">重新调整排版</button>

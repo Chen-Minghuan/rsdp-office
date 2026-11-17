@@ -6,7 +6,7 @@ import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import { zoneLayoutExclusions } from './spatial/obstacles'
 import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
-import { rectOverlapsBlocker } from './layoutConstraints'
+import { rectOverlapsBlocker, rotatedFurnitureFootprint as officeFurnitureFootprint } from './layoutConstraints'
 
 export interface OfficeFurniturePlacement {
   zoneId: string
@@ -17,12 +17,7 @@ export interface OfficeFurniturePlacement {
   spacing: OfficeLayoutSpacing
 }
 
-export function officeFurnitureFootprint(item: Pick<FurnitureObject, 'x' | 'y' | 'w' | 'h' | 'rotation'>) {
-  const radians = item.rotation * Math.PI / 180
-  const w = Math.abs(item.w * Math.cos(radians)) + Math.abs(item.h * Math.sin(radians))
-  const h = Math.abs(item.w * Math.sin(radians)) + Math.abs(item.h * Math.cos(radians))
-  return { x: item.x + (item.w - w) / 2, y: item.y + (item.h - h) / 2, w, h }
-}
+export { rotatedFurnitureFootprint as officeFurnitureFootprint } from './layoutConstraints'
 
 export function manualOfficeFurniture(draft: OfficeFurniturePlacement, xMm: number, yMm: number): FurnitureObject {
   return {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
-import type { LayoutPreview } from '~/types/layoutPlanning'
+import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanning'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 const store = useOfficeStore()
@@ -11,6 +11,7 @@ const router = useRouter()
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
 const layoutPreview = ref<LayoutPreview | null>(null)
+const referenceEditing = ref<LayoutReferenceEditing | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
@@ -24,7 +25,19 @@ const snapEnabled = ref(true)
 const showUnderlay = ref(true)
 const underlayOpacity = ref(0.5)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
+const workflowRef = ref<{ openFurniture: (id: string) => void } | null>(null)
 watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
+watch(() => !!referenceEditing.value, active => {
+  if (active) {
+    tool.value = 'select'
+    selectedId.value = null
+    showUnderlay.value = true
+    store.cancelFurniturePlacement()
+  }
+})
+watch(tool, value => {
+  if (value !== 'pan' && value !== 'select') referenceEditing.value = null
+})
 
 const mode = computed<'overview' | 'design'>(() => store.canvasMode)
 const designZoneId = computed(() => store.designZoneId)
@@ -185,7 +198,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" @edit-furniture="workflowRef?.openFurniture($event)" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">
@@ -205,7 +218,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
       </div>
 
       <!-- Right sidebar -->
-      <OfficeCanvasDesignWorkflowSidebar v-if="mode === 'design'" v-model:selected-id="selectedId" :current-preview="layoutPreview" @preview="layoutPreview = $event" />
+      <OfficeCanvasDesignWorkflowSidebar v-if="mode === 'design'" ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing" :current-preview="layoutPreview" @preview="layoutPreview = $event" />
       <aside v-else :class="['flex-none bg-white border border-line rounded-none shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
         <div v-show="!overviewCollapsed" class="w-72 h-full p-4 flex flex-col gap-4">
           <div class="relative flex items-center justify-between">

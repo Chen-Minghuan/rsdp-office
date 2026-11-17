@@ -48,6 +48,27 @@ class QwenVisionClientTest {
     }
 
     @Test
+    void referenceFurnitureUsesCropNormalizedCoordinatesAndRejectsInvalidBoxes() throws Exception {
+        server.expect(requestTo(properties.getBaseUrl() + "/chat/completions"))
+            .andExpect(jsonPath("$.max_tokens").value(6000))
+            .andRespond(withSuccess(completion("""
+                {"furniture":[
+                  {"templateId":"desk-manager","categoryId":"workstation","group":"office","bbox":[100,200,350,300],"rotation":90,"confidence":"high"},
+                  {"templateId":"chair-office","categoryId":"workstation","group":"office","bbox":[1,2,1400,400],"confidence":"high"},
+                  {"templateId":"cabinet-entry","categoryId":"entry","group":"bad group","bbox":[700,50,800,150],"rotation":42,"confidence":"unknown"}
+                ]}
+                """), MediaType.APPLICATION_JSON));
+        var marks = client.recognizeFurniture(image());
+        assertEquals(2, marks.size());
+        assertEquals(0.1, marks.get(0).x(), 1e-9);
+        assertEquals(0.25, marks.get(0).width(), 1e-9);
+        assertEquals(90, marks.get(0).rotation());
+        assertEquals("low", marks.get(1).confidence());
+        assertEquals(0, marks.get(1).rotation());
+        server.verify();
+    }
+
+    @Test
     void ungroundedModelConfidenceIsLoweredEvenWhenNoWallCorrectionWasAttempted() throws Exception {
         properties.setRefineRoomContours(true);
         server.expect(requestTo(properties.getBaseUrl() + "/chat/completions"))

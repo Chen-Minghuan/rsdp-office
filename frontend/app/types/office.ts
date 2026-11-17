@@ -120,6 +120,8 @@ export interface FurnitureObject {
   /** Immutable definition for a custom instance, independent of local catalog edits. */
   moduleSnapshot?: CustomOfficeModule
   layoutSettings?: { mode: OfficeLayoutMode; spacing: OfficeLayoutSpacing } & OfficeLayoutSettingsMeta
+  mixedBundleId?: string
+  layoutReference?: { analysisId: string; revision: number; evidence: 'ESTIMATED' | 'MANUAL'; adjusted?: boolean }
   wingWidthMm?: number
   heightMm?: number
   spaceTemplateId?: string

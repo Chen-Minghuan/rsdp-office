@@ -1,5 +1,15 @@
 # 开发进度与下一步
 
+2026-11-16 [LAYOUT-043 家具尺寸入口](tasks/LAYOUT-043-reference-and-mixed-layout.md) 画布点已排家具直接进入产品选型详情，调整旋转家具尺寸时保留实际占地锚点。UI mock 验证已确认排版的贴墙柜缩小、越界拒绝和确认失效。
+
+2026-11-16 [LAYOUT-043 直接应用参考方案](tasks/LAYOUT-043-reference-and-mixed-layout.md) 在原图编辑中一次提交当前家具摆位，保留精确坐标和朝向；失败保留整组编辑。前端构建、组合算法及两项 UI mock 通过。
+
+2026-11-16 [LAYOUT-043 画布操作复用](tasks/LAYOUT-043-reference-and-mixed-layout.md) 原图参考家具接入共用拖动、吸附、放置预览和旋转／删除入口。前端构建、两项算法及两项 UI mock 通过。
+
+2026-11-16 [LAYOUT-043 交互调整](tasks/LAYOUT-043-reference-and-mixed-layout.md) 将原图参考移入布局画布与侧栏，识别结果复用产品选型的预设图例，支持点选、拖动和点放补录。前端构建、两组算法与两项 UI mock 通过，未重跑真实模型。
+
+2026-11-16 [LAYOUT-043](tasks/LAYOUT-043-reference-and-mixed-layout.md) 原图参考与组合布局：新增上传图纸原位参考候选，可识别预填、人工核对和框选；组合以房型、朝向、功能分区和通路比较候选，统一工位计数和净距校验。前端构建、两组算法、五项 UI mock 及 Java（272 通过、3 跳过）通过。真实模型与图纸业务验收待执行。
+
 2026-11-15 [LAYOUT-042](tasks/LAYOUT-042-apply-edited-preview.md) 手动预览应用修复：单模块原“应用”会重新求解再按临时 ID 回填位置，现与组合布局统一为直接提交当前 `LayoutPreview` 快照，不再重排；提交前检查 sourceKey、临时 ID 唯一性和最终硬约束，成功后退出预览并使确认失效。新增手动调整提示、未应用预览确认拦截；修复首次单选品类时子面板未挂载导致预览未开启。删除 `applyMixedLayoutProposal` 及旧候选索引/位置覆盖参数，共用替换自动组、清单扣减和确认失效逻辑。验证：最终 `pnpm build`、`test:layout-planning`、`test:mixed-layout`、`e2e:preview-drag`（空空间/已有排版/刷新/组合）、`e2e:layout-planning`、`e2e:auto-layout`、`e2e:module-selection`、`e2e:module-recommendations`、`git diff --check` 通过；UI 均为模拟 API，未操作真实画布，真实业务复核待执行。未提交、未部署。
 
 2026-11-14 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 工厂可见性体系一期落地（rsdp 侧，方案 C：office 工厂身份不拆分、继续看全库）：rsdp `3b68ca3`——V28 迁移（owner_type/owner_factory_code 归属回填、厂级公共库开关、factory_catalog_grant/block 两表，双路径校验零差异）；`CatalogVisibilityService` 收口"自家已报价∪整批放行∪开关ON全量−黑名单（不遮蔽自家已报价）"并接入列表/详情，替换旧能力覆盖自动隐藏口径；上下架/元数据改按 owner 判定（谁录入谁负责），三处建档打标；`FactoryCatalogController` 开关/放行/黑名单接口（工厂管理员仅本厂）；SecurityConfig 修复 DELETE 误落平台专属 factory:delete。验证：rsdp `mvn test` 2261/0/0/0；真实链路三工厂正反用例全过（167→拉黑剩12→开关关=0→放行=155→黑名单优先=0→详情404→越权400→维护权400/200）；office 回归商品库 167 全量可见。未覆盖：导出/AI 匹配读取入口接入、product-feed、office 代理/投影（均列入文档待办）。详见 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 验证记录。

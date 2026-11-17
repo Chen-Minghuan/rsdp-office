@@ -46,6 +46,7 @@ export interface LayoutPreferences {
   /** @deprecated GEOM-013 起迁移为 zone.obstacles（NO_PLACEMENT）；仅保留旧数据读取兼容。 */
   exclusions?: LayoutExclusion[]
   channels?: LayoutChannel[]
+  mixed?: { spacing: OfficeLayoutSpacing }
 }
 export interface LayoutRequest {
   module: OfficeModuleTemplate
@@ -105,6 +106,40 @@ export interface LayoutCandidate {
   topologyKey?: string
   /** 三档间距候选（2026-11-02 定稿 v2）：该候选由哪个间距档求出；standard 即当前间距基准。 */
   spacingTier?: 'compact' | 'standard' | 'comfort'
+  officeSeats?: number
+  guestSeats?: number
+  passageMm?: number | null
+  notes?: string[]
+  spacing?: OfficeLayoutSpacing
+}
+
+/** Furniture evidence is stored separately from the live design until the user applies a preview. */
+export interface LayoutReferenceMark {
+  templateId: string
+  categoryId: string
+  group: string
+  x: number
+  y: number
+  width: number
+  depth: number
+  rotation: number
+  confidence: 'high' | 'mid' | 'low' | 'manual'
+}
+
+export interface LayoutReference {
+  analysisId: string
+  revision: number
+  crop: { x: number; y: number; w: number; h: number }
+  marks: LayoutReferenceMark[]
+  includeOtherCategories: boolean
+}
+
+export interface LayoutReferenceEditing {
+  zoneId: string
+  crop: LayoutReference['crop'] | null
+  marks: LayoutReferenceMark[]
+  selected: number | null
+  placement: { templateId: string; categoryId: string; group: string; rotation: number } | null
 }
 /** 画布中可拖动的待应用排版；手动调整后，应用必须提交这份快照而不是重新求解。 */
 export interface LayoutPreview {
@@ -113,6 +148,7 @@ export interface LayoutPreview {
   replaceIds: string[]
   seatClearanceMm: number
   manuallyAdjusted?: boolean
+  mixedSpacing?: OfficeLayoutSpacing
 }
 
 export interface LayoutProposal {

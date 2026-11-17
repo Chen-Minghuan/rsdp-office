@@ -44,6 +44,10 @@ public final class OfficeLayoutValidationPolicy {
             }
             // 通道禁放带：语义对齐前端 channelRects（宽度+2×净距、包围盒裁剪、「仅从二排起」按 firstBlockDepthMm 豁免首排）。
             List<Rectangle2D.Double> channelBands = channelBands(points, preferences, furniture);
+            JsonNode mixedSpacing = preferences.path("mixed").path("spacing");
+            double mixedWall = nonNegative(mixedSpacing, "wallMm");
+            double mixedGap = nonNegative(mixedSpacing, "gapMm");
+            double mixedAisle = nonNegative(mixedSpacing, "aisleMm");
             for (int i = 0; i < furniture.size(); i++) {
                 JsonNode item = furniture.get(i);
                 if (!item.path("layoutConfirmed").asBoolean()) continue;
@@ -53,10 +57,35 @@ public final class OfficeLayoutValidationPolicy {
                 for (Area area : exclusions) if (overlaps(bounds.get(i), area)) throw new BusinessException("已确认家具占用了入口或禁放区");
                 for (Rectangle2D.Double band : channelBands) if (bounds.get(i).intersects(band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
                 for (int j = 0; j < furniture.size(); j++) if (i != j && bounds.get(i).intersects(bounds.get(j))) throw new BusinessException("已确认家具存在重叠");
+                String bundle = item.path("mixedBundleId").asText();
+                if (mixedSpacing.isObject() && !bundle.isBlank()) {
+                    var box = bounds.get(i);
+                    var expanded = new Rectangle2D.Double(box.x - mixedWall, box.y - mixedWall, box.width + 2 * mixedWall, box.height + 2 * mixedWall);
+                    Area beyondWall = new Area(expanded);
+                    beyondWall.subtract(room);
+                    if (!beyondWall.isEmpty()) throw new BusinessException("已确认组合家具离墙净距不足");
+                    for (int j = 0; j < furniture.size(); j++) {
+                        String other = furniture.get(j).path("mixedBundleId").asText();
+                        if (i != j && !bundle.equals(other)
+                            && withinGap(box, bounds.get(j), other.isBlank() ? mixedGap : mixedAisle)) throw new BusinessException("已确认组合家具的净距不足");
+                    }
+                }
             }
             int target = preferences.path("targetSeats").asInt();
             if (preferences.has("targetSeats") && (!preferences.path("targetSeats").isIntegralNumber() || !preferences.path("targetSeats").canConvertToInt() || target < 0 || target > 500)) throw new BusinessException("目标人数无效");
-            if (target > 0 && furniture.stream().allMatch(item -> item.path("layoutConfirmed").asBoolean())) {
+            if (mixedSpacing.isObject() && furniture.stream().allMatch(item -> item.path("layoutConfirmed").asBoolean())) {
+                String objective = preferences.path("objective").asText("target-seats");
+                JsonNode quantity = preferences.path("fixedQuantity");
+                if ("fixed-quantity".equals(objective)
+                    && (!quantity.isIntegralNumber() || !quantity.canConvertToInt() || quantity.asInt() < 0 || quantity.asInt() > 500)) {
+                    throw new BusinessException("组合目标套数无效");
+                }
+                boolean fixed = "fixed-quantity".equals(objective);
+                long seats = furniture.stream().filter(item -> (!fixed || !item.path("mixedBundleId").asText().isBlank())
+                    && !"seat".equals(item.path("layoutRole").asText())
+                    && (item.path("furnitureTemplateId").asText().startsWith("desk-") || "职员桌".equals(item.path("moduleSnapshot").path("category").asText()))).count();
+                if (!"max-capacity".equals(objective) && seats < (fixed ? quantity.asInt() : target)) throw new BusinessException("当前组合的办公工位或套数不足");
+            } else if (target > 0 && furniture.stream().allMatch(item -> item.path("layoutConfirmed").asBoolean())) {
                 JsonNode primary = furniture.stream().filter(item -> "primary".equals(item.path("layoutRole").asText())).findFirst().orElse(furniture.get(0));
                 String context = primary.path("layoutSettings").path("layoutContext").asText();
                 boolean meeting = "meeting".equals(context) || primary.path("furnitureTemplateId").asText().startsWith("table-conference-") || primary.path("furnitureTemplateId").asText().startsWith("table-meeting-");
@@ -64,6 +93,12 @@ public final class OfficeLayoutValidationPolicy {
                 if (seats < target) throw new BusinessException("当前排版座位不足，请调整方案或目标人数");
             }
         }
+    }
+
+    private static boolean withinGap(Rectangle2D.Double a, Rectangle2D.Double b, double gap) {
+        double epsilon = 0.001;
+        return a.x < b.getMaxX() + gap - epsilon && b.x < a.getMaxX() + gap - epsilon
+            && a.y < b.getMaxY() + gap - epsilon && b.y < a.getMaxY() + gap - epsilon;
     }
 
     private static double number(JsonNode node, String key) {

@@ -1,4 +1,5 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
+import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
 import type { ImportedProduct, BatchAuditResult, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
@@ -115,6 +116,24 @@ export function useOfficeApi() {
     const projectId = selectedProjectId()
     if (!projectId) throw new Error('请先创建或选择项目与楼层')
     return projectId
+  }
+
+  async function recognizeLayoutReference(image: Blob, analysisId: string, revision: number) {
+    const form = new FormData()
+    form.set('image', image, 'room.png')
+    form.set('analysisId', analysisId)
+    form.set('revision', String(revision))
+    const response = await $fetch<ApiResponse<LayoutReferenceMark[]>>(apiUrl(`/api/v1/office/floors/${requireProjectId()}/layout-reference/recognize`), {
+      method: 'POST', body: form, credentials: 'include',
+    })
+    if (response.code !== 200) throw new Error(response.message || '原图家具识别失败')
+    return response.data
+  }
+
+  function layoutReferenceSource(analysisId: string, revision: number) {
+    return $fetch<Blob>(apiUrl(`/api/v1/office/floors/${requireProjectId()}/layout-reference/source`), {
+      query: { analysisId, revision }, credentials: 'include', responseType: 'blob',
+    })
   }
 
   async function loadCanvas(): Promise<{ objects: OfficeObject[]; files: ProjectFile[]; mode: 'overview' | 'design'; designZoneId: string | null; revision: number; blank: boolean } | null> {
@@ -448,6 +467,8 @@ export function useOfficeApi() {
   }
 
   return {
+    recognizeLayoutReference,
+    layoutReferenceSource,
     get projectId() { return selectedProjectId() },
     loadCanvas,
     saveCanvas,

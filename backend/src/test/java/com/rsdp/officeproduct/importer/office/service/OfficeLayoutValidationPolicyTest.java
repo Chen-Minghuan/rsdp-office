@@ -20,6 +20,26 @@ class OfficeLayoutValidationPolicyTest {
         objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("x", 4800).put("y", 2000).put("w", 550).put("h", 580).put("rotation", 0).put("furnitureTemplateId", "chair-meeting");
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
     }
+    @Test void mixedLayoutUsesOfficeSeatsAndSymmetricBundleClearance() throws Exception {
+        ArrayNode objects = scene();
+        ObjectNode prefs = (ObjectNode) objects.get(0).path("layoutPreferences");
+        prefs.put("targetSeats", 1).putObject("mixed").putObject("spacing").put("wallMm", 0).put("aisleMm", 900).put("gapMm", 0);
+        ((ObjectNode) objects.get(1)).put("furnitureTemplateId", "desk-manager").put("mixedBundleId", "office");
+        objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true)
+            .put("x", 2500).put("y", 3400).put("w", 550).put("h", 580).put("rotation", 0)
+            .put("furnitureTemplateId", "chair-office").put("layoutRole", "seat").put("mixedBundleId", "office");
+        ObjectNode cabinet = objects.addObject().put("id", "S").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true)
+            .put("x", 5700).put("y", 2000).put("w", 1000).put("h", 350).put("rotation", 0)
+            .put("furnitureTemplateId", "cabinet-entry").put("layoutRole", "primary").put("mixedBundleId", "storage");
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        cabinet.put("x", 5690);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        cabinet.put("x", 5700);
+        prefs.put("targetSeats", 2);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        prefs.put("targetSeats", 0).put("objective", "fixed-quantity").put("fixedQuantity", 2);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
     @Test void acceptsFurnitureAcrossSpaceTypes() throws Exception {
         ArrayNode objects = scene(); ((ObjectNode) objects.get(1)).put("furnitureTemplateId", "desk-l");
         ((ObjectNode) objects.get(0).path("layoutPreferences")).put("targetSeats", 1);

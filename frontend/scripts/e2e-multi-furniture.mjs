@@ -25,8 +25,15 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
-  await context.route('**/api/v1/**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) }))
-  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const project = {
+    projectId: 'OFFICE-PROJECT-001', name: '家具多选测试',
+    floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+  }
+  await context.route('**/api/v1/**', route => {
+    const path = new URL(route.request().url()).pathname
+    return route.fulfill({ json: { code: 200, data: path === '/api/v1/office/projects' ? [project] : null } })
+  })
+  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const items = async () => (await state()).objects.filter(item => item.kind === 'furniture')
   const item = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
   const dragBy = async (locator, dx, dy) => {
@@ -40,7 +47,7 @@ try {
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01')) || {}
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')) || {}
     const zone = (id, x) => ({ id, kind: 'zone', x, y: 0, w: 6000, h: 4000, name: id, zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[x,0],[x+6000,0],[x+6000,4000],[x,4000]] })
     const furniture = (id, zoneId, x, y) => ({ id, kind: 'furniture', zoneId, furnitureTemplateId: 'desk-straight', productId: '', label: id, x, y, w: 800, h: 500, rotation: 0, layoutConfirmed: true })
     draft.objects = [zone('ROOM', 0), zone('OTHER', 10000), furniture('A', 'ROOM', 500, 1000), furniture('B', 'ROOM', 2000, 1000), furniture('C', 'ROOM', 4000, 1000), furniture('D', 'OTHER', 11000, 1000), furniture('E', 'ROOM', 5200, 1000)]
@@ -48,7 +55,7 @@ try {
     draft.spaceTemplate = null
     draft.canvasMode = 'overview'
     draft.designZoneId = null
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(draft))
   })
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM', { waitUntil: 'networkidle' })
   await item('A').click()
@@ -99,7 +106,8 @@ try {
   assert.equal((await items()).find(f => f.id === 'C').layoutConfirmed, false)
   await page.getByTestId('mirror-selection').click()
   assert.equal((await items()).find(f => f.id === 'C').mirrorX, true)
-  await page.keyboard.press('r')
+  await page.getByTestId('office-design-canvas').focus()
+  await page.keyboard.press('Space')
   assert.equal((await items()).find(f => f.id === 'C').rotation, 180)
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.equal((await items()).find(f => f.id === 'C').rotation, 90)
@@ -108,9 +116,9 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.equal((await items()).find(f => f.id === 'C').rotation, 0)
   await item('E').click()
-  await page.keyboard.press('r')
-  await page.keyboard.press('r')
-  await page.keyboard.press('r')
+  await page.keyboard.press('Space')
+  await page.keyboard.press('Space')
+  await page.keyboard.press('Space')
   assert.equal((await items()).find(f => f.id === 'E').rotation, 270, '座椅侧净空不足已降级为提示，不再拦截旋转（2026-10-26 定稿）')
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal((await items()).find(f => f.id === 'E').rotation, 270)
