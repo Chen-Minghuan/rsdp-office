@@ -11,6 +11,7 @@ public class ModuleRecommendationDto {
     private Integer canvasRevision;
     private BigDecimal widthMm;
     private BigDecimal depthMm;
+    private String targetCategory;
     private int sameModuleCount;
     private int missingDimensions;
     private int eligibleVariantCount;
@@ -21,6 +22,8 @@ public class ModuleRecommendationDto {
         private OfficeProductDto product;
         private String tier;
         private BigDecimal fitRatio;
+        private BigDecimal relevanceScore;
+        private String matchReason;
         private int rotationDeg;
         private BigDecimal remainingWidthMm;
         private BigDecimal remainingDepthMm;

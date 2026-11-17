@@ -53,20 +53,29 @@ public class OfficeModuleRecommendationService {
     private ModuleRecommendationDto recommendations(Context context, ModuleRecommendationRequest request) {
         BigDecimal width = OfficeProductMatching.positive(context.module().get("w"));
         BigDecimal depth = OfficeProductMatching.positive(context.module().get("h"));
+        var target = OfficeFurnitureRelevance.target(context.module());
         List<ModuleRecommendationDto.Candidate> matches = new ArrayList<>();
         int missing = 0;
-        List<OfficeProductDto> catalog = office.listOfficeProducts();
+        List<OfficeProductDto> catalog = target == null ? List.of() : office.listOfficeProducts();
         for (OfficeProductDto product : catalog) {
             if (product.getWidthMm() == null || product.getDepthMm() == null) { missing++; continue; }
             var match = OfficeProductMatching.match(product, width, depth, request.isAllowRotation());
-            if (match != null) matches.add(match);
+            if (match == null) continue;
+            var relevance = OfficeFurnitureRelevance.match(target, product);
+            if (relevance == null) continue;
+            match.setMatchReason(relevance.reason());
+            // The 0–15 size contribution sorts offers with comparable category evidence.
+            match.setRelevanceScore(BigDecimal.valueOf(relevance.points()).add(match.getFitRatio().multiply(BigDecimal.valueOf(15))));
+            matches.add(match);
         }
-        matches.sort(Comparator.comparing(ModuleRecommendationDto.Candidate::getFitRatio).reversed()
+        matches.sort(Comparator.comparing(ModuleRecommendationDto.Candidate::getRelevanceScore).reversed()
+            .thenComparing(ModuleRecommendationDto.Candidate::getFitRatio, Comparator.reverseOrder())
             .thenComparingInt(ModuleRecommendationDto.Candidate::getRotationDeg)
             .thenComparing(item -> item.getProduct().getId()));
         ModuleRecommendationDto result = new ModuleRecommendationDto();
         result.setModuleId(request.getModuleId()); result.setZoneId(request.getZoneId());
         result.setCanvasRevision(context.canvas().getRevision()); result.setWidthMm(width); result.setDepthMm(depth);
+        result.setTargetCategory(target == null ? null : target.label);
         result.setSameModuleCount(context.sameModules().size()); result.setCandidates(matches); result.setMissingDimensions(missing); result.setEligibleVariantCount(catalog.size());
         return result;
     }
@@ -82,7 +91,7 @@ public class OfficeModuleRecommendationService {
         Context context = context(projectId, request);
         var result = recommendations(context, request);
         var match = result.getCandidates().stream().filter(candidate -> Objects.equals(candidate.getProduct().getId(), request.getProductId())).findFirst()
-            .orElseThrow(() -> new BusinessException("商品已不可用、尺寸缺失或超出当前模块，请重新选择"));
+            .orElseThrow(() -> new BusinessException("商品已不可用，或品类、尺寸与当前模块不匹配，请重新选择"));
         if (match.getProduct().getPrice() == null || match.getProduct().getPrice().signum() <= 0) throw new BusinessException("商品尚未报价，请补齐报价后加入方案");
         List<JsonNode> targets = request.isApplyToSameModules() ? context.sameModules() : List.of(context.module());
         List<CartItemDto> lines = new ArrayList<>();

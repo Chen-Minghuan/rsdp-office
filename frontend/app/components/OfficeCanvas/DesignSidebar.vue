@@ -9,7 +9,8 @@ const hasFurniture = computed(() => zone.value ? store.furnitureForZone(zone.val
 const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
 const layoutReviewNotice = computed(() => layoutConfirmed.value && zone.value ? store.layoutReviewWarning(zone.value.id) : null)
 
-const props = withDefaults(defineProps<{ selectedId?: string | null; embedded?: boolean }>(), { embedded: false })
+const selectedId = defineModel<string | null>('selectedId')
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 
 function backToOverview() {
   store.setCanvasMode('overview')
@@ -108,7 +109,7 @@ function backToOverview() {
     <!-- Layout confirmed: real SKU recommendations for current module footprints -->
     <template v-else>
       <p v-if="layoutReviewNotice" class="border-b border-[#f0d9b3] bg-[#fff8e8] px-3 py-2 text-[10px] leading-relaxed text-[#8a6a2c]" data-testid="layout-review-notice">{{ layoutReviewNotice }}</p>
-      <OfficeCanvasModuleProductRecommendations :selected-id="props.selectedId" />
+      <OfficeCanvasModuleProductRecommendations v-model:selected-id="selectedId" />
 
       <div class="px-4 py-3 border-t border-line bg-[#fefcfb] flex-none">
         <div class="flex justify-between text-xs text-[#78736d] my-1">

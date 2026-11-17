@@ -29,7 +29,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
 
   const P1 = { id: 'P1', rspuId: 'R1', variantId: 'V1', widthMm: 1200, depthMm: 550, heightMm: 750, widthCm: 120, depthCm: 55, name: '行政桌 1200', desc: '', variant: '暖白 / 钢脚', price: 1999, kind: 'desk' }
-  const candidate = { product: P1, tier: 'CLOSE', fitRatio: 0.96, rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 50 }
+  const candidate = { product: P1, tier: 'CLOSE', fitRatio: 0.96, relevanceScore: 94.4, matchReason: '同品类 · 商品名称或规格名', rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 50 }
 
   let page
   const renderSubmissions = []
@@ -38,6 +38,10 @@ try {
     const request = route.request()
     const path = new URL(request.url()).pathname
     const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: '成功', data }) })
+    if (path === '/api/v1/office/projects') return respond([{
+      projectId: 'OFFICE-PROJECT-001', name: '白模测试项目',
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+    }])
     if (path === '/api/v1/office/products') return respond([P1])
     if (path.endsWith('/render-previews') && request.method() === 'POST') {
       const body = request.postDataJSON()
@@ -57,12 +61,12 @@ try {
     if (path.endsWith('/module-recommendations') && request.method() === 'POST') {
       const body = request.postDataJSON()
       return respond({ moduleId: body.moduleId, zoneId: body.zoneId, canvasRevision: body.canvasRevision,
-        widthMm: 1200, depthMm: 600, sameModuleCount: 1, missingDimensions: 0, eligibleVariantCount: 1, candidates: [candidate] })
+        widthMm: 1200, depthMm: 600, targetCategory: '办公桌', sameModuleCount: 1, missingDimensions: 0, eligibleVariantCount: 1, candidates: [candidate] })
     }
     if (path.endsWith('/module-products') && request.method() === 'POST') {
       const body = request.postDataJSON()
       // 模拟服务端：基于当前已保存画布写回 productId + productSelection，并同步清单
-      const state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}'))
+      const state = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}'))
       const objects = (state.objects || []).map(o => o.id === body.moduleId
         ? { ...o, productId: body.productId, productSelection: { product: P1, tier: 'CLOSE', fitRatio: 0.96, rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 50, cartLineId: 'L1', sourceCanvasRevision: body.canvasRevision } }
         : o)
@@ -78,7 +82,7 @@ try {
 
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     state.objects = [
       { id: 'Z1', kind: 'zone', name: '白模测试区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' },
         polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]],
@@ -90,7 +94,7 @@ try {
       { id: 'L90', kind: 'furniture', zoneId: 'Z1', furnitureTemplateId: 'desk-screen-l', label: '卡位 L90', x: 4200, y: 2200, w: 1400, h: 1400, rotation: 90, productId: '', layoutConfirmed: true },
     ]
     state.canvasRevision = 3; state.canvasMode = 'design'; state.designZoneId = 'Z1'; state.cart = []; state.floorPlan = null; state.spaceTemplate = null
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=Z1', { waitUntil: 'networkidle' })
 
@@ -105,7 +109,7 @@ try {
   assert.equal(await dialog.getAttribute('data-default-seats'), '2', '工位默认带一把配套办公椅')
 
 
-  const readObject = id => page.evaluate(oid => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(o => o.id === oid), id)
+  const readObject = id => page.evaluate(oid => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(o => o.id === oid), id)
   const project = target => page.evaluate(t => window.__whiteModelProject(t), target)
 
   // 朝向回归：90° L 卡位的 3D 配椅投影应与 2D 约定的座位世界坐标一致（仅差 450mm 抬升投影位移）
@@ -144,6 +148,7 @@ try {
   await page.getByTestId('white-model-product-change').click()
   const productDialog = page.getByTestId('white-model-product-dialog')
   await productDialog.waitFor()
+  await productDialog.getByText('适配度 94.4 / 100 · 同品类 · 商品名称或规格名').waitFor()
   await page.getByTestId('white-model-product-option-P1').getByRole('button', { name: '绑定该商品' }).click()
   await page.getByTestId('white-model-notice').waitFor()
   const boundA = await readObject('A')

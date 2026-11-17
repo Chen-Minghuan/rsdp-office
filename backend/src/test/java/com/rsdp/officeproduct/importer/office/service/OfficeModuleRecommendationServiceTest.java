@@ -33,7 +33,7 @@ class OfficeModuleRecommendationServiceTest {
         when(office.listOfficeProducts()).thenReturn(List.of(sku("FIT", "1200", "600"), sku("SMALL", "600", "300"), sku("TOO-WIDE", "1200.01", "600"), new OfficeProductDto()));
     }
     private OfficeProductDto sku(String id, String width, String depth) {
-        var p = new OfficeProductDto(); p.setId(id); p.setVariantId(id); p.setRspuId("MASTER"); p.setWidthMm(new BigDecimal(width)); p.setDepthMm(new BigDecimal(depth)); p.setPrice(BigDecimal.TEN); return p;
+        var p = new OfficeProductDto(); p.setId(id); p.setVariantId(id); p.setRspuId("MASTER"); p.setName("办公桌"); p.setWidthMm(new BigDecimal(width)); p.setDepthMm(new BigDecimal(depth)); p.setPrice(BigDecimal.TEN); return p;
     }
     private ModuleRecommendationRequest request() {
         var request = new ModuleRecommendationRequest(); request.setZoneId("Z"); request.setModuleId("A"); request.setCanvasRevision(7); request.setProductId("FIT"); return request;
@@ -44,6 +44,63 @@ class OfficeModuleRecommendationServiceTest {
         assertEquals(4, result.getEligibleVariantCount());
         assertEquals(1, result.getMissingDimensions()); assertEquals(2, result.getSameModuleCount());
         verifyNoInteractions(carts);
+    }
+
+    @Test void ranksCoffeeTablesBeforeSimilarFurnitureAndTagsAndRejectsIncompatibleFurniture() {
+        var module = (Map<String,Object>) canvas.getObjects().get(1);
+        module.put("furnitureTemplateId", "UMOD-COFFEE");
+        module.put("label", "客区定制款");
+        module.put("moduleSnapshot", Map.of("glyphTemplateId", "coffee-round"));
+        module.put("w", 462.65);
+        module.put("h", 530.45);
+
+        var declared = sku("CLASSIFIED", "430", "465");
+        declared.setName("WG-1");
+        declared.setCategoryPath(List.of("家具", "桌类", "茶几"));
+        var named = sku("NAMED", "400", "400");
+        named.setName("小圆茶几");
+        named.setCategoryPath(List.of("办公家具"));
+        var edge = sku("EDGE", "460", "525");
+        edge.setName("沙发边几");
+        var tagged = sku("TAGGED", "460", "525");
+        tagged.setName("WG-2");
+        tagged.setFurnitureTags(List.of("双层茶几", "圆形台面"));
+        var chair = sku("CHAIR", "530", "450");
+        chair.setName("明月主椅 WG-25332");
+        chair.setCategoryPath(List.of("家具", "座椅", "休闲椅", "单椅"));
+        chair.setFurnitureTags(List.of("搭配茶几", "FS-板面壳体靠背"));
+        var oversize = sku("OVERSIZE", "462.66", "500");
+        oversize.setName("圆形茶几");
+        var unknown = sku("UNKNOWN", "462.65", "530.45");
+        unknown.setName("WG-3");
+        when(office.listOfficeProducts()).thenReturn(List.of(chair, tagged, oversize, unknown, edge, named, declared));
+        var request = request();
+        request.setAllowRotation(true);
+
+        var result = service.recommend("P", request);
+        assertEquals("茶几", result.getTargetCategory());
+        assertEquals(List.of("CLASSIFIED", "NAMED", "EDGE", "TAGGED"), result.getCandidates().stream().map(c -> c.getProduct().getId()).toList());
+        assertTrue(result.getCandidates().get(2).getFitRatio().compareTo(result.getCandidates().get(0).getFitRatio()) > 0);
+        assertTrue(result.getCandidates().get(3).getMatchReason().contains("六维标签"));
+
+        request.setProductId("CHAIR");
+        assertThrows(BusinessException.class, () -> service.select("P", request));
+        verifyNoInteractions(carts);
+    }
+
+    @Test void legacyModuleUsesItsLabelAndUnknownTypeDoesNotUseSizeAlone() {
+        var module = (Map<String,Object>) canvas.getObjects().get(1);
+        module.remove("furnitureTemplateId");
+        module.put("label", "原图补录茶几");
+        var variant = sku("V", "500", "500");
+        variant.setName("WG");
+        variant.setVariantName("方茶几");
+        when(office.listOfficeProducts()).thenReturn(List.of(variant));
+        assertEquals("V", service.recommend("P", request()).getCandidates().get(0).getProduct().getId());
+        module.put("label", "其他家具");
+        var result = service.recommend("P", request());
+        assertNull(result.getTargetCategory());
+        assertTrue(result.getCandidates().isEmpty());
     }
     @Test void enforcesAllConfirmedCurrentRevisionAndOwnedModule() {
         var stale = request(); stale.setCanvasRevision(6); assertThrows(BusinessException.class, () -> service.recommend("P", stale));

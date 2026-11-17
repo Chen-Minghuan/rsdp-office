@@ -16,10 +16,11 @@ type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void }
 const activePage = ref<WorkflowPage>('auto')
 watch(activePage, () => store.cancelFurniturePlacement())
-function openFurniture(id: string) {
+function openFurniture(id: string, fromGroup: boolean) {
   if (!store.designZoneId || !store.furnitureForZone(store.designZoneId).some(item => item.id === id)) return
+  if (fromGroup && activePage.value !== 'recommendations') return
   selectedId.value = id
-  activePage.value = 'products'
+  if (activePage.value !== 'recommendations') activePage.value = 'products'
   collapsed.value = false
 }
 defineExpose({ openFurniture })
@@ -157,7 +158,7 @@ function clearAutomaticLayout() {
       <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="emit('preview', $event)" />
       <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="selectedCatalogId" :current-preview="currentPreview" @preview="emit('preview', $event)" />
       <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @navigate="activePage = 'auto'" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
-      <OfficeCanvasDesignSidebar v-else embedded :selected-id="selectedId" />
+      <OfficeCanvasDesignSidebar v-else embedded v-model:selected-id="selectedId" />
     </div>
     <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-[#fafbf7] px-3 py-2.5" data-testid="auto-layout-next-actions">
       <p class="mb-2 text-[9px] leading-relaxed text-muted">可直接确认并推荐款式，也可进入产品选型手动调整，无需按固定顺序操作。</p>

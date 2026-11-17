@@ -1,5 +1,9 @@
 # 开发进度与下一步
 
+2026-11-16 [RECOMMEND-002 品类相关性](tasks/RECOMMEND-002-module-size-matching.md) 款式推荐结合主库分类、名称、六维标签和尺寸排序，服务端应用时复核。Java 275 通过、3 跳过，前端构建及三项 UI mock 通过。本地主库只读重放中，截图尺寸的 37 个旧候选过滤为 0；1400 × 900 mm 对照获得 3 个茶几规格。
+
+2026-11-16 [RECOMMEND-002 画布点选联动](tasks/RECOMMEND-002-module-size-matching.md) 款式推荐按画布中选中的家具实例匹配，并支持侧栏反向高亮。默认单件应用，可主动同步同规格家具。前端构建及五项 UI mock 通过。
+
 2026-11-16 [LAYOUT-005 放置操作和家具图例](tasks/LAYOUT-005-custom-and-manual-modules.md) 逐件放置支持画布顶部按钮、右键和 Esc 退出，空格旋转。九种桌型增加单桌预设，六种座椅使用各自的二维线稿，含新增总裁椅。前端构建、白模及排布规则测试、五项 UI mock 通过。
 
 2026-11-16 [LAYOUT-043 家具尺寸入口](tasks/LAYOUT-043-reference-and-mixed-layout.md) 画布点已排家具直接进入产品选型详情，调整旋转家具尺寸时保留实际占地锚点。UI mock 验证已确认排版的贴墙柜缩小、越界拒绝和确认失效。

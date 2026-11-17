@@ -8,8 +8,10 @@ import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.dto.response.CategoryDictDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
+import com.rsdp.officeproduct.importer.office.service.OfficeFurnitureRelevance;
 import com.rsdp.officeproduct.importer.office.service.OfficeProductMatching;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -30,6 +32,7 @@ import java.util.concurrent.Semaphore;
  * 保持 office 前端契约不变。图片地址拼接为主项目绝对地址（主项目图片接口免登录）。
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class RsdpCatalogGateway {
 
@@ -96,6 +99,7 @@ public class RsdpCatalogGateway {
     }
 
     private List<OfficeProductDto> toOfficeProductDtos(ProductListItemDto product) {
+        if (product.getStatus() != null && !"active".equals(product.getStatus())) return List.of();
         JsonNode variants = rsdpClient.get("/api/v1/products/" + product.getRspuId() + "/variants");
         List<OfficeProductDto> rows = new ArrayList<>();
         if (!variants.isArray()) {
@@ -110,6 +114,9 @@ public class RsdpCatalogGateway {
             dto.setRspuId(product.getRspuId());
             dto.setVariantId(v.path("variantId").asText());
             dto.setName(product.getProductName());
+            dto.setCategoryPath(product.getCategoryPath());
+            dto.setFurnitureTags(product.getFurnitureTags());
+            dto.setVariantName(textOrNull(v, "displayName"));
             dto.setVariant(buildVariantText(v));
             dto.setPrice(product.getRetailPrice() != null ? product.getRetailPrice() : BigDecimal.ZERO);
             dto.setKind("other");
@@ -118,7 +125,53 @@ public class RsdpCatalogGateway {
             applyDimensions(dto, textOrNull(v, "dimensions"));
             rows.add(dto);
         });
+        // The main list carries categoryPath; sixDimTags normally arrive in product detail.
+        // Enrich ambiguous products once per catalog refresh under the existing concurrency limit.
+        if (rows.stream().anyMatch(row -> row.getWidthMm() != null && row.getDepthMm() != null && OfficeFurnitureRelevance.needsTags(row))) {
+            enrichFurnitureTags(product.getRspuId(), rows);
+        }
         return rows;
+    }
+
+    private void enrichFurnitureTags(String rspuId, List<OfficeProductDto> rows) {
+        try {
+            JsonNode rspu = rsdpClient.get("/api/v1/products/" + rspuId).path("rspu");
+            List<String> path = textValues(embeddedJson(rspu.path("categoryPath")));
+            List<String> tags = furnitureTags(rspu.path("sixDimTags"));
+            for (OfficeProductDto row : rows) {
+                if (!path.isEmpty()) row.setCategoryPath(path);
+                row.setFurnitureTags(tags);
+            }
+        } catch (BusinessException failure) {
+            log.debug("读取商品 {} 的六维标签失败", rspuId, failure);
+        }
+    }
+
+    private List<String> furnitureTags(JsonNode raw) {
+        JsonNode tags = embeddedJson(raw);
+        List<String> values = new ArrayList<>();
+        // E describes material, which is not evidence of the furniture's use.
+        for (String dimension : List.of("A", "B", "C", "D", "F")) values.addAll(textValues(tags.path(dimension)));
+        return values;
+    }
+
+    private JsonNode embeddedJson(JsonNode node) {
+        if (!node.isTextual()) return node;
+        String value = node.textValue().strip();
+        if (value.startsWith("[") || value.startsWith("{")) {
+            try { return objectMapper.readTree(value); }
+            catch (com.fasterxml.jackson.core.JsonProcessingException invalid) { return objectMapper.missingNode(); }
+        }
+        return node;
+    }
+
+    private List<String> textValues(JsonNode node) {
+        if (node.isTextual() && !node.textValue().isBlank()) return List.of(node.textValue().strip());
+        List<String> values = new ArrayList<>();
+        if (node.isArray()) for (JsonNode value : node) {
+            if (value.isTextual() && !value.textValue().isBlank()) values.add(value.textValue().strip());
+        }
+        return values;
     }
 
     /** 变体摘要文本：显示名 / 尺寸 / 颜色 / 材质（与本地实现口径一致）。 */
@@ -316,6 +369,8 @@ public class RsdpCatalogGateway {
         dto.setRspuCode(textOrNull(row, "rspuCode"));
         dto.setExternalCode(null);
         dto.setProductName(textOrNull(row, "productName"));
+        dto.setCategoryPath(textValues(embeddedJson(row.path("categoryPath"))));
+        dto.setFurnitureTags(furnitureTags(row.path("sixDimTags")));
         String imageUrl = textOrNull(row, "primaryImageUrl");
         dto.setPrimaryImageUrl(imageUrl == null ? null : absolutize(imageUrl));
         dto.setRetailPrice(decimalOrNull(row, "retailPrice"));

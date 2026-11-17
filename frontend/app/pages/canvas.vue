@@ -25,7 +25,7 @@ const snapEnabled = ref(true)
 const showUnderlay = ref(true)
 const underlayOpacity = ref(0.5)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
-const workflowRef = ref<{ openFurniture: (id: string) => void } | null>(null)
+const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void } | null>(null)
 watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
 watch(() => !!referenceEditing.value, active => {
   if (active) {
@@ -198,7 +198,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" @edit-furniture="workflowRef?.openFurniture($event)" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">

@@ -23,7 +23,7 @@ import { channelRects, channelOffsetRange, channelTravelSpan, channelTravelDelta
 
 
 const store = useOfficeStore()
-const emit = defineEmits<{ editFurniture: [id: string] }>()
+const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean] }>()
 const layoutPreview = defineModel<LayoutPreview | null>('layoutPreview', { default: null })
 const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { default: null })
@@ -590,7 +590,7 @@ function dragFurnitureItem(item: FurnitureObject) {
 }
 const dragSnapGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
 watch(selectedId, id => {
-  if (id && furniture.value.some(item => item.id === id) && !selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
+  if (id && furniture.value.some(item => item.id === id)) selectedFurnitureIds.value = [id]
 })
 const lastDeletedFurnitureId = ref<string | null>(null)
 const deleteFeedback = computed(() => lastDeletedFurnitureId.value && !store.objects.some(item => item.id === lastDeletedFurnitureId.value) ? '已删除模块，可点击工具栏撤销恢复' : '')
@@ -1034,12 +1034,12 @@ function onReferencePointerDown(index: number, e: PointerEvent) {
   canvasWindow.value.focus({ preventScroll: true })
   state.selected = index
   referenceFeedback.value = ''
-  beginFurnitureDrag(e, point(e), ['reference-' + index], mark)
+  beginFurnitureDrag(e, point(e), ['reference-' + index], { referenceMark: mark })
 }
 
-function beginFurnitureDrag(e: PointerEvent, p: { x: number; y: number }, ids: string[], referenceMark?: LayoutReferenceMark) {
+function beginFurnitureDrag(e: PointerEvent, p: { x: number; y: number }, ids: string[], target: { id: string } | { referenceMark: LayoutReferenceMark }) {
   canvasWindow.value?.focus({ preventScroll: true })
-  drag.value = { mode: 'furniture', cx: p.x, cy: p.y, ids, dx: 0, dy: 0, referenceMark }
+  drag.value = { mode: 'furniture', cx: p.x, cy: p.y, ids, dx: 0, dy: 0, ...target }
   canvasWindow.value?.setPointerCapture(e.pointerId)
   moveProblem.value = ''
 }
@@ -1178,7 +1178,7 @@ function onPointerDown(e: PointerEvent) {
         }
         if (!selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
         selectedId.value = selectedFurnitureIds.value.length === 1 ? id : null
-        beginFurnitureDrag(e, p, [...selectedFurnitureIds.value])
+        beginFurnitureDrag(e, p, [...selectedFurnitureIds.value], { id })
         return
       }
       selectedFurnitureIds.value = []
@@ -1503,7 +1503,7 @@ function onPointerUp(e: PointerEvent) {
   } else if (d.mode === 'furniture' && d.ids?.length && store.designZoneId) {
     const p = point(e)
     const { dx, dy } = furnitureDragDelta(d, p)
-    if (!d.referenceMark && d.ids.length === 1 && p.x === d.cx && p.y === d.cy) emit('editFurniture', d.ids[0]!)
+    if (d.id && p.x === d.cx && p.y === d.cy) emit('editFurniture', d.id, d.ids.length > 1)
     if (dx || dy) {
       if (d.referenceMark) {
         const state = activeReference.value, mark = d.referenceMark
@@ -1688,7 +1688,11 @@ watch(() => store.objects.length, () => {
   nextTick(placeBoard)
 })
 
-watch([mode, designZone], () => {
+// A server save can replace the zone object even when its geometry is unchanged.
+watch([mode, () => store.workspaceId, () => {
+  const zone = designZone.value
+  return zone ? JSON.stringify([zone.id, zone.x, zone.y, zone.w, zone.h, zone.polygon]) : null
+}], () => {
   if (store.furniturePlacement && store.furniturePlacement.zoneId !== store.designZoneId) store.cancelFurniturePlacement()
   selectedId.value = null
   selectedFurnitureIds.value = []

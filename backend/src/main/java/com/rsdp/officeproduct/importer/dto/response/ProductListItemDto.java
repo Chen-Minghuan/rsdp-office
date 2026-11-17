@@ -1,9 +1,11 @@
 package com.rsdp.officeproduct.importer.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 已导入商品列表项。
@@ -15,6 +17,9 @@ public class ProductListItemDto {
     private String rspuCode;
     private String externalCode;
     private String productName;
+    private List<String> categoryPath;
+    @JsonIgnore
+    private List<String> furnitureTags;
     private String primaryImageUrl;
     private BigDecimal retailPrice;
     private String status;
