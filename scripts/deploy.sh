@@ -6,9 +6,10 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export DEPLOY_ROOT=${DEPLOY_ROOT:-/opt/rsdp-office}
 export ENV_FILE=${ENV_FILE:-$DEPLOY_ROOT/.env}
 export IMAGE_TAG=${IMAGE_TAG:-$(git -C "$repo_root" rev-parse --short=12 HEAD)}
+export RSDP_COMPOSE_PROJECT=${RSDP_COMPOSE_PROJECT:-rsdp-office}
 
 compose() {
-    docker compose --project-name rsdp-office --env-file "$ENV_FILE" -f "$1" "${@:2}"
+    docker compose --project-name "$RSDP_COMPOSE_PROJECT" --env-file "$ENV_FILE" -f "$1" "${@:2}"
 }
 
 check() {
@@ -19,7 +20,7 @@ check() {
     docker compose version
     test -r "$ENV_FILE" || { echo "无法读取服务器配置：$ENV_FILE" >&2; exit 1; }
     python3 - "$ENV_FILE" "$repo_root/compose.deploy.yaml" <<'PY'
-import stat, subprocess, sys
+import os, stat, subprocess, sys
 from pathlib import Path
 p = Path(sys.argv[1])
 if stat.S_IMODE(p.stat().st_mode) & 0o007:
@@ -34,10 +35,25 @@ for key in ('POSTGRES_PASSWORD', 'DASHSCOPE_API_KEY', 'RSDP_AUTH_SECRET'):
         sys.exit('服务器 .env 缺少 ' + key)
 if len(values['RSDP_AUTH_SECRET']) < 32:
     sys.exit('RSDP_AUTH_SECRET 至少需要 32 个字符。')
+project = os.environ['RSDP_COMPOSE_PROJECT']
+if project == 'rsdp-office-test':
+    expected = {
+        'POSTGRES_DB': 'office_test',
+        'RSDP_DATA_DIR': '/opt/rsdp-office-test/data',
+        'RSDP_HTTP_PORT': '3003',
+        'RSDP_OFFICE_SUBPATH_PORT': '3004',
+        'RSDP_MAIN_BASE_URL': 'https://rsdp-test.rooom.vip',
+    }
+    for key, value in expected.items():
+        if values.get(key) != value:
+            sys.exit('测试环境隔离配置不符：' + key)
+    for key in ('RSDP_MAIN_USERNAME', 'RSDP_MAIN_PASSWORD'):
+        if not values.get(key):
+            sys.exit('测试商品服务账号配置缺失：' + key)
 if not values.get('RSDP_BOOTSTRAP_PASSWORD'):
     # PostgreSQL owns its data directory; Jenkins need not read it on the host.
     result = subprocess.run([
-        'docker', 'compose', '--project-name', 'rsdp-office', '--env-file', str(p),
+        'docker', 'compose', '--project-name', project, '--env-file', str(p),
         '-f', sys.argv[2], 'exec', '-T', 'postgres', 'sh', '-c',
         '''psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) FROM office_user WHERE status='active'"'''
     ], capture_output=True, text=True)

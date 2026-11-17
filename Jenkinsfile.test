@@ -1,0 +1,58 @@
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        timeout(time: 60, unit: 'MINUTES')
+    }
+
+    parameters {
+        booleanParam(name: 'DEPLOY', defaultValue: false, description: '构建成功后发布到 Office 测试环境')
+    }
+
+    environment {
+        DEPLOY_ROOT = '/opt/rsdp-office-test'
+        ENV_FILE = '/opt/rsdp-office-test/.env'
+        RSDP_COMPOSE_PROJECT = 'rsdp-office-test'
+        COMPOSE_PARALLEL_LIMIT = '1'
+    }
+
+    stages {
+        stage('Checkout and preflight') {
+            steps {
+                checkout scm
+                sh '''#!/usr/bin/env bash
+set -euo pipefail
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/test)"
+bash scripts/deploy.sh check
+'''
+            }
+        }
+        stage('Java tests') {
+            steps {
+                sh '''#!/usr/bin/env bash
+set -euo pipefail
+test_image="rsdp-office-test-checks:${BUILD_NUMBER}"
+rm -rf test-results/java
+docker build --target test -t "$test_image" backend
+container=$(docker create "$test_image")
+trap 'docker rm "$container" >/dev/null' EXIT
+mkdir -p test-results/java
+docker cp "$container:/build/target/surefire-reports/." test-results/java/
+'''
+            }
+            post {
+                always { junit testResults: 'test-results/java/TEST-*.xml', allowEmptyResults: true }
+            }
+        }
+        stage('Build images') {
+            steps { sh 'bash scripts/deploy.sh build' }
+        }
+        stage('Deploy test') {
+            when { expression { params.DEPLOY } }
+            steps { sh 'bash scripts/deploy.sh deploy' }
+        }
+    }
+}
