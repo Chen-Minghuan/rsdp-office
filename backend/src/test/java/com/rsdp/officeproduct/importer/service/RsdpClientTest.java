@@ -6,7 +6,9 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.config.RsdpMainProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.ResourceAccessException;
@@ -66,5 +68,27 @@ class RsdpClientTest {
 
         assertEquals("business failure", error.getMessage());
         verify(restTemplate, times(1)).exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
+    void binaryResponseUsesNewTransportHeaders() {
+        byte[] image = {1, 2, 3};
+        when(restTemplate.exchange(eq("http://rsdp.test/api/v1/images/IMG-1"), eq(HttpMethod.GET),
+            any(HttpEntity.class), eq(byte[].class))).thenReturn(ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_JPEG)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=60")
+                .header(HttpHeaders.TRANSFER_ENCODING, "chunked")
+                .header(HttpHeaders.CONNECTION, "keep-alive")
+                .header(HttpHeaders.SET_COOKIE, "upstream=internal")
+                .body(image));
+
+        ResponseEntity<byte[]> response = client().getBinary("/api/v1/images/IMG-1");
+
+        assertArrayEquals(image, response.getBody());
+        assertEquals(MediaType.IMAGE_JPEG, response.getHeaders().getContentType());
+        assertEquals("max-age=60", response.getHeaders().getCacheControl());
+        assertFalse(response.getHeaders().containsKey(HttpHeaders.TRANSFER_ENCODING));
+        assertFalse(response.getHeaders().containsKey(HttpHeaders.CONNECTION));
+        assertFalse(response.getHeaders().containsKey(HttpHeaders.SET_COOKIE));
     }
 }

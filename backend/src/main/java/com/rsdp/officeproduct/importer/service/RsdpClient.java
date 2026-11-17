@@ -214,10 +214,10 @@ public class RsdpClient {
     }
 
     /**
-     * 调用主项目 GET 接口并透传二进制响应（图片代理用）。
+     * 调用主项目 GET 接口，返回可由本服务重新发送的二进制响应。
      *
      * @param path 以 /api/v1 开头的接口路径
-     * @return 主项目原始响应（状态码/内容类型/字节流）
+     * @return 上游状态码、内容类型和字节流
      */
     public ResponseEntity<byte[]> getBinary(String path) {
         ensureConfigured();
@@ -243,7 +243,15 @@ public class RsdpClient {
         }
         HttpHeaders headers = new HttpHeaders();
         headers.add(HttpHeaders.COOKIE, COOKIE_NAME + "=" + sessionCookie);
-        return restTemplate.exchange(baseUrl() + path, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+        ResponseEntity<byte[]> upstream = restTemplate.exchange(
+            baseUrl() + path, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+        HttpHeaders responseHeaders = new HttpHeaders();
+        MediaType contentType = upstream.getHeaders().getContentType();
+        if (contentType != null) responseHeaders.setContentType(contentType);
+        String cacheControl = upstream.getHeaders().getCacheControl();
+        if (cacheControl != null) responseHeaders.setCacheControl(cacheControl);
+        // 上游分块已被 HTTP 客户端解包，出站响应由本服务重新编码。
+        return new ResponseEntity<>(upstream.getBody(), responseHeaders, upstream.getStatusCode());
     }
 
     private void ensureConfigured() {
