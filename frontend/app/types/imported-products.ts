@@ -6,8 +6,6 @@ export interface ImportedProduct {
   primaryImageUrl: string | null
   retailPrice: number | null
   status: string | null
-  auditStatus: string | null
-  auditRemark: string | null
   createdAt: string
   updatedAt: string
 }
@@ -168,16 +166,9 @@ export interface ProductDetail {
   primaryImageUrl: string | null
   detailImageUrls: string | null
   status: string | null
-  auditStatus: string | null
-  auditRemark: string | null
   createdAt: string
   updatedAt: string
   deletedAt: string | null
   variants: ProductVariant[]
   images: ProductImage[]
-}
-
-export interface BatchAuditResult {
-  processedCount: number
-  skippedCount: number
 }

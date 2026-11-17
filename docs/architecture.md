@@ -142,9 +142,9 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 方案快照包含空间、排版、商品/变体、价格与选择版本；效果图依赖该快照。
 回包带输入版本，收到结果时比较当前版本；过期结果进入历史，不覆盖当前编辑状态。
 
-商品下架后禁止新推荐，但保留旧方案选择的快照和提示；确认方案时再次核验商品可用性。
+Office 将确认后的新商品通过 `POST /api/v1/products/factory-entry` 写入 RSDP 主库，由主库将商品与默认规格创建为 `active`。同外部编码更新已有商品时沿用主档的上下架状态。商品下架后禁止新推荐，但保留旧方案选择的快照和提示；确认方案时再次核验商品可用性。
 当前商品导入已把确认后的 `widthMm/depthMm/heightMm` 写入 `rspu_variant.dimensions`（JSONB，`unit=mm`）；尺寸原文保留在 `size_text`。旧 `widthCm/depthCm` 数据仍可读取。画布现有接口显示厘米，读取毫米时向上取整厘米，避免缩小占地；这只是旧候选适配，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
-本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订和在售审核状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
+本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订以及商品和变体的在售状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
 
 品类匹配从已保存家具图例或旧实例名称推导需求。网关保留主库 `categoryPath` 及规格名，目录同步时为分类和名称都模糊的商品补读详情中的 `sixDimTags`。尺寸适配后按品类证据和宽深贴合度计算 `relevanceScore`，`matchReason` 返回依据，旧 `fitRatio` 和 `tier` 继续表示尺寸。推荐和应用共用匹配逻辑，无品类相关性或有明显冲突的商品不会进入候选。
 供应商的包数、CBM 体积和重量原表值分别保存在变体字段，与采购数量、商品尺寸分开；重量源表没有明确单位，不推断为千克。

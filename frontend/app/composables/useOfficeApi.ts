@@ -1,7 +1,7 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
-import type { ImportedProduct, BatchAuditResult, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
+import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -421,8 +421,8 @@ export function useOfficeApi() {
     return await request<SharedCatalogStatus>('PUT', '/api/v1/office/workspace/shared-catalog', { enabled })
   }
 
-  async function createManualProduct(request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
-    return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', request)
+  async function createManualProduct(product: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
+    return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', product)
   }
 
   async function getProduct(rspuId: string): Promise<ProductDetail> {

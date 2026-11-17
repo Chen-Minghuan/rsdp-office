@@ -348,7 +348,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="mb-2 text-[25px] font-bold tracking-tight">批量导入商品</h1>
-          <p class="text-xs text-muted">上传商品文件，预览并编辑后确认入库；Excel 内嵌图片会自动关联商品。</p>
+          <p class="text-xs text-muted">上传商品文件并预览，确认导入后新商品直接上架。Excel 内嵌图片会自动关联商品。</p>
         </div>
         <NuxtLink to="/products" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm hover:bg-cream">
           <AppIcon name="arrowLeft" size="4" />返回商品库
@@ -460,7 +460,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
           </label>
           <label class="flex items-start gap-2 text-sm">
             <input v-model="updateIfExists" type="radio" :value="true" name="duplicate-policy" class="mt-1 accent-bronze" @change="needsValidation = true">
-            <span><strong class="font-medium">覆盖更新已有商品</strong><span class="block text-xs text-muted">按编码匹配并更新非空字段。</span></span>
+            <span><strong class="font-medium">覆盖更新已有商品</strong><span class="block text-xs text-muted">按编码匹配并更新非空字段，保留原有上下架状态。</span></span>
           </label>
         </div>
       </fieldset>
@@ -641,7 +641,6 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
         <button type="button" class="rounded-lg border border-line px-4 py-2.5 text-sm hover:bg-cream" @click="resetImport">继续导入</button>
         <div class="flex flex-wrap gap-3">
           <NuxtLink to="/products/import-records" class="rounded-lg border border-line px-4 py-2.5 text-sm hover:bg-cream">查看导入记录</NuxtLink>
-          <NuxtLink to="/products/audit" class="rounded-lg bg-cream px-4 py-2.5 text-sm font-semibold text-bronze-dark hover:bg-[#ebe3d8]">去审核商品</NuxtLink>
           <NuxtLink to="/products" class="rounded-lg bg-bronze px-4 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark">查看商品库</NuxtLink>
         </div>
       </div>

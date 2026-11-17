@@ -274,8 +274,6 @@ public class RsdpCatalogGateway {
         dto.setDescription(textOrNull(rspu, "description"));
         dto.setRetailPrice(decimalOrNull(rspu, "retailPrice"));
         dto.setStatus(textOrNull(rspu, "status"));
-        // 主项目无审核流概念：主库商品视为已通过审核
-        dto.setAuditStatus("approved");
         dto.setCreatedAt(dateOrNull(rspu, "createdAt"));
         dto.setUpdatedAt(dateOrNull(rspu, "updatedAt"));
 
@@ -375,7 +373,6 @@ public class RsdpCatalogGateway {
         dto.setPrimaryImageUrl(imageUrl == null ? null : absolutize(imageUrl));
         dto.setRetailPrice(decimalOrNull(row, "retailPrice"));
         dto.setStatus(textOrNull(row, "status"));
-        dto.setAuditStatus("approved");
         dto.setCreatedAt(dateOrNull(row, "createdAt"));
         dto.setUpdatedAt(dateOrNull(row, "updatedAt"));
         return dto;
