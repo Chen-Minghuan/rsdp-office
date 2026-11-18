@@ -4,24 +4,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeRequirementsRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
+import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeAuditLog;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeAuditLogMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -39,7 +45,16 @@ class OfficeProjectServiceTest {
     private final Map<String, OfficeUser> users = new LinkedHashMap<>();
     private final List<OfficeProjectMember> members = new ArrayList<>();
     private final List<OfficeAuditLog> auditLogs = new ArrayList<>();
+    private final List<OfficeCart> cartLines = new ArrayList<>();
+    private OfficeDesignProjectMapper projectMapper;
+    private OfficeDesignFloorMapper floorMapper;
+    private OfficeProjectMemberMapper memberMapper;
+    private OfficeUserMapper userMapper;
     private OfficeProjectAccessService access;
+    private OfficeAuditService auditService;
+    private OfficeCartMapper cartMapper;
+    private RsdpCatalogGateway catalogGateway;
+    private SharedCatalogService sharedCatalogService;
     private OfficeProjectService service;
 
     @BeforeEach void setup() {
@@ -48,12 +63,16 @@ class OfficeProjectServiceTest {
         users.clear();
         members.clear();
         auditLogs.clear();
-        var projectMapper = mock(OfficeDesignProjectMapper.class);
-        var floorMapper = mock(OfficeDesignFloorMapper.class);
-        var memberMapper = mock(OfficeProjectMemberMapper.class);
-        var userMapper = mock(OfficeUserMapper.class);
+        cartLines.clear();
+        projectMapper = mock(OfficeDesignProjectMapper.class);
+        floorMapper = mock(OfficeDesignFloorMapper.class);
+        memberMapper = mock(OfficeProjectMemberMapper.class);
+        userMapper = mock(OfficeUserMapper.class);
         var auditLogMapper = mock(OfficeAuditLogMapper.class);
         access = mock(OfficeProjectAccessService.class);
+        cartMapper = mock(OfficeCartMapper.class);
+        catalogGateway = mock(RsdpCatalogGateway.class);
+        sharedCatalogService = mock(SharedCatalogService.class);
         when(access.enforcementEnabled()).thenReturn(false);
         when(access.accessibleProjectIds()).thenReturn(null);
         when(auditLogMapper.insert(any(OfficeAuditLog.class))).thenAnswer(call -> { auditLogs.add(call.getArgument(0)); return 1; });
@@ -74,6 +93,9 @@ class OfficeProjectServiceTest {
         when(memberMapper.selectList(any())).thenAnswer(call -> members.stream()
             .filter(member -> scopeIds(call.getArgument(0)).contains(member.getProjectId())).toList());
         when(memberMapper.delete(any())).thenAnswer(call -> { members.removeIf(member -> scopeIds(call.getArgument(0)).contains(member.getProjectId())); return 1; });
+        when(cartMapper.selectList(any())).thenAnswer(call -> cartLines.stream()
+            .filter(cart -> scopeIds(call.getArgument(0)).contains(cart.getProjectId())).toList());
+        when(sharedCatalogService.resolveViewMode()).thenReturn("full");
         when(userMapper.selectById(anyString())).thenAnswer(call -> users.get(call.getArgument(0)));
         when(userMapper.selectBatchIds(any(Collection.class))).thenAnswer(call -> users.values().stream()
             .filter(user -> ((Collection<?>) call.getArgument(0)).contains(user.getUserId())).toList());
@@ -86,8 +108,9 @@ class OfficeProjectServiceTest {
                 .filter(user -> workspaceParams.isEmpty() || workspaceParams.contains(user.getWorkspaceId()))
                 .toList();
         });
+        auditService = new OfficeAuditService(auditLogMapper, currentUserService);
         service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
-            new OfficeAuditService(auditLogMapper, currentUserService), new ObjectMapper());
+            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService);
     }
 
     private OfficeUser activeUser(String userId, String username) {
@@ -122,6 +145,47 @@ class OfficeProjectServiceTest {
         assertEquals(1, tree.size());
         assertEquals(created.getProjectId(), tree.get(0).getProjectId());
         assertEquals(List.of(0, 1), tree.get(0).getFloors().stream().map(floor -> floor.getSortOrder()).toList());
+    }
+
+    @Test void listsProjectBudgetAcrossFloorsAndMarksMissingPrices() {
+        var first = service.createProject(request("总部", List.of("一层", "二层")));
+        var second = service.createProject(request("分部", List.of("一层")));
+        cartLines.add(cart(first.getFloors().get(0).getFloorId(), "V-1", 2));
+        cartLines.add(cart(first.getFloors().get(1).getFloorId(), "V-2", 3));
+        cartLines.add(cart(first.getFloors().get(1).getFloorId(), "MISSING", 1));
+        cartLines.add(cart(second.getFloors().get(0).getFloorId(), "V-3", 4));
+        when(catalogGateway.listOfficeProducts("full")).thenReturn(List.of(
+            product("V-1", "100"), product("V-2", "50"), product("V-3", "10")));
+
+        var result = budgetService().listProjects();
+
+        var headquarters = project(result, first.getProjectId());
+        assertEquals(new BigDecimal("350"), budgetTotal(headquarters));
+        assertEquals("PENDING_PRICING", budgetStatus(headquarters));
+        var branch = project(result, second.getProjectId());
+        assertEquals(new BigDecimal("40"), budgetTotal(branch));
+        assertEquals("COMPLETE", budgetStatus(branch));
+    }
+
+    @Test void listsZeroBudgetForProjectsWithoutCartItems() {
+        var created = service.createProject(request("空项目", List.of("一层")));
+
+        var project = project(budgetService().listProjects(), created.getProjectId());
+
+        assertEquals(BigDecimal.ZERO, budgetTotal(project));
+        assertEquals("COMPLETE", budgetStatus(project));
+        verifyNoInteractions(catalogGateway);
+    }
+
+    @Test void keepsProjectListAvailableWhenCatalogPricingFails() {
+        var created = service.createProject(request("待价项目", List.of("一层")));
+        cartLines.add(cart(created.getFloors().get(0).getFloorId(), "V-1", 1));
+        when(catalogGateway.listOfficeProducts("full")).thenThrow(new BusinessException("商品目录不可用"));
+
+        var project = project(budgetService().listProjects(), created.getProjectId());
+
+        assertNull(budgetTotal(project));
+        assertEquals("UNAVAILABLE", budgetStatus(project));
     }
 
     @Test void updatesRequirementsAndIncrementsRevision() {
@@ -305,16 +369,10 @@ class OfficeProjectServiceTest {
     }
 
     @Test void createProjectRequiresWorkspaceAndValidatesMemberWorkspaceWhenEnforced() {
-        when(access.enforcementEnabled()).thenReturn(true);
-        var outsider = activeUser("USR-9", "outsider");
-        when(access.currentUserOrNull()).thenReturn(outsider);
+        when(access.workspaceForProjectCreation()).thenReturn("W1");
         var request = request("项目", List.of("一层"));
-        request.setLeaderUserId("USR-9");
-        assertEquals("当前账号不属于任何工作区，不能创建项目", assertThrows(BusinessException.class,
-            () -> service.createProject(request)).getMessage());
 
-        // 操作人归属 W1，但负责人账号在 W2：拒绝
-        outsider.setWorkspaceId("W1");
+        // 项目落在经销商工作区 W1，但负责人账号在 W2：拒绝
         activeUserIn("USR-1", "leader", "W2");
         request.setLeaderUserId("USR-1");
         assertEquals("项目负责人不属于本项目工作区", assertThrows(BusinessException.class,
@@ -331,6 +389,7 @@ class OfficeProjectServiceTest {
 
     @Test void replaceMembersRejectsCollaboratorOutsideProjectWorkspace() {
         when(access.enforcementEnabled()).thenReturn(true);
+        when(access.workspaceForProjectCreation()).thenReturn("W1");
         var operator = activeUserIn("USR-1", "leader", "W1");
         when(access.currentUserOrNull()).thenReturn(operator);
         activeUserIn("USR-2", "collab", "W1");
@@ -413,6 +472,56 @@ class OfficeProjectServiceTest {
         assertEquals(2, result.size());
         assertTrue(result.stream().allMatch(user -> !user.getUserId().equals("USR-3")));
         assertEquals("alpha", result.get(0).getUsername());
+    }
+
+    private OfficeProjectService budgetService() {
+        try {
+            return OfficeProjectService.class.getConstructor(
+                OfficeDesignProjectMapper.class, OfficeDesignFloorMapper.class, OfficeProjectMemberMapper.class,
+                OfficeUserMapper.class, OfficeProjectAccessService.class, OfficeAuditService.class, ObjectMapper.class,
+                OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class
+            ).newInstance(projectMapper, floorMapper, memberMapper, userMapper, access, auditService, new ObjectMapper(),
+                cartMapper, catalogGateway, sharedCatalogService);
+        } catch (NoSuchMethodException missingBudgetDependencies) {
+            throw new AssertionError("项目服务尚未提供购物车预算聚合依赖", missingBudgetDependencies);
+        } catch (ReflectiveOperationException failed) {
+            throw new AssertionError("无法构造带预算聚合能力的项目服务", failed);
+        }
+    }
+
+    private OfficeProjectDto project(List<OfficeProjectDto> projects, String projectId) {
+        return projects.stream().filter(project -> projectId.equals(project.getProjectId())).findFirst().orElseThrow();
+    }
+
+    private BigDecimal budgetTotal(OfficeProjectDto project) {
+        return (BigDecimal) budgetValue(project, "getBudgetTotal");
+    }
+
+    private String budgetStatus(OfficeProjectDto project) {
+        return (String) budgetValue(project, "getBudgetStatus");
+    }
+
+    private Object budgetValue(OfficeProjectDto project, String getter) {
+        try {
+            return project.getClass().getMethod(getter).invoke(project);
+        } catch (ReflectiveOperationException missingBudgetField) {
+            throw new AssertionError("项目 DTO 尚未提供预算字段 " + getter, missingBudgetField);
+        }
+    }
+
+    private OfficeCart cart(String floorId, String productId, int qty) {
+        var cart = new OfficeCart();
+        cart.setProjectId(floorId);
+        cart.setProductId(productId);
+        cart.setQty(qty);
+        return cart;
+    }
+
+    private OfficeProductDto product(String id, String price) {
+        var product = new OfficeProductDto();
+        product.setId(id);
+        product.setPrice(new BigDecimal(price));
+        return product;
     }
 
     private CreateOfficeProjectRequest request(String name, List<String> floorNames) {

@@ -21,6 +21,8 @@ import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanRoomMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
 import com.rsdp.officeproduct.importer.mapper.ImageAssetsMapper;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectService;
 import com.rsdp.officeproduct.importer.util.CurrentUserContext;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -57,7 +59,8 @@ public class FloorPlanService {
     private static final List<String> CAD_TYPES = List.of("application/octet-stream", "application/dwg", "application/dxf");
 
     private final FloorPlanAnalysisMapper analysisMapper;
-    private final com.rsdp.officeproduct.importer.office.service.OfficeProjectService officeProjectService;
+    private final OfficeProjectService officeProjectService;
+    private final OfficeProjectAccessService projectAccess;
     private final FloorPlanRoomMapper roomMapper;
     private final FloorPlanSceneRevisionMapper revisionMapper;
     private final ImageAssetsMapper imageAssetsMapper;
@@ -237,10 +240,7 @@ public class FloorPlanService {
 
     private record Work(FloorPlanAnalysis analysis, FloorPlanSceneRevision revision) {}
     private Work createWork(MultipartFile image, MultipartFile cad, String projectId, String sourceName, String baseUrl) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = defaultProjectId();
-        }
-        validateProject(projectId);
+        requireUploadFloor(projectId);
 
         boolean hasImage = image != null && !image.isEmpty();
         boolean hasCad = cad != null && !cad.isEmpty();
@@ -289,10 +289,7 @@ public class FloorPlanService {
      */
     @Transactional(readOnly = true)
     public FloorPlanAnalysisResponse getAnalysis(String analysisId, Integer analysisRevision) {
-        FloorPlanAnalysis analysis = analysisMapper.selectById(analysisId);
-        if (analysis == null) {
-            throw new BusinessException("分析批次不存在: " + analysisId);
-        }
+        FloorPlanAnalysis analysis = requireAccessibleAnalysis(analysisId);
 
         Integer targetRevision = analysisRevision;
         if (targetRevision == null) {
@@ -372,10 +369,7 @@ public class FloorPlanService {
      */
     @Transactional
     public FloorPlanAnalysisResponse confirmRooms(String analysisId, FloorPlanConfirmRequest request) {
-        FloorPlanAnalysis analysis = analysisMapper.selectById(analysisId);
-        if (analysis == null) {
-            throw new BusinessException("分析批次不存在: " + analysisId);
-        }
+        FloorPlanAnalysis analysis = requireAccessibleAnalysis(analysisId);
 
         if (FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) throw new BusinessException("空间识别尚未完成，请稍后再编辑识别结果");
 
@@ -433,15 +427,27 @@ public class FloorPlanService {
 
     // ==================== 私有工具 ====================
 
-    private String defaultProjectId() {
-        return "OFFICE-PROJECT-001";
+    private FloorPlanAnalysis requireAccessibleAnalysis(String analysisId) {
+        FloorPlanAnalysis analysis = analysisMapper.selectById(analysisId);
+        if (analysis == null) {
+            throw new BusinessException("分析批次不存在: " + analysisId);
+        }
+        projectAccess.requireFloorAccess(analysis.getProjectId());
+        return analysis;
     }
 
-    private void validateProject(String projectId) {
-        if (projectId == null || projectId.isBlank() || projectId.length() > 64) {
+    private void requireUploadFloor(String floorId) {
+        if (!StringUtils.hasText(floorId)) {
+            throw new BusinessException("请先选择项目和楼层，再识别图纸");
+        }
+        if (floorId.length() > 64) {
             throw new BusinessException("设计工作区 ID 无效");
         }
-        officeProjectService.requireFloor(projectId);
+        if (projectAccess.enforcementEnabled()) {
+            projectAccess.requireFloorAccess(floorId);
+        } else {
+            officeProjectService.requireFloor(floorId);
+        }
     }
 
     private boolean isPdf(MultipartFile file) {

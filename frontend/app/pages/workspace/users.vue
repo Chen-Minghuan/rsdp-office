@@ -172,7 +172,7 @@ function formatTime(value: string | null) {
             <tr class="border-b border-line text-left text-xs text-muted">
               <th class="px-3 py-2 font-medium">用户名</th>
               <th class="px-3 py-2 font-medium">显示名称</th>
-              <th class="px-3 py-2 font-medium">身份</th>
+              <th class="px-3 py-2 font-medium">系统角色</th>
               <th class="px-3 py-2 font-medium">来源</th>
               <th class="px-3 py-2 font-medium">状态</th>
               <th class="px-3 py-2 font-medium">创建时间</th>
@@ -184,7 +184,7 @@ function formatTime(value: string | null) {
             <tr v-for="user in users" :key="user.userId" class="border-b border-line last:border-b-0">
               <td class="px-3 py-2 font-medium">{{ user.username }}</td>
               <td class="px-3 py-2">{{ user.displayName }}</td>
-              <td class="px-3 py-2"><span class="text-xs" :class="user.role === 'DEALER' ? 'text-bronze-dark font-semibold' : 'text-muted'">{{ user.role === 'DEALER' ? '经销商主号' : '设计师' }}</span></td>
+              <td class="px-3 py-2"><span class="text-xs" :class="user.role === 'DEALER' ? 'text-bronze-dark font-semibold' : 'text-muted'">{{ user.role === 'DEALER' ? '经销商主号' : '普通账号' }}</span></td>
               <td class="px-3 py-2 text-xs text-muted">{{ sourceLabel(user.source) }}</td>
               <td class="px-3 py-2"><span class="text-xs" :class="user.status === 'active' ? 'text-green' : 'text-red-700'">{{ user.status === 'active' ? '在用' : '已停用' }}</span></td>
               <td class="px-3 py-2 text-xs text-muted">{{ formatTime(user.createdAt) }}</td>

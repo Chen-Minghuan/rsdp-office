@@ -28,7 +28,7 @@ async function submit() {
     })
     useWorkspaceStore().$reset()
     useOfficeStore().$reset()
-    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') && !route.query.redirect.startsWith('//') ? route.query.redirect : '/'
+    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') && !route.query.redirect.startsWith('//') ? route.query.redirect : '/workspace/project-bench'
     window.location.replace(router.resolve(redirect).href)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '登录失败，请重试'

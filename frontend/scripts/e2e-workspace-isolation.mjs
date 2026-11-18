@@ -15,7 +15,8 @@ const app = spawn(process.execPath, ['.output/server/index.mjs'], {
 })
 
 const users = {
-  designer: { userId: 'USER-A', username: 'designer', displayName: '设计师 A', role: 'USER' },
+  designer: { userId: 'USER-UNASSIGNED', username: 'designer', displayName: '未分配项目的设计师', role: 'USER' },
+  creator: { userId: 'USER-A', username: 'creator', displayName: '经销商 A', role: 'DEALER' },
   dealer: { userId: 'USER-B', username: 'dealer', displayName: '经销商 B', role: 'DEALER' },
   collaborator: { userId: 'USER-C', username: 'collaborator', displayName: '协作者 C', role: 'USER' },
   admin: { userId: 'ADMIN', username: 'admin', displayName: '管理员', role: 'ADMIN' },
@@ -91,6 +92,7 @@ try {
       return respond([])
     }
     if (path === '/api/v1/office/projects' && request.method() === 'POST') {
+      assert.equal(currentUser.role, 'DEALER')
       const body = request.postDataJSON()
       const project = {
         projectId: 'OPRJ-A', name: body.name, customerRequirements: body.customerRequirements, requirementsRevision: 1,
@@ -123,21 +125,31 @@ try {
   failProjects = false
   await page.getByRole('button', { name: '重新加载', exact: true }).click()
   await page.getByRole('heading', { name: '暂无可访问项目', exact: true }).waitFor()
+  await page.getByTestId('topbar-role').filter({ hasText: /^设计师$/ }).waitFor()
+  assert.equal(await page.getByRole('button', { name: /新建项目/ }).count(), 0)
   assert.equal(await page.getByText('默认办公项目', { exact: true }).count(), 0)
   assert.equal(canvasReads.length, 0, '空项目列表不得读取默认画布')
+  await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
+  await page.getByRole('link', { name: /项目与楼层/ }).click()
+  await page.getByTestId('project-empty-state').getByText('请联系经销商创建项目并分配给你。', { exact: true }).waitFor()
 
+  await logoutAndLogin('creator')
   await page.getByTestId('project-empty-state').getByRole('button', { name: '新建项目', exact: true }).click()
   await page.getByPlaceholder('例如：深圳 XX 集团总部办公').fill('账号 A 的项目')
   await page.getByRole('button', { name: '创建项目', exact: true }).click()
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
+  await page.getByTestId('topbar-role').filter({ hasText: /^经销商主号$/ }).waitFor()
   await page.locator('input[type="file"]').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: Buffer.from('account-a-file') })
   await page.getByText('a.png', { exact: true }).last().waitFor()
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('rsdp-office-v01:USER-A:OFLR-A') || '{}').files?.[0]?.name === 'a.png')
   await page.waitForFunction(async () => {
     const db = await new Promise((resolve, reject) => { const req = indexedDB.open('rsdp-office-files'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
     if (!db.objectStoreNames.contains('floorFiles')) return false
+    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01:USER-A:OFLR-A'))
+    const key = 'USER-A:OFLR-A:' + draft.files[0].drawingId
     const tx = db.transaction('floorFiles', 'readonly')
-    const record = await new Promise((resolve, reject) => { const req = tx.objectStore('floorFiles').get('USER-A:OFLR-A:a.png'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
+    const record = await new Promise((resolve, reject) => { const req = tx.objectStore('floorFiles').get(key); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
+    db.close()
     return record?.floorId === 'OFLR-A' && record?.storageScope === 'USER-A'
   })
   assert.ok(await page.evaluate(() => !!localStorage.getItem('rsdp-office-workspace-v1:USER-A')))
@@ -154,25 +166,29 @@ try {
 
   await logoutAndLogin('collaborator')
   await page.getByRole('heading', { name: '旧楼层 · 上传办公图纸', exact: true }).waitFor()
+  await page.getByTestId('topbar-role').filter({ hasText: /^项目协作者$/ }).waitFor()
+  assert.equal(await page.getByRole('button', { name: /新建项目/ }).count(), 0)
   assert.equal(await page.getByText('legacy.png', { exact: true }).count(), 0, '协作者不得继承未分账号的旧草稿')
   assert.ok(await page.evaluate(() => !!localStorage.getItem('rsdp-office-v01')), '非负责人不得消费旧草稿')
   assert.equal(await page.evaluate(() => localStorage.getItem('rsdp-office-v01:USER-C:OFFICE-PROJECT-001')), null)
 
   await logoutAndLogin('dealer')
   await page.getByText('legacy.png', { exact: true }).last().waitFor()
+  await page.getByTestId('topbar-role').filter({ hasText: /^经销商主号$/ }).waitFor()
   assert.equal(await page.evaluate(() => localStorage.getItem('rsdp-office-v01')), null, '负责人迁移后应移除旧共享键')
   const dealerDraft = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:USER-B:OFFICE-PROJECT-001') || '{}'))
   assert.equal(dealerDraft.files[0].name, 'legacy.png')
   assert.equal(dealerDraft.objects[0].name, '旧项目空间')
 
-  await logoutAndLogin('designer')
+  await logoutAndLogin('creator')
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
   await page.getByText('a.png', { exact: true }).last().waitFor()
   assert.equal(await page.getByText('legacy.png', { exact: true }).count(), 0)
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:USER-A:OFLR-A')).files[0].name), 'a.png')
 
   await logoutAndLogin('admin')
-  await page.getByText('系统管理员用于管理账号和工作区，不直接创建设计项目。请使用经销商主号或设计师账号登录。', { exact: true }).waitFor()
+  await page.getByText('系统管理员用于管理账号和工作区。请使用经销商主号或工作区成员账号进入项目设计。', { exact: true }).waitFor()
+  await page.getByTestId('topbar-role').filter({ hasText: /^系统管理员$/ }).waitFor()
   assert.equal(await page.getByRole('button', { name: '新建项目', exact: true }).count(), 0)
   assert.equal(await page.getByText('默认办公项目', { exact: true }).count(), 0)
   assert.deepEqual(errors, [])
@@ -195,8 +211,8 @@ try {
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
     if (path === '/api/v1/office/projects' && request.method() === 'GET') {
-      if (staleUser.userId === 'USER-A' && delayNext) { delayNext = false; await staleGate }
-      return respond(staleUser.userId === 'USER-A' ? [] : [legacyProject])
+      if (staleUser === users.designer && delayNext) { delayNext = false; await staleGate }
+      return respond(staleUser === users.designer ? [] : [legacyProject])
     }
     return respond(path.endsWith('/canvas') ? null : [])
   })

@@ -109,7 +109,7 @@ watch([show, () => props.item?.id], ([open]) => { if (open) void refresh() })
               </div>
             </article>
             <p v-if="!result.candidates.length" class="py-6 text-center text-muted">
-              {{ result.targetCategory === null ? '当前家具品类未确定，请先在产品选型中选择对应图例。' : result.eligibleVariantCount === 0 ? '暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。' : '暂无品类相关且尺寸可容纳的在售商品。' }}
+              {{ result.targetCategory === null ? '当前家具品类未确定，请先在产品选型中选择对应图例。' : result.eligibleVariantCount === 0 ? '暂无符合推荐条件的在售规格，请核对商品和规格的在售状态。' : '暂无品类相关且尺寸可容纳的在售商品。' }}
             </p>
           </template>
         </div>

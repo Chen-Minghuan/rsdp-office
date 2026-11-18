@@ -132,7 +132,7 @@ async function choose(candidate: ModuleProductCandidate) {
         </article>
         <div v-if="!candidates.length" class="text-xs text-muted py-5 space-y-2">
           <p v-if="result.targetCategory === null">当前家具品类未确定。可回到「产品选型」选择对应的家具图例，再确认排版。</p>
-          <template v-else-if="result.eligibleVariantCount === 0"><p>暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。</p><NuxtLink to="/products/audit" class="text-bronze underline">前往商品审核</NuxtLink></template>
+          <template v-else-if="result.eligibleVariantCount === 0"><p>暂无符合推荐条件的在售规格，请核对商品和规格的在售状态。</p><NuxtLink to="/products" class="text-bronze underline">查看商品库</NuxtLink></template>
           <p v-else>{{ result.candidates.length ? '该尺寸档暂无商品，可切换其他档位。' : '暂无品类相关且尺寸可容纳的在售商品。' }}</p>
         </div>
       </template>

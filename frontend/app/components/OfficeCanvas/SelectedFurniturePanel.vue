@@ -127,7 +127,7 @@ function onReplaceModule(event: Event) {
           </div>
         </dl>
         <p v-if="productStale" class="mt-1.5 rounded-none bg-amber-50 px-2 py-1.5 text-[10px] leading-relaxed text-amber-700" data-testid="white-model-product-stale">
-          该商品可能已下架或待审核；旧方案保留引用，新的商品推荐不会再包含它。替换商品请先确认排版后重新选择。
+          该商品或规格当前不可用。旧方案保留原选择，新的商品推荐会排除它。替换商品请先确认排版后重新选择。
         </p>
       </template>
       <template v-else>

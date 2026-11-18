@@ -53,10 +53,10 @@ import { authEnabled, useAuth } from '~/composables/useAuth'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
-const DEFAULT_WORKSPACE_ID = 'OFFICE-PROJECT-001'
+const LEGACY_WORKSPACE_ID = 'OFFICE-PROJECT-001'
 
 function legacyStorageKey(workspaceId: string) {
-  return workspaceId === DEFAULT_WORKSPACE_ID ? STORAGE_KEY : `${STORAGE_KEY}:${workspaceId}`
+  return workspaceId === LEGACY_WORKSPACE_ID ? STORAGE_KEY : `${STORAGE_KEY}:${workspaceId}`
 }
 
 function storageKey(workspaceId: string) {
@@ -64,10 +64,10 @@ function storageKey(workspaceId: string) {
 }
 
 function canMigrateLegacyDefaultDraft(workspaceId: string) {
-  if (!authEnabled || workspaceId !== DEFAULT_WORKSPACE_ID) return false
+  if (!authEnabled || workspaceId !== LEGACY_WORKSPACE_ID) return false
   const user = useAuth().user.value
   const project = useWorkspaceStore().currentProject
-  return !!user && project?.projectId === DEFAULT_WORKSPACE_ID && project.leader?.userId === user.userId
+  return !!user && project?.projectId === LEGACY_WORKSPACE_ID && project.leader?.userId === user.userId
 }
 
 interface OfficeState {
@@ -174,7 +174,7 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
     if (migrateLegacy) {
       localStorage.removeItem(legacyStorageKey(workspaceId))
       localStorage.removeItem(LEGACY_STORAGE_KEY)
-    } else if (workspaceId === DEFAULT_WORKSPACE_ID && !authEnabled) {
+    } else if (workspaceId === LEGACY_WORKSPACE_ID && !authEnabled) {
       localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
     const { undoStack, ...rest } = parsed

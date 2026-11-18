@@ -6,10 +6,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
+import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.office.dto.AssignableUserDto;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectMemberDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
@@ -19,9 +21,11 @@ import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
+import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -31,14 +35,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -59,6 +66,9 @@ public class OfficeProjectService {
     private final OfficeProjectAccessService accessService;
     private final OfficeAuditService auditService;
     private final ObjectMapper objectMapper;
+    private final OfficeCartMapper cartMapper;
+    private final RsdpCatalogGateway catalogGateway;
+    private final SharedCatalogService sharedCatalogService;
 
     public List<OfficeProjectDto> listProjects() {
         List<OfficeDesignProject> projects = projectMapper.selectList(
@@ -77,16 +87,70 @@ public class OfficeProjectService {
             .collect(Collectors.groupingBy(OfficeDesignFloor::getProjectId));
         Map<String, List<OfficeProjectMember>> membersByProject = membersByProject(projectIds);
         Map<String, OfficeUser> usersById = usersById(membersByProject);
+        Map<String, ProjectBudget> budgetsByProject = budgetsByProject(projectIds, floors);
         return projects.stream()
-            .map(project -> toProjectDto(project,
-                floorsByProject.getOrDefault(project.getProjectId(), List.of()),
-                membersByProject.getOrDefault(project.getProjectId(), List.of()),
-                usersById))
+            .map(project -> {
+                OfficeProjectDto dto = toProjectDto(project,
+                    floorsByProject.getOrDefault(project.getProjectId(), List.of()),
+                    membersByProject.getOrDefault(project.getProjectId(), List.of()),
+                    usersById);
+                ProjectBudget budget = budgetsByProject.getOrDefault(project.getProjectId(), ProjectBudget.complete());
+                dto.setBudgetTotal(budget.total());
+                dto.setBudgetStatus(budget.status());
+                return dto;
+            })
             .toList();
+    }
+
+    private Map<String, ProjectBudget> budgetsByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {
+        Map<String, ProjectBudget> budgets = new HashMap<>();
+        projectIds.forEach(projectId -> budgets.put(projectId, ProjectBudget.complete()));
+        if (floors.isEmpty()) {
+            return budgets;
+        }
+
+        Map<String, String> projectIdByFloorId = floors.stream()
+            .collect(Collectors.toMap(OfficeDesignFloor::getFloorId, OfficeDesignFloor::getProjectId));
+        List<OfficeCart> carts = cartMapper.selectList(new QueryWrapper<OfficeCart>().in("project_id", projectIdByFloorId.keySet()));
+        if (carts.isEmpty()) {
+            return budgets;
+        }
+
+        Set<String> projectIdsWithCart = carts.stream()
+            .map(cart -> projectIdByFloorId.get(cart.getProjectId()))
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        try {
+            Map<String, BigDecimal> priceByVariantId = new HashMap<>();
+            for (OfficeProductDto product : catalogGateway.listOfficeProducts(sharedCatalogService.resolveViewMode())) {
+                if (StringUtils.hasText(product.getId()) && product.getPrice() != null
+                    && product.getPrice().compareTo(BigDecimal.ZERO) > 0) {
+                    priceByVariantId.put(product.getId(), product.getPrice());
+                }
+            }
+
+            for (OfficeCart cart : carts) {
+                String projectId = projectIdByFloorId.get(cart.getProjectId());
+                if (projectId == null || cart.getQty() == null || cart.getQty() <= 0) {
+                    continue;
+                }
+                BigDecimal price = priceByVariantId.get(cart.getProductId());
+                if (price == null) {
+                    budgets.computeIfPresent(projectId, (ignored, budget) -> budget.pendingPricing());
+                    continue;
+                }
+                budgets.computeIfPresent(projectId, (ignored, budget) -> budget.add(price.multiply(BigDecimal.valueOf(cart.getQty()))));
+            }
+        } catch (RuntimeException catalogUnavailable) {
+            log.warn("项目列表预算读取商品目录失败，将展示为不可用: {}", catalogUnavailable.getMessage());
+            projectIdsWithCart.forEach(projectId -> budgets.put(projectId, ProjectBudget.unavailable()));
+        }
+        return budgets;
     }
 
     @Transactional
     public OfficeProjectDto createProject(CreateOfficeProjectRequest request) {
+        String workspaceId = accessService.workspaceForProjectCreation();
         if (request == null) {
             throw new BusinessException("项目参数不能为空");
         }
@@ -107,19 +171,11 @@ public class OfficeProjectService {
             floorNames.add(floorName);
         }
         List<ProjectReferenceImage> referenceImages = validateReferenceImages(request.getReferenceImages());
-        String workspaceId = null;
-        if (accessService.enforcementEnabled()) {
-            OfficeUser operator = accessService.currentUserOrNull();
-            workspaceId = operator != null ? operator.getWorkspaceId() : null;
-            if (!StringUtils.hasText(workspaceId)) {
-                throw new BusinessException("当前账号不属于任何工作区，不能创建项目");
-            }
-        }
         boolean membersProvided = StringUtils.hasText(request.getLeaderUserId())
             || (request.getCollaboratorUserIds() != null && !request.getCollaboratorUserIds().isEmpty());
         List<String> collaboratorIds = List.of();
         String leaderUserId = null;
-        if (membersProvided || accessService.enforcementEnabled()) {
+        if (membersProvided || workspaceId != null) {
             leaderUserId = request.getLeaderUserId();
             collaboratorIds = validateMemberSet(workspaceId, leaderUserId, request.getCollaboratorUserIds());
         }
@@ -519,6 +575,28 @@ public class OfficeProjectService {
         dto.setUpdatedAt(project.getUpdatedAt());
         dto.setFloors(floors.stream().map(this::toFloorDto).toList());
         return dto;
+    }
+
+    private record ProjectBudget(BigDecimal total, String status) {
+        private static final String COMPLETE = "COMPLETE";
+        private static final String PENDING_PRICING = "PENDING_PRICING";
+        private static final String UNAVAILABLE = "UNAVAILABLE";
+
+        static ProjectBudget complete() {
+            return new ProjectBudget(BigDecimal.ZERO, COMPLETE);
+        }
+
+        static ProjectBudget unavailable() {
+            return new ProjectBudget(null, UNAVAILABLE);
+        }
+
+        ProjectBudget add(BigDecimal amount) {
+            return new ProjectBudget(total.add(amount), status);
+        }
+
+        ProjectBudget pendingPricing() {
+            return new ProjectBudget(total, PENDING_PRICING);
+        }
     }
 
     private ProjectMemberDto toMemberDto(OfficeProjectMember member, OfficeUser user) {
