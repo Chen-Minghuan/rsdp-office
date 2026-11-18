@@ -23,8 +23,6 @@ public class ProductListItemDto {
     private String primaryImageUrl;
     private BigDecimal retailPrice;
     private String status;
-    private String auditStatus;
-    private String auditRemark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -4,13 +4,20 @@ import { authEnabled } from '~/composables/useAuth'
 const { isProjectWorkflow } = useWorkspaceNavigation()
 const auth = useAuth()
 const { user } = auth
+const workspace = useWorkspaceStore()
 
 const displayName = computed(() => user.value?.displayName || user.value?.username || (authEnabled ? '' : '本地开发'))
 const roleLabel = computed(() => {
-  if (!user.value) return ''
-  if (user.value.role === 'ADMIN') return '系统管理员'
-  if (user.value.role === 'DEALER') return '经销商主号'
-  return '设计师'
+  const account = user.value
+  if (!account) return ''
+  if (account.role === 'ADMIN') return '系统管理员'
+  if (account.role === 'DEALER') return '经销商主号'
+  if (!workspace.initialized) return ''
+
+  const project = workspace.currentProject
+  if (project?.leader?.userId === account.userId) return '项目负责人'
+  if (project?.collaborators.some(member => member.userId === account.userId)) return '项目协作者'
+  return workspace.projects.length ? '普通账号' : '设计师'
 })
 const avatarChar = computed(() => (displayName.value.trim()[0] || '').toUpperCase())
 

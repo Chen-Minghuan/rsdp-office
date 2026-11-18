@@ -39,13 +39,13 @@ Viewport（平移、缩放）独立于上述物理几何
 
 2026-10-17 曾移除项目资料及 office_project 表，历史迁移见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。2026-10-26 按最新需求新增 `office_design_project` / `office_design_floor` 和项目树、创建项目/楼层、添加楼层、修改客户需求接口。项目保存名称、需求备注及需求修订；楼层保存项目归属、名称和排序。
 
-楼层的 `floorId` 直接作为既有业务表 `project_id` 与路径 `projectId` 的隔离键，复用上传、画布、模板、选品和预览能力。默认 `OFFICE-PROJECT-001` 映射为默认项目/楼层以保留旧数据；上传与画布保存核验楼层存在。前端按楼层隔离 Office localStorage、识别 sessionStorage 和 IndexedDB 原图，切层时保存旧层并完整加载目标层，过期响应不得污染当前层。客户需求只作提醒，不自动使几何变化或替代下游复核。实现见 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md)。
+楼层的 `floorId` 直接作为既有业务表 `project_id` 与路径 `projectId` 的隔离键，复用上传、画布、模板、选品和预览能力。旧 `OFFICE-PROJECT-001` 项目与楼层映射保留历史数据。启动时只初始化表结构，项目和楼层由用户创建；上传与画布保存核验所选楼层存在。前端按楼层隔离 Office localStorage、识别 sessionStorage 和 IndexedDB 原图，切层时保存旧层并完整加载目标层，过期响应不得污染当前层。客户需求只作提醒，不自动使几何变化或替代下游复核。实现见 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md)。
 
 2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换为同事务删除+插入的原子操作且仅负责人可用。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
 
 2026-10-29 系统管理员与用户管理（AUTH-003）：全局角色只用既有 `office_user.role` 的 ADMIN/USER 两档，与项目内 LEADER/COLLABORATOR 无关（负责人不从管理员链路任命）。`/api/v1/office/admin/users` 提供列表/创建/停用启用/重置密码/删除，服务端逐接口 `requireAdmin`（认证关闭放行）；只存 PBKDF2 哈希，接口不返回哈希；停用与重置密码即删该用户全部会话；删除为硬删除，仍是项目负责人的账号拒绝删除（协作者关系与会话一并清除）。前端 `/users` 页与侧栏入口仅管理员可见。2026-11-06 按用户要求修订（见 TENANT-001）：**系统管理员唯一**——创建接口只接受 USER（设计师），经销商主号随工作区创建；停用/重置/删除只能作用于 USER/DEALER，任何 ADMIN 目标一律拒绝（含自己与开发模式），原「不能停自己/至少保留一位管理员」兜底随之移除；界面 USER 称「设计师」。见 [AUTH-003](tasks/AUTH-003-user-admin.md)。
 
-2026-11-06 工作区与经销商角色（TENANT-001）：在全局角色与项目角色之间新增工作区（经销商）隔离层。`office_workspace(workspace_id, name, owner_user_id 唯一)` 一个经销商主号恰好一个工作区；`office_user.role` 增加第三档 `DEALER`（经销商主号），`office_user.workspace_id` 记录账号归属、`office_user.source` 预留来源标记（`DEALER_STAFF`/`FACTORY_SALES`，一期不参与鉴权）；`office_design_project.workspace_id` 使项目唯一归属一个工作区（旧项目为空，保持 PROJECT-004 纯成员判定，补录留待后续）。访问规则（仅 `rsdp.auth.enabled=true` 强制）：项目有工作区时访问者须为项目成员且账号同属该工作区，或为该工作区主号（主号可读并管理本工作区项目成员，用于指定负责人）；跨工作区成员关系写入拒绝、读取双重校验；创建项目取当前账号工作区，无工作区账号不能创建；`/users/assignable` 限定本工作区账号池。系统管理员经 `GET/POST /api/v1/office/admin/workspaces` 创建工作区+主号（单事务）；经销商主号经 `/api/v1/office/workspace/me|users` 开户（仅 USER 角色）。`office_audit_log` 记录成员替换（前后集合）、开户与建工作区，与业务写入同事务；成员移出按请求实时查库即时生效（含已登录会话）。经销商主号可停用（工作区/项目/账号保留、会话失效）但拥有工作区时拒绝删除。开发模式下项目/成员接口放行，经销商主号接口因无法解析归属明确报错。字段级权限（出厂价/毛利/终端客户分权）与竞品屏蔽列二期。见 [TENANT-001](tasks/TENANT-001-workspace-roles.md)。
+2026-11-06 工作区与经销商角色（TENANT-001）：在全局角色与项目角色之间新增工作区（经销商）隔离层。`office_workspace(workspace_id, name, owner_user_id 唯一)` 一个经销商主号恰好一个工作区；`office_user.role` 增加第三档 `DEALER`（经销商主号），`office_user.workspace_id` 记录账号归属、`office_user.source` 预留来源标记（`DEALER_STAFF`/`FACTORY_SALES`，一期不参与鉴权）；`office_design_project.workspace_id` 使项目唯一归属一个工作区（旧项目为空，保持 PROJECT-004 纯成员判定，补录留待后续）。访问规则（仅 `rsdp.auth.enabled=true` 强制）：项目有工作区时访问者须为项目成员且账号同属该工作区，或为该工作区主号（主号可读并管理本工作区项目成员，用于指定负责人）；跨工作区成员关系写入拒绝、读取双重校验；创建项目仅限经销商主号，项目归属该主号拥有的工作区；`/users/assignable` 限定本工作区账号池。系统管理员经 `GET/POST /api/v1/office/admin/workspaces` 创建工作区+主号（单事务）；经销商主号经 `/api/v1/office/workspace/me|users` 开户（仅 USER 角色）。`office_audit_log` 记录成员替换（前后集合）、开户与建工作区，与业务写入同事务；成员移出按请求实时查库即时生效（含已登录会话）。经销商主号可停用（工作区/项目/账号保留、会话失效）但拥有工作区时拒绝删除。开发模式下项目/成员接口放行，经销商主号接口因无法解析归属明确报错。字段级权限（出厂价/毛利/终端客户分权）与竞品屏蔽列二期。见 [TENANT-001](tasks/TENANT-001-workspace-roles.md)。
 
 2026-11-14 历史项目归属与账号隔离（TENANT-002）：本机旧 `OFFICE-PROJECT-001` 保留原项目/楼层 ID 和全部画布修订，补录为「示例经销商」工作区项目，`dealer1` 任负责人、`designer1` 任协作者；其他环境不得复用本机工作区 ID，需逐环境确认归属。前端项目列表只接受服务端真实项目，空列表显示空状态、失败显示错误，不再生成默认项目或请求默认画布。登录与退出在重置 Pinia 后按 Nuxt baseURL 完整跳转；认证开启时，项目选择、画布 localStorage、识别 sessionStorage、效果图待提交参数和 IndexedDB 文件记录均包含会话用户 ID，项目/画布初始化与保存响应同时校验用户作用域和楼层，过期响应不得覆盖新账号。旧未分账号的默认草稿仅由该项目负责人迁移一次；IndexedDB 旧原图按授权楼层读取并复制到当前用户记录键，不删除旧文件。认证关闭的开发模式保留原缓存键。见 [TENANT-002](tasks/TENANT-002-project-ownership-session-isolation.md)。
 
@@ -54,6 +54,8 @@ Viewport（平移、缩放）独立于上述物理几何
 当前上传记录带 drawingId（同名同大小重传也更新）、analysisId、analysisPageNumber、appliedAnalysisId，原样保存在现有 files_json，无新增表。前端 floorPlan.sourceDrawingId 关联本地来源；旧草稿仅保留有限名称兼容。上传页和空间页按当前任务进入；未识别/识别中/失败显示当前图纸提示或预览，不展示旧几何。进入空间明确应用新图，导入前保留撤销快照，跨图替换移除旧坐标对象和模板；同分析恢复只补来源、不覆盖设计编辑，appliedAnalysisId 防止清空后的空间重填。详见 [UPLOAD-002](tasks/UPLOAD-002-drawing-canvas-handoff.md)。
 
 图片/PDF 上传页通过 `/api/v1/floor-plan/analyze` 的 `background=true` 启用后台识别（直连 Qwen）。先事务保存原图和独立分析 ID，再后台转换并事务发布标准预览，之后并行请求房间/尺寸候选与独立房名框，两者完成后校正轮廓并事务保存房间。GET 在 analyzing 时即可返回 previewUrl；processing 记录实际阶段、耗时和缓存命中。前端每秒查询，刷新/导航后从 sessionStorage 续查同一任务，完成或失败停查。保存状态与 DONE 进度分次提交，客户端同时等待进度终态。结果由用户应用到画布，不自动覆盖设计稿。未指定 background、CAD、外部 RSDP_VISION_URL 服务兼容同步协议。
+
+识别上传的历史参数 `projectId` 必须传当前楼层 ID。认证开启时，后端先从楼层查所属项目，再按画布接口的规则检查访问权限。读取识别结果、确认空间及尺寸标定按分析记录对应的楼层鉴权。识别后台任务使用提交时已保存的分析记录执行。
 
 任务池 2 个线程/8 个等待位，独立模型池 4 个线程/8 个等待位，满载明确失败。当前后台队列限单 Java 实例；进程重启时，启动扫描将遗留后台任务标为失败并保留底图，需要重新发起。标准 PNG 缓存按源 SHA256、页码、最长边、PDF DPI 和转换版本隔离，30 分钟 TTL、最多 8 项/64 MiB LRU；同键转换合并，不缓存 AI 或人工几何。详见 [RECOG-007](tasks/RECOG-007-progressive-recognition.md)。
 
@@ -142,9 +144,9 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 方案快照包含空间、排版、商品/变体、价格与选择版本；效果图依赖该快照。
 回包带输入版本，收到结果时比较当前版本；过期结果进入历史，不覆盖当前编辑状态。
 
-商品下架后禁止新推荐，但保留旧方案选择的快照和提示；确认方案时再次核验商品可用性。
+Office 将确认后的新商品通过 `POST /api/v1/products/factory-entry` 写入 RSDP 主库，由主库将商品与默认规格创建为 `active`。同外部编码更新已有商品时沿用主档的上下架状态。商品下架后禁止新推荐，但保留旧方案选择的快照和提示；确认方案时再次核验商品可用性。
 当前商品导入已把确认后的 `widthMm/depthMm/heightMm` 写入 `rspu_variant.dimensions`（JSONB，`unit=mm`）；尺寸原文保留在 `size_text`。旧 `widthCm/depthCm` 数据仍可读取。画布现有接口显示厘米，读取毫米时向上取整厘米，避免缩小占地；这只是旧候选适配，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
-本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订和在售审核状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
+本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订以及商品和变体的在售状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
 
 品类匹配从已保存家具图例或旧实例名称推导需求。网关保留主库 `categoryPath` 及规格名，目录同步时为分类和名称都模糊的商品补读详情中的 `sixDimTags`。尺寸适配后按品类证据和宽深贴合度计算 `relevanceScore`，`matchReason` 返回依据，旧 `fitRatio` 和 `tier` 继续表示尺寸。推荐和应用共用匹配逻辑，无品类相关性或有明显冲突的商品不会进入候选。
 供应商的包数、CBM 体积和重量原表值分别保存在变体字段，与采购数量、商品尺寸分开；重量源表没有明确单位，不推断为千克。

@@ -94,7 +94,7 @@ async function submitForm() {
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="mb-2 text-[25px] font-bold tracking-tight">手工录入商品</h1>
-          <p class="text-xs text-muted">按表单创建单个商品及默认规格，录入后进入待审核状态。</p>
+          <p class="text-xs text-muted">保存后，新商品直接上架。同一外部编码的商品会更新资料，保留原有上下架状态。</p>
         </div>
         <NuxtLink to="/products" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm hover:bg-cream">
           <AppIcon name="arrowLeft" size="4" />返回商品库
@@ -166,7 +166,7 @@ async function submitForm() {
           <input v-model="form.materialText" type="text" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：网布">
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted">工厂价</label>
+          <label class="text-xs font-medium text-muted">工厂价（新商品必填）</label>
           <input v-model.number="form.factoryPrice" type="number" min="0" step="0.01" class="rounded-lg border border-line px-3 py-2.5 text-sm outline-bronze" placeholder="如：899">
         </div>
         <div class="flex flex-col gap-1.5">

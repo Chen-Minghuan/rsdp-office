@@ -129,7 +129,7 @@ onMounted(async () => {
                 <div><dt class="mb-1 text-xs text-muted">商品名称</dt><dd class="text-sm font-semibold text-ink">{{ product.productName || '—' }}</dd></div>
                 <div><dt class="mb-1 text-xs text-muted">主色</dt><dd class="text-sm text-ink">{{ product.colorPrimaryName || '—' }}</dd></div>
                 <div><dt class="mb-1 text-xs text-muted">外部编码</dt><dd class="break-all text-sm text-ink">{{ product.externalCode || '—' }}</dd></div>
-                <div><dt class="mb-1 text-xs text-muted">审核状态</dt><dd class="text-sm text-ink">{{ product.auditStatus === 'pending' ? '待审核' : product.auditStatus === 'approved' ? '已通过' : product.auditStatus || '—' }}</dd></div>
+                <div><dt class="mb-1 text-xs text-muted">在售状态</dt><dd class="text-sm text-ink">{{ product.status === 'active' ? '在售' : product.status ? '非在售' : '—' }}</dd></div>
               </dl>
               <div class="mt-5 border-t border-line pt-4"><div class="mb-1 text-xs text-muted">描述 / 配置说明</div><p class="whitespace-pre-wrap text-sm leading-6 text-ink">{{ product.description || '暂无说明' }}</p></div>
             </div>

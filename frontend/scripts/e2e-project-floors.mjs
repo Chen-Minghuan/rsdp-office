@@ -25,7 +25,7 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   // 本地构建默认开启鉴权（frontend/.env VITE_AUTH_ENABLED=1），需 mock 会话接口
-  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试经销商', role: 'DEALER' } } }))
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -37,6 +37,10 @@ try {
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
     if (path === '/api/v1/office/projects' && request.method() === 'GET') return respond(projects)
+    if (path === '/api/v1/floor-plan/analyze') return respond({ analysisId: 'ANALYSIS-2F', taskId: 'TASK-2F' })
+    if (path === '/api/v1/floor-plan/ANALYSIS-2F') {
+      return respond({ analysisId: 'ANALYSIS-2F', projectId: 'OFLR-2', status: 'awaiting_confirm', rooms: [] })
+    }
     if (path === '/api/v1/office/projects' && request.method() === 'POST') {
       const body = request.postDataJSON()
       const isSecondProject = projects.length > 0
@@ -85,6 +89,37 @@ try {
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
   assert.match(page.url(), /floorId=OFLR-1/)
 
+  const navigation = page.getByRole('navigation', { name: '工作区导航' })
+  await navigation.getByRole('link', { name: '商品库', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/products')
+  await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^1F/ }).click()
+  await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-1')
+
+  await navigation.getByRole('link', { name: '商品库', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/products')
+  await page.getByRole('button', { name: '2F', exact: true }).click()
+  await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-2')
+
+  await navigation.getByRole('link', { name: '导入记录', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/products/import-records')
+  await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^2F/ }).click()
+  await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-2')
+  await page.getByRole('button', { name: '1F', exact: true }).click()
+  await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
+
+  await page.goto(`${baseUrl}/products?floorId=OFLR-1&mode=design&zoneId=OLD-ZONE&analysisId=OLD-ANALYSIS`, { waitUntil: 'networkidle' })
+  await page.getByRole('button', { name: '2F', exact: true }).click()
+  await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
+  assert.deepEqual([...new URL(page.url()).searchParams.entries()], [['floorId', 'OFLR-2']])
+  await page.getByRole('button', { name: '1F', exact: true }).click()
+  await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
+
   await page.locator('input[type="file"]').setInputFiles({ name: 'first.png', mimeType: 'image/png', buffer: png })
   await page.getByText('first.png', { exact: true }).last().waitFor()
   await page.getByRole('button', { name: '折叠1F空间', exact: true }).click()
@@ -99,6 +134,14 @@ try {
   assert.equal(await page.getByText('first.png', { exact: true }).count(), 0)
   await page.locator('input[type="file"]').setInputFiles({ name: 'second.png', mimeType: 'image/png', buffer: png })
   await page.getByText('second.png', { exact: true }).last().waitFor()
+  const recognitionRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/floor-plan/analyze')
+  await page.getByRole('button', { name: '识别图纸', exact: true }).click()
+  const request = await recognitionRequest
+  const form = await new Response(request.postDataBuffer(), {
+    headers: { 'Content-Type': request.headers()['content-type'] },
+  }).formData()
+  assert.equal(form.get('projectId'), 'OFLR-2')
+  await page.getByText('识别房间', { exact: true }).waitFor()
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByText('second.png', { exact: true }).last().waitFor()
   await page.getByRole('button', { name: '1F', exact: true }).click()
@@ -200,6 +243,21 @@ try {
   await page.getByRole('button', { name: '1 项目创建', exact: true }).click()
   await page.getByRole('heading', { name: '创建办公项目', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭创建项目', exact: true }).click()
+  await page.evaluate(() => {
+    const office = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    office.$patch({ objects: [{
+      id: 'NAVIGATION-ZONE', kind: 'zone', name: '导航会议室', zoneType: 'MEETING_ROOM',
+      x: 0, y: 0, w: 4000, h: 3000, polygon: [[0, 0], [4000, 0], [4000, 3000], [0, 3000]],
+    }] })
+  })
+  await navigation.getByRole('link', { name: '商品库', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/products')
+  await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^3F/ }).click()
+  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === 'OFLR-3')
+  await page.getByRole('button', { name: '一层', exact: true }).click()
+  await page.getByRole('heading', { name: '一层 · 上传办公图纸', exact: true }).waitFor()
+  assert.deepEqual([...new URL(page.url()).searchParams.entries()], [['floorId', 'OFLR-1']])
+  await page.getByText('first.png', { exact: true }).last().waitFor()
   assert.ok(saves.every(save => save.path.includes(save.body.projectId)), '画布保存必须使用原楼层隔离键')
   assert.deepEqual(errors, [])
   console.log('E2E project floors passed')

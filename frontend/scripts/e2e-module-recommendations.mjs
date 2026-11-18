@@ -250,8 +250,8 @@ try {
   assert.equal(await panel.locator('[data-product-id]').count(), 0)
   noCatalog = true
   await panel.getByRole('button', { name: '重新匹配' }).click()
-  await panel.getByText('暂无已上架、审核通过且有有效规格的商品，请先核对商品审核和规格。').waitFor()
-  assert.equal(await panel.getByRole('link', { name: '前往商品审核' }).count(), 1)
+  await panel.getByText('暂无符合推荐条件的在售规格，请核对商品和规格的在售状态。').waitFor()
+  assert.equal(await panel.getByRole('link', { name: '查看商品库' }).getAttribute('href'), '/products')
   fail = true
   await panel.getByRole('button', { name: '重新匹配' }).click()
   await panel.getByRole('alert').filter({ hasText: '推荐服务暂不可用' }).waitFor()

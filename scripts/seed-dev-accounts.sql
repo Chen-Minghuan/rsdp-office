@@ -45,13 +45,12 @@ DECLARE
     account_id TEXT;
     new_password TEXT;
     dev_workspace CONSTANT TEXT := 'DEV-OFFICE-WORKSPACE';
-    dev_project CONSTANT TEXT := 'DEV-OFFICE-PROJECT';
 BEGIN
     FOR account IN SELECT * FROM (VALUES
         (1, 'admin',    '开发系统管理员', 'ADMIN', NULL),
         (2, 'dealer',   '开发经销商主号', 'DEALER', 'DEALER_STAFF'),
         (3, 'lead',     '开发项目负责人', 'USER', 'DEALER_STAFF'),
-        (4, 'designer', '开发设计师',     'USER', 'DEALER_STAFF'),
+        (4, 'designer', '开发项目协作者', 'USER', 'DEALER_STAFF'),
         (5, 'factory',  '开发厂家业务员', 'USER', 'FACTORY_SALES')
     ) AS accounts(position, username, display_name, role, source) ORDER BY position LOOP
         account_id := 'DEV-OFFICE-DEV_' || upper(account.username);
@@ -98,21 +97,13 @@ BEGIN
         RAISE EXCEPTION '开发工作区的归属与种子数据不一致';
     END IF;
 
-    INSERT INTO office_design_project (project_id, name, workspace_id)
-    VALUES (dev_project, '本地开发示例项目', dev_workspace)
-    ON CONFLICT (project_id) DO NOTHING;
-
-    IF FOUND THEN
-        INSERT INTO office_design_floor (floor_id, project_id, name)
-        VALUES ('DEV-OFFICE-FLOOR-1', dev_project, '1F');
-
-        INSERT INTO office_project_member (project_id, user_id, role)
-        VALUES (dev_project, 'DEV-OFFICE-DEV_LEAD', 'LEADER'),
-               (dev_project, 'DEV-OFFICE-DEV_DESIGNER', 'COLLABORATOR'),
-               (dev_project, 'DEV-OFFICE-DEV_FACTORY', 'COLLABORATOR');
-    END IF;
 END;
 $$;
+
+UPDATE office_user
+SET display_name = '开发项目协作者', updated_at = CURRENT_TIMESTAMP
+WHERE user_id = 'DEV-OFFICE-DEV_DESIGNER' AND username = 'designer'
+    AND display_name = '开发设计师';
 
 COMMIT;
 

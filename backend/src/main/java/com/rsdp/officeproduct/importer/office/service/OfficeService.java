@@ -42,12 +42,7 @@ public class OfficeService {
     private final SharedCatalogService sharedCatalogService;
     private final ObjectMapper objectMapper;
 
-    private static final String DEFAULT_PROJECT_ID = "OFFICE-PROJECT-001";
-
     public CanvasDto getCanvas(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         List<OfficeCanvas> list = canvasMapper.selectList(
             new QueryWrapper<OfficeCanvas>().eq("project_id", projectId).orderByDesc("created_at").orderByDesc("canvas_id").last("limit 1"));
@@ -66,7 +61,7 @@ public class OfficeService {
         if ("design".equals(request.getMode())) {
             OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(request.getObjects()), request.getDesignZoneId());
         }
-        String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
+        String projectId = request.getProjectId();
         projectService.requireFloor(projectId);
         accessService.requireFloorAccess(projectId);
         workspaceLocks.lockWorkspace(projectId);
@@ -146,9 +141,6 @@ public class OfficeService {
     }
 
     public List<CartItemDto> listCart(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         List<OfficeCart> list = cartMapper.selectList(
             new QueryWrapper<OfficeCart>().eq("project_id", projectId).orderByAsc("created_at"));
@@ -212,9 +204,6 @@ public class OfficeService {
     }
 
     public List<AgentMessageDto> listMessages(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         List<OfficeAgentMessage> list = messageMapper.selectList(
             new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId).orderByAsc("created_at"));
@@ -251,9 +240,6 @@ public class OfficeService {
 
     @Transactional
     public void resetProjectData(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", projectId));
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));

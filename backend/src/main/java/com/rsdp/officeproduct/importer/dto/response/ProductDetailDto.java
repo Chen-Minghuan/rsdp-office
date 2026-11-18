@@ -21,8 +21,6 @@ public class ProductDetailDto {
     private String primaryImageUrl;
     private String detailImageUrls;
     private String status;
-    private String auditStatus;
-    private String auditRemark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime deletedAt;

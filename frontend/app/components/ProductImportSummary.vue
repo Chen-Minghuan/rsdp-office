@@ -36,7 +36,8 @@ function downloadFailures() {
       <AppIcon :name="result.failedCount ? 'warning' : 'checkCircle'" size="5" />
       <div>
         <h2 class="text-sm font-semibold">{{ resultTitle }}</h2>
-        <p class="mt-1 text-xs leading-relaxed">成功 {{ result.successCount }} 行，失败 {{ result.failedCount }} 行，跳过 {{ result.skippedCount }} 行，关联内嵌图片 {{ result.embeddedImageCount || 0 }} 张。成功行已写入商品库，状态为「待审核」。</p>
+        <p class="mt-1 text-xs leading-relaxed">成功 {{ result.successCount }} 行，失败 {{ result.failedCount }} 行，跳过 {{ result.skippedCount }} 行，关联内嵌图片 {{ result.embeddedImageCount || 0 }} 张。</p>
+        <p v-if="result.successCount" class="mt-1 text-xs leading-relaxed">成功行已写入商品库。新商品直接上架，已更新的商品保留原有上下架状态。</p>
       </div>
     </div>
     <dl class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">

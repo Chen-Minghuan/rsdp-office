@@ -1,5 +1,17 @@
 # 开发进度与下一步
 
+2026-11-18 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md#2026-11-18-从商品资源返回楼层) 修复从商品库点击楼层后仍停留在商品库的问题，空楼层进入上传页，已有空间的楼层进入总览，重复点击当前楼层也生效。前端构建、四项模拟 UI 通过，本地 3001 已更新，真实负责人会话导航核验通过。
+
+2026-11-17 [TENANT-001](tasks/TENANT-001-workspace-roles.md#2026-11-17-经销商创建项目) 创建项目限经销商主号；普通账号无项目时由项目栏进入「请联系经销商」提示。启动及账号初始化不再自动建项目。隔离数据库验证空库和账号权限通过，前端构建、四项模拟 UI、Java（280 通过、3 跳过）通过。未部署。
+
+2026-11-17 [TENANT-002](tasks/TENANT-002-project-ownership-session-isolation.md#2026-11-17-图纸识别按楼层权限执行) 识别与画布统一按当前楼层校验项目访问权限。前端构建及三项模拟 UI 通过，Java 278 通过、3 跳过，独立本地后端验证负责人 PNG 后台识别权限，模型响应为模拟。未部署。
+
+2026-11-17 [CAT-007](tasks/CAT-007-publish-on-entry.md) 清理商品审核残留。手工保存和批量确认由 RSDP 主库直接创建在售新商品，覆盖更新沿用商品当前上下架状态。旧审核地址跳转到商品库，商品详情只显示在售状态。前端构建、三项模拟 UI、Java（275 通过、3 跳过）和本机真实商品接口只读核对通过，新商品实写待验证。
+
+2026-11-17 商品图片代理修复同步至主分支：Office 重新发送二进制响应时只保留适用的内容和缓存头，避免重复发送分块传输头。Java 回归执行 278 项、0 失败、0 错误、3 跳过；本地真实浏览器验证两张商品图片和原图切换，图片接口返回 200 且字节与 RSDP 原图一致。
+
+2026-11-17 [TENANT-001](tasks/TENANT-001-workspace-roles.md#2026-11-17-账号和项目角色称呼) 前端顶栏按所选项目显示负责人和协作者，未加入项目的普通账号显示「设计师」。构建、账号隔离和工作流模拟回归通过，五个本地测试账号的真实顶栏显示已验证。
+
 2026-11-17 [AUTH-001](tasks/AUTH-001-user-login.md#2026-11-17-本地测试账号初始化) 增加本地开发 SQL 种子。一次执行创建测试账号、工作区和示例项目，库内无系统管理员时创建一个，随机密码仅在新建时输出。独立 PostgreSQL 16 验证账号关系、重复及并发执行、已有管理员和冲突回滚，Java 密码校验通过。本机开发库执行后新增四个测试账号，保留现有管理员，四个账号均通过真实浏览器登录、项目访问及退出验证。
 
 2026-11-17 [AUTH-001](tasks/AUTH-001-user-login.md#2026-11-17-首次访问登录页修复) 首次访问登录页：应用外壳按 Vue Router 当前路由挂载登录页，修复地址已跳转但仍渲染工作区的问题；前端默认认证，顶栏显示真实会话身份。无 Cookie 浏览器访问本地首页、画布、商品库，真实后端返回 401 后均显示登录表单且未请求工作区 API。构建、账号隔离、工作流和冒烟模拟回归通过。未部署公网。
@@ -332,11 +344,11 @@
 | DOC-001 | 需求、规则、规范与进度基线 | 已验收（文档）；本轮新增文档及 README 同步 | 文档检查通过；后续业务任务按对应标准另行验收 | P0 |
 | DOC-002 | PDF/PNG 空间编辑首期文档调整 | 已验收（文档）；三份 Spatial 目标文档及项目基线已调整，见 [任务记录](tasks/DOC-002-spatial-canvas-first-phase.md) | 本地链接、JSON 示例、契约一致性及差异检查通过；不代表功能实现 | P0 |
 | DOC-003 | 几何、接口/存储、确认失效和真实样本附件 | 已验收（文档/契约结构）；四份附件、API schema/报文及待填样本清单，见 [任务记录](tasks/DOC-003-spatial-contract-attachments.md) | 文档链接、schema 正反用例、一致性检查通过；真实识别/SQL/业务代码未实施 | P0 |
-| CAT-001 | 商品入库与可恢复上下架 | 部分实现；已有导入、预览、手工录入、审核、编辑和删除代码；商品库支持 10/20/50/100 条分页、首页/末页跳转及带清单确认的批量永久删除，模拟接口跨页操作已验证（见 [CAT-004](tasks/CAT-004-product-pagination-hard-delete.md)）；供应商工作簿可转换为预览行，见 [CAT-002](tasks/CAT-002-workbook-image-ingest.md) | 真实数据库导入、独立上下架流程、刷新持久化、推荐过滤及旧方案处理；补充批量删除真实服务验收 | P0 |
+| CAT-001 | 商品入库与可恢复上下架 | Office 提供预览、批量导入、手工录入及列表和详情。商品资料和上下架由 RSDP 主库维护。新商品确认即上架，见 [CAT-007](tasks/CAT-007-publish-on-entry.md) | 确认导入后真实状态回读、上下架与推荐和旧方案联动 | P0 |
 | CAT-002 | 系统导入时自动提取内嵌图片 | 已编码待补图验收；普通图、组合图、WPS 图片和合并图片区解析；`16FMT001` 锚定图的说明编码错误已纳入候选，默认不选、需人工勾选；预览可逐行排除图片并选择主图，详见 [CAT-002](tasks/CAT-002-workbook-image-ingest.md) | 用户在原端口复核并补入 `16FMT001` 两张图，核对商品详情、其他冲突图片、重复/失败路径及部署持久存储 | P0 |
 | CAT-003 | 供应商商品尺寸与预览适配 | 已编码待完整验收；F 列合并说明、浮点尾数归一、包装字段、图片预览和品类码清理已完成；双宽度拆分形成 220 条规格；用户补入单行失败商品后数据库已有 211 商品、220 规格，详见 [任务记录](tasks/CAT-003-supplier-size-import.md) | 核对缺图商品补图、价格、规格和正式导入结果；完整尺寸推荐另按 RECOMMEND-001 实施 | P0 |
 | CAT-005 | 商品大图与悬停放大查看 | 已编码并完成真实商品页面浏览器检查；详情页主图局部放大镜、列表缩略图统一外框内按原图比例完整展示、悬停预览按原图比例展示整图、详情点击全屏完整预览；详情布局与白色图片背景已调整，见 [任务记录](tasks/CAT-005-product-image-gallery.md) | 用户在常用浏览器复核不同宽高比和移动端显示 | P1 |
-| CAT-006 | 商品批量审核与一键全部通过 | 已编码；审核页勾选批量通过/驳回、一键全部通过（弹窗确认），后端批量接口只处理仍为待审核的商品并返回处理/跳过数量；构建、Java 184 项（含新增 4 项）、差异检查通过，见 [任务记录](tasks/CAT-006-product-batch-audit.md) | 真实数据库与运行后端上的批量审核验证，并发下跳过统计核对 | P1 |
+| CAT-006 | 商品批量审核与一键全部通过 | 已下线，见[历史记录](tasks/CAT-006-product-batch-audit.md) | 商品确认入库流程见 [CAT-007](tasks/CAT-007-publish-on-entry.md) | — |
 | RECOG-003 | 图中尺寸与自动比例候选 | 后端候选/确认链路已实现并通过专项验证（48 项 Java、构建、专项 UI 模拟、一次性 DB 确认链路、真实 PNG 候选），见[任务记录](tasks/RECOG-003-dimension-calibration.md)；2026-10-21 按需求移除前端“图中尺寸自动校准”面板，空间核对统一使用两点校准，后端接口保留 | 真实 PNG 候选待用户确认；更多 PNG/PDF 的质量验收，非标准/模糊尺寸仍需人工校准 | P0 |
 | RECOG-001 | CAD 真实识别链路 | 已编码待验证；上传页 → Java `/api/v1/cad/parse` → CAD 服务 | 真实办公 DWG/DXF、目标选择、单位、未命名空间和失败路径验收 | P0 |
 | RECOG-002 | PDF/PNG 真实识别 | 已接入 Qwen-VL，当前默认切换为 `qwen3-vl-max`，后端环境密钥、PDF 选页渲染、候选/预览适配及明确错误已编码；[接入任务](tasks/RECOG-002-qwen-vl-integration.md) | 真实百炼调用与附件 D 原始自动质量待验收；像素比例校准及人工空稿按 Spatial 任务继续推进 | P0 |
@@ -386,7 +398,7 @@
 | LAYOUT-015 | 严格按四张参考图排布 | 已实现，构建、全部 10 预设坐标/镜像/间距与专项 UI mock 通过；T 型 12 件、C 型 8 件、十字 16 件，座席朝向与整组保留见[任务记录](tasks/LAYOUT-015-exact-reference-presets.md) | 用户实际空间待核对；旧布局需显式重新应用，不静默改写 | P1 |
 | LAYOUT-016 | 按场地自适应参考样式 | 已实现，构建、算法与专项 UI mock 通过；样式不变，数量/方向按轮廓与障碍计算，同尺寸矩形测试 6 件上限修正为 36 件，见[任务记录](tasks/LAYOUT-016-space-adaptive-reference-layout.md) | 用户纠正覆盖 LAYOUT-015 固定示例件数；真实建筑与全局最优不扩大验收 | P1 |
 | LAYOUT-042 | 应用手动调整后的排版预览 | 已编码待验证；单/组合预览直接提交、硬校验、确认失效与重复提交逻辑清理完成，构建/纯函数及相关 UI mock 通过，见[任务记录](tasks/LAYOUT-042-apply-edited-preview.md) | 真实用户空间的拖动应用与数据库保存回读待业务复核 | P1 |
-| RECOMMEND-002 | 单位模块向下兼容尺寸推荐 | 已实现并通过专项验证；精确毫米/三档/旋转、真实 SKU、同规格批量选择与独立快照；Java 97 项、构建、专项及相关 UI mock 通过，见[任务记录](tasks/RECOMMEND-002-module-size-matching.md) | 当前本地库商品均待审核；真实服务集成、品类/结构与整体方案另行验收 | P1 |
+| RECOMMEND-002 | 单位模块向下兼容尺寸推荐 | 已实现并通过专项验证；精确毫米/三档/旋转、真实 SKU、同规格批量选择与独立快照；Java 97 项、构建、专项及相关 UI mock 通过，见[任务记录](tasks/RECOMMEND-002-module-size-matching.md) | 真实服务集成、品类/结构与整体方案另行验收 | P1 |
 | RECOMMEND-001 | 已确认排版后的真实商品推荐 | 部分实现；模块宽深匹配及真实变体选择已按 RECOMMEND-002 落地，旧候选入口仍兼容 | 完整品类/结构与使用约束、方案确认、旧清单失效/复核及真实服务集成 | P1 |
 | RENDER-001 | 已确认方案效果图 | 正式已确认商品方案生成仍待开始；独立概念预览见 RENDER-002 | 正式方案条件核验、商品外观资源与精确对应验收 | P2 |
 | RENDER-002 | 单空间二维概念效果预览 | 已实现，Java 97 项、构建、专项模拟 UI/冒烟及两次真实百炼生图通过；独立 DB 验证去重、图片保存与修改后历史标记，见[任务记录](tasks/RENDER-002-single-space-preview.md) | 合成布局仅验证真实链路；模型仍可能补充家具/门窗，概念图不替代精确对应验收；完整工作流仍在旧商品详情选择器失败 | P1 |
@@ -398,7 +410,7 @@ P0 是后续设计流程的数据与业务基础；P1 依赖空间与确认基�
 
 ## 3. 关键源码证据
 
-- 商品：[接口](../backend/src/main/java/com/rsdp/officeproduct/importer/controller/ProductImportController.java)、[审核服务](../backend/src/main/java/com/rsdp/officeproduct/importer/service/ProductAuditService.java)、[商品页](../frontend/app/pages/products/index.vue)。
+- 商品：[接口](../backend/src/main/java/com/rsdp/officeproduct/importer/controller/ProductImportController.java)、[录入网关](../backend/src/main/java/com/rsdp/officeproduct/importer/service/MainProductEntryGateway.java)、[商品页](../frontend/app/pages/products/index.vue)。
 - 识别与导入：[上传页](../frontend/app/pages/index.vue)、[API 客户端](../frontend/app/composables/useOfficeApi.ts)、[vision 客户端](../backend/src/main/java/com/rsdp/officeproduct/importer/service/VisionRecognitionClient.java)。
 - 当前画布模型：[类型](../frontend/app/types/office.ts)、[空间核对](../frontend/app/components/OfficeCanvas/SpaceReview.vue)、[统一渲染](../frontend/app/components/OfficeCanvas/SpatialCanvas.vue)、[坐标/几何适配](../frontend/app/utils/spatial/review.ts)；单空间排版保留 [CanvasBoard](../frontend/app/components/OfficeCanvas/CanvasBoard.vue)。
 - 排版：[算法](../frontend/app/utils/layout.ts)、[排版侧栏](../frontend/app/components/OfficeCanvas/DesignLayoutSidebar.vue)、[商品候选侧栏](../frontend/app/components/OfficeCanvas/DesignSidebar.vue)。
@@ -410,7 +422,7 @@ P0 是后续设计流程的数据与业务基础；P1 依赖空间与确认基�
 2. 后端 DesignScene API 与表已落地，但幂等回执、数据库集成测试、全稿删除/关系/质量处理尚未完成。
 3. `/canvas` 已支持多空间/L 形顶点编辑、撤销与本地刷新恢复的模拟回归；仍使用兼容 Office Canvas 保存，完整 DesignScene 写队列、整体确认版本快照和 409 冲突合并 UI 待补齐。
 4. 单位模块已可使用未绑定商品的共享家具图例；完整的布局需求、约束校验与商品匹配/版本约束仍需推进。
-5. 商品 status 与 auditStatus 分开存在，但审核不是上下架；不能凭已有 approve/reject 接口认为上下架完成。
+5. 商品在售状态取自主库。尚需端到端核对上下架后新的推荐和旧方案引用提示。
 6. 图片/PDF 已接入 Qwen，未配置密钥明确报错；旧演示记录仍为演示。新候选使用来源像素坐标；自动尺寸校验后仍待用户确认比例，一张真实 PNG 已获得一致参考，跨样本质量未验收。
 
 ## 5. 建议执行顺序

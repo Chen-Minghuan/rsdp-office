@@ -150,6 +150,7 @@ public class OfficeProjectService {
 
     @Transactional
     public OfficeProjectDto createProject(CreateOfficeProjectRequest request) {
+        String workspaceId = accessService.workspaceForProjectCreation();
         if (request == null) {
             throw new BusinessException("项目参数不能为空");
         }
@@ -170,19 +171,11 @@ public class OfficeProjectService {
             floorNames.add(floorName);
         }
         List<ProjectReferenceImage> referenceImages = validateReferenceImages(request.getReferenceImages());
-        String workspaceId = null;
-        if (accessService.enforcementEnabled()) {
-            OfficeUser operator = accessService.currentUserOrNull();
-            workspaceId = operator != null ? operator.getWorkspaceId() : null;
-            if (!StringUtils.hasText(workspaceId)) {
-                throw new BusinessException("当前账号不属于任何工作区，不能创建项目");
-            }
-        }
         boolean membersProvided = StringUtils.hasText(request.getLeaderUserId())
             || (request.getCollaboratorUserIds() != null && !request.getCollaboratorUserIds().isEmpty());
         List<String> collaboratorIds = List.of();
         String leaderUserId = null;
-        if (membersProvided || accessService.enforcementEnabled()) {
+        if (membersProvided || workspaceId != null) {
             leaderUserId = request.getLeaderUserId();
             collaboratorIds = validateMemberSet(workspaceId, leaderUserId, request.getCollaboratorUserIds());
         }

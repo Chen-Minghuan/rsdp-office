@@ -13,6 +13,8 @@ let listMode = 'success'
 let importMode = 'partial'
 let importRequests = 0
 let overwriteRequested = false
+let legacyAuditDetailRequests = 0
+let manuallyCreatedProduct = null
 const products = Array.from({ length: 23 }, (_, index) => ({
   rspuId: `PRODUCT-${index + 1}`,
   rspuCode: `RSDP-${String(index + 1).padStart(3, '0')}`,
@@ -49,16 +51,18 @@ await context.route('**/api/v1/**', async route => {
   const url = new URL(request.url())
   const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: status === 200 ? '成功' : '服务暂不可用', data }) })
   if (url.pathname === '/api/v1/office/projects' && request.method() === 'GET') return respond([defaultProject])
-  if (url.pathname.startsWith('/api/v1/products/') && request.method() === 'GET') {
-    const found = products.find(item => url.pathname.endsWith('/' + item.rspuId))
-    if (found) return respond(found)
+  if (url.pathname === '/api/v1/products/audit') legacyAuditDetailRequests += 1
+  if (url.pathname === '/api/v1/products/manual' && request.method() === 'POST') {
+    manuallyCreatedProduct = { rspuId: 'PRODUCT-MANUAL', productName: request.postDataJSON().productName, status: 'active', images: [], variants: [] }
+    return respond({ rspuId: manuallyCreatedProduct.rspuId, updated: false })
   }
   if (url.pathname === '/api/v1/products' && request.method() === 'GET') {
     if (listMode === 'error') return respond(null, 404)
     return respond(listMode === 'empty' ? [] : products)
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
-    const product = products.find(item => item.rspuId === url.pathname.split('/').at(-1))
+    const rspuId = url.pathname.split('/').at(-1)
+    const product = products.find(item => item.rspuId === rspuId) ?? (manuallyCreatedProduct?.rspuId === rspuId ? manuallyCreatedProduct : null)
     return respond({ ...product, images: [], variants: [] })
   }
   if (url.pathname === '/api/v1/products/import-template') return route.fulfill({ status: 200, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('test-template') })
@@ -106,6 +110,8 @@ try {
   assert.equal(await page.locator('tbody tr').count(), 1)
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
+  await page.getByText('在售状态', { exact: true }).waitFor()
+  assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
   await heading('没有找到匹配的商品')
@@ -167,6 +173,8 @@ try {
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByRole('alert').filter({ hasText: '正在处理导入' }).waitFor()
   await page.getByRole('heading', { name: '处理完成，部分商品未能导入' }).waitFor()
+  await page.getByText(/新商品直接上架，已更新的商品保留原有上下架状态/).waitFor()
+  assert.equal(await page.locator('a[href="/products/audit"]').count(), 0)
   assert.equal(await page.getByRole('alert').filter({ hasText: /失败|未完成/ }).count(), 0)
   assert.equal(importRequests, 1)
   assert.equal(overwriteRequested, true)
@@ -193,11 +201,27 @@ try {
   importMode = 'skipped'
   await page.getByRole('button', { name: '确认并执行导入' }).click()
   await page.getByRole('heading', { name: '处理完成，已跳过重复商品' }).waitFor()
+  assert.equal(await page.getByText(/成功行已写入商品库/).count(), 0)
   assert.equal(overwriteRequested, false)
   assert.equal(importRequests, 3)
   await page.getByRole('link', { name: '查看导入记录' }).click()
   await heading('导入记录')
   assert.equal(await page.locator('tbody tr').count(), 3)
+
+  await page.goto(`${baseUrl}/products/audit`, { waitUntil: 'networkidle' })
+  await page.waitForURL('**/products')
+  await heading('商品库')
+  assert.equal(legacyAuditDetailRequests, 0)
+
+  await page.goto(`${baseUrl}/products/manual`, { waitUntil: 'networkidle' })
+  await heading('手工录入商品')
+  await page.getByText(/保存后，新商品直接上架/).waitFor()
+  await page.getByPlaceholder('如：人体工学办公椅').fill('手工录入验证椅')
+  await page.getByPlaceholder('如：899', { exact: true }).fill('899')
+  await page.getByRole('button', { name: '保存商品', exact: true }).click()
+  await page.waitForURL('**/products/PRODUCT-MANUAL')
+  await heading('手工录入验证椅')
+  await page.getByRole('definition').filter({ hasText: /^在售$/ }).waitFor()
 
   listMode = 'error'
   await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
