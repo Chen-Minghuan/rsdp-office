@@ -75,6 +75,31 @@ try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   const appSidebar = page.getByTestId('app-sidebar')
   assert.equal(await appSidebar.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '侧栏应隐藏原生纵向滚动条，但保留滚动能力')
+  const sidebarResizeHandle = page.getByTestId('sidebar-resize-handle')
+  assert.equal(await sidebarResizeHandle.count(), 1, '桌面端应提供侧栏宽度拖拽把手')
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 240, '侧栏默认宽度应为 240px')
+
+  async function dragSidebarTo(offsetX) {
+    const box = await sidebarResizeHandle.boundingBox()
+    assert.ok(box, '侧栏拖拽把手应可定位')
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + offsetX, box.y + box.height / 2)
+    await page.mouse.up()
+  }
+
+  await dragSidebarTo(80)
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 320, '向右拖动应增大侧边栏宽度')
+  await dragSidebarTo(1000)
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), await page.evaluate(() => Math.floor(innerWidth / 2)), '侧栏宽度不应超过页面可视宽度的一半')
+  await dragSidebarTo(-1000)
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 192, '侧栏宽度不应小于 192px')
+
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 240, '刷新后侧栏宽度应恢复默认值')
+  await page.setViewportSize({ width: 600, height: 1000 })
+  assert.equal(await sidebarResizeHandle.isVisible(), false, '窄屏不应显示侧栏宽度拖拽把手')
+  await page.setViewportSize({ width: 1600, height: 1000 })
   await page.getByRole('button', { name: '＋ 新建项目', exact: true }).click()
   await page.getByPlaceholder('例如：深圳 XX 集团总部办公').fill('总部办公大楼')
   await page.getByPlaceholder('记录客户偏好、工位数量、预算或其他需要持续提醒的事项').fill('保留开放办公区，控制预算')
