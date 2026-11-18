@@ -16,12 +16,6 @@ function leaderName(project: WorkspaceProject) {
   return project.leader ? project.leader.displayName || project.leader.username : ''
 }
 
-// 项目预算 = 该项目所有楼层金额之和。楼层金额字段（WorkspaceFloor）尚未落地，
-// 先返回 null 显示占位；待后端补充后改为 floors.reduce(...) 并用 utils/helpers.ts 的 money() 格式化。
-function budgetTotal(_project: WorkspaceProject): number | null {
-  return null
-}
-
 const visibleProjects = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   const filtered = keyword
@@ -97,8 +91,11 @@ const visibleProjects = computed(() => {
             </td>
             <td class="px-4 py-3.5 text-right text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
             <td class="px-5 py-3.5 text-right text-sm [font-variant-numeric:tabular-nums]">
-              <span v-if="budgetTotal(project) === null" class="text-muted">—</span>
-              <span v-else>{{ budgetTotal(project) }}</span>
+              <template v-if="project.budgetTotal !== null && project.budgetStatus !== 'UNAVAILABLE'">
+                <span>{{ money(project.budgetTotal) }}</span>
+                <span v-if="project.budgetStatus === 'PENDING_PRICING'" class="ml-1 text-xs text-bronze-dark">待补价</span>
+              </template>
+              <span v-else class="text-muted">—</span>
             </td>
           </tr>
         </tbody>
