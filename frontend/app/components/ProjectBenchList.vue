@@ -16,6 +16,12 @@ function leaderName(project: WorkspaceProject) {
   return project.leader ? project.leader.displayName || project.leader.username : ''
 }
 
+// 项目预算 = 该项目所有楼层金额之和。楼层金额字段（WorkspaceFloor）尚未落地，
+// 先返回 null 显示占位；待后端补充后改为 floors.reduce(...) 并用 utils/helpers.ts 的 money() 格式化。
+function budgetTotal(_project: WorkspaceProject): number | null {
+  return null
+}
+
 const visibleProjects = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   const filtered = keyword
@@ -59,25 +65,44 @@ const visibleProjects = computed(() => {
     <p v-else-if="!workspace.initialized" class="border-t border-line px-5 py-8 text-center text-sm text-muted">正在加载项目…</p>
     <p v-else-if="!workspace.projects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">当前账号暂无可访问项目</p>
     <p v-else-if="!visibleProjects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">没有匹配的项目，换个关键词试试。</p>
-    <ul v-else class="border-t border-line">
-      <li
-        v-for="project in visibleProjects"
-        :key="project.projectId"
-        class="group relative px-5 py-3.5 transition hover:bg-[#f8f3ef]"
-      >
-        <span class="absolute left-0 top-0 h-full w-0.5 bg-bronze opacity-0 transition group-hover:opacity-100" aria-hidden="true" />
-        <div class="min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="truncate text-sm font-semibold">{{ project.projectName }}</span>
-            <span v-if="project.projectId === workspace.currentProjectId" class="flex-none border border-bronze/40 px-1.5 py-px text-[11px] leading-4 text-bronze-dark">
-              当前
-            </span>
-          </div>
-          <div class="mt-1 text-xs text-muted">
-            <template v-if="leaderName(project)">负责人 {{ leaderName(project) }} · </template>{{ project.floors.length }} 个楼层<template v-if="project.collaborators.length"> · 协作 {{ project.collaborators.length }} 人</template>
-          </div>
-        </div>
-      </li>
-    </ul>
+    <div v-else class="overflow-x-auto border-t border-line">
+      <table class="w-full min-w-[560px] border-collapse text-left">
+        <thead>
+          <tr class="text-xs text-muted">
+            <th scope="col" class="px-5 py-2.5 font-normal">项目名</th>
+            <th scope="col" class="px-4 py-2.5 font-normal">负责人</th>
+            <th scope="col" class="px-4 py-2.5 text-right font-normal">楼层数</th>
+            <th scope="col" class="px-5 py-2.5 text-right font-normal">项目预算</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="project in visibleProjects"
+            :key="project.projectId"
+            class="group border-t border-line transition hover:bg-[#f8f3ef]"
+          >
+            <td class="relative px-5 py-3.5">
+              <span class="absolute left-0 top-0 h-full w-0.5 bg-bronze opacity-0 transition group-hover:opacity-100" aria-hidden="true" />
+              <div class="flex items-center gap-2">
+                <span class="truncate text-sm font-semibold">{{ project.projectName }}</span>
+                <span v-if="project.projectId === workspace.currentProjectId" class="flex-none border border-bronze/40 px-1.5 py-px text-[11px] leading-4 text-bronze-dark">
+                  当前
+                </span>
+              </div>
+              <div v-if="project.collaborators.length" class="mt-1 text-xs text-muted">协作 {{ project.collaborators.length }} 人</div>
+            </td>
+            <td class="px-4 py-3.5 text-sm">
+              <span v-if="leaderName(project)">{{ leaderName(project) }}</span>
+              <span v-else class="text-muted">—</span>
+            </td>
+            <td class="px-4 py-3.5 text-right text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
+            <td class="px-5 py-3.5 text-right text-sm [font-variant-numeric:tabular-nums]">
+              <span v-if="budgetTotal(project) === null" class="text-muted">—</span>
+              <span v-else>{{ budgetTotal(project) }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 </template>
