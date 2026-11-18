@@ -238,3 +238,113 @@ export interface DesignBrief {
   sourceAssets: { fileName: string; fileType: string; source: string }[]
   pendingQuestions: string[]
 }
+
+/** 项目报价口径：系数或毛利率（毛利率以小数传输，0.35 表示 35%）。 */
+export type QuotationPricingMode = 'COEFFICIENT' | 'MARGIN'
+
+export interface QuotationLine {
+  productId: string
+  rspuId: string | null
+  productName: string
+  imageUrl: string | null
+  variant: string | null
+  qty: number
+  factoryPrice: number | null
+  unitPrice: number | null
+  subtotal: number | null
+  /** 无法计价的原因；为空表示可计价。 */
+  issue: string | null
+}
+
+export interface QuotationSpace {
+  zoneId: string
+  zoneName: string
+  lines: QuotationLine[]
+  factoryTotal: number
+  dealTotal: number
+}
+
+export interface QuotationFloor {
+  floorId: string
+  floorName: string
+  spaces: QuotationSpace[]
+  factoryTotal: number
+  dealTotal: number
+}
+
+export interface QuotationTotals {
+  lineCount: number
+  missingFactoryPriceLines: number
+  factoryTotal: number
+  dealTotal: number
+}
+
+export interface ProjectQuotationPreview {
+  projectId: string
+  projectName: string
+  pricingMode: QuotationPricingMode
+  pricingValue: number
+  generatedAt: string
+  floors: QuotationFloor[]
+  totals: QuotationTotals
+}
+
+export interface QuotationRecordLine {
+  floorId: string
+  floorName: string
+  zoneId: string | null
+  zoneName: string
+  productId: string
+  rspuId: string | null
+  productName: string
+  variant: string | null
+  imageUrl: string | null
+  qty: number
+  factoryPrice: number | null
+  unitPrice: number | null
+  subtotal: number | null
+  issue: string | null
+}
+
+/** 报价附加费用：名称与金额随确认快照保存。 */
+export interface QuotationFee {
+  name: string
+  amount: number | null
+}
+
+/** 已确认报价单：确认时的价格与名称快照，只读。 */
+export interface ProjectQuotationRecord {
+  quotationId: string
+  projectId: string
+  projectName: string
+  revision: number
+  status: 'CONFIRMED' | 'SUPERSEDED' | 'STALE'
+  pricingMode: QuotationPricingMode
+  pricingValue: number
+  goodsTotal: number
+  serviceFee: number
+  logisticsFee: number
+  fees: QuotationFee[]
+  totalAmount: number
+  lineCount: number
+  missingPriceLines: number
+  createdBy: string | null
+  createdAt: string
+  lines: QuotationRecordLine[]
+}
+
+export interface ConfirmQuotationLine {
+  floorId: string
+  zoneId: string | null
+  zoneName: string
+  productId: string
+  qty: number
+  unitPrice: number | null
+}
+
+export interface ConfirmQuotationRequest {
+  pricingMode: QuotationPricingMode
+  pricingValue: number
+  fees: QuotationFee[]
+  lines: ConfirmQuotationLine[]
+}

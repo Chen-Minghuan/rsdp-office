@@ -70,6 +70,22 @@ public class OfficeProjectAccessService {
         }
     }
 
+    /**
+     * 经销商主号专属入口（项目报价等）：认证开启时要求当前账号是项目所属工作区的主号。
+     * 历史无工作区项目没有主号归属，按拒绝处理，避免退化成全员可见。
+     */
+    public void requireWorkspaceOwner(String projectId) {
+        if (!enforcementEnabled()) {
+            return;
+        }
+        OfficeUser user = currentUserOrNull();
+        OfficeDesignProject project = requireProject(projectId);
+        if (user == null || !"DEALER".equalsIgnoreCase(user.getRole())
+            || !isWorkspaceOwner(user, project.getWorkspaceId())) {
+            throw new AccessDeniedException("只有经销商主号可以查看项目报价");
+        }
+    }
+
     /** 成员管理：项目内负责人（同属工作区），或该工作区的经销商主号。 */
     public void requireLeader(String projectId) {
         if (!enforcementEnabled()) {
