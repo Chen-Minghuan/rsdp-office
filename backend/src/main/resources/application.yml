@@ -7,7 +7,7 @@ spring:
   application:
     name: office-product-import
   datasource:
-    url: jdbc:postgresql://192.168.186.129:5432/office
+    url: jdbc:postgresql://localhost:5434/office
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
@@ -44,7 +44,7 @@ rsdp:
     model: ${RSDP_RENDER_MODEL:qwen-image-3.0}
     storage-directory: ${RSDP_RENDER_STORAGE_DIRECTORY:uploads/render-previews}
   cad-parser:
-    url: http://192.168.186.129:8091
+    url: http://127.0.0.1:8091
   # 主项目（RSDP）连接：office 以供应商服务账号读取主库商品数据（商品/字典唯一数据源）
   main:
     base-url: ${RSDP_MAIN_BASE_URL:http://localhost:8081}
