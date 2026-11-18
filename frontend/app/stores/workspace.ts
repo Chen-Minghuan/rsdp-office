@@ -77,7 +77,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       await this.init()
       await useOfficeStore().init()
     },
-    async activateFloor(floorId: string) {
+    async activateFloor(floorId: string, returnToRoot = false) {
       const floor = this.projects.flatMap(project => project.floors).find(item => item.floorId === floorId)
       if (!floor || this.switching) return
       if (floorId === this.currentFloorId && useOfficeStore().initialized) return
@@ -88,7 +88,9 @@ export const useWorkspaceStore = defineStore('workspace', {
         this.currentProjectId = floor.projectId
         this.rememberSelection()
         const router = useRouter()
-        await router.replace({ query: { ...useRoute().query, floorId: floor.floorId } })
+        await router.replace(returnToRoot
+          ? { path: '/', query: { floorId: floor.floorId } }
+          : { query: { ...useRoute().query, floorId: floor.floorId } })
         await useOfficeStore().activateFloor(floor.floorId)
       } catch (error) {
         this.error = error instanceof Error ? error.message : '楼层切换失败'
