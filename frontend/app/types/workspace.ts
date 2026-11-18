@@ -17,6 +17,8 @@ export interface ProjectReferenceImage {
   name: string
 }
 
+export type ProjectBudgetStatus = 'COMPLETE' | 'PENDING_PRICING' | 'UNAVAILABLE'
+
 export interface AssignableUser {
   userId: string
   username: string
@@ -32,6 +34,8 @@ export interface WorkspaceProject {
   collaborators: WorkspaceMember[]
   referenceImages: ProjectReferenceImage[]
   floors: WorkspaceFloor[]
+  budgetTotal: number | null
+  budgetStatus: ProjectBudgetStatus
 }
 
 export interface CreateProjectRequest {

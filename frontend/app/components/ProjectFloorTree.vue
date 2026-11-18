@@ -9,6 +9,7 @@ const canCreateProject = computed(() => !authEnabled || auth.user.value?.role !=
 const route = useRoute()
 const router = useRouter()
 const showCreate = ref(false)
+const showProjectList = ref(false)
 const showSettings = ref(false)
 const showRequirements = ref(false)
 const addingFloor = ref(false)
@@ -22,6 +23,38 @@ const editingProjectId = ref('')
 const editingFloorId = ref('')
 const savingEdit = ref(false)
 const nameInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
+const projectListId = 'project-list-popover'
+const visibleProjects = computed(() => workspace.currentProject ? [workspace.currentProject] : [])
+
+function closeProjectList() {
+  showProjectList.value = false
+}
+
+function toggleProjectList() {
+  showProjectList.value = !showProjectList.value
+}
+
+function openCreateDialog() {
+  closeProjectList()
+  showCreate.value = true
+}
+
+async function selectProject(projectId: string) {
+  if (workspace.switching) return
+  actionError.value = ''
+  if (projectId === workspace.currentProjectId) {
+    closeProjectList()
+    return
+  }
+  const project = workspace.projects.find(item => item.projectId === projectId)
+  const floor = project?.floors[0]
+  if (!floor) {
+    actionError.value = '该项目暂无可切换楼层'
+    return
+  }
+  closeProjectList()
+  await workspace.activateFloor(floor.floorId, true)
+}
 
 function focusNameInput(select = false) {
   const input = Array.isArray(nameInput.value) ? nameInput.value[0] : nameInput.value
@@ -92,12 +125,45 @@ async function selectSpace(zoneId: string) {
 
 <template>
   <section class="project-floor-tree" aria-label="项目与楼层">
-    <div class="mb-1 flex items-center justify-between px-1">
+    <div class="relative z-30 mb-1 flex items-center justify-between px-1">
       <span class="text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
-      <button v-if="canCreateProject" class="rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream" @click="showCreate = true">＋ 新建项目</button>
+      <div class="relative flex items-center gap-0.5">
+        <button v-if="canCreateProject" class="relative left-[12px] rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream" @click="openCreateDialog">＋ 新建项目</button>
+        <button
+          v-if="workspace.projects.length"
+          type="button"
+          class="relative left-[12px] rounded-none px-1.5 py-0.5 text-[11px] font-semibold"
+          :class="showProjectList ? 'bg-cream text-bronze-dark' : 'text-bronze-dark hover:bg-cream'"
+          :aria-expanded="showProjectList"
+          :aria-pressed="showProjectList"
+          :aria-controls="projectListId"
+          @click="toggleProjectList"
+        >项目列表</button>
+        <div
+          v-if="showProjectList"
+          :id="projectListId"
+          data-testid="project-list-popover"
+          class="absolute right-[-14px] top-[calc(100%+4px)] z-50 max-h-[min(24rem,calc(100dvh-10rem))] w-59 overflow-y-auto border border-line bg-white py-1 shadow-panel"
+        >
+          <button
+            v-for="project in workspace.projects"
+            :key="project.projectId"
+            type="button"
+            class="grid w-full gap-0.5 px-3 py-2 text-left text-xs transition disabled:cursor-wait disabled:opacity-60"
+            :class="project.projectId === workspace.currentProjectId ? 'bg-cream text-bronze-dark' : 'text-[#5f5b56] hover:bg-bg'"
+            :aria-label="`切换到项目 ${project.projectName}`"
+            :aria-current="project.projectId === workspace.currentProjectId ? 'true' : undefined"
+            :disabled="workspace.switching"
+            @click="selectProject(project.projectId)"
+          >
+            <span class="flex min-w-0 items-center gap-1.5"><strong class="truncate font-semibold">{{ project.projectName }}</strong><span v-if="project.projectId === workspace.currentProjectId" class="shrink-0 text-[10px] font-normal">当前</span></span>
+            <span class="truncate text-[10px] leading-4 opacity-75"><template v-if="project.leader">负责人 {{ project.leader.displayName || project.leader.username }} · </template>{{ project.floors.length }} 个楼层<template v-if="project.collaborators.length"> · 协作 {{ project.collaborators.length }} 人</template></span>
+          </button>
+        </div>
+      </div>
     </div>
     <div class="grid">
-      <article v-for="project in workspace.projects" :key="project.projectId" class="border-y border-line bg-white">
+      <article v-for="project in visibleProjects" :key="project.projectId" class="border-y border-line bg-white">
         <div class="flex items-center" :class="project.projectId === workspace.currentProjectId ? 'bg-cream' : ''">
           <input v-if="editingKey === `project:${project.projectId}`" ref="nameInput" v-model="editingName" class="mx-2 min-w-0 flex-1 rounded-none border border-bronze bg-white px-2 py-1 text-xs font-semibold" aria-label="双击编辑项目名称" :disabled="savingEdit" @keydown.enter.prevent="saveEdit" @keydown.esc.prevent="cancelEdit" @blur="saveEdit">
           <button v-else class="min-w-0 flex-1 px-2 py-2 text-left" :aria-expanded="!workspace.collapsedProjectIds.includes(project.projectId)" title="单击折叠，双击修改项目名称" @click="workspace.toggleProject(project.projectId)" @dblclick.stop.prevent="startEdit(`project:${project.projectId}`, project.projectId, '', project.projectName)">
@@ -113,7 +179,7 @@ async function selectSpace(zoneId: string) {
           <template v-for="floor in project.floors" :key="floor.floorId">
             <input v-if="editingKey === `floor:${floor.floorId}`" ref="nameInput" v-model="editingName" class="mx-1 rounded-none border border-bronze bg-white px-2 py-1 text-xs" aria-label="双击编辑楼层名称" :disabled="savingEdit" @keydown.enter.prevent="saveEdit" @keydown.esc.prevent="cancelEdit" @blur="saveEdit">
             <div v-else class="flex items-center rounded-none transition" :class="floor.floorId === workspace.currentFloorId ? 'bg-bronze font-semibold text-white' : 'text-[#5f5b56] hover:bg-bg'">
-              <button class="flex min-w-0 flex-1 items-center justify-between px-2 py-1.5 text-left text-xs" :aria-current="floor.floorId === workspace.currentFloorId ? 'page' : undefined" title="单击切换楼层，双击修改楼层名称" @click="workspace.activateFloor(floor.floorId)" @dblclick.stop.prevent="startEdit(`floor:${floor.floorId}`, project.projectId, floor.floorId, floor.floorName)">
+              <button class="flex min-w-0 flex-1 items-center justify-between px-2 py-1.5 text-left text-xs" :aria-current="floor.floorId === workspace.currentFloorId ? 'page' : undefined" title="单击切换楼层，双击修改楼层名称" @click="workspace.activateFloor(floor.floorId, true)" @dblclick.stop.prevent="startEdit(`floor:${floor.floorId}`, project.projectId, floor.floorId, floor.floorName)">
                 <span class="truncate">{{ floor.floorName }}</span><span v-if="floor.floorId === workspace.currentFloorId" class="text-[9px] font-normal opacity-80">当前</span>
               </button>
               <button v-if="floor.floorId === workspace.currentFloorId" class="mr-1 shrink-0 rounded-none px-1 py-0.5 text-[10px] hover:bg-white/15" :aria-label="`${workspace.collapsedFloorIds.includes(floor.floorId) ? '展开' : '折叠'}${floor.floorName}空间`" :aria-expanded="!workspace.collapsedFloorIds.includes(floor.floorId)" :title="workspace.collapsedFloorIds.includes(floor.floorId) ? '展开空间' : '折叠空间'" @click="workspace.toggleFloorSpaces(floor.floorId)">
@@ -139,7 +205,7 @@ async function selectSpace(zoneId: string) {
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
     <CustomerRequirementsBlock v-if="requirements" class="mt-2 border-t border-line px-2 py-2 hover:bg-cream" />
-    <ProjectCreateDialog v-if="showCreate" @close="showCreate = false" />
+    <ProjectCreateDialog v-if="showCreate" @created="closeProjectList" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
     <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />
   </section>
