@@ -73,6 +73,8 @@ try {
   })
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
+  const appSidebar = page.getByTestId('app-sidebar')
+  assert.equal(await appSidebar.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '侧栏应隐藏原生纵向滚动条，但保留滚动能力')
   await page.getByRole('button', { name: '＋ 新建项目', exact: true }).click()
   await page.getByPlaceholder('例如：深圳 XX 集团总部办公').fill('总部办公大楼')
   await page.getByPlaceholder('记录客户偏好、工位数量、预算或其他需要持续提醒的事项').fill('保留开放办公区，控制预算')
@@ -176,11 +178,18 @@ try {
 
   const projectBenchLink = page.getByRole('link', { name: '项目工作台', exact: true })
   const navigationYBefore = (await projectBenchLink.boundingBox())?.y
-  await page.getByRole('button', { name: '项目列表', exact: true }).click()
+  const projectListToggle = page.getByRole('button', { name: '项目列表', exact: true })
+  await projectListToggle.click()
   const projectList = page.getByTestId('project-list-popover')
   await projectList.waitFor()
+  assert.equal(await projectListToggle.getAttribute('aria-expanded'), 'true')
+  assert.ok((await projectListToggle.getAttribute('class') || '').split(/\s+/).includes('bg-cream'), '项目列表打开时按钮应显示选中状态')
   const navigationYAfter = (await projectBenchLink.boundingBox())?.y
   assert.equal(navigationYAfter, navigationYBefore, '项目列表应覆盖侧栏内容，不能推挤导航')
+  await page.waitForTimeout(5100)
+  await projectList.waitFor()
+  assert.equal(await projectListToggle.getAttribute('aria-expanded'), 'true')
+  assert.ok((await projectListToggle.getAttribute('class') || '').split(/\s+/).includes('bg-cream'), '项目列表应保持打开，直到用户主动关闭或选择项目')
   await projectList.getByRole('button', { name: '切换到项目 总部项目双击', exact: true }).click()
   await projectList.waitFor({ state: 'hidden' })
   await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('floorId') === 'OFLR-1')

@@ -26,8 +26,16 @@ const nameInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 const projectListId = 'project-list-popover'
 const visibleProjects = computed(() => workspace.currentProject ? [workspace.currentProject] : [])
 
-function openCreateDialog() {
+function closeProjectList() {
   showProjectList.value = false
+}
+
+function toggleProjectList() {
+  showProjectList.value = !showProjectList.value
+}
+
+function openCreateDialog() {
+  closeProjectList()
   showCreate.value = true
 }
 
@@ -35,7 +43,7 @@ async function selectProject(projectId: string) {
   if (workspace.switching) return
   actionError.value = ''
   if (projectId === workspace.currentProjectId) {
-    showProjectList.value = false
+    closeProjectList()
     return
   }
   const project = workspace.projects.find(item => item.projectId === projectId)
@@ -44,7 +52,7 @@ async function selectProject(projectId: string) {
     actionError.value = '该项目暂无可切换楼层'
     return
   }
-  showProjectList.value = false
+  closeProjectList()
   await workspace.activateFloor(floor.floorId, true)
 }
 
@@ -124,16 +132,18 @@ async function selectSpace(zoneId: string) {
         <button
           v-if="workspace.projects.length"
           type="button"
-          class="relative left-[12px] rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream"
+          class="relative left-[12px] rounded-none px-1.5 py-0.5 text-[11px] font-semibold"
+          :class="showProjectList ? 'bg-cream text-bronze-dark' : 'text-bronze-dark hover:bg-cream'"
           :aria-expanded="showProjectList"
+          :aria-pressed="showProjectList"
           :aria-controls="projectListId"
-          @click="showProjectList = !showProjectList"
+          @click="toggleProjectList"
         >项目列表</button>
         <div
           v-if="showProjectList"
           :id="projectListId"
           data-testid="project-list-popover"
-          class="absolute right-[-17px] top-[calc(100%+4px)] z-50 max-h-[min(24rem,calc(100dvh-10rem))] w-56 overflow-y-auto border border-line bg-white py-1 shadow-panel"
+          class="absolute right-[-14px] top-[calc(100%+4px)] z-50 max-h-[min(24rem,calc(100dvh-10rem))] w-59 overflow-y-auto border border-line bg-white py-1 shadow-panel"
         >
           <button
             v-for="project in workspace.projects"
@@ -195,7 +205,7 @@ async function selectSpace(zoneId: string) {
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
     <CustomerRequirementsBlock v-if="requirements" class="mt-2 border-t border-line px-2 py-2 hover:bg-cream" />
-    <ProjectCreateDialog v-if="showCreate" @created="showProjectList = false" @close="showCreate = false" />
+    <ProjectCreateDialog v-if="showCreate" @created="closeProjectList" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
     <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />
   </section>

@@ -33,7 +33,7 @@ function isActive(to: string) {
 </script>
 
 <template>
-  <aside class="max-h-[45dvh] flex-none overflow-y-auto border-b border-line bg-white p-3 md:max-h-none md:w-60 md:border-b-0 md:border-r md:flex md:flex-col md:p-3">
+  <aside data-testid="app-sidebar" class="app-sidebar-scroll max-h-[45dvh] flex-none overflow-y-auto border-b border-line bg-white p-3 md:max-h-none md:w-60 md:border-b-0 md:border-r md:flex md:flex-col md:p-3">
     <div class="hidden items-center gap-2 mb-6 px-2 md:flex">
       <span class="text-2xl font-extrabold tracking-tight text-ink">RSDP</span>
       <span class="text-[10px] text-muted leading-tight">办公空间<br>智能设计平台</span>
@@ -117,3 +117,14 @@ function isActive(to: string) {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.app-sidebar-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.app-sidebar-scroll::-webkit-scrollbar {
+  display: none;
+}
+</style>
