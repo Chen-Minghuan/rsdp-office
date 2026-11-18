@@ -11,7 +11,7 @@ Office 测试环境使用主机回环端口 3003（根路径）和 3004（子路
 
 ## 发布和本地联调
 
-Jenkins 任务使用 Pipeline script from SCM，分支 `*/test`，脚本路径 `Jenkinsfile.test`。默认执行构建和测试。勾选 `DEPLOY` 后才发布到 Office 测试环境。首次安装先准备 RSDP 测试商品服务、测试账号、两个 HTTPS 入口和服务器专用配置，再发布 Office。
+Jenkins 任务使用 Pipeline script from SCM，分支 `*/test`，脚本路径 `Jenkinsfile.test`。流水线每分钟检查一次 SCM，仅在 `test` 有新提交时触发构建，Java 测试和镜像构建通过后自动发布到 Office 测试环境，不再需要 `DEPLOY` 参数。手动构建同样自动发布。多个快速提交可能合并为一次构建，以实际检出的提交为准。首次安装先准备 RSDP 测试商品服务、测试账号、两个 HTTPS 入口和服务器专用配置，再发布 Office。
 
 本地运行 Office 时，可以通过根目录 `.env` 指向同一个测试商品源，然后重启本地 Java 后端：
 

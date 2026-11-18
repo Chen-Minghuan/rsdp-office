@@ -8,8 +8,9 @@ pipeline {
         timeout(time: 60, unit: 'MINUTES')
     }
 
-    parameters {
-        booleanParam(name: 'DEPLOY', defaultValue: false, description: '构建成功后发布到 Office 测试环境')
+    triggers {
+        // 仅在 test 分支有新提交时触发；无变化不重复构建。
+        pollSCM('* * * * *')
     }
 
     environment {
@@ -51,7 +52,6 @@ docker cp "$container:/build/target/surefire-reports/." test-results/java/
             steps { sh 'bash scripts/deploy.sh build' }
         }
         stage('Deploy test') {
-            when { expression { params.DEPLOY } }
             steps { sh 'bash scripts/deploy.sh deploy' }
         }
     }

@@ -268,6 +268,9 @@ try {
   await page.getByRole('button', { name: '1 项目创建', exact: true }).click()
   await page.getByRole('heading', { name: '创建办公项目', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭创建项目', exact: true }).click()
+  // 项目切换用例已回到 1F；导航回归的空间数据必须写入后续点击的 3F。
+  await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^3F/ }).click()
+  await page.getByRole('heading', { name: '3F · 上传办公图纸', exact: true }).waitFor()
   await page.evaluate(() => {
     const office = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     office.$patch({ objects: [{
