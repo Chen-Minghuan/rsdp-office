@@ -47,7 +47,7 @@ public class FloorPlanController {
      * @param image     户型图片（jpg/png/pdf），可选
      * @param cad       CAD 图纸（dwg/dxf），可选
      * @param hint      用户补充说明，可选
-     * @param projectId 归属项目 ID，可选
+     * @param projectId 图纸归属的楼层 ID（沿用历史参数名）
      * @param sourceName 户型名称/备注，可选
      * @return analysisId + taskId
      */
