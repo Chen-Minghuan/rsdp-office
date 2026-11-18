@@ -8,6 +8,14 @@ const productLinks = [
   { icon: 'documentText', label: '导入记录', to: '/products/import-records' },
 ]
 
+const defaultSidebarWidth = 240
+const minSidebarWidth = 192
+const sidebarWidth = ref(defaultSidebarWidth)
+const isSidebarResizing = ref(false)
+let sidebarResizeStartX = 0
+let sidebarResizeStartWidth = defaultSidebarWidth
+let activeSidebarResizePointerId: number | null = null
+
 // 两个工作空间入口共享同一活动键，避免路由切换期间出现双高亮。
 const activeWorkspaceTab = computed<'project-bench' | 'space-design' | null>(() => {
   const path = router.currentRoute.value.path
@@ -30,10 +38,66 @@ function isActive(to: string) {
   if (to === '/products') return path === '/products' || path === '/products/import'
   return path === to
 }
+
+function maxSidebarWidth() {
+  return Math.max(minSidebarWidth, Math.floor(window.innerWidth / 2))
+}
+
+function clampSidebarWidth(width: number) {
+  return Math.min(maxSidebarWidth(), Math.max(minSidebarWidth, width))
+}
+
+function stopSidebarResize() {
+  isSidebarResizing.value = false
+  activeSidebarResizePointerId = null
+  document.body.style.userSelect = ''
+  window.removeEventListener('pointermove', resizeSidebar)
+  window.removeEventListener('pointerup', endSidebarResize)
+  window.removeEventListener('pointercancel', endSidebarResize)
+}
+
+function startSidebarResize(event: PointerEvent) {
+  if (event.button !== 0) return
+  const handle = event.currentTarget as HTMLElement
+  activeSidebarResizePointerId = event.pointerId
+  sidebarResizeStartX = event.clientX
+  sidebarResizeStartWidth = sidebarWidth.value
+  isSidebarResizing.value = true
+  document.body.style.userSelect = 'none'
+  handle.setPointerCapture(event.pointerId)
+  window.addEventListener('pointermove', resizeSidebar)
+  window.addEventListener('pointerup', endSidebarResize)
+  window.addEventListener('pointercancel', endSidebarResize)
+  event.preventDefault()
+}
+
+function resizeSidebar(event: PointerEvent) {
+  if (!isSidebarResizing.value || event.pointerId !== activeSidebarResizePointerId) return
+  sidebarWidth.value = clampSidebarWidth(sidebarResizeStartWidth + event.clientX - sidebarResizeStartX)
+}
+
+function endSidebarResize(event: PointerEvent) {
+  if (event.pointerId !== activeSidebarResizePointerId) return
+  stopSidebarResize()
+}
+
+function constrainSidebarWidthToViewport() {
+  sidebarWidth.value = clampSidebarWidth(sidebarWidth.value)
+}
+
+onMounted(() => window.addEventListener('resize', constrainSidebarWidthToViewport))
+onBeforeUnmount(() => {
+  stopSidebarResize()
+  window.removeEventListener('resize', constrainSidebarWidthToViewport)
+})
 </script>
 
 <template>
-  <aside data-testid="app-sidebar" class="app-sidebar-scroll max-h-[45dvh] flex-none overflow-y-auto border-b border-line bg-white p-3 md:max-h-none md:w-60 md:border-b-0 md:border-r md:flex md:flex-col md:p-3">
+  <aside
+    data-testid="app-sidebar"
+    class="app-sidebar-scroll relative max-h-[45dvh] flex-none overflow-y-auto border-b border-line bg-white p-3 md:max-h-none md:border-b-0 md:border-r md:flex md:flex-col md:p-3"
+    :style="{ '--sidebar-width': `${sidebarWidth}px` }"
+  >
     <div class="hidden items-center gap-2 mb-6 px-2 md:flex">
       <span class="text-2xl font-extrabold tracking-tight text-ink">RSDP</span>
       <span class="text-[10px] text-muted leading-tight">办公空间<br>智能设计平台</span>
@@ -115,6 +179,16 @@ function isActive(to: string) {
         办公空间智能设计平台
       </div>
     </div>
+    <div
+      data-testid="sidebar-resize-handle"
+      role="separator"
+      aria-label="调整侧边栏宽度"
+      aria-orientation="vertical"
+      class="sidebar-resize-handle hidden md:block"
+      :class="{ 'is-resizing': isSidebarResizing }"
+      @pointerdown="startSidebarResize"
+      @lostpointercapture="endSidebarResize"
+    ></div>
   </aside>
 </template>
 
@@ -126,5 +200,39 @@ function isActive(to: string) {
 
 .app-sidebar-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: -5px;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  content: '';
+  background: transparent;
+  transform: translateX(-50%);
+  transition: background-color 150ms ease;
+}
+
+.sidebar-resize-handle:hover::before,
+.sidebar-resize-handle.is-resizing::before {
+  background: #a77b51;
+}
+
+@media (min-width: 768px) {
+  .app-sidebar-scroll {
+    width: var(--sidebar-width, 240px);
+  }
 }
 </style>
