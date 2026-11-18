@@ -168,4 +168,36 @@ class RsdpCatalogGatewayTest {
 
         verify(client, times(1)).get(anyString());
     }
+
+    @Test
+    void officeProductsExposeRspuPrimaryColorForEveryVariant() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        JsonNode list = json.readTree("""
+            {"total":2,"rows":[
+              {"rspuId":"COLORED","productName":"茶几","categoryPath":["办公家具"],"status":"active","colorPrimaryName":"蜜芽胡桃+雅士白"},
+              {"rspuId":"UNCATEGORIZED","productName":"边几","categoryPath":["办公家具"],"status":"active"}
+            ]}
+            """);
+        JsonNode coloredVariants = json.readTree("""
+            [{"variantId":"V1","status":"active","dimensions":"{\\"w\\":1200,\\"d\\":600}"},
+             {"variantId":"V2","status":"active","dimensions":"{\\"w\\":600,\\"d\\":600}"}]
+            """);
+        JsonNode uncoloredVariants = json.readTree("""
+            [{"variantId":"V3","status":"active","dimensions":"{\\"w\\":500,\\"d\\":500}"}]
+            """);
+        when(client.get(anyString())).thenAnswer(call -> switch (call.<String>getArgument(0)) {
+            case "/api/v1/products/COLORED/variants" -> coloredVariants;
+            case "/api/v1/products/UNCATEGORIZED/variants" -> uncoloredVariants;
+            default -> list;
+        });
+
+        List<OfficeProductDto> result = gateway.listOfficeProducts("full");
+
+        assertEquals(3, result.size());
+        assertEquals("蜜芽胡桃+雅士白", result.get(0).getColorPrimaryName());
+        assertEquals("蜜芽胡桃+雅士白", result.get(1).getColorPrimaryName());
+        assertNull(result.get(2).getColorPrimaryName());
+    }
+
 }

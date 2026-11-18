@@ -17,6 +17,8 @@ public class ProductListItemDto {
     private String rspuCode;
     private String externalCode;
     private String productName;
+    /** RSPU 主色原文，由主项目商品列表返回。 */
+    private String colorPrimaryName;
     private List<String> categoryPath;
     @JsonIgnore
     private List<String> furnitureTags;

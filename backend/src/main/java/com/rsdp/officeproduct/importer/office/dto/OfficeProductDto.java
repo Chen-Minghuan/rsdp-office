@@ -16,6 +16,8 @@ public class OfficeProductDto {
     private BigDecimal depthMm;
     private BigDecimal heightMm;
     private String name;
+    /** 商品级主色原文；当前变体颜色为空时以此为准。 */
+    private String colorPrimaryName;
     private List<String> categoryPath;
     @JsonIgnore
     private List<String> furnitureTags;
