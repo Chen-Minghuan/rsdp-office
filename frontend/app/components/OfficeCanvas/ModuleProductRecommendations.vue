@@ -57,7 +57,7 @@ const groupedCandidates = computed(() => {
 })
 const filtersDisabled = computed(() => !module.value || loading.value || !result.value)
 const clearColorFilters = () => { searchKeyword.value = ''; colorFilter.value = 'ALL' }
-const tiers = [{ key: 'ALL', name: '全部兼容' }, { key: 'CLOSE', name: '贴合 ≥85%' }, { key: 'RELAXED', name: '宽松 60–85%' }, { key: 'SMALL', name: '偏小 <60%' }]
+const tiers = [{ key: 'ALL', name: '全部兼容', short: '全部' }, { key: 'CLOSE', name: '贴合 ≥85%', short: '≥85%' }, { key: 'RELAXED', name: '宽松 60–85%', short: '60–85%' }, { key: 'SMALL', name: '偏小 <60%', short: '<60%' }]
 let sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
@@ -162,10 +162,10 @@ async function choose(candidate: ModuleProductCandidate) {
         <label><input v-model="allowRotation" type="checkbox" :disabled="applying"> 允许旋转 90°</label>
         <label v-if="sameModuleCount > 1"><input v-model="applyToSameModules" type="checkbox" :disabled="applying"> 同步 {{ sameModuleCount }} 个同规格模块</label>
       </div>
-      <div v-if="result" class="flex gap-1 flex-wrap"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key">{{ entry.name }} <span>({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
+      <div v-if="result" class="flex flex-nowrap gap-1" data-testid="tier-row"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key" :title="entry.name">{{ entry.short }} <span>({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
       <p v-if="module" class="text-[10px] text-muted">按品类相关性和尺寸贴合度排序。上方档位筛选尺寸贴合度，取宽、深占比中的较低值。</p>
     </div>
-    <div :key="module?.id" class="flex-1 min-h-0 overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
+    <div :key="module?.id" class="flex-1 min-h-[160px] overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
       <p v-if="!allConfirmed" class="text-xs text-muted py-5">请先确认当前空间的全部排版</p>
       <p v-else-if="!module" class="text-xs text-muted py-5">点击画布上的家具，或从上方列表选择。</p>
       <p v-else-if="applying && !result" role="status" class="text-xs text-muted py-5">正在保存刚才的商品选择…</p>
