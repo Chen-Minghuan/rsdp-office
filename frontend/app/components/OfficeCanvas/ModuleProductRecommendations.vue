@@ -36,6 +36,10 @@ function sameModuleKey(item: FurnitureObject): string {
   return [savedField('furnitureTemplateId'), savedField('moduleSnapshot'), savedField('heightMm'), stableJson(item.w), stableJson(item.h)].join('\u001f')
 }
 
+function moduleSpecificationKey(item: FurnitureObject): string {
+  return [stableJson(item.label), stableJson(item.w), stableJson(item.h)].join('\u001f')
+}
+
 const moduleGroups = computed<ModuleDisplayGroup[]>(() => {
   const groups = new Map<string, ModuleDisplayGroup>()
   for (const item of modules.value) {
@@ -46,6 +50,19 @@ const moduleGroups = computed<ModuleDisplayGroup[]>(() => {
   }
   return [...groups.values()]
 })
+
+const selectedModuleSpecifications = computed(() => {
+  const cartByLineId = new Map(store.cart.map(item => [item.id, item]))
+  return new Set(modules.value.filter((item) => {
+    const selection = item.productSelection
+    const cartItem = selection ? cartByLineId.get(selection.cartLineId) : undefined
+    return cartItem?.productId === item.productId && selection?.product.id === item.productId
+  }).map(moduleSpecificationKey))
+})
+
+function groupSelectedInCart(group: ModuleDisplayGroup): boolean {
+  return selectedModuleSpecifications.value.has(moduleSpecificationKey(group.representative))
+}
 
 function groupOptionValue(group: ModuleDisplayGroup): string {
   return group.modules.some(item => item.id === module.value?.id) ? module.value!.id : group.representative.id
@@ -137,7 +154,7 @@ async function choose(candidate: ModuleProductCandidate) {
       <label class="block text-[11px] text-muted">当前家具
         <select aria-label="匹配单位模块" :value="module?.id || ''" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="selectedId = ($event.target as HTMLSelectElement).value || null">
           <option value="" disabled>选择家具</option>
-          <option v-for="(group, index) in moduleGroups" :key="group.key" :value="groupOptionValue(group)">{{ index + 1 }}. {{ group.representative.label || '单位模块' }} · {{ number(group.representative.w) }} × {{ number(group.representative.h) }} mm · 数量：{{ group.modules.length }}</option>
+          <option v-for="(group, index) in moduleGroups" :key="group.key" :value="groupOptionValue(group)">{{ index + 1 }}. {{ group.representative.label || '单位模块' }} · {{ number(group.representative.w) }} × {{ number(group.representative.h) }} mm · 数量：{{ group.modules.length }}<template v-if="groupSelectedInCart(group)"> · 已选择</template></option>
         </select>
       </label>
       <div v-if="module" class="rounded-none bg-[#f7f3ee] p-2 text-xs leading-relaxed"><div v-if="result?.targetCategory">推荐品类：{{ result.targetCategory }}</div>商品宽 ≤ {{ number(module.w) }} mm，深 ≤ {{ number(module.h) }} mm</div>
