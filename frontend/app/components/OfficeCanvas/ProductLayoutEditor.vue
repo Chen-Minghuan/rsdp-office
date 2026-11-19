@@ -1,17 +1,32 @@
 <script setup lang="ts">
 import type { FurnitureObject } from '~/types/office'
+import type { FurnitureCategory } from '~/types/manualCanvas'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
-import { furnitureCatalogTemplates, furnitureCategories } from '~/utils/manualFurniture'
+import { furnitureCatalogTemplates, furnitureCategories, furnitureCategoryForItem, preferredFurnitureCategory } from '~/utils/manualFurniture'
 import { moduleGlyphId } from '~/utils/officeModules'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
+import { OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
 
 const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
-const emit = defineEmits<{ navigate: []; confirmed: []; 'select-module': [module: OfficeModuleTemplate] }>()
+const emit = defineEmits<{ confirmed: [] }>()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const items = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
 const catalogCategories = computed(() => zone.value?.zoneType === 'MEETING_ROOM' ? ['会议与洽谈', ...furnitureCategories.filter(category => category !== '会议与洽谈')] : furnitureCategories)
 const selectedItem = computed(() => items.value.find(item => item.id === selectedId.value) || null)
+const catalog = ref<HTMLElement | null>(null)
+const preferredCatalogCategory = computed(() => furnitureCategoryForItem(selectedItem.value) || preferredFurnitureCategory(zone.value))
+const openCategories = ref<FurnitureCategory[]>([])
+watch([() => zone.value?.id, preferredCatalogCategory], ([, category]) => {
+  openCategories.value = [category]
+  nextTick(() => catalog.value?.querySelector(`[data-catalog-category="${category}"]`)?.scrollIntoView({ block: 'nearest' }))
+}, { immediate: true, flush: 'post' })
+function onCategoryToggle(category: FurnitureCategory, event: Event) {
+  const open = (event.target as HTMLDetailsElement).open
+  openCategories.value = open
+    ? [...new Set([...openCategories.value, category])]
+    : openCategories.value.filter(item => item !== category)
+}
 const itemEditor = ref<HTMLElement | null>(null)
 watch(itemEditor, editor => editor?.scrollIntoView({ block: 'nearest' }), { flush: 'post' })
 const confirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
@@ -20,7 +35,8 @@ const editWidth = ref(0), editDepth = ref(0), message = ref('')
 const showModuleDialog = ref(false), editingModule = ref<CustomOfficeModule | null>(null)
 const lastDeletedModule = ref<CustomOfficeModule | null>(null)
 const selectedCatalogId = defineModel<string>('selectedCatalogId', { default: '' })
-const selectedCatalogModule = computed(() => store.customModules.find(module => module.id === selectedCatalogId.value) || furnitureCatalogTemplates.find(module => module.id === selectedCatalogId.value) || null)
+const replacementMode = ref(false)
+watch(() => selectedItem.value?.id, () => { replacementMode.value = false })
 watch(() => [selectedItem.value?.id, selectedItem.value?.w, selectedItem.value?.h], () => {
   editWidth.value = Math.round(selectedItem.value?.w || 0)
   editDepth.value = Math.round(selectedItem.value?.h || 0)
@@ -60,22 +76,37 @@ function clearLayout() {
 function addModule(module: OfficeModuleTemplate) {
   if (!zone.value) return
   selectedCatalogId.value = module.id
-  if (store.furniturePlacement?.template.id === module.id) { store.cancelFurniturePlacement(); return }
+  selectedId.value = null
+  replacementMode.value = false
   const started = store.beginFurniturePlacement(zone.value.id, module.id, module.widthMm, module.depthMm, { ...OFFICE_LAYOUT_SPACING })
-  message.value = started ? '' : '当前空间或模块尺寸无法用于逐件添加'
+  message.value = started ? '' : '当前空间或模块尺寸无法用于摆放'
 }
 function chooseModule(module: OfficeModuleTemplate) {
   selectedCatalogId.value = module.id
-  if (!selectedItem.value) {
-    message.value = `已选择「${module.name}」；点击“逐件”手动添加，或点击“自动”用于自动布局`
+  if (replacementMode.value && selectedItem.value) {
+    const result = store.replaceFurnitureModule(selectedItem.value.id, module.id)
+    message.value = result || `已替换为「${module.name}」，位置与旋转保持不变，可撤销`
+    replacementMode.value = false
     return
   }
-  const result = store.replaceFurnitureModule(selectedItem.value.id, module.id)
-  message.value = result || `已替换为「${module.name}」，位置与旋转保持不变，可撤销`
+  addModule(module)
 }
-function selectForAuto(module: OfficeModuleTemplate) {
-  selectedCatalogId.value = module.id
-  emit('select-module', module)
+function beginReplacement() {
+  if (!selectedItem.value) return
+  store.cancelFurniturePlacement()
+  replacementMode.value = true
+  message.value = '请点击下方图例替换当前家具'
+}
+function startModuleDrag(module: OfficeModuleTemplate, event: DragEvent) {
+  if (!zone.value || !event.dataTransfer) return
+  addModule(module)
+  if (store.furniturePlacement?.template.id !== module.id) { event.preventDefault(); return }
+  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.setData(OFFICE_MODULE_DRAG_TYPE, module.id)
+}
+function endModuleDrag(module: OfficeModuleTemplate, event: DragEvent) {
+  if (event.dataTransfer?.dropEffect === 'copy') return
+  if (store.furniturePlacement?.template.id === module.id) store.cancelFurniturePlacement()
 }
 function openModuleDialog(module: CustomOfficeModule | null = null) {
   store.cancelFurniturePlacement()
@@ -84,7 +115,7 @@ function openModuleDialog(module: CustomOfficeModule | null = null) {
 }
 function moduleSaved(module: CustomOfficeModule) {
   showModuleDialog.value = false
-  chooseModule(module)
+  selectedCatalogId.value = module.id
 }
 function removeModule(module: CustomOfficeModule) {
   if (!store.removeCustomModule(module.id)) return
@@ -123,15 +154,14 @@ function confirmLayout() {
         <h2 class="text-xs font-semibold text-[#42533d]">产品选型 · 手动排版</h2>
         <span class="text-[10px] text-muted"><b data-testid="current-furniture-count">{{ items.length }}</b> 件 · {{ confirmed ? '已确认' : '待确认' }}</span>
       </div>
-      <p class="mt-1 text-[10px] text-muted">在画布中拖动位置；选中家具后可改尺寸、旋转、复制或点击图例替换模块。</p>
+      <p class="mt-1 text-[10px] text-muted">在画布中拖动位置；选中家具后可改尺寸、旋转、复制或进入替换模式。</p>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
       <div v-if="!items.length" class="px-4 py-8 text-center">
         <AppIcon name="cube" size="8" class="mx-auto mb-3 text-[#c9d3c1]" />
         <h3 class="text-xs font-semibold text-[#56614f]">从手动排版开始</h3>
-        <p class="mt-2 text-[11px] leading-relaxed text-muted">可直接在下方选择图例并点击“逐件”添加，也可使用自动布局生成初步方案。</p>
-        <button class="mt-4 rounded-none border border-line bg-white px-4 py-2 text-[11px] font-semibold text-[#596252]" @click="emit('navigate')">使用自动布局</button>
+        <p class="mt-2 text-[11px] leading-relaxed text-muted">点击下方图例后移动到画布点击放置，也可直接把图例拖拽到画布中。</p>
       </div>
 
       <template v-else>
@@ -168,37 +198,52 @@ function confirmLayout() {
               <button data-testid="product-copy-furniture" class="rounded-none border border-line bg-white px-1 py-1.5 text-[10px] text-[#596252]" @click="copySelected">复制</button>
               <button class="rounded-none border border-[#ead7d2] bg-white px-1 py-1.5 text-[10px] text-[#a65e4c]" @click="removeSelected">删除</button>
             </div>
+            <button data-testid="product-replace-module" class="mt-1.5 w-full border border-line bg-white px-2 py-1.5 text-[10px] text-[#596252]" @click="beginReplacement">选择图例替换当前模块</button>
           </div>
         </section>
       </template>
 
-      <section class="px-3 py-2.5" data-testid="unit-module-catalog">
+      <section ref="catalog" class="px-3 py-2.5" data-testid="unit-module-catalog">
         <div class="mb-2 flex items-center justify-between">
           <h3 class="text-[11px] font-semibold text-[#56614f]">家具图例</h3>
           <span class="text-[9px] text-muted">全部品类均可选择</span>
         </div>
-        <p class="mb-2 text-[9px] leading-relaxed text-muted">选中已排家具后，点击图例即可替换模块；“逐件”用于手动添加，“自动”用于生成自动布局。</p>
+        <p class="mb-2 text-[9px] leading-relaxed text-muted">点击图例后在画布点击放置，或直接把图例拖到画布中。</p>
+        <p v-if="replacementMode" class="mb-2 bg-[#eef8e7] px-2 py-1.5 text-[10px] text-[#4d713d]">正在替换「{{ selectedItem?.label || '当前家具' }}」：请点击一个图例完成替换。<button class="ml-1 underline" @click="replacementMode = false">取消</button></p>
         <button class="mb-2 w-full border border-dashed border-[#a8c99a] px-3 py-2 text-[11px] text-[#4d713d]" @click="openModuleDialog()">＋ 新增单位模块</button>
         <div v-if="lastDeletedModule" role="status" class="mb-2 flex items-center justify-between gap-2 text-[10px] text-muted"><span>已删除 {{ lastDeletedModule.name }}</span><button class="flex-none text-[#4d713d] underline" @click="undoModuleDeletion">撤销删除目录模块</button></div>
         <details v-if="store.customModules.length" open class="mb-1.5">
           <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">我的模块 · 本机 {{ store.customModules.length }} 款</summary>
           <div class="grid grid-cols-3 gap-1.5">
             <div v-for="module in store.customModules" :key="module.id" class="min-w-0 border border-line bg-white">
-              <button :data-module-id="module.id" :aria-label="module.name" :aria-pressed="selectedCatalogId === module.id" class="w-full p-1.5 text-left hover:bg-[#f5f9f1]" @click="chooseModule(module)">
-                <div class="h-9"><OfficeCanvasFurniturePreview :template-id="module.glyphTemplateId" :width-mm="module.widthMm" :depth-mm="module.depthMm" thumbnail /></div>
+              <button
+                :data-module-id="module.id"
+                :aria-label="module.name"
+                :aria-pressed="selectedCatalogId === module.id"
+                :title="`${module.name}：点击后移动到画布放置，或拖拽到画布`"
+                draggable="true"
+                class="w-full cursor-grab p-1.5 text-left hover:bg-[#f5f9f1] active:cursor-grabbing"
+                @click="chooseModule(module)"
+                @dragstart="startModuleDrag(module, $event)"
+                @dragend="endModuleDrag(module, $event)"
+              >
+                <div class="h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.glyphTemplateId" :width-mm="module.widthMm" :depth-mm="module.depthMm" thumbnail /></div>
                 <div class="truncate text-[10px] font-medium">{{ module.name }}</div>
                 <div class="mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</div>
               </button>
-              <div class="grid grid-cols-2 border-t border-line text-[9px]">
-                <button :data-auto-module-id="module.id" :aria-label="'用于自动布局 ' + module.name" class="py-1 text-[#4d713d]" @click="selectForAuto(module)">自动</button>
-                <button :aria-label="'逐件添加 ' + module.name" class="border-l border-line py-1 text-[#4d713d]" @click="addModule(module)">逐件</button>
-              </div>
               <div class="flex border-t border-line text-[9px]"><button class="flex-1 py-1" :aria-label="'编辑模块 ' + module.name" @click="openModuleDialog(module)">编辑</button><button class="flex-1 py-1 text-muted" :aria-label="'删除目录模块 ' + module.name" @click="removeModule(module)">删除</button></div>
             </div>
           </div>
         </details>
-        <p v-if="store.furniturePlacement" class="mb-2 bg-[#eef8e7] px-2 py-1.5 text-[10px] text-[#4d713d]">正在逐件添加：点击画布放置，空格旋转，Esc 或右键结束。</p>
-        <details v-for="category in catalogCategories" :key="category" :open="category === catalogCategories[0]" class="mb-1.5">
+        <p v-if="store.furniturePlacement" class="mb-2 bg-[#eef8e7] px-2 py-1.5 text-[10px] text-[#4d713d]">正在摆放：移动到画布点击放置，空格旋转，Esc 或右键结束。</p>
+        <details
+          v-for="category in catalogCategories"
+          :key="category"
+          :data-catalog-category="category"
+          :open="openCategories.includes(category)"
+          class="mb-1.5"
+          @toggle="onCategoryToggle(category, $event)"
+        >
           <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">{{ category }} <span class="text-muted">{{ furnitureCatalogTemplates.filter(module => module.category === category).length }} 款</span></summary>
           <div class="grid grid-cols-3 gap-1.5">
             <div v-for="module in furnitureCatalogTemplates.filter(module => module.category === category)" :key="module.id" class="min-w-0 border border-line bg-white">
@@ -206,18 +251,19 @@ function confirmLayout() {
                 type="button"
                 :data-module-id="module.id"
                 :data-product-module-id="module.id"
-                :aria-label="module.name" :aria-pressed="selectedCatalogId === module.id"
-                class="w-full p-1.5 text-left hover:bg-[#f5f9f1]"
+                :aria-label="module.name"
+                :aria-pressed="selectedCatalogId === module.id"
+                :title="`${module.name}：点击后移动到画布放置，或拖拽到画布`"
+                draggable="true"
+                class="w-full cursor-grab p-1.5 text-left hover:bg-[#f5f9f1] active:cursor-grabbing"
                 @click="chooseModule(module)"
+                @dragstart="startModuleDrag(module, $event)"
+                @dragend="endModuleDrag(module, $event)"
               >
-                <div class="h-9"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></div>
+                <div class="h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></div>
                 <div class="truncate text-[10px] font-medium" :title="module.name">{{ module.name }}</div>
                 <div class="mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</div>
               </button>
-              <div class="grid grid-cols-2 border-t border-line text-[9px]">
-                <button type="button" :data-auto-module-id="module.id" :aria-label="'用于自动布局 ' + module.name" class="py-1 text-[#4d713d] hover:bg-[#eef8e7]" @click="selectForAuto(module)">自动</button>
-                <button type="button" class="border-l border-line py-1 text-[#4d713d] hover:bg-[#eef8e7]" :aria-label="'逐件添加 ' + module.name" @click="addModule(module)">逐件</button>
-              </div>
             </div>
           </div>
         </details>
@@ -226,7 +272,7 @@ function confirmLayout() {
 
     <div class="flex-none border-t border-line bg-white px-3 py-2.5">
       <p v-if="message" role="status" class="mb-1.5 text-[10px] leading-relaxed text-[#66745e]">{{ message }}</p>
-      <button v-if="store.furniturePlacement || selectedCatalogModule" class="mb-1.5 w-full rounded-none border border-line bg-white px-3 py-2 text-[11px] font-semibold text-[#4d713d]" @click="store.furniturePlacement ? store.cancelFurniturePlacement() : selectedCatalogModule && addModule(selectedCatalogModule)">{{ store.furniturePlacement ? '结束逐件添加' : '逐件添加' }}</button>
+      <button v-if="store.furniturePlacement" class="mb-1.5 w-full rounded-none border border-line bg-white px-3 py-2 text-[11px] font-semibold text-[#4d713d]" @click="store.cancelFurniturePlacement()">结束摆放</button>
       <p v-if="confirmProblem" data-testid="confirm-problem" class="mb-1.5 text-[10px] leading-relaxed text-amber-600">暂不能确认：{{ confirmProblem }}</p>
       <button v-if="items.length && !confirmed" class="w-full rounded-none bg-[#83d94f] px-3 py-2 text-[11px] font-semibold text-[#214326]" @click="confirmLayout">确认当前排版</button>
       <button v-else-if="confirmed" class="w-full rounded-none border border-line px-3 py-2 text-[11px] font-semibold text-[#596252]" @click="store.unconfirmLayout(zone!.id)">重新调整排版</button>

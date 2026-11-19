@@ -8,6 +8,8 @@ import { zoneLayoutExclusions } from './spatial/obstacles'
 import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
 import { rectOverlapsBlocker, rotatedFurnitureFootprint as officeFurnitureFootprint } from './layoutConstraints'
 
+export const OFFICE_MODULE_DRAG_TYPE = 'application/x-rsdp-office-module'
+
 export interface OfficeFurniturePlacement {
   zoneId: string
   template: OfficeModuleTemplate

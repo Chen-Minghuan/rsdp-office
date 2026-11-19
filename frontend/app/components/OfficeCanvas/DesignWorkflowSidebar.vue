@@ -71,6 +71,11 @@ function selectModule(module: OfficeModuleTemplate) {
   activePage.value = 'auto'
   nextTick(() => autoLayout.value?.selectModule(module))
 }
+function openPage(page: WorkflowPage) {
+  const module = store.customModules.find(item => item.id === selectedCatalogId.value) || furnitureById.get(selectedCatalogId.value)
+  if (page === 'auto' && module) { selectModule(module); return }
+  activePage.value = page
+}
 function confirmAndRecommend() {
   if (!zone.value) return
   if (props.currentPreview?.zoneId === zone.value.id && props.currentPreview.furniture.length) {
@@ -115,7 +120,7 @@ function clearAutomaticLayout() {
           :data-testid="page.testId"
           :aria-selected="activePage === page.id"
           :class="['rounded-none px-2 py-1.5 text-[11px] font-medium transition', activePage === page.id ? 'bg-[#83d94f] text-[#214326]' : 'bg-[#f4f5f1] text-[#6f776a] hover:bg-[#e8eee1']"
-          @click="activePage = page.id"
+          @click="openPage(page.id)"
         >{{ page.label }}</button>
       </div>
     </div>
@@ -157,7 +162,7 @@ function clearAutomaticLayout() {
     <div v-show="!collapsed" class="flex min-h-0 flex-1 flex-col">
       <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="emit('preview', $event)" />
       <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="selectedCatalogId" :current-preview="currentPreview" @preview="emit('preview', $event)" />
-      <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @navigate="activePage = 'auto'" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
+      <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @confirmed="activePage = 'recommendations'" />
       <OfficeCanvasDesignSidebar v-else embedded v-model:selected-id="selectedId" />
     </div>
     <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-[#fafbf7] px-3 py-2.5" data-testid="auto-layout-next-actions">
