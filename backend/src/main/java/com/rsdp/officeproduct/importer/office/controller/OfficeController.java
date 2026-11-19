@@ -98,6 +98,12 @@ public class OfficeController {
         return Result.ok(officeService.listOfficeProducts());
     }
 
+    @PostMapping("/projects/{projectId}/proposal/catalog-check")
+    public Result<Void> checkProposalCatalog(@PathVariable String projectId) {
+        officeService.checkProposalCatalog(projectId);
+        return Result.ok(null);
+    }
+
     @PostMapping("/projects/{projectId}/proposal/export")
     public void exportProposal(@PathVariable String projectId, HttpServletResponse response) throws IOException {
         List<CartItemDto> cart = officeService.listCart(projectId);

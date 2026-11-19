@@ -6,6 +6,7 @@ const { canCreateProject } = useAuth()
 const route = useRoute()
 const router = useRouter()
 const { isProjectWorkflow } = useWorkspaceNavigation()
+const isCanvasOverview = computed(() => route.name === 'canvas' && office.canvasMode === 'overview')
 const showCreate = ref(false)
 const showProjectList = ref(false)
 const showSettings = ref(false)
@@ -110,12 +111,12 @@ async function addFloor() {
 }
 
 async function selectSpace(zoneId: string) {
-  if (route.path === '/canvas' && office.canvasMode === 'overview') {
+  if (isCanvasOverview.value) {
     office.setActiveZone(zoneId)
     return
   }
   if (!office.enterDesign(zoneId)) return
-  if (route.path !== '/canvas') {
+  if (route.name !== 'canvas') {
     await router.push({ path: '/canvas', query: { floorId: workspace.currentFloorId, mode: 'design', zoneId } })
   }
 }
@@ -207,8 +208,8 @@ async function selectFloor(floorId: string) {
             <OfficeCanvasDesignSpaceSwitcher
               v-if="floor.floorId === workspace.currentFloorId"
               v-show="!workspace.collapsedFloorIds.includes(floor.floorId)"
-              :mode="route.path === '/canvas' && office.canvasMode === 'overview' ? 'review' : 'design'"
-              :zone-id="route.path === '/canvas' && office.canvasMode === 'overview' ? office.activeZoneId : office.designZoneId"
+              :mode="isCanvasOverview ? 'review' : 'design'"
+              :zone-id="isCanvasOverview ? office.activeZoneId : office.designZoneId"
               @select="selectSpace"
             />
           </template>

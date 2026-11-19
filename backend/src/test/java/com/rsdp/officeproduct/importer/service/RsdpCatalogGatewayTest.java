@@ -21,6 +21,22 @@ class RsdpCatalogGatewayTest {
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
+    void factoryPriceLookupKeepsLowestAuthorizedPricePerVariant() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products/RSPU-1/rsku")).thenReturn(json.readTree("""
+            [{"variantId":"A","factoryPrice":60.25},{"variantId":"A","factoryPrice":52.75},
+             {"variantId":"B","factoryPrice":null},{"factoryPrice":85}]
+            """));
+
+        var prices = gateway.getFactoryPrices("RSPU-1");
+
+        assertEquals(new BigDecimal("52.75"), prices.get("A"));
+        assertEquals(new BigDecimal("85"), prices.get(""));
+        assertFalse(prices.containsKey("B"));
+    }
+
+    @Test
     void officeProductsFlattenActiveVariantsWithExactDimensions() throws Exception {
         RsdpClient client = mock(RsdpClient.class);
         RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);

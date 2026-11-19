@@ -3,6 +3,8 @@ package com.rsdp.officeproduct.importer.auth;
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.entity.OfficeUserSession;
+import com.rsdp.officeproduct.importer.office.entity.OfficeWorkspace;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceMapper;
 import javax.imageio.ImageIO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -29,6 +31,7 @@ public class AuthController {
     private final AuthService auth;
     private final LoginAttemptGuard attempts;
     private final CaptchaService captcha;
+    private final OfficeWorkspaceMapper workspaces;
 
     @PostMapping("/login")
     public ResponseEntity<Result<?>> login(@RequestBody LoginRequest request, HttpServletRequest httpRequest,
@@ -99,8 +102,10 @@ public class AuthController {
         return builder.build().toString();
     }
 
-    private static UserResponse toResponse(OfficeUser user) {
-        return new UserResponse(user.getUserId(), user.getUsername(), user.getDisplayName(), user.getRole());
+    private UserResponse toResponse(OfficeUser user) {
+        OfficeWorkspace workspace = user.getWorkspaceId() == null ? null : workspaces.selectById(user.getWorkspaceId());
+        return new UserResponse(user.getUserId(), user.getUsername(), user.getDisplayName(), user.getRole(),
+            workspace == null ? null : workspace.getWorkspaceType());
     }
 
     private String attemptKey(String username, HttpServletRequest request) {
@@ -135,5 +140,5 @@ public class AuthController {
     }
 
     public record LoginRequest(String username, String password, Boolean rememberMe, String captchaCode) {}
-    public record UserResponse(String userId, String username, String displayName, String role) {}
+    public record UserResponse(String userId, String username, String displayName, String role, String workspaceType) {}
 }

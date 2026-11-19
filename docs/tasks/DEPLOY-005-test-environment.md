@@ -43,3 +43,5 @@ PR #2/#3/#4 已合入 `test`。测试任务每分钟检查新提交，构建成�
 ## 2026-11-19 RSDP 测试管理界面
 
 此前 `rsdp-test.rooom.vip` 仅提供 `/api/`，浏览器首页按配置返回 404。现已增加与测试后端同版本的管理前端，首页、登录和商品列表可访问。真实账号登录、10 行商品展示及全库接口返回 185 件商品均通过，API 请求连接测试 RSDP 同源地址。原有运行容器均未重启。配置、备份和验证记录见 [DEPLOY-007](DEPLOY-007-catalog-test-web.md)。
+
+Office 测试流水线将 `NUXT_PUBLIC_RSDP_WEB_URL=https://rsdp-test.rooom.vip` 传给两个静态前端镜像，使商品库和导入记录的管理链接进入 RSDP 测试站。

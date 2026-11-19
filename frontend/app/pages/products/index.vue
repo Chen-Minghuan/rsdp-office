@@ -1,8 +1,28 @@
 <script setup lang="ts">
-import type { ImportedProduct } from '~/types/imported-products'
+import type { CatalogCapabilities, ImportedProduct } from '~/types/imported-products'
+import { catalogSourceLabel } from '~/utils/catalogSource'
 
 const api = useOfficeApi()
+const rsdpWeb = useRsdpWeb()
 const products = ref<ImportedProduct[]>([])
+const capabilities = ref<CatalogCapabilities | null>(null)
+const managed = ref(false)
+let listRequest = 0
+
+async function loadCapabilities() {
+  try {
+    capabilities.value = await api.loadCatalogCapabilities()
+  } catch {
+    capabilities.value = null
+  }
+}
+
+function setManaged(next: boolean) {
+  if (managed.value === next) return
+  managed.value = next
+  currentPage.value = 1
+  void loadProducts()
+}
 const isLoading = ref(true)
 const listError = ref<string | null>(null)
 const actionError = ref<string | null>(null)
@@ -55,14 +75,16 @@ watch(pageCount, count => {
 watch(currentPage, value => { pageInput.value = value })
 
 async function loadProducts() {
+  const request = ++listRequest
   isLoading.value = true
   listError.value = null
   try {
-    products.value = await api.loadImportedProducts()
+    const result = await api.loadImportedProducts(managed.value)
+    if (request === listRequest) products.value = result
   } catch (error) {
-    listError.value = error instanceof Error ? error.message : '商品列表请求失败'
+    if (request === listRequest) listError.value = error instanceof Error ? error.message : '商品列表请求失败'
   } finally {
-    isLoading.value = false
+    if (request === listRequest) isLoading.value = false
   }
 }
 
@@ -85,6 +107,7 @@ async function toggleWorkspaceSharedCatalog() {
   try {
     const updated = await api.setWorkspaceSharedCatalog(!current.workspaceEnabled)
     catalogStatus.value = updated
+    managed.value = false
     currentPage.value = 1
     actionMessage.value = updated.workspaceEnabled ? '公共库已开启，对整个工作区生效' : '公共库已关闭，对整个工作区生效'
     await loadProducts()
@@ -124,6 +147,7 @@ async function showDetails(product: ImportedProduct) {
 onMounted(() => {
   loadProducts()
   loadCatalogStatus()
+  loadCapabilities()
 })
 </script>
 
@@ -134,7 +158,7 @@ onMounted(() => {
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="mb-2 text-[25px] font-bold tracking-tight">商品库</h1>
-          <p class="text-xs text-muted">维护办公商品资料，为空间设计与方案报价提供商品资源。</p>
+          <p class="text-xs text-muted">从 RSDP 读取商品，供空间设计、选品和报价使用。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button v-if="catalogStatus?.dealer" type="button" role="switch" aria-label="公共库"
@@ -146,16 +170,17 @@ onMounted(() => {
               {{ savingCatalogStatus ? '保存中' : catalogStatus.workspaceEnabled ? '已开启' : '已关闭' }}
             </span>
           </button>
-          <NuxtLink to="/products/manual" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
-            <AppIcon name="plus" size="4" />手工录入
-          </NuxtLink>
-          <NuxtLink to="/products/import" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-bronze-dark">
-            <AppIcon name="import" size="4" />批量导入
-          </NuxtLink>
+          <a :href="rsdpWeb('/products')" target="_blank" rel="noopener" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
+            去 RSDP 管理商品
+          </a>
         </div>
       </div>
     </div>
 
+    <nav v-if="capabilities?.managed && catalogStatus?.workspaceEnabled" class="mb-3 flex gap-2" aria-label="商品库范围">
+      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': !managed }" :aria-pressed="!managed" @click="setManaged(false)">共享商品</button>
+      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': managed }" :aria-pressed="managed" @click="setManaged(true)">本厂录入</button>
+    </nav>
     <div class="flex flex-none flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted" aria-live="polite">
       <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? products.length : '—' }}</strong></span>
       <span>在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
@@ -193,7 +218,7 @@ onMounted(() => {
       </div>
 
       <div v-else-if="products.length === 0" class="grid min-h-[320px] place-items-center p-6">
-        <div class="text-center"><div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-cream text-bronze"><AppIcon name="cube" size="6" /></div><h2 class="mb-2 text-base font-bold">商品库还是空的</h2><p class="mb-5 text-sm text-muted">导入第一份商品档案，建立可供设计使用的商品资源。</p><NuxtLink to="/products/import" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark"><AppIcon name="import" size="4" />导入商品</NuxtLink></div>
+        <div class="text-center"><div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-cream text-bronze"><AppIcon name="cube" size="6" /></div><h2 class="mb-2 text-base font-bold">商品库还是空的</h2><p class="text-sm text-muted">当前范围没有可读取的商品。</p></div>
       </div>
 
       <div v-else-if="filteredProducts.length === 0" class="grid min-h-[280px] place-items-center p-6">
@@ -208,7 +233,7 @@ onMounted(() => {
               <td class="px-2 py-3">
                 <NuxtLink :to="`/products/${product.rspuId}`" class="group flex w-fit items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2" :aria-label="`查看${product.productName || '商品'}详情`">
                   <div class="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg border border-line bg-white transition group-hover:border-bronze"><ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" /></div>
-                  <div class="min-w-0 max-w-[250px]"><div class="truncate font-medium group-hover:text-bronze-dark group-hover:underline" :title="product.productName || undefined">{{ product.productName || '未命名商品' }}</div><div class="mt-1 text-xs text-muted">{{ product.rspuCode || product.externalCode || product.rspuId }}</div></div>
+                  <div class="min-w-0 max-w-[250px]"><div class="truncate font-medium group-hover:text-bronze-dark group-hover:underline" :title="product.productName || undefined">{{ product.productName || '未命名商品' }}</div><div class="mt-1 text-xs text-muted">{{ product.rspuCode || product.externalCode || product.rspuId }}</div><div v-if="product.sourceChannel || managed" class="mt-1 text-xs text-muted">{{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}</div></div>
                 </NuxtLink>
               </td>
               <td class="px-4 py-4 text-right font-medium tabular-nums">{{ formatPrice(product.retailPrice) }}</td>

@@ -2,7 +2,6 @@ package com.rsdp.officeproduct.importer.office.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.office.dto.ConfirmProjectQuotationRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationPreviewDto;
@@ -14,6 +13,7 @@ import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeQuotation;
+import com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
@@ -27,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -98,6 +99,43 @@ class ProjectQuotationServiceTest {
     }
 
     @Test
+    void previewDraftAndConfirmSharePricingAndFactoryPriceCache() {
+        stubScenario(true);
+        ProjectQuotationService service = service();
+        ConfirmProjectQuotationRequest request = request("MARGIN", "0.35", "0", "0",
+            List.of(confirmLine("V-DESK", 2, null)));
+
+        ProjectQuotationPreviewDto preview = service.preview(PROJECT_ID, "margin", new BigDecimal("0.35"));
+        ProjectQuotationRecordDto draft = service.previewConfirmation(PROJECT_ID, request);
+        ProjectQuotationRecordDto confirmed = service.confirm(PROJECT_ID, request);
+
+        QuotationLineDto desk = preview.getFloors().getFirst().getSpaces().getFirst().getLines().getFirst();
+        assertAmount("298.46", desk.getUnitPrice());
+        assertEquals(desk.getUnitPrice(), draft.getLines().getFirst().getUnitPrice());
+        assertEquals(draft.getLines(), confirmed.getLines());
+        assertEquals(draft.getTotalAmount(), confirmed.getTotalAmount());
+        verify(catalogGateway).getFactoryPrices("RSPU-DESK");
+    }
+
+    @Test
+    void previewKeepsCanvasSpaceIdsContainingDelimiters() {
+        stubScenario(true);
+        OfficeCanvas canvas = new OfficeCanvas();
+        canvas.setObjectsJson("""
+            [{"kind":"furniture","id":"F-1","productId":"V-CHAIR","zoneId":"Z|2"},
+             {"kind":"zone","id":"Z|2","name":"会议室"}]
+            """);
+        when(canvasMapper.selectOne(any())).thenReturn(canvas);
+
+        ProjectQuotationPreviewDto preview = service().preview(PROJECT_ID, "COEFFICIENT", null);
+
+        QuotationSpaceDto space = preview.getFloors().getFirst().getSpaces().getLast();
+        assertEquals("Z|2", space.getZoneId());
+        assertEquals("会议室", space.getZoneName());
+        assertAmount("120", space.getLines().getFirst().getUnitPrice());
+    }
+
+    @Test
     void lineWithoutFactoryPriceIsReportedAndExcludedFromTotals() {
         stubScenario(false);
 
@@ -133,14 +171,14 @@ class ProjectQuotationServiceTest {
         assertEquals("CONFIRMED", header.getValue().getStatus());
         assertEquals(1, header.getValue().getRevision());
         assertEquals("报价测试项目", header.getValue().getProjectName());
-        assertAmount("600", header.getValue().getGoodsTotal());
-        assertAmount("100", header.getValue().getServiceFee());
         assertAmount("750", header.getValue().getTotalAmount());
-        assertEquals(1, header.getValue().getLineCount());
-        assertNotNull(header.getValue().getSnapshotJson());
+        assertNotNull(header.getValue().getFeesJson());
         verify(quotationMapper).update(any(OfficeQuotation.class), any());
-        verify(quotationLineMapper).insert(any(com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine.class));
+        verify(quotationLineMapper).insert(any(OfficeQuotationLine.class));
+        assertAmount("600", stored.getGoodsTotal());
+        assertAmount("100", stored.getServiceFee());
         assertAmount("750", stored.getTotalAmount());
+        assertEquals(1, stored.getLineCount());
         assertEquals("CONFIRMED", stored.getStatus());
     }
 
@@ -164,17 +202,16 @@ class ProjectQuotationServiceTest {
         stubScenario(false);
         when(quotationMapper.selectOne(any())).thenReturn(null);
 
-        service().confirm(PROJECT_ID, request("COEFFICIENT", "1.2", "0", "0",
+        ProjectQuotationRecordDto stored = service().confirm(PROJECT_ID, request("COEFFICIENT", "1.2", "0", "0",
             List.of(confirmLine("V-DESK", 1, "300"))));
 
-        ArgumentCaptor<OfficeQuotation> header = ArgumentCaptor.forClass(OfficeQuotation.class);
-        verify(quotationMapper).insert(header.capture());
-        assertEquals(1, header.getValue().getMissingPriceLines());
-        assertAmount("0", header.getValue().getTotalAmount());
+        assertEquals(1, stored.getMissingPriceLines());
+        assertNull(stored.getLines().getFirst().getSubtotal());
+        assertAmount("0", stored.getTotalAmount());
     }
 
     @Test
-    void confirmStoresMultipleFeesAndLatestRestoresThem() {
+    void confirmStoresMultipleFeesAndLatestRestoresThem() throws Exception {
         stubScenario(true);
         when(quotationMapper.selectOne(any())).thenReturn(null);
         ConfirmProjectQuotationRequest request = request("COEFFICIENT", "1.25", "100", "50",
@@ -192,10 +229,15 @@ class ProjectQuotationServiceTest {
         assertAmount("100", stored.getServiceFee());
         assertAmount("50", stored.getLogisticsFee());
         ArgumentCaptor<OfficeQuotation> header = ArgumentCaptor.forClass(OfficeQuotation.class);
+        ArgumentCaptor<OfficeQuotationLine> line = ArgumentCaptor.forClass(OfficeQuotationLine.class);
         verify(quotationMapper).insert(header.capture());
+        verify(quotationLineMapper).insert(line.capture());
+        var fees = json.readTree(header.getValue().getFeesJson());
+        assertEquals(true, fees.isArray());
+        assertEquals(4, fees.size());
         when(quotationMapper.selectOne(any())).thenReturn(header.getValue());
-        when(quotationLineMapper.selectList(any())).thenReturn(List.of());
-        assertEquals(4, service.latest(PROJECT_ID).getFees().size());
+        when(quotationLineMapper.findByQuotationId(stored.getQuotationId())).thenReturn(List.of(line.getValue()));
+        assertEquals(stored, service.latest(PROJECT_ID));
     }
 
     @Test
@@ -238,13 +280,15 @@ class ProjectQuotationServiceTest {
         line.setZoneName("开放办公区");
         line.setProductId(productId);
         line.setQty(qty);
-        line.setUnitPrice(new BigDecimal(unitPrice));
+        line.setUnitPrice(unitPrice == null ? null : new BigDecimal(unitPrice));
         return line;
     }
 
     private ProjectQuotationService service() {
-        return new ProjectQuotationService(accessService, projectMapper, floorMapper, canvasMapper, cartMapper,
-            quotationMapper, quotationLineMapper, catalogGateway, auditService, json);
+        QuotationCatalog catalog = new QuotationCatalog(catalogGateway);
+        return new ProjectQuotationService(accessService, projectMapper, quotationMapper, quotationLineMapper,
+            auditService, new ProjectQuotationPreviewBuilder(floorMapper, canvasMapper, cartMapper, catalog, json),
+            new ProjectQuotationDraftBuilder(floorMapper, catalog), new QuotationRecordAssembler(json));
     }
 
     /** 一间楼层：清单里 2 张办公桌（空间 Z1），画布里 2 把会议椅（空间 Z2）。 */
@@ -254,6 +298,7 @@ class ProjectQuotationServiceTest {
         project.setName("报价测试项目");
         project.setWorkspaceId("WS-1");
         when(projectMapper.selectById(PROJECT_ID)).thenReturn(project);
+        when(projectMapper.selectOne(any())).thenReturn(project);
 
         OfficeDesignFloor floor = new OfficeDesignFloor();
         floor.setFloorId(FLOOR_ID);
@@ -283,8 +328,10 @@ class ProjectQuotationServiceTest {
         when(catalogGateway.listOfficeProducts(anyString())).thenReturn(List.of(
             product("V-DESK", "RSPU-DESK", "办公桌", "标准款"),
             product("V-CHAIR", "RSPU-CHAIR", "会议椅", "标准款")));
-        when(catalogGateway.getProductDetail("RSPU-DESK")).thenReturn(detail("V-DESK", withFactoryPrice ? "194" : null));
-        when(catalogGateway.getProductDetail("RSPU-CHAIR")).thenReturn(detail("V-CHAIR", withFactoryPrice ? "100" : null));
+        when(catalogGateway.getFactoryPrices("RSPU-DESK"))
+            .thenReturn(withFactoryPrice ? Map.of("V-DESK", new BigDecimal("194")) : Map.of());
+        when(catalogGateway.getFactoryPrices("RSPU-CHAIR"))
+            .thenReturn(withFactoryPrice ? Map.of("", new BigDecimal("100")) : Map.of());
     }
 
     private OfficeProductDto product(String variantId, String rspuId, String name, String variant) {
@@ -296,15 +343,6 @@ class ProjectQuotationServiceTest {
         product.setVariant(variant);
         product.setPrice(new BigDecimal("588"));
         return product;
-    }
-
-    private ProductDetailDto detail(String variantId, String factoryPrice) {
-        ProductDetailDto detail = new ProductDetailDto();
-        ProductDetailDto.Variant variant = new ProductDetailDto.Variant();
-        variant.setVariantId(variantId);
-        variant.setFactoryPrice(factoryPrice == null ? null : new BigDecimal(factoryPrice));
-        detail.getVariants().add(variant);
-        return detail;
     }
 
     private void assertAmount(String expected, BigDecimal actual) {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
+import { workspaceOwnerLabel, type WorkspaceType } from '~/utils/workspaceType'
 
 interface WorkspaceUserItem {
   userId: string
@@ -16,6 +17,8 @@ const { me } = useAuth()
 const authorized = ref(false)
 const checking = ref(true)
 const workspaceName = ref('')
+const workspaceType = ref<WorkspaceType>('DEALER')
+const defaultSource = computed(() => workspaceType.value === 'FACTORY' ? 'FACTORY_SALES' : 'DEALER_STAFF')
 const users = ref<WorkspaceUserItem[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -51,6 +54,10 @@ async function loadAll() {
   try {
     const workspace = await api.getMyWorkspace()
     workspaceName.value = workspace.name
+    if (workspace.workspaceType !== workspaceType.value) {
+      workspaceType.value = workspace.workspaceType ?? 'DEALER'
+      newSource.value = defaultSource.value
+    }
     users.value = await api.listWorkspaceUsers()
     const catalog = await api.getSharedCatalogStatus()
     sharedCatalogEnabled.value = catalog.workspaceEnabled
@@ -95,7 +102,7 @@ async function createUser() {
     newUsername.value = ''
     newDisplayName.value = ''
     newPassword.value = ''
-    newSource.value = 'DEALER_STAFF'
+    newSource.value = defaultSource.value
     await loadAll()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '开户失败'
@@ -119,11 +126,11 @@ function formatTime(value: string | null) {
   <div class="mx-auto w-full max-w-4xl p-6">
     <header class="mb-4">
       <h1 class="text-lg font-bold">工作区账号</h1>
-      <p class="mt-1 text-xs text-muted">经销商主号在本工作区内开通普通账号（员工或厂家业务员）；项目负责人在项目内从本工作区账号池中增删协作者。停用与重置密码由系统管理员处理。</p>
+      <p class="mt-1 text-xs text-muted">工作区主号在本工作区开通成员账号，项目负责人从成员中添加协作者。停用账号和重置密码由系统管理员处理。</p>
     </header>
 
-    <p v-if="checking" class="text-sm text-muted">正在核验经销商主号身份…</p>
-    <p v-else-if="!authorized" class="border border-line bg-white px-4 py-6 text-sm text-muted">无权访问：只有经销商主号可以管理工作区账号。</p>
+    <p v-if="checking" class="text-sm text-muted">正在核验工作区主号身份…</p>
+    <p v-else-if="!authorized" class="border border-line bg-white px-4 py-6 text-sm text-muted">请使用工作区主号管理成员账号。</p>
 
     <template v-else>
       <p v-if="workspaceName" class="mb-3 text-sm text-muted">当前工作区：<span class="font-semibold text-ink">{{ workspaceName }}</span></p>
@@ -184,7 +191,7 @@ function formatTime(value: string | null) {
             <tr v-for="user in users" :key="user.userId" class="border-b border-line last:border-b-0">
               <td class="px-3 py-2 font-medium">{{ user.username }}</td>
               <td class="px-3 py-2">{{ user.displayName }}</td>
-              <td class="px-3 py-2"><span class="text-xs" :class="user.role === 'DEALER' ? 'text-bronze-dark font-semibold' : 'text-muted'">{{ user.role === 'DEALER' ? '经销商主号' : '普通账号' }}</span></td>
+              <td class="px-3 py-2"><span class="text-xs" :class="user.role === 'DEALER' ? 'text-bronze-dark font-semibold' : 'text-muted'">{{ user.role === 'DEALER' ? workspaceOwnerLabel(workspaceType) : '普通账号' }}</span></td>
               <td class="px-3 py-2 text-xs text-muted">{{ sourceLabel(user.source) }}</td>
               <td class="px-3 py-2"><span class="text-xs" :class="user.status === 'active' ? 'text-green' : 'text-red-700'">{{ user.status === 'active' ? '在用' : '已停用' }}</span></td>
               <td class="px-3 py-2 text-xs text-muted">{{ formatTime(user.createdAt) }}</td>

@@ -1,5 +1,33 @@
 # 开发进度与下一步
 
+2026-11-19 `test` 合入 `main` 的画布、商品库与报价改动，保留经销商主号的公共库开关，商品管理入口指向 RSDP 测试站，并修复静态站刷新 `/canvas/` 后的项目导航与空间核对列表。前端构建和静态生成通过，Nginx 上的冒烟与工作流以及家具多选、报价模拟回归通过。Java 283 项、0 失败、3 跳过。真实测试站发布和业务验收未核验。
+
+2026-11-19 布局选品画布与空间核对共用空格左拖、中键平移，工具栏补充拖动快捷键和「恢复」。普通左拖移动家具，单按空格旋转，家具拖动可撤销和恢复。前端构建及家具多选、逐件添加、预览拖动、冒烟和工作流 UI 模拟回归通过，本地前端已更新。见 [LAYOUT-008](tasks/LAYOUT-008-multi-furniture-selection.md#2026-11-19-布局选品画布平移)。
+
+2026-11-19 [GEOM-007](tasks/GEOM-007-free-contour-transform.md#2026-11-19-撤销与恢复) 空间画布在撤销旁新增恢复，支持连续恢复，新的画布编辑清除旧恢复记录。前端构建、Chrome 和 Edge 模拟冒烟及模拟工作流通过。本地前端已更新。
+
+2026-11-19 [GEOM-007](tasks/GEOM-007-free-contour-transform.md#2026-11-19-画布右键与浏览器手势) 空间画布移除右键平移，画布内外均保留浏览器默认右键行为。点击画布后可按空格左拖，也可用中键平移。各工具名称下方显示对应快捷操作，窄屏换行。前端构建和 Chrome、Edge 模拟冒烟通过，工具栏排版在 1440、660 和 390 像素宽度核对。旧空间复核专项受空项目模拟阻塞。本地前端已更新。
+
+2026-11-19 [伟豪目录与主分支报价合流](tasks/INTEG-002-weihao-catalog.md#主分支合流) 保留工厂工作区、公共库只读权限、项目报价、主色筛选和工作台导航。合并后的前端构建、报价、推荐、选品、工作流、冒烟及楼层模拟回归通过。
+
+2026-11-19 [录入审核修复](tasks/INTEG-002-weihao-catalog.md#录入审核修复) 清理两端旧 Office 写实现和转发依赖，保留商品只读、旧页面跳转和导入历史。RSDP 收紧单条录入校验及 Excel 确认版本。两端构建和 Java 测试通过，Office 模拟工作流与冒烟通过。
+
+2026-11-19 [公有库和伟豪私有商品边界](tasks/INTEG-002-weihao-catalog.md#公有库和伟豪私有商品边界) 本机 28 个旧写入请求均被拒绝。164 件旧 B001 公有库商品已移入 RSDP 回收站，共享目录剩余 307 件。伟豪 Office 私有商品录入待其他开发人员实现。
+
+2026-11-19 [INTEG-002 录入统一回到 RSDP](tasks/INTEG-002-weihao-catalog.md#2026-11-19-录入统一回到-rsdp) 两端本地已切换，Office 连接账号改为目录只读。共享目录 471 件，本厂范围 164 件，公共库开关及商品详情保留。两端构建、Java、Office 模拟回归及隔离双服务合成样表通过。正式样表与公网部署待办。
+
+2026-11-19 [TENANT-001 伟豪账号与工作区](tasks/TENANT-001-workspace-roles.md#2026-11-19-伟豪账号与工作区) Office 支持工厂工作区类型和工厂工作区主号，RSDP 用户管理独立展示企业名称和关联工厂。本地已配置伟豪办公工作区和 RSDP 工厂测试账号，两个测试账号均通过真实登录。商品录入链路切换列入后续阶段。
+
+2026-11-18 [INTEG-002 存量录入来源回填](tasks/INTEG-002-weihao-catalog.md#本地主库存量来源回填) 本地主库 710 条已补来源（471 在售、239 已删除），伟豪 Office 历史录入 164 条，主项目 Excel 546 条。隔离副本演练后写入并回读核对，留下逐条审计，录入来源不授予维护权。
+
+2026-11-18 商品库恢复经销商主号的公共库开关入口，复用工作区账号页的工作区级设置。前端构建及模拟工作流通过。见 [INTEG-002](tasks/INTEG-002-weihao-catalog.md#商品库公共库开关入口)。
+
+2026-11-18 [INTEG-002 伟豪商品接入](tasks/INTEG-002-weihao-catalog.md) 第一轮实施。两端在集成分支接通可信工厂身份、手工确认上架、来源、精确改价、独立上下架及统一 Excel 批次。V29 隔离库结构校验通过；真实双服务使用合成工厂和样表验证。真表、正式租户与生产迁移待验收。
+
+2026-11-19 [QUOTE-001](tasks/QUOTE-001-project-quotation.md) 拆分项目报价服务，统一计价规则和出厂价缓存，保留确认事务及接口。Java 299 项、0 失败、3 跳过。临时 PostgreSQL 和模拟商品主档验证了试算、导出、并发确认、回显及明细失败回滚。本轮未重跑前端和真实主号业务验收。
+
+2026-11-19 [QUOTE-001](tasks/QUOTE-001-project-quotation.md) 简化 PR #5 的报价存储。主表 `fees_json` 只存费用，删除完整 JSON 及重复费用、统计和小计列。保留历史价格和确认总额，明细以报价 ID 和行号为主键，事务内按项目串行分配版本。同步远程 main 后，Java 297 项、0 失败、3 跳过，前端构建及三项模拟 UI 通过。临时 PostgreSQL 16 验证旧数据迁移、新库建表及真实后端回显、导出与并发确认，商品主档使用模拟服务。真实经销商主号的端到端验收待执行。
+
 2026-11-19 [CAT-008](tasks/CAT-008-shared-catalog-toggle.md) 已恢复并部署测试站商品页公共库开关，仅对经销商主号展示，沿用工作区级后端权限。构建、定向模拟 UI、工作流/冒烟和 7 项公共库权限测试通过；Jenkins 第 8 次自动部署成功，真实 `dealer` 可见且状态正确，管理员不显示。线上验证未更改工作区开关，写入由模拟回归覆盖。
 
 2026-11-19 [DEPLOY-007](tasks/DEPLOY-007-catalog-test-web.md) 已补齐 RSDP 测试管理前端并修复首页 404，首页与登录路由返回 200，真实测试账号登录、商品列表和全库接口（185 件）验证通过；仅新增测试前端容器，原有运行容器未重启。本轮不扩大为全部业务验收。
@@ -419,7 +447,7 @@ P0 是后续设计流程的数据与业务基础；P1 依赖空间与确认基�
 
 ## 3. 关键源码证据
 
-- 商品：[接口](../backend/src/main/java/com/rsdp/officeproduct/importer/controller/ProductImportController.java)、[录入网关](../backend/src/main/java/com/rsdp/officeproduct/importer/service/MainProductEntryGateway.java)、[商品页](../frontend/app/pages/products/index.vue)。
+- 商品：[目录接口](../backend/src/main/java/com/rsdp/officeproduct/importer/controller/ProductImportController.java)、[只读目录网关](../backend/src/main/java/com/rsdp/officeproduct/importer/service/RsdpCatalogGateway.java)、[商品页](../frontend/app/pages/products/index.vue)。
 - 识别与导入：[上传页](../frontend/app/pages/index.vue)、[API 客户端](../frontend/app/composables/useOfficeApi.ts)、[vision 客户端](../backend/src/main/java/com/rsdp/officeproduct/importer/service/VisionRecognitionClient.java)。
 - 当前画布模型：[类型](../frontend/app/types/office.ts)、[空间核对](../frontend/app/components/OfficeCanvas/SpaceReview.vue)、[统一渲染](../frontend/app/components/OfficeCanvas/SpatialCanvas.vue)、[坐标/几何适配](../frontend/app/utils/spatial/review.ts)；单空间排版保留 [CanvasBoard](../frontend/app/components/OfficeCanvas/CanvasBoard.vue)。
 - 排版：[算法](../frontend/app/utils/layout.ts)、[排版侧栏](../frontend/app/components/OfficeCanvas/DesignLayoutSidebar.vue)、[商品候选侧栏](../frontend/app/components/OfficeCanvas/DesignSidebar.vue)。

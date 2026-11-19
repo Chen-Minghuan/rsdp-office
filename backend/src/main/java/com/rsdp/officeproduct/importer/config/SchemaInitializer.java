@@ -62,7 +62,8 @@ public class SchemaInitializer {
             Resource dropUserSharedCatalogToggle = new ClassPathResource("db/migrations/20261114_drop_user_shared_catalog_toggle.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(dropUserSharedCatalogToggle), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
-            Resource projectQuotation = new ClassPathResource("db/migrations/20261118_project_quotation.sql");
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261119_workspace_type.sql"));
+            Resource projectQuotation = new ClassPathResource("db/migrations/20261119_simplify_project_quotation.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(projectQuotation), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
             connection.commit();

@@ -27,6 +27,7 @@ export default defineNuxtConfig({
     public: {
       // Build-time same-origin API prefix; '/office' for the domain subpath build.
       apiBaseUrl: '',
+      rsdpWebUrl: '',
     },
   },
 })

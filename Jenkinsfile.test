@@ -17,6 +17,7 @@ pipeline {
         DEPLOY_ROOT = '/opt/rsdp-office-test'
         ENV_FILE = '/opt/rsdp-office-test/.env'
         RSDP_COMPOSE_PROJECT = 'rsdp-office-test'
+        NUXT_PUBLIC_RSDP_WEB_URL = 'https://rsdp-test.rooom.vip'
         COMPOSE_PARALLEL_LIMIT = '1'
     }
 

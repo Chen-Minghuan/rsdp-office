@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
+import { workspaceTypeLabel } from '~/utils/workspaceType'
 
 const router = useRouter()
-const { lastProjectRoute } = useWorkspaceNavigation()
+const auth = useAuth()
+const { isProjectWorkflow, lastProjectRoute } = useWorkspaceNavigation()
 const productLinks = [
   { icon: 'cube', label: '商品库', to: '/products' },
   { icon: 'documentText', label: '导入记录', to: '/products/import-records' },
@@ -18,9 +20,8 @@ let activeSidebarResizePointerId: number | null = null
 
 // 两个工作空间入口共享同一活动键，避免路由切换期间出现双高亮。
 const activeWorkspaceTab = computed<'project-bench' | 'space-design' | null>(() => {
-  const path = router.currentRoute.value.path
-  if (path === '/workspace/project-bench') return 'project-bench'
-  return ['/', '/canvas', '/proposal', '/agent'].includes(path) ? 'space-design' : null
+  if (router.currentRoute.value.name === 'workspace-project-bench') return 'project-bench'
+  return isProjectWorkflow.value ? 'space-design' : null
 })
 
 // 用户管理入口只对系统管理员可见，工作区账号入口只对经销商主号可见；服务端仍逐接口校验
@@ -28,7 +29,7 @@ const isAdmin = ref(false)
 const isDealer = ref(false)
 onMounted(async () => {
   if (!authEnabled) { isAdmin.value = true; isDealer.value = true; return }
-  const user = await useAuth().me()
+  const user = await auth.me()
   isAdmin.value = user?.role === 'ADMIN'
   isDealer.value = user?.role === 'DEALER'
 })
@@ -144,7 +145,7 @@ onBeforeUnmount(() => {
       </NuxtLink>
       </div>
       <div v-if="isDealer" class="grid content-start gap-1">
-        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">经销商工作区</div>
+        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">{{ workspaceTypeLabel(auth.user.value?.workspaceType) }}</div>
 
         <NuxtLink
           to="/workspace/quotes"

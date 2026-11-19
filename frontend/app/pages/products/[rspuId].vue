@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ProductDetail } from '~/types/imported-products'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
+import { catalogSourceLabel } from '~/utils/catalogSource'
 
 const route = useRoute()
 const api = useOfficeApi()
@@ -11,7 +12,6 @@ const error = ref<string | null>(null)
 const product = ref<ProductDetail | null>(null)
 
 const form = ref<Partial<ProductDetail>>({})
-
 const galleryImages = computed(() => {
   const images = (form.value.images || []).filter(image => image.storageUrl).map(image => ({
     id: image.imageId,
@@ -101,6 +101,7 @@ onMounted(async () => {
           <span class="text-sm font-semibold text-ink">商品概览</span>
           <span class="rounded-md bg-bg px-2.5 py-1 text-xs text-muted">{{ product.rspuCode || product.rspuId }}</span>
           <span class="rounded-md px-2.5 py-1 text-xs" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
+          <span class="text-xs text-muted">{{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}</span>
         </div>
       </div>
 
@@ -144,9 +145,9 @@ onMounted(async () => {
       </section>
 
       <section class="rounded-xl border border-line bg-white p-5 shadow-panel sm:p-6">
-            <div class="mb-4 flex flex-wrap items-end justify-between gap-2"><div><div class="mb-1 text-xs text-muted">商品规格</div><h2 class="text-base font-semibold">规格与报价</h2></div><span class="text-xs text-muted">{{ form.variants?.length || 0 }} 个规格</span></div>
+            <div class="mb-4 flex flex-wrap items-end justify-between gap-2"><div><h2 class="text-base font-semibold">商品规格</h2></div><span class="text-xs text-muted">{{ form.variants?.length || 0 }} 个规格</span></div>
             <div class="overflow-x-auto rounded-lg border border-line">
-              <table class="w-full min-w-[1050px] text-left text-sm">
+              <table class="w-full min-w-[740px] text-left text-sm">
                 <thead class="bg-bg text-xs text-muted">
                   <tr>
                     <th class="px-4 py-3 font-medium">变体名称</th>
@@ -156,14 +157,11 @@ onMounted(async () => {
                     <th class="px-4 py-3 text-right font-medium">包数</th>
                     <th class="px-4 py-3 text-right font-medium">体积(CBM)</th>
                     <th class="px-4 py-3 text-right font-medium">重量(原表值)</th>
-                    <th class="px-4 py-3 text-right font-medium">工厂价</th>
-                    <th class="px-4 py-3 text-right font-medium">MOQ</th>
-                    <th class="px-4 py-3 text-right font-medium">交期</th>
                     <th class="px-4 py-3 font-medium">状态</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-if="!form.variants?.length"><td colspan="11" class="px-4 py-8 text-center text-sm text-muted">暂无规格信息</td></tr>
+                  <tr v-if="!form.variants?.length"><td colspan="8" class="px-4 py-8 text-center text-sm text-muted">暂无规格信息</td></tr>
                   <tr v-for="variant in form.variants" :key="variant.variantId" class="border-t border-line">
                     <td class="px-4 py-3">{{ variant.displayName || '—' }}</td>
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.sizeText || variant.sizeCode || '—' }}</td>
@@ -172,9 +170,6 @@ onMounted(async () => {
                     <td class="px-4 py-3 text-right tabular-nums">{{ variant.packageCount ?? '—' }}</td>
                     <td class="px-4 py-3 text-right tabular-nums">{{ variant.packageVolumeCbm ?? '—' }}</td>
                     <td class="px-4 py-3 text-right tabular-nums">{{ variant.grossWeight ?? '—' }}</td>
-                    <td class="px-4 py-3 text-right tabular-nums">{{ formatPrice(variant.factoryPrice) }}</td>
-                    <td class="px-4 py-3 text-right tabular-nums">{{ variant.moq ?? '—' }}</td>
-                    <td class="px-4 py-3 text-right tabular-nums">{{ variant.leadTimeDays ?? '—' }} 天</td>
                     <td class="px-4 py-3 text-xs">
                       <span class="rounded px-1.5 py-0.5" :class="variant.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ variant.status === 'active' ? '有效' : variant.status }}</span>
                     </td>

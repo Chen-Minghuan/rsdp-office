@@ -268,23 +268,19 @@ create table if not exists office_quotation (
     status varchar(20) not null default 'CONFIRMED',
     pricing_mode varchar(20) not null,
     pricing_value numeric(12,4) not null,
-    goods_total numeric(14,2) not null default 0,
-    service_fee numeric(14,2) not null default 0,
-    logistics_fee numeric(14,2) not null default 0,
     total_amount numeric(14,2) not null default 0,
-    line_count integer not null default 0,
-    missing_price_lines integer not null default 0,
-    snapshot_json jsonb not null default '{}'::jsonb,
+    fees_json jsonb not null default '[]'::jsonb,
     created_by varchar(64),
     created_at timestamp not null default now(),
-    superseded_at timestamp
+    superseded_at timestamp,
+    constraint ck_office_quotation_fees_array check (jsonb_typeof(fees_json) = 'array')
 );
-create index if not exists idx_office_quotation_project on office_quotation(project_id, revision desc);
+create unique index if not exists uk_office_quotation_project_revision on office_quotation(project_id, revision);
 create unique index if not exists uk_office_quotation_confirmed on office_quotation(project_id) where status = 'CONFIRMED';
 
 create table if not exists office_quotation_line (
-    line_id varchar(64) primary key,
     quotation_id varchar(64) not null references office_quotation(quotation_id) on delete cascade,
+    line_no integer not null,
     floor_id varchar(64),
     floor_name varchar(200),
     zone_id varchar(64),
@@ -297,8 +293,6 @@ create table if not exists office_quotation_line (
     qty integer not null default 1,
     factory_price numeric(14,2),
     unit_price numeric(14,2),
-    subtotal numeric(14,2),
     issue varchar(255),
-    sort_order integer not null default 0
+    primary key (quotation_id, line_no)
 );
-create index if not exists idx_office_quotation_line_quotation on office_quotation_line(quotation_id, sort_order);

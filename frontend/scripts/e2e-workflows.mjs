@@ -10,11 +10,13 @@ const page = await context.newPage()
 const pageErrors = []
 page.on('pageerror', error => pageErrors.push(error.message))
 let listMode = 'success'
-let importMode = 'partial'
+let catalogEnabled = true
+let catalogDealer = true
+let catalogManaged = false
+let rejectCatalogChange = false
+const catalogUpdates = []
 let importRequests = 0
-let overwriteRequested = false
 let legacyAuditDetailRequests = 0
-let manuallyCreatedProduct = null
 const products = Array.from({ length: 23 }, (_, index) => ({
   rspuId: `PRODUCT-${index + 1}`,
   rspuCode: `RSDP-${String(index + 1).padStart(3, '0')}`,
@@ -25,19 +27,10 @@ const products = Array.from({ length: 23 }, (_, index) => ({
   sixDimTags: '{"A":["A1"],"B":["B2"]}', status: index % 3 ? 'active' : 'inactive',
   createdAt: '2026-10-12T08:00:00', updatedAt: '2026-10-12T09:00:00',
 }))
-const partialResult = {
-  totalRows: 3, successCount: 1, failedCount: 1, skippedCount: 1,
-  failures: [{ rowIndex: 3, externalCode: '=INVALID', rspuId: null, reason: '商品名称不能为空' }],
-  warnings: [{ rowIndex: 4, externalCode: 'EXTERNAL-1', rspuId: 'PRODUCT-1', reason: '商品已存在，已跳过' }],
-  cleansingReport: { cleanedRows: 3, issuesFound: 0, issues: [] },
+const batchOverview = {
+  batchId: 'BATCH-MOCK', fileName: '商品清单.xlsx', status: 'done',
+  totalRows: 2, successCount: 1, failedCount: 1,
 }
-const importPreview = {
-  columns: [{ key: '商品名称', label: '商品名称', type: 'text' }],
-  rows: [{ rowIndex: 2, fields: { '商品名称': '办公椅' }, skipped: false, groupKey: 'G1', action: 'insert', errors: [] }],
-  productCount: 1, invalidRows: 0, skippedRows: 0,
-  cleansingReport: { cleanedRows: 1, issuesFound: 0, issues: [] },
-}
-
 await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
 const reviewMock = createReviewConfirmMock()
 const defaultProject = {
@@ -51,35 +44,39 @@ await context.route('**/api/v1/**', async route => {
   const url = new URL(request.url())
   const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: status === 200 ? '成功' : '服务暂不可用', data }) })
   if (url.pathname === '/api/v1/office/projects' && request.method() === 'GET') return respond([defaultProject])
+  if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: catalogManaged })
+  if (url.pathname.startsWith('/api/v1/dicts/')) {
+    return respond([{ dictCode: 'CODE-1', dictName: '测试字典项' }])
+  }
+  if (url.pathname === '/api/v1/products/import-batches' && request.method() === 'GET') return respond([batchOverview])
+  if (url.pathname === '/api/v1/products/import-batches/BATCH-MOCK/status' && request.method() === 'GET') {
+    return respond({ ...batchOverview, rows: [
+      { excelRowNumber: 2, status: 'success', generatedRspuId: 'PRODUCT-1' },
+      { excelRowNumber: 3, status: 'failed', failureReason: '商品名称不能为空' },
+    ] })
+  }
   if (url.pathname === '/api/v1/products/audit') legacyAuditDetailRequests += 1
-  if (url.pathname === '/api/v1/products/manual' && request.method() === 'POST') {
-    manuallyCreatedProduct = { rspuId: 'PRODUCT-MANUAL', productName: request.postDataJSON().productName, status: 'active', images: [], variants: [] }
-    return respond({ rspuId: manuallyCreatedProduct.rspuId, updated: false })
+  if (url.pathname.startsWith('/api/v1/products') && request.method() !== 'GET') {
+    importRequests += 1
+    return respond(null, 403)
   }
   if (url.pathname === '/api/v1/products' && request.method() === 'GET') {
     if (listMode === 'error') return respond(null, 404)
-    return respond(listMode === 'empty' ? [] : products)
+    return respond(listMode === 'empty' ? [] : catalogEnabled ? products : [])
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
-    const product = products.find(item => item.rspuId === rspuId) ?? (manuallyCreatedProduct?.rspuId === rspuId ? manuallyCreatedProduct : null)
+    const product = products.find(item => item.rspuId === rspuId)
     return respond({ ...product, images: [], variants: [] })
   }
-  if (url.pathname === '/api/v1/products/import-template') return route.fulfill({ status: 200, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('test-template') })
-  if (url.pathname === '/api/v1/products/import-preview') {
-    assert.match(request.headers()['content-type'], /multipart\/form-data/)
-    return respond(importPreview)
+  if (url.pathname === '/api/v1/office/workspace/shared-catalog') {
+    if (request.method() === 'PUT') {
+      catalogUpdates.push(request.postDataJSON().enabled)
+      if (!catalogDealer || rejectCatalogChange) return respond(null, 503)
+      catalogEnabled = request.postDataJSON().enabled
+    }
+    return respond({ workspaceEnabled: catalogEnabled, dealer: catalogDealer, effectiveVisible: catalogEnabled })
   }
-  if (url.pathname === '/api/v1/products/import-preview/validate') return respond(importPreview)
-  if (url.pathname === '/api/v1/products/import-confirm') {
-    importRequests += 1
-    overwriteRequested = /updateIfExists[\s\S]*true/.test(request.postData() || '')
-    await new Promise(resolve => setTimeout(resolve, 600))
-    if (importMode === 'error') return respond(null, 503)
-    if (importMode === 'skipped') return respond({ totalRows: 1, successCount: 0, failedCount: 0, skippedCount: 1, failures: [], warnings: [{ rowIndex: 2, externalCode: 'EXTERNAL-1', rspuId: null, reason: '商品已存在，已跳过' }], cleansingReport: { cleanedRows: 0, issuesFound: 0, issues: [] } })
-    return respond(partialResult)
-  }
-  if (url.pathname === '/api/v1/office/workspace/shared-catalog') return respond({ workspaceEnabled: true, dealer: false, effectiveVisible: true })
   return respond(url.pathname.endsWith('/OFFICE-PROJECT-001') || url.pathname.endsWith('/canvas') ? null : [])
 })
 
@@ -91,15 +88,34 @@ async function assertNoProjectSteps() {
   assert.equal(await page.getByRole('navigation', { name: '项目设计步骤' }).count(), 0)
 }
 
-async function chooseFile(name = '商品清单.csv', content = '商品名称\n办公椅') {
-  await page.getByLabel('选择商品数据文件').setInputFiles({ name, mimeType: 'text/csv', buffer: Buffer.from(content) })
-}
 
 try {
   await page.goto(`${baseUrl}/products`, { waitUntil: 'networkidle' })
   await heading('商品库')
   await assertNoProjectSteps()
   assert.equal(await page.locator('tbody tr').count(), 20)
+
+  const catalogSwitch = page.getByRole('switch', { name: '公共库' })
+  await catalogSwitch.waitFor()
+  assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
+  assert.equal(await page.getByRole('link', { name: '手工录入' }).count(), 0)
+  rejectCatalogChange = true
+  await catalogSwitch.click()
+  await page.getByRole('alert').waitFor()
+  assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
+  assert.equal(await page.locator('tbody tr').count(), 20)
+  rejectCatalogChange = false
+  await catalogSwitch.click()
+  await heading('商品库还是空的')
+  assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'false')
+  await catalogSwitch.click()
+  await page.getByRole('link', { name: '查看人体工学椅 1详情' }).first().waitFor()
+  assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
+  assert.deepEqual(catalogUpdates, [false, false, true])
+  catalogDealer = false
+  catalogManaged = true
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal(await catalogSwitch.count(), 0)
 
   await page.getByLabel('每页显示数量').selectOption('10')
   assert.equal(await page.locator('tbody tr').count(), 10)
@@ -148,83 +164,26 @@ try {
   assert.equal(page.url(), designUrl)
 
   await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
-  await page.getByRole('link', { name: '批量导入', exact: true }).click()
-  await heading('批量导入商品')
-  await assertNoProjectSteps()
-  const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: '下载 Excel 模板' }).click()
-  assert.equal((await downloadPromise).suggestedFilename(), '办公产品导入模板.xlsx')
-  await chooseFile('错误文件.txt')
-  assert.match(await page.getByRole('alert').innerText(), /请选择/)
-  await chooseFile('空文件.csv', '')
-  assert.match(await page.getByRole('alert').innerText(), /文件内容为空/)
-  await chooseFile()
-  await heading('预览并确认导入数据')
-  const dismissNavigation = page.waitForEvent('dialog').then(dialog => dialog.dismiss())
-  await page.getByRole('link', { name: '返回商品库' }).click()
-  await dismissNavigation
-  assert.match(page.url(), /\/products\/import$/)
-  assert.equal(importRequests, 0)
-  await page.getByRole('radio', { name: /覆盖更新已有商品/ }).check()
-  await page.getByRole('button', { name: '重新校验', exact: true }).click()
-  await page.getByRole('button', { name: '确认并执行导入', exact: true }).waitFor({ state: 'visible' })
-  await page.getByRole('button', { name: '确认并执行导入' }).click()
-  assert.equal(await page.getByRole('button', { name: '正在导入，请稍候…' }).isDisabled(), true)
-  await page.getByRole('link', { name: '返回商品库' }).click()
-  await page.getByRole('alert').filter({ hasText: '正在处理导入' }).waitFor()
-  await page.getByRole('heading', { name: '处理完成，部分商品未能导入' }).waitFor()
-  await page.getByText(/新商品直接上架，已更新的商品保留原有上下架状态/).waitFor()
-  assert.equal(await page.locator('a[href="/products/audit"]').count(), 0)
-  assert.equal(await page.getByRole('alert').filter({ hasText: /失败|未完成/ }).count(), 0)
-  assert.equal(importRequests, 1)
-  assert.equal(overwriteRequested, true)
-  const failureDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: '下载失败明细' }).click()
-  const failedRows = await failureDownload
-  assert.equal(failedRows.suggestedFilename(), '商品导入失败明细.csv')
-  const failedRowsStream = await failedRows.createReadStream()
-  let failedRowsCsv = ''
-  for await (const chunk of failedRowsStream) failedRowsCsv += chunk
-  assert.match(failedRowsCsv, /'=INVALID/)
-  await page.getByRole('link', { name: '查看导入记录' }).click()
-  await heading('导入记录')
-  await page.reload({ waitUntil: 'networkidle' })
-  assert.equal(await page.locator('tbody tr').count(), 1)
-  await page.getByRole('button', { name: '查看商品清单.csv导入结果' }).click()
-  await page.getByRole('heading', { name: '处理完成，部分商品未能导入' }).waitFor()
+  await page.getByRole('link', { name: '去 RSDP 管理商品' }).waitFor()
+  assert.equal(await page.getByRole('link', { name: '手工录入' }).count(), 0)
+  assert.equal(await page.getByRole('link', { name: '批量导入' }).count(), 0)
 
-  await page.getByRole('link', { name: '新建导入' }).click()
-  await chooseFile('失败后重试.csv')
-  importMode = 'error'
-  await page.getByRole('button', { name: '确认并执行导入' }).click()
-  await page.getByRole('alert').filter({ hasText: '导入请求未完成' }).waitFor()
-  importMode = 'skipped'
-  await page.getByRole('button', { name: '确认并执行导入' }).click()
-  await page.getByRole('heading', { name: '处理完成，已跳过重复商品' }).waitFor()
-  assert.equal(await page.getByText(/成功行已写入商品库/).count(), 0)
-  assert.equal(overwriteRequested, false)
-  assert.equal(importRequests, 3)
-  await page.getByRole('link', { name: '查看导入记录' }).click()
-  await heading('导入记录')
-  assert.equal(await page.locator('tbody tr').count(), 3)
+  await page.getByRole('link', { name: '导入记录', exact: true }).click()
+  await heading('Office 历史导入记录')
+  await page.getByRole('button', { name: '查看批次' }).click()
+  await page.getByText(/商品名称不能为空/).waitFor()
+  assert.equal(await page.getByRole('link', { name: '去 RSDP 导入' }).count(), 1)
 
-  await page.goto(`${baseUrl}/products/audit`, { waitUntil: 'networkidle' })
-  await page.waitForURL('**/products')
-  await heading('商品库')
+  for (const route of ['audit', 'manual', 'import']) {
+    await page.goto(`${baseUrl}/products/${route}`, { waitUntil: 'networkidle' })
+    await page.waitForURL('**/products')
+    await heading('商品库')
+  }
   assert.equal(legacyAuditDetailRequests, 0)
-
-  await page.goto(`${baseUrl}/products/manual`, { waitUntil: 'networkidle' })
-  await heading('手工录入商品')
-  await page.getByText(/保存后，新商品直接上架/).waitFor()
-  await page.getByPlaceholder('如：人体工学办公椅').fill('手工录入验证椅')
-  await page.getByPlaceholder('如：899', { exact: true }).fill('899')
-  await page.getByRole('button', { name: '保存商品', exact: true }).click()
-  await page.waitForURL('**/products/PRODUCT-MANUAL')
-  await heading('手工录入验证椅')
-  await page.getByRole('definition').filter({ hasText: /^在售$/ }).waitFor()
+  assert.equal(importRequests, 0)
 
   listMode = 'error'
-  await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
+  await page.getByRole('button', { name: '刷新商品列表' }).click()
   await heading('商品暂时无法加载')
   assert.equal(await page.getByRole('button', { name: '导入商品', exact: true }).count(), 0)
   assert.match(await page.locator('[aria-live="polite"]').first().innerText(), /商品总数 —/)
@@ -242,11 +201,11 @@ try {
     await page.setViewportSize({ width, height: 900 })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Overflow at ${width}px`)
   }
-  await page.getByRole('link', { name: '批量导入', exact: true }).click()
-  await heading('批量导入商品')
+  await page.getByRole('link', { name: '导入记录', exact: true }).click()
+  await heading('Office 历史导入记录')
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   assert.deepEqual(pageErrors, [])
-  console.log('Workflow E2E passed: navigation, context, filters, pagination, details, import, downloads, history, retry, empty/error states and responsive layouts.')
+  console.log('Workflow E2E passed: navigation, context, filters, pagination, read-only details, legacy redirects, history, retry, empty/error states and responsive layouts.')
 } finally {
   await browser.close()
 }

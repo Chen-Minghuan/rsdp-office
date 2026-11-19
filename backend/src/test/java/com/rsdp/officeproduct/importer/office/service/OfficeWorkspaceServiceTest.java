@@ -152,6 +152,7 @@ class OfficeWorkspaceServiceTest {
         var dto = service.adminCreateWorkspace(workspaceRequest("华东经销商", "dealer-east"));
         assertTrue(dto.getWorkspaceId().startsWith("OWKS-"));
         assertEquals("华东经销商", dto.getName());
+        assertEquals("DEALER", dto.getWorkspaceType());
         assertEquals("dealer-east", dto.getOwnerUsername());
         assertEquals(1, dto.getUserCount());
         assertEquals(0, dto.getProjectCount());
@@ -169,6 +170,23 @@ class OfficeWorkspaceServiceTest {
         var listed = service.adminListWorkspaces();
         assertEquals(1, listed.size());
         assertEquals(dto.getWorkspaceId(), listed.get(0).getWorkspaceId());
+    }
+
+    @Test void factoryWorkspaceReusesOwnerRoleAndDefaultsNewMembersToFactoryStaff() {
+        var request = workspaceRequest("伟豪办公", "weihao-office");
+        request.setWorkspaceType("FACTORY");
+        var workspace = service.adminCreateWorkspace(request);
+        assertEquals("FACTORY", workspace.getWorkspaceType());
+        assertEquals("DEALER", users.get(workspace.getOwnerUserId()).getRole());
+        assertEquals("FACTORY_SALES", users.get(workspace.getOwnerUserId()).getSource());
+
+        loginAs("weihao-office");
+        assertEquals("FACTORY", service.myWorkspace().getWorkspaceType());
+        var member = service.createWorkspaceUser(accountRequest("weihao-staff", null));
+        assertEquals("USER", member.getRole());
+        assertEquals("FACTORY_SALES", member.getSource());
+        assertThrows(AccessDeniedException.class,
+            () -> service.adminUpdateWorkspaceType(workspace.getWorkspaceId(), "DEALER"));
     }
 
     @Test void adminCreateWorkspaceValidatesInput() {
