@@ -773,14 +773,42 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
         <div class="review-toolbar">
           <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
-            <button :class="{ active: tool === 'select' && !temporaryPanning }" @click="tool = 'select'"><AppIcon name="cursor" size="3.5" /> 选择 / 缩放</button>
-            <button :class="{ active: tool === 'pan' || temporaryPanning }" @click="tool = 'pan'"><AppIcon name="hand" size="3.5" /> 拖动画布</button><i></i>
-            <button :class="{ active: tool === 'edit' }" @click="tool = 'edit'"><AppIcon name="pencil" size="3.5" /> 编辑轮廓</button>
-            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" title="在画布上逐点画出新的空间轮廓" @click="startSketch"><AppIcon name="plus" size="3.5" /> 画新空间</button>
-            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')"><AppIcon name="merge" size="3.5" /> 合并空间</button>
-            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')"><AppIcon name="scissors" size="3.5" /> 剔除区域</button>
+            <button :class="{ active: tool === 'select' && !temporaryPanning }" aria-labelledby="review-select-label" aria-describedby="review-select-shortcut" @click="tool = 'select'">
+              <AppIcon name="cursor" size="3.5" />
+              <span id="review-select-label">选择 / 缩放</span>
+              <small id="review-select-shortcut" class="review-tool-shortcut">左拖 · 滚轮</small>
+            </button>
+            <button :class="{ active: tool === 'pan' || temporaryPanning }" aria-labelledby="review-pan-label" aria-describedby="review-pan-shortcut"
+              title="先点击画布，再按住空格用左键拖动，也可用中键拖动" @click="tool = 'pan'">
+              <AppIcon name="hand" size="3.5" />
+              <span id="review-pan-label">拖动画布</span>
+              <small id="review-pan-shortcut" class="review-tool-shortcut"><span class="sr-only">先点击画布，</span><kbd>空格</kbd>＋左拖 · 中键</small>
+            </button><i></i>
+            <button :class="{ active: tool === 'edit' }" aria-labelledby="review-edit-label" aria-describedby="review-edit-shortcut"
+              title="拖动顶点或边线。拖动或重描时按 Esc 取消" @click="tool = 'edit'">
+              <AppIcon name="pencil" size="3.5" />
+              <span id="review-edit-label">编辑轮廓</span>
+              <small id="review-edit-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
+            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" aria-labelledby="review-sketch-label" aria-describedby="review-sketch-shortcut"
+              title="逐点描出至少三点后按 Enter 保存，按 Esc 取消绘制" @click="startSketch">
+              <AppIcon name="plus" size="3.5" />
+              <span id="review-sketch-label">画新空间</span>
+              <small id="review-sketch-shortcut" class="review-tool-shortcut">逐点描 <kbd>Enter</kbd> 保存</small>
+            </button>
+            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" aria-labelledby="review-merge-label" aria-describedby="review-merge-shortcut" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')">
+              <AppIcon name="merge" size="3.5" />
+              <span id="review-merge-label">合并空间</span>
+              <small id="review-merge-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
+            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" aria-labelledby="review-subtract-label" aria-describedby="review-subtract-shortcut" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')">
+              <AppIcon name="scissors" size="3.5" />
+              <span id="review-subtract-label">剔除区域</span>
+              <small id="review-subtract-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
             <button :class="{ active: calibrating }" @click="startCalibration"><AppIcon name="fit" size="3.5" /> 两点校准</button>
             <button :disabled="!store.undoStack.length" @click="store.undo()"><AppIcon name="undo" size="3.5" /> 撤销</button>
+            <button :disabled="!store.redoStack.length" title="恢复上一次撤销的编辑" @click="store.redo()"><AppIcon name="redo" size="3.5" /> 恢复</button>
           </div>
           <div class="review-zoom">
             <div class="review-zoom-slider">
@@ -795,7 +823,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
           </div>
         </div>
           <div v-if="tool === 'select' && !calibrating" class="contour-edit-bar">
-          <span>拖动内部移动；拉边调整宽深，拉角缩放。滚轮缩放视图，中键或按住右键平移，松开右键返回选择。</span>
+          <span>左拖空间内部可移动，拉边调整宽深，拉角缩放。</span>
           <label><input v-model="keepAspect" type="checkbox"> 锁定比例（角点 / Shift）</label>
           <form v-if="selected?.polygon?.length" class="rotate-form" data-testid="rotate-form" title="调整角度即时预览；仅 Enter 或点「应用」保存，点击其他位置或 Esc 放弃预览" @submit.prevent="applyRotate">
             旋转<input v-model.number="rotateAngle" type="number" min="-360" max="360" step="5" aria-label="空间旋转角度（度，顺时针为正）" @input="onRotateInput" @keydown.enter.prevent="applyRotate" @keydown.esc.prevent="onRotateEsc" @blur="onRotateBlur"><span>°</span>
