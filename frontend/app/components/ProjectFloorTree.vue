@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { authEnabled } from '~/composables/useAuth'
-
 withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
 const office = useOfficeStore()
-const auth = useAuth()
-const canCreateProject = computed(() => !authEnabled || auth.user.value?.role !== 'ADMIN')
+const { canCreateProject } = useAuth()
 const route = useRoute()
 const router = useRouter()
+const { isProjectWorkflow } = useWorkspaceNavigation()
 const showCreate = ref(false)
 const showSettings = ref(false)
 const showRequirements = ref(false)
@@ -88,11 +86,31 @@ async function selectSpace(zoneId: string) {
     await router.push({ path: '/canvas', query: { floorId: workspace.currentFloorId, mode: 'design', zoneId } })
   }
 }
+
+async function selectFloor(floorId: string) {
+  if (workspace.switching) return
+  await workspace.activateFloor(floorId)
+  if (workspace.currentFloorId !== floorId || workspace.error) return
+  if (!office.zones.length || !isProjectWorkflow.value) {
+    await router.push({
+      path: office.zones.length ? '/canvas' : '/',
+      query: { floorId },
+    })
+  }
+}
 </script>
 
 <template>
   <section class="project-floor-tree" aria-label="项目与楼层">
-    <div class="mb-1 flex items-center justify-between px-1">
+    <NuxtLink
+      v-if="workspace.initialized && !workspace.projects.length && !canCreateProject"
+      to="/"
+      class="block hover:bg-cream"
+    >
+      <span class="mb-1 block px-1 text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
+      <span class="block border-y border-line px-2 py-3 text-[11px] leading-5 text-muted">当前账号暂无可访问项目</span>
+    </NuxtLink>
+    <div v-else class="mb-1 flex items-center justify-between px-1">
       <span class="text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
       <button v-if="canCreateProject" class="rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream" @click="showCreate = true">＋ 新建项目</button>
     </div>
@@ -113,7 +131,7 @@ async function selectSpace(zoneId: string) {
           <template v-for="floor in project.floors" :key="floor.floorId">
             <input v-if="editingKey === `floor:${floor.floorId}`" ref="nameInput" v-model="editingName" class="mx-1 rounded-none border border-bronze bg-white px-2 py-1 text-xs" aria-label="双击编辑楼层名称" :disabled="savingEdit" @keydown.enter.prevent="saveEdit" @keydown.esc.prevent="cancelEdit" @blur="saveEdit">
             <div v-else class="flex items-center rounded-none transition" :class="floor.floorId === workspace.currentFloorId ? 'bg-bronze font-semibold text-white' : 'text-[#5f5b56] hover:bg-bg'">
-              <button class="flex min-w-0 flex-1 items-center justify-between px-2 py-1.5 text-left text-xs" :aria-current="floor.floorId === workspace.currentFloorId ? 'page' : undefined" title="单击切换楼层，双击修改楼层名称" @click="workspace.activateFloor(floor.floorId)" @dblclick.stop.prevent="startEdit(`floor:${floor.floorId}`, project.projectId, floor.floorId, floor.floorName)">
+              <button class="flex min-w-0 flex-1 items-center justify-between px-2 py-1.5 text-left text-xs" :aria-current="floor.floorId === workspace.currentFloorId ? 'page' : undefined" title="单击切换楼层，双击修改楼层名称" @click="selectFloor(floor.floorId)" @dblclick.stop.prevent="startEdit(`floor:${floor.floorId}`, project.projectId, floor.floorId, floor.floorName)">
                 <span class="truncate">{{ floor.floorName }}</span><span v-if="floor.floorId === workspace.currentFloorId" class="text-[9px] font-normal opacity-80">当前</span>
               </button>
               <button v-if="floor.floorId === workspace.currentFloorId" class="mr-1 shrink-0 rounded-none px-1 py-0.5 text-[10px] hover:bg-white/15" :aria-label="`${workspace.collapsedFloorIds.includes(floor.floorId) ? '展开' : '折叠'}${floor.floorName}空间`" :aria-expanded="!workspace.collapsedFloorIds.includes(floor.floorId)" :title="workspace.collapsedFloorIds.includes(floor.floorId) ? '展开空间' : '折叠空间'" @click="workspace.toggleFloorSpaces(floor.floorId)">
@@ -132,14 +150,14 @@ async function selectSpace(zoneId: string) {
         </div>
       </article>
     </div>
-    <p v-if="workspace.initialized && !workspace.projects.length" class="border-y border-line px-2 py-3 text-[11px] leading-5 text-muted">当前账号暂无可访问项目</p>
+    <p v-if="canCreateProject && workspace.initialized && !workspace.projects.length" class="border-y border-line px-2 py-3 text-[11px] leading-5 text-muted">当前账号暂无可访问项目</p>
     <form v-if="addingFloor" class="mt-1.5 flex gap-1" @submit.prevent="addFloor">
       <input v-model="floorName" class="min-w-0 flex-1 rounded-none border border-line bg-white px-2 py-1.5 text-xs" placeholder="如 3F / B1F" aria-label="新楼层名称">
       <button class="rounded-none bg-bronze px-2 text-xs text-white disabled:opacity-50" :disabled="savingFloor">添加</button>
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
     <CustomerRequirementsBlock v-if="requirements" class="mt-2 border-t border-line px-2 py-2 hover:bg-cream" />
-    <ProjectCreateDialog v-if="showCreate" @close="showCreate = false" />
+    <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
     <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />
   </section>

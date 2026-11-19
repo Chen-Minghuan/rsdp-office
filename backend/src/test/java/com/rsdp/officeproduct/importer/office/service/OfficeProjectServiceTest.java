@@ -305,16 +305,10 @@ class OfficeProjectServiceTest {
     }
 
     @Test void createProjectRequiresWorkspaceAndValidatesMemberWorkspaceWhenEnforced() {
-        when(access.enforcementEnabled()).thenReturn(true);
-        var outsider = activeUser("USR-9", "outsider");
-        when(access.currentUserOrNull()).thenReturn(outsider);
+        when(access.workspaceForProjectCreation()).thenReturn("W1");
         var request = request("项目", List.of("一层"));
-        request.setLeaderUserId("USR-9");
-        assertEquals("当前账号不属于任何工作区，不能创建项目", assertThrows(BusinessException.class,
-            () -> service.createProject(request)).getMessage());
 
-        // 操作人归属 W1，但负责人账号在 W2：拒绝
-        outsider.setWorkspaceId("W1");
+        // 项目落在经销商工作区 W1，但负责人账号在 W2：拒绝
         activeUserIn("USR-1", "leader", "W2");
         request.setLeaderUserId("USR-1");
         assertEquals("项目负责人不属于本项目工作区", assertThrows(BusinessException.class,
@@ -331,6 +325,7 @@ class OfficeProjectServiceTest {
 
     @Test void replaceMembersRejectsCollaboratorOutsideProjectWorkspace() {
         when(access.enforcementEnabled()).thenReturn(true);
+        when(access.workspaceForProjectCreation()).thenReturn("W1");
         var operator = activeUserIn("USR-1", "leader", "W1");
         when(access.currentUserOrNull()).thenReturn(operator);
         activeUserIn("USR-2", "collab", "W1");
