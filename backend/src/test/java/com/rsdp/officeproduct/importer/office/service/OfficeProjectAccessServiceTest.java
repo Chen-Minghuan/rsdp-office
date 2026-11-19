@@ -125,6 +125,25 @@ class OfficeProjectAccessServiceTest {
         assertDoesNotThrow(() -> access.requireFloorAccess("UNKNOWN"));
         assertNull(access.accessibleProjectIds());
         assertNull(access.currentUserId());
+        assertNull(access.workspaceForProjectCreation());
+    }
+
+    @Test void projectCreationRequiresDealerWhoOwnsWorkspace() {
+        addWorkspace("W1", "USR-DEALER");
+        enforcementOn("USR-STAFF", "W1");
+        var staff = currentUser.currentUser();
+        staff.setRole("USER");
+        assertEquals("请联系经销商创建项目并分配给你", assertThrows(AccessDeniedException.class,
+            access::workspaceForProjectCreation).getMessage());
+
+        staff.setRole("ADMIN");
+        assertThrows(AccessDeniedException.class, access::workspaceForProjectCreation);
+        staff.setRole("DEALER");
+        assertThrows(AccessDeniedException.class, access::workspaceForProjectCreation);
+
+        enforcementOn("USR-DEALER", "W1");
+        currentUser.currentUser().setRole("DEALER");
+        assertEquals("W1", access.workspaceForProjectCreation());
     }
 
     @Test void memberAndLeaderChecksFollowMembership() {
