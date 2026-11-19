@@ -24,12 +24,17 @@ class OfficeProductMatchingTest {
         var match = OfficeProductMatching.match(sku("500", "1100"), n("1200"), n("600"), true);
         assertEquals(90, match.getRotationDeg()); assertEquals(n("100"), match.getRemainingWidthMm()); assertEquals(n("100"), match.getRemainingDepthMm());
     }
-    @Test void tiersUseTheSmallerAxisRatioAndDoNotExcludeTinyFits() {
+    @Test void tiersUseTheSmallerAxisRatioAndEnforceTheDownwardTolerance() {
         assertEquals("CLOSE", OfficeProductMatching.match(sku("1020", "510"), n("1200"), n("600"), false).getTier());
         assertEquals("RELAXED", OfficeProductMatching.match(sku("1200", "509.9"), n("1200"), n("600"), false).getTier());
         assertEquals("RELAXED", OfficeProductMatching.match(sku("720", "360"), n("1200"), n("600"), false).getTier());
         assertEquals("SMALL", OfficeProductMatching.match(sku("1200", "359.9"), n("1200"), n("600"), false).getTier());
-        assertEquals("SMALL", OfficeProductMatching.match(sku("1", "1"), n("1200"), n("600"), false).getTier());
+        // 恰好处于误差边界（预留 -500mm）的规格仍被接受。
+        assertNotNull(OfficeProductMatching.match(sku("700", "100"), n("1200"), n("600"), false));
+        // 任一轴小于预留 -500mm 的规格不再进入推荐。
+        assertNull(OfficeProductMatching.match(sku("699.9", "600"), n("1200"), n("600"), false));
+        assertNull(OfficeProductMatching.match(sku("1200", "99.9"), n("1200"), n("600"), false));
+        assertNull(OfficeProductMatching.match(sku("1", "1"), n("1200"), n("600"), false));
     }
     @Test void readsExactMmAndExplicitLegacyCmButRejectsUnknownOrConflictingUnits() throws Exception {
         var exact = OfficeProductMatching.dimensions(json.readTree("{\"widthMm\":1200.01,\"depthMm\":600,\"unit\":\"mm\"}"));

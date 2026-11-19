@@ -1,6 +1,5 @@
 # 开发进度与下一步
 
-
 2026-11-18 [QUOTE-001](tasks/QUOTE-001-project-quotation.md) 报价费用与导出增强：固定两项费用改为可命名、增删的多项费用，按顺序随 `snapshot_json.fees` 保存，旧快照仍按原两列恢复。确认报价改为冻结当前草稿并打开居中 Excel 风格预览，右上角下载真实 `.xlsx`，右下角依次为确认、取消；导出与确认共用服务端重算，导出本身不落库。前端校验口径变化、整数数量与费用金额，下载和确认使用同一冻结载荷。验证：Java 288 运行 / 0 失败 / 3 跳过，前端构建、报价专项 UI（含 390px 窄屏）及既有工作流回归通过；UI 均为模拟 API，真实主号页面、真实后端下载及业务验收未执行。
 
 2026-11-18 [QUOTE-001](tasks/QUOTE-001-project-quotation.md) 项目报价：经销商主号专属入口（侧栏「商品报价」）。试算按楼层 → 空间 → 商品汇总画布与清单，支持「出厂价×系数」与「出厂价÷(1−毛利率)」；出厂价按变体取自主项目详情并缓存 120 秒，缺价行单列且不计入合计。页面支持商品图、手填数量与成交单价、可选的服务费与物流搬运安装费，底部固定商品报价合计并支持「确认报价」两步落库。新增 `office_quotation`（项目名称快照、版本、状态、金额、`snapshot_json`）与 `office_quotation_line`，单项目仅一条 CONFIRMED，新确认把旧版置 SUPERSEDED，写入与 `QUOTATION_CONFIRMED` 审计同事务；服务端重算金额并校验数量/费用/口径/楼层归属。验证：Java 285 运行 / 0 失败 / 3 跳过，前端构建通过，临时实例实测确认 485.00+100+50=635.00、第二版取代第一版、latest 回显与审计记录正常；匿名 401、管理员 403。测试数据已清理。经销商主号真实浏览器验收、底线拦截与变更失效联动未执行。
@@ -15,7 +14,6 @@
 
 2026-11-18 [LAYOUT-044](tasks/LAYOUT-044-recommendation-panel-height-fallback.md) 款式推荐面板矮视口滚动兜底：商品列表保底 160px，空间信息与筛选区包入兜底滚动层，结算条钉底；高度充足时与原布局一致，小屏或浏览器放大时所有内容可达。档位按钮改单行短标签。构建、推荐/工作流/家具选择模拟回归通过。未部署。
 
-
 2026-11-18 [RECOMMEND-003](tasks/RECOMMEND-003-module-color-family-filter.md) 款式推荐新增 RSPU 主色透出、深/浅/未分类与具体主色筛选、主色单一分组及颜色/商品名规范化搜索；颜色位于尺寸过滤之后，不触发新推荐请求，不改匹配内核、主项目或数据库。Java 279 项（0 失败、3 跳过）、前端构建、推荐/家具选择/多选 UI mock 和差异检查通过；截图已查看。已编码待真实业务验收，未部署、未提交。
 
 2026-11-17 [CAT-007](tasks/CAT-007-publish-on-entry.md) 清理商品审核残留。手工保存和批量确认由 RSDP 主库直接创建在售新商品，覆盖更新沿用商品当前上下架状态。旧审核地址跳转到商品库，商品详情只显示在售状态。前端构建、三项模拟 UI、Java（275 通过、3 跳过）和本机真实商品接口只读核对通过，新商品实写待验证。
@@ -27,7 +25,6 @@
 2026-11-17 [DEPLOY-005](tasks/DEPLOY-005-test-environment.md#2026-11-17-商品图片代理返回-502) 测试站图片代理修复重复传输头导致的 502。Java 回归通过，`test` 分支测试环境部署后实测两张图片的字节一致和浏览器正常切换。
 
 2026-11-17 [DEPLOY-005](tasks/DEPLOY-005-test-environment.md) 独立 Office 测试部署与测试商品源：Jenkins `rsdp-office-test` 第 3 次发布成功，测试 Office 和 RSDP 分别使用 `office_test` 与 `rsdp_test`。公网 HTTPS 真实验证登录、示例项目和测试商品，本机运行的 Office 也通过测试商品源读取三件样品及其规格。正式服务保持原运行实例。
-
 
 2026-11-17 [AUTH-001](tasks/AUTH-001-user-login.md#2026-11-17-本地测试账号初始化) 增加本地开发 SQL 种子。一次执行创建测试账号、工作区和示例项目，库内无系统管理员时创建一个，随机密码仅在新建时输出。独立 PostgreSQL 16 验证账号关系、重复及并发执行、已有管理员和冲突回滚，Java 密码校验通过。本机开发库执行后新增四个测试账号，保留现有管理员，四个账号均通过真实浏览器登录、项目访问及退出验证。
 
@@ -56,7 +53,6 @@
 2026-11-14 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 工厂可见性体系一期落地（rsdp 侧，方案 C：office 工厂身份不拆分、继续看全库）：rsdp `3b68ca3`——V28 迁移（owner_type/owner_factory_code 归属回填、厂级公共库开关、factory_catalog_grant/block 两表，双路径校验零差异）；`CatalogVisibilityService` 收口"自家已报价∪整批放行∪开关ON全量−黑名单（不遮蔽自家已报价）"并接入列表/详情，替换旧能力覆盖自动隐藏口径；上下架/元数据改按 owner 判定（谁录入谁负责），三处建档打标；`FactoryCatalogController` 开关/放行/黑名单接口（工厂管理员仅本厂）；SecurityConfig 修复 DELETE 误落平台专属 factory:delete。验证：rsdp `mvn test` 2261/0/0/0；真实链路三工厂正反用例全过（167→拉黑剩12→开关关=0→放行=155→黑名单优先=0→详情404→越权400→维护权400/200）；office 回归商品库 167 全量可见。未覆盖：导出/AI 匹配读取入口接入、product-feed、office 代理/投影（均列入文档待办）。详见 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 验证记录。
 
 2026-11-14 录入端端到端打通（office→主项目转发链路激活与两处纠错）：SHARED-003 代码已具备但运行环境未就位——主项目 8081 未启动、开发库无 rsdp-office 服务账号（此前记录"已建"但实际缺失）、office `.env` 未配 `RSDP_MAIN_*`、8082 跑着 11-09 的旧进程。本次落地：①主项目开发库建工厂 A034 + 服务账号 rsdp-office（FACTORY_ADMIN + 绑定 A034 + view_full_catalog，bcrypt 密码 `rsdp-office-dev-2026!` 仅存 office `.env`）+ 能力等级声明 A(主)/B（office 默认按 B 级录入，未声明会被主项目拦截）；②office `.env` 增 `RSDP_MAIN_BASE_URL/USERNAME/PASSWORD`；③主项目 `seed_dev_data.sql` 固化上述账号/工厂/能力（幂等，`make seed-dev` 可重建；rsdp 仓库未提交）。**两处转发纠错**：手工录入同 externalCode 重复提交会重复建档——`createManualEntry` 改走 `forwardRow` 更新路径（查 externalCode→更新基础字段+匹配/补变体+补报价，响应带 `updated` 标记）；更新路径补报价撞主项目"同厂同变体同供应配置"唯一约束报 400——`MainProductEntryGateway.addQuote` 捕获后回退查本厂既有 RSKU 并 PUT 出厂价更新。新增 `ProductImportManualEntryTest`/`MainProductEntryGatewayTest` 各 2 例。验证：`mvn test` 268 运行/0 失败/3 跳过；真实链路实测（8082→8081）：手工录入「联调验证-会议桌」→主库落 RSPU（OF-TBD-0001，归属 A034、出厂价 AES 密文、毫米尺寸）→office 列表/详情回读一致；同码重交（零售价 2680→2980、出厂价 1280→1480）→不重复建档、字段更新、变体按名匹配不增；联调产生的重复测试档已清理（主库该码仅剩 1 条）。改动为纯后端，未跑前端构建/e2e。另发现主项目种子既有缺陷（与本改动无关）：`seed_dev_data.sql` 演示 RSKU 段未提供 `supplier_configuration_key`（现为 NOT NULL），重跑种子到该段报错，其前的服务账号段不受影响。office admin 开发库密码重置为 `.env` 引导值（原哈希与引导值不符）。未提交。
-
 
 2026-11-14 [INTEG-001](tasks/INTEG-001-product-master-integration.md) 商品主档统一方案定稿（跨 rsdp/rsdp-office，待实施）：经多轮架构讨论确定——商品主档唯一归 rsdp（含 pgvector/六维/字典体系，字典不够走扩展），office 删除商品写路径、录入页代理 rsdp 管线、商品表降级只读投影；工厂上传产品一律入公共库，`owner_factory_id` 为归属标记；工厂可见性 = 自家必见 + 公共库开关 + 整批放行（工厂×工厂）− 黑名单（最高优先）；上下架谁录入谁负责、后端强制；经销商（office 工作区）一期看全量公共池；存量为测试数据不迁移。已排除微服务合并与共库共表路线（依据两仓库实际度量与约束冲突）。字段级权限/竞品屏蔽/M07 报价/SSO 列二期。文档放本仓库，rsdp 侧实施记录按其规范另行登记。未开始编码。
 2026-11-14 [LAYOUT-041](tasks/LAYOUT-041-recommendation-list-scroll.md) 推荐列表内部滚动修复：`DesignSidebar` 根节点基础 `flex-none` 与嵌入 `flex-1` 冲突，最终 `flex:0 0 auto` 使 146 个候选把列表撑至 23530px，外层裁切而列表无滚动距离。调整为仅非嵌入/折叠分支 flex-none，嵌入及候选滚动区补 min-h-0。`pnpm build`、`e2e:module-recommendations`（新增 30 候选滚动断言及既有推荐全链路）、`e2e:workflows`、MOCK 冒烟通过；真实 designer1 会话验证列表 clientHeight=100/scrollHeight=23530，scrollTop=500 后滚轮增至 900。测试 PUT 拦截未改真实画布，未提交、未部署生产。
@@ -225,8 +221,6 @@
 
 2026-10-23 LAYOUT-029 通道与入口/疏散联动提示：入口数据盘点结论——识别层（视觉/CAD）不产出门/开口、openings 契约层恒空，唯一入口代理为人工标注的门洞净空障碍。新增纯函数 `channelEgressHints`（utils/channelEgress.ts）：通道端头 600mm 缓冲内未接到门洞净空提示"未衔接入口"；端头到门洞的衔接走廊被家具/禁放区挤至净宽不足 600mm 提示截断；未标注门洞的空间只提示未核验。严格级别按用户定稿为**提示不拦截**（排版面板通道区 amber 文案），后端核验挂点不接入（无 warnings 通道，偏差记录于任务卡）；阈值均为策略值非规范。验证：`pnpm build`、`test:layout-channels` 新增 029 用例、通道专项 e2e 步骤 12、三组排版回归与 smoke（自建 3013 端口）通过，见[任务记录](tasks/LAYOUT-029-channel-egress-linkage.md)。
 
-
-
 2026-10-23 页脚按钮阻塞弹出提示：按用户反馈（未校准时「生成空间模板」「进入家具排版」只禁用无说明；且要求弹出提示而非旁侧文字），两按钮改为 `aria-disabled` 灰化但可点击（`data-testid="template-workbench"/"advance-layout"`），点击时在画布中央弹出 toast 告知原因与下一步——未校准提示「图纸比例待校准，请先用工具条『两点校准』确认图纸尺寸比例」，校准中/描边中/约束编辑中分别给出对应引导；无阻塞时正常进入。e2e:space-review 增补灰化、点击弹 toast、不跳转/不开模板断言并通过；build、smoke、workflows 通过；toast 截图人工核对通过。
 
 2026-10-23 LAYOUT-028 通道端点留断：通道新增 `startMm`/`endMm`（世界毫米，缺省贯通、旧数据无需迁移），与「仅从二排起」按交集收窄走向跨度；渲染、压占确认（前端 confirmedLayoutProblem + 服务端 channelBands 同步语义与测试）按留断范围生效，编辑卡与排版面板均可数值编辑（空=贯通）。定稿：fromSecondRow 保留独立动态字段不迁移；横向不做对称布尔（列轴无"首块"语义，用端点数值表达）；自动排版切段仍按未留断全轴禁放带（绕过端点需二维装箱，留作后续评估）。验证：`pnpm build`、`test:layout-channels`/`test:layout-planning`、mvn 191 通过（新增端点用例）、通道专项 e2e 步骤 11、smoke（自建 3012 端口）通过，见[任务记录](tasks/LAYOUT-028-channel-endpoint-breaks.md)。真实提交链路集成验证未执行（同 LAYOUT-022 记录）。
@@ -296,19 +290,11 @@
 2026-10-22 切换模块预览不再重叠：待应用预览显示期间隐藏将被替换的自动组家具（数据不删、应用时才真正替换），画布直接呈现"先清空再展示"的效果。构建与全部排版回归通过，见[任务记录](tasks/LAYOUT-020-edge-fill-layout.md)补记十。
 2026-10-21 HTTPS 入口启用：用户提供的阿里云 DV 证书（覆盖 rooom.vip/www.rooom.vip，至 2027-01-16）已部署到 443；原静态站保留，`https://rooom.vip/office/` 代理应用，Cookie 恢复 Secure，真实 DNS 全流程复测通过。HTTP 80/8081 入口按用户要求保留，未做 80→443 跳转；证书到期需手动续换。
 
-
-
 2026-10-21 域名 DNS 切换完成：`rooom.vip` 旧 A 记录 `120.77.15.115` 已删除（此前双 A 轮询导致旧服务器 301 跳 `https://www.rooom.vip`，静态资源跨源失败）。权威与主流递归实测只剩本实例，`http://rooom.vip/office/` 真实 DNS 全流程复测通过；`www` 仍指旧服务器按需处理，个别递归 TTL 残留为过渡现象。
-
-
 
 2026-10-21 测试产物清理：按用户要求 e2e 脚本不再生成截图（space-review/space-template/dimension-calibration/workflows/render-preview/drawing-entry 及两个公网复测脚本），`output/` 与 `frontend/screenshots/` 已删除并加入 .gitignore。顺带修复三个被合并变更遗留下来的 UI 回归：space-review/dimension-calibration/workflows 补 auth mock，workflows 适配商品页 20 条分页、详情改路由页、导入改预览/校验/确认三段接口；import.vue 结果到达后清除离开守卫残留提示。build、drawing-entry、templates、render-preview、dimensions、space-review、workflows 及两个公网复测全部通过。
 
-
-
 2026-10-21 Jenkins 改造按用户决定从简：曾完成 CI/CD 双任务拆分方案（本地验证后已还原），最终保留现有单一 `rsdp-office` 任务与 `DEPLOY=false` 默认只构建、手动勾选才发布的流程，Jenkinsfile 与 deploy.sh 均不改动；仅补 `deploy/.env.example` 子路径端口示例。现有流程已满足：SCM 轮询自动测试构建、测试失败不进入部署、部署仅限当前 origin/main、健康检查失败即任务失败。
-
-
 
 2026-10-20 域名子路径入口：[DEPLOY-004](tasks/DEPLOY-004-domain-subpath.md) 已实现 `http://rooom.vip/office/`。新增 `frontend-office` 双基座容器与 80 站点 `/office/` 代理，IP 8081 与原站点不受影响；识别绝对资源地址跨入口 401 由前端同源化修复，新识别经 `X-Forwarded-Prefix` 落子路径。强制解析公网复测（登录/文件选择/云端画布/底图/退出）与 8081 回归通过；DNS 旧 A 记录 `120.77.15.115` 待用户删除后域名正式生效。
 
