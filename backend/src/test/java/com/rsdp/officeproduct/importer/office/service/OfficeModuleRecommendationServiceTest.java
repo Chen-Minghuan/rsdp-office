@@ -30,7 +30,7 @@ class OfficeModuleRecommendationServiceTest {
              {"id":"OTHER","kind":"furniture","zoneId":"OTHER-ZONE","w":1200,"h":600,"productId":"KEEP","layoutConfirmed":true}]
             """, new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {}));
         when(office.getCanvas("P")).thenReturn(canvas);
-        when(office.listOfficeProducts()).thenReturn(List.of(sku("FIT", "1200", "600"), sku("SMALL", "600", "300"), sku("TOO-WIDE", "1200.01", "600"), new OfficeProductDto()));
+        when(office.listOfficeProducts()).thenReturn(List.of(sku("FIT", "1200", "600"), sku("SMALL", "700", "300"), sku("TOO-WIDE", "1200.01", "600"), new OfficeProductDto()));
     }
     private OfficeProductDto sku(String id, String width, String depth) {
         var p = new OfficeProductDto(); p.setId(id); p.setVariantId(id); p.setRspuId("MASTER"); p.setName("办公桌"); p.setWidthMm(new BigDecimal(width)); p.setDepthMm(new BigDecimal(depth)); p.setPrice(BigDecimal.TEN); return p;
@@ -92,7 +92,7 @@ class OfficeModuleRecommendationServiceTest {
         var module = (Map<String,Object>) canvas.getObjects().get(1);
         module.remove("furnitureTemplateId");
         module.put("label", "原图补录茶几");
-        var variant = sku("V", "500", "500");
+        var variant = sku("V", "700", "500");
         variant.setName("WG");
         variant.setVariantName("方茶几");
         when(office.listOfficeProducts()).thenReturn(List.of(variant));

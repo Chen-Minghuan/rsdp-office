@@ -157,7 +157,7 @@ async function choose(candidate: ModuleProductCandidate) {
           </optgroup>
         </select>
       </div>
-      <div v-if="module" class="rounded-none bg-[#f7f3ee] p-2 text-xs leading-relaxed"><div v-if="result?.targetCategory">推荐品类：{{ result.targetCategory }}</div>商品宽 ≤ {{ number(module.w) }} mm，深 ≤ {{ number(module.h) }} mm</div>
+      <div v-if="module" class="rounded-none bg-[#f7f3ee] p-2 text-xs leading-relaxed"><div v-if="result?.targetCategory">推荐品类：{{ result.targetCategory }}</div>商品宽 {{ number(Math.max(0, module.w - 500)) }} ~ {{ number(module.w) }} mm，深 {{ number(Math.max(0, module.h - 500)) }} ~ {{ number(module.h) }} mm</div>
       <div v-if="module" class="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
         <label><input v-model="allowRotation" type="checkbox" :disabled="applying"> 允许旋转 90°</label>
         <label v-if="sameModuleCount > 1"><input v-model="applyToSameModules" type="checkbox" :disabled="applying"> 同步 {{ sameModuleCount }} 个同规格模块</label>
