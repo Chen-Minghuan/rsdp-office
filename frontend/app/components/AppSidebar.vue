@@ -147,6 +147,17 @@ onBeforeUnmount(() => {
         <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">经销商工作区</div>
 
         <NuxtLink
+          to="/workspace/quotes"
+          :aria-current="isActive('/workspace/quotes') ? 'page' : undefined"
+          :class="[
+            'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
+            isActive('/workspace/quotes') ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
+          ]"
+        >
+          <AppIcon name="documentText" />
+          <span>商品报价</span>
+        </NuxtLink>
+        <NuxtLink
           to="/workspace/users"
           :aria-current="isActive('/workspace/users') ? 'page' : undefined"
           :class="[
