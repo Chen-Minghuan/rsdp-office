@@ -114,6 +114,7 @@ public class RsdpCatalogGateway {
             dto.setRspuId(product.getRspuId());
             dto.setVariantId(v.path("variantId").asText());
             dto.setName(product.getProductName());
+            dto.setColorPrimaryName(product.getColorPrimaryName());
             dto.setCategoryPath(product.getCategoryPath());
             dto.setFurnitureTags(product.getFurnitureTags());
             dto.setVariantName(textOrNull(v, "displayName"));
@@ -367,6 +368,7 @@ public class RsdpCatalogGateway {
         dto.setRspuCode(textOrNull(row, "rspuCode"));
         dto.setExternalCode(null);
         dto.setProductName(textOrNull(row, "productName"));
+        dto.setColorPrimaryName(textOrNull(row, "colorPrimaryName"));
         dto.setCategoryPath(textValues(embeddedJson(row.path("categoryPath"))));
         dto.setFurnitureTags(furnitureTags(row.path("sixDimTags")));
         String imageUrl = textOrNull(row, "primaryImageUrl");

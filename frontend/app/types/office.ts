@@ -201,6 +201,8 @@ export interface Product {
   heightMm?: number
   id: string
   name: string
+  /** RSPU 主色原文；空值表示未分类。 */
+  colorPrimaryName?: string
   desc: string
   variant: string
   price: number

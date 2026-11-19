@@ -32,10 +32,12 @@ try {
   let waitForSelection
   const selections = [], queries = []
   const products = [
-    ['EXACT', '精确尺寸办公桌', 1200, 600, 1000], ['MEDIUM', '宽松办公桌', 1000, 500, 800],
-    ['SMALL', '小尺寸边桌', 600, 300, 400], ['ROTATED', '旋转适配长桌', 550, 1150, 900],
-    ['QUOTE', '待报价办公桌', 1100, 500, 0],
-  ].map(([id, name, widthMm, depthMm, price]) => ({ id, rspuId: 'MASTER-' + id, variantId: id, name, widthMm, depthMm, price, widthCm: widthMm / 10, depthCm: depthMm / 10, desc: '', variant: '真实规格 API 模拟', kind: 'other', uses: ['OTHER'] }))
+    ['EXACT', '精确尺寸办公桌', 1200, 600, 1000, '暮山黑橡+深灰银钢脚+灯带'],
+    ['MEDIUM', '宽松办公桌', 1000, 500, 800, '蜜芽胡桃+雅士白'],
+    ['SMALL', '小尺寸边桌', 600, 300, 400, '月影胡桃+海鸥灰'],
+    ['ROTATED', '旋转适配长桌', 550, 1150, 900, '雾山核桃+液态银'],
+    ['QUOTE', '待报价办公桌', 1100, 500, 0, '雅士白+爱马仕橙'],
+  ].map(([id, name, widthMm, depthMm, price, colorPrimaryName]) => ({ id, rspuId: 'MASTER-' + id, variantId: id, name, colorPrimaryName, widthMm, depthMm, price, widthCm: widthMm / 10, depthCm: depthMm / 10, desc: '', variant: '真实规格 API 模拟', kind: 'other', uses: ['OTHER'] }))
   products.push(...Array.from({ length: 30 }, (_, index) => ({
     id: `FILL-${index}`, rspuId: `MASTER-FILL-${index}`, variantId: `FILL-${index}`, name: `滚动候选 ${index + 1}`,
     widthMm: 1190, depthMm: 590, price: 100 + index, widthCm: 119, depthCm: 59, desc: '', variant: '滚动回归模拟', kind: 'other', uses: ['OTHER'],
@@ -162,6 +164,8 @@ try {
   await page.keyboard.press('Escape')
   await panel.getByText('点击画布上的家具，或从上方列表选择。').waitFor()
   assert.equal(await card('EXACT').count(), 0, '清除画布选择时不保留旧候选')
+  assert.equal(await panel.getByTestId('color-search').isDisabled(), true)
+  assert.equal(await panel.getByTestId('color-filter').isDisabled(), true)
   await furniture('A').click()
   await furniture('B').click({ modifiers: ['Shift'] })
   await furniture('B').click()
@@ -211,9 +215,55 @@ try {
   assert.ok(rankedIds.indexOf('SMALL') < rankedIds.indexOf('ROTATED'), '界面保留服务端的综合分顺序')
   assert.equal(await card('QUOTE').getByRole('button', { name: '待补报价' }).isDisabled(), true)
   assert.equal(await panel.getByText('四人工位组合', { exact: true }).count(), 0)
+
+  const colorSearch = panel.getByTestId('color-search')
+  const colorFilter = panel.getByTestId('color-filter')
+  const visibleIds = () => panel.locator('[data-product-id]').evaluateAll(cards => cards.map(item => item.dataset.productId))
+  const queryCount = queries.length
+  await colorFilter.selectOption('TONE:DARK')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['EXACT', 'SMALL', 'ROTATED']))
+  assert.equal(await card('MEDIUM').count(), 0)
+  assert.match(await card('EXACT').getByTestId('product-color').innerText(), /深色/)
+  await page.screenshot({ path: outDir + '/01-color-dark-filter.png', animations: 'disabled' })
+  await colorFilter.selectOption('TONE:LIGHT')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['MEDIUM', 'QUOTE']))
+  await colorFilter.selectOption('PRIMARY:月影胡桃')
+  assert.deepEqual(await visibleIds(), ['SMALL'])
+  await colorFilter.selectOption('ALL')
+  await colorSearch.fill('胡桃')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['MEDIUM', 'SMALL', 'ROTATED']))
+  await colorSearch.fill(' 胡　桃 ')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['MEDIUM', 'SMALL', 'ROTATED']), '搜索忽略首尾、半角和全角空格')
+  await colorSearch.fill('api')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['EXACT', 'MEDIUM', 'SMALL', 'ROTATED', 'QUOTE']))
+  await colorSearch.fill('ＡＰＩ')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['EXACT', 'MEDIUM', 'SMALL', 'ROTATED', 'QUOTE']), '搜索忽略大小写和全半角')
+  await colorSearch.fill('核桃')
+  assert.deepEqual(await visibleIds(), ['ROTATED'])
+  await colorSearch.fill('白色')
+  assert.deepEqual(new Set(await visibleIds()), new Set(['MEDIUM', 'QUOTE']))
+  await colorSearch.fill('爱马仕橙')
+  assert.deepEqual(await visibleIds(), ['QUOTE'])
+  await colorSearch.fill('胡桃')
+  await colorFilter.selectOption('TONE:LIGHT')
+  assert.deepEqual(await visibleIds(), ['MEDIUM'])
+  await panel.getByRole('button', { name: /^贴合/ }).click()
+  await panel.getByText('当前颜色或搜索条件下无商品。').waitFor()
+  await panel.getByRole('button', { name: '清空颜色与搜索' }).click()
+  assert.equal(await colorSearch.inputValue(), '')
+  assert.equal(await colorFilter.inputValue(), 'ALL')
+  await panel.getByRole('button', { name: /^全部兼容/ }).click()
+  await colorFilter.selectOption('TONE:UNKNOWN')
+  assert.equal(await panel.locator('[data-product-id]').count(), 30, '无颜色候选进入未分类')
+  await colorFilter.selectOption('ALL')
+  assert.equal(queries.length, queryCount, '颜色筛选和搜索不得重新请求推荐接口')
+  const uniqueIds = await visibleIds()
+  assert.equal(new Set(uniqueIds).size, uniqueIds.length, '组合色商品不得重复展示')
+
   await panel.getByRole('button', { name: /^偏小/ }).click()
   assert.equal(await panel.locator('[data-product-id]').count(), 1)
   assert.equal(await card('SMALL').count(), 1)
+  assert.deepEqual(await colorFilter.locator('optgroup option').allTextContents(), ['月影胡桃 (1)'])
   await panel.getByRole('button', { name: /^全部兼容/ }).click()
   await page.screenshot({ path: outDir + '/01-size-tiers.png', animations: 'disabled' })
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects)
@@ -269,7 +319,7 @@ try {
   await page.getByTestId('layout-review-notice').waitFor()
   assert.match(await page.getByTestId('layout-review-notice').innerText(), /座椅一侧离墙净空不足 560mm，请现场复核/)
   assert.deepEqual(errors, [])
-  console.log('模块尺寸推荐 UI 通过：画布与下拉双向联动、同规格单件及可选批量应用、保存中切换、旧响应拦截、几何保留、尺寸分档和旋转、待报价、下架拒绝、空结果和失败。全部 API 模拟。')
+  console.log('模块尺寸推荐 UI 通过：画布与下拉双向联动、同规格单件及可选批量应用、保存中切换、旧响应拦截、几何保留、尺寸分档和旋转、颜色搜索、深浅/主色筛选、组合色搜索、筛选叠加、未分类、待报价、下架拒绝、空结果和失败。全部 API 模拟。')
 } catch (failure) {
   if (page) await page.screenshot({ path: outDir + '/failure.png', animations: 'disabled' }).catch(() => {})
   throw failure

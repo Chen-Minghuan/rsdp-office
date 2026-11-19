@@ -104,7 +104,7 @@ try {
   await page.getByTestId('layout-unchanged').waitFor()
   assert.equal((await state()).objects.filter(item=>item.layoutGroupId==='auto:MEETING-ROOM').length,3)
   assert.ok((await state()).objects.filter(item=>item.layoutGroupId==='auto:MEETING-ROOM').every(item=>item.layoutConfirmed&&item.furnitureTemplateId==='cabinet-mobile'))
-  await page.screenshot({path:'C:/Users/cmh/AppData/Local/Temp/rsdp-module-selection.png'})
+  await page.screenshot({ path: process.env.MODULE_SELECTION_SCREENSHOT_PATH || 'C:/Users/cmh/AppData/Local/Temp/rsdp-module-selection.png' })
   assert.deepEqual(errors,[])
   console.log('PASS: unrestricted meeting furniture, one module selector, compatible presets, no automatic tab change, size retention, screen persistence, generic quantity confirmation and reload')
 } finally {
