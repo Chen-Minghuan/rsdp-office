@@ -1,6 +1,20 @@
 name: rsdp-catalog-test
 
 services:
+  web:
+    image: rsdp-web:${CATALOG_IMAGE_TAG:?}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:3201:80'
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q --spider http://127.0.0.1/']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      server:
+        condition: service_healthy
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped

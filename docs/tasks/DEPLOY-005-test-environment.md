@@ -5,9 +5,9 @@
 | 用途 | 运行实例 | 数据与配置 |
 | --- | --- | --- |
 | Office 测试 | Jenkins `rsdp-office-test`，`test` 分支的 [Jenkinsfile.test](../../Jenkinsfile.test)，HTTPS `office-test.rooom.vip` | Compose 项目 `rsdp-office-test`，PostgreSQL `office_test`，`/opt/rsdp-office-test/.env`，独立的会话密钥、数据库、上传目录、备份和发布目录 |
-| 测试商品 | [RSDP 商品服务测试 Compose](../../deploy/compose-catalog.test.yaml)，HTTPS API `rsdp-test.rooom.vip` | Compose 项目 `rsdp-catalog-test`，PostgreSQL `rsdp_test`，独立的 Redis、MinIO 和应用密钥；从空库执行主项目迁移 |
+| 测试商品管理和 API | [RSDP 商品服务测试 Compose](../../deploy/compose-catalog.test.yaml)，HTTPS `rsdp-test.rooom.vip` | Compose 项目 `rsdp-catalog-test`，PostgreSQL `rsdp_test`，独立的 Redis、MinIO 和应用密钥；管理前端与后端使用同一镜像版本 |
 
-Office 测试环境使用主机回环端口 3003（根路径）和 3004（子路径镜像），RSDP 测试 API 使用回环端口 3200。[Nginx 测试站点配置](../../deploy/nginx-office-test.conf) 将两个测试子域名转发到各自的实例。应用认证、数据库和上传目录按实例分开。
+Office 测试环境使用主机回环端口 3003（根路径）和 3004（子路径镜像），RSDP 测试 API 使用回环端口 3200，管理前端使用回环端口 3201。[Nginx 测试站点配置](../../deploy/nginx-office-test.conf) 将两个测试子域名转发到各自的实例；RSDP 的 `/api/` 仍直达测试后端，其他路径由管理前端提供 SPA 页面。应用认证、数据库和上传目录按实例分开。RSDP 与 Office 的测试账号分属各自的账号系统。
 
 ## 发布和本地联调
 
@@ -39,3 +39,7 @@ RSDP_MAIN_PASSWORD=<测试商品只读账号密码>
 ## 2026-11-18 测试分支自动部署
 
 PR #2/#3/#4 已合入 `test`。测试任务每分钟检查新提交，构建成功后自动部署，不再需要手动发布参数。第 4 次 SCM 自动构建部署 `714b2e9628a8` 成功；容器健康、真实账号登录、工作台和侧栏拖拽验证通过。正式任务和服务保持原配置及容器。过程、已知问题和验证范围见 [DEPLOY-006](DEPLOY-006-test-auto-deploy.md)。
+
+## 2026-11-19 RSDP 测试管理界面
+
+此前 `rsdp-test.rooom.vip` 仅提供 `/api/`，浏览器首页按配置返回 404。现已增加与测试后端同版本的管理前端，首页、登录和商品列表可访问。真实账号登录、10 行商品展示及全库接口返回 185 件商品均通过，API 请求连接测试 RSDP 同源地址。原有运行容器均未重启。配置、备份和验证记录见 [DEPLOY-007](DEPLOY-007-catalog-test-web.md)。
