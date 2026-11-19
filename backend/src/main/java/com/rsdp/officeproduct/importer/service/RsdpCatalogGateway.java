@@ -127,6 +127,7 @@ public class RsdpCatalogGateway {
             dto.setRspuId(product.getRspuId());
             dto.setVariantId(v.path("variantId").asText());
             dto.setName(product.getProductName());
+            dto.setColorPrimaryName(product.getColorPrimaryName());
             dto.setCategoryPath(product.getCategoryPath());
             dto.setFurnitureTags(product.getFurnitureTags());
             dto.setVariantName(textOrNull(v, "displayName"));
@@ -346,6 +347,21 @@ public class RsdpCatalogGateway {
         return dto;
     }
 
+    /** 读取主项目授权的工厂报价，仅供 Office 报价服务使用。 */
+    public Map<String, BigDecimal> getFactoryPrices(String rspuId) {
+        JsonNode quotes = rsdpClient.get("/api/v1/products/" + rspuId + "/rsku");
+        Map<String, BigDecimal> prices = new HashMap<>();
+        if (quotes.isArray()) {
+            for (JsonNode quote : quotes) {
+                BigDecimal price = decimalOrNull(quote, "factoryPrice");
+                if (price != null) {
+                    prices.merge(quote.path("variantId").asText(""), price, BigDecimal::min);
+                }
+            }
+        }
+        return prices;
+    }
+
     /** 拉取主项目字典。 */
     public List<CategoryDictDto> listDicts(String dictType) {
         JsonNode data = rsdpClient.get("/api/v1/dicts/" + dictType);
@@ -375,6 +391,7 @@ public class RsdpCatalogGateway {
         dto.setSourceFactoryName(textOrNull(row, "sourceFactoryName"));
         dto.setOwnerFactoryCode(textOrNull(row, "ownerFactoryCode"));
         dto.setProductName(textOrNull(row, "productName"));
+        dto.setColorPrimaryName(textOrNull(row, "colorPrimaryName"));
         dto.setCategoryPath(textValues(embeddedJson(row.path("categoryPath"))));
         dto.setFurnitureTags(furnitureTags(row.path("sixDimTags")));
         String imageUrl = textOrNull(row, "primaryImageUrl");

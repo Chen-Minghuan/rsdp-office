@@ -6,8 +6,11 @@ import com.rsdp.officeproduct.importer.office.dto.ModuleRecommendationDto.Candid
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-/** Strict millimetre footprint comparison. Tiers rank every fitting size; none impose a minimum. */
+/** Strict millimetre footprint comparison. A candidate must fit the reserved footprint and stay within the per-axis downward tolerance; tiers rank the sizes that remain. */
 public final class OfficeProductMatching {
+    /** 商品各轴允许小于预留尺寸的最大误差（mm）：目标 4,500mm 时最小接受 4,000mm。 */
+    static final BigDecimal MIN_SIZE_TOLERANCE_MM = new BigDecimal("500");
+
     private OfficeProductMatching() {}
 
     public static BigDecimal positive(JsonNode node) {
@@ -47,6 +50,7 @@ public final class OfficeProductMatching {
         BigDecimal w = rotated ? product.getDepthMm() : product.getWidthMm();
         BigDecimal d = rotated ? product.getWidthMm() : product.getDepthMm();
         if (w.signum() <= 0 || d.signum() <= 0 || w.compareTo(width) > 0 || d.compareTo(depth) > 0) return null;
+        if (w.compareTo(width.subtract(MIN_SIZE_TOLERANCE_MM)) < 0 || d.compareTo(depth.subtract(MIN_SIZE_TOLERANCE_MM)) < 0) return null;
         BigDecimal ratio = w.divide(width, 12, RoundingMode.DOWN).min(d.divide(depth, 12, RoundingMode.DOWN));
         Candidate result = new Candidate();
         result.setProduct(product);

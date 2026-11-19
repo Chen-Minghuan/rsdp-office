@@ -20,6 +20,8 @@ public class ProductListItemDto {
     private String sourceChannel;
     private String ownerFactoryCode;
     private String sourceFactoryName;
+    /** RSPU 主色原文，由主项目商品列表返回。 */
+    private String colorPrimaryName;
     private List<String> categoryPath;
     @JsonIgnore
     private List<String> furnitureTags;

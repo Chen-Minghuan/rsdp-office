@@ -43,9 +43,12 @@ try {
     }
     if (path === '/api/v1/office/projects' && request.method() === 'POST') {
       const body = request.postDataJSON()
-      const project = { projectId: 'OPRJ-TEST', name: body.name, customerRequirements: body.customerRequirements, requirementsRevision: 1,
+      const isSecondProject = projects.length > 0
+      const projectId = isSecondProject ? 'OPRJ-TEST-2' : 'OPRJ-TEST'
+      const floorIdPrefix = isSecondProject ? 'OFLR-SECOND-' : 'OFLR-'
+      const project = { projectId, name: body.name, customerRequirements: body.customerRequirements, requirementsRevision: 1,
         leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
-        floors: body.floors.map((floor, index) => ({ projectId: 'OPRJ-TEST', floorId: `OFLR-${index + 1}`, name: floor.name, sortOrder: index + 1 })) }
+        floors: body.floors.map((floor, index) => ({ projectId, floorId: `${floorIdPrefix}${index + 1}`, name: floor.name, sortOrder: index + 1 })) }
       projects.push(project)
       return respond(project)
     }
@@ -74,6 +77,33 @@ try {
   })
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
+  const appSidebar = page.getByTestId('app-sidebar')
+  assert.equal(await appSidebar.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '侧栏应隐藏原生纵向滚动条，但保留滚动能力')
+  const sidebarResizeHandle = page.getByTestId('sidebar-resize-handle')
+  assert.equal(await sidebarResizeHandle.count(), 1, '桌面端应提供侧栏宽度拖拽把手')
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 240, '侧栏默认宽度应为 240px')
+
+  async function dragSidebarTo(offsetX) {
+    const box = await sidebarResizeHandle.boundingBox()
+    assert.ok(box, '侧栏拖拽把手应可定位')
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + offsetX, box.y + box.height / 2)
+    await page.mouse.up()
+  }
+
+  await dragSidebarTo(80)
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 320, '向右拖动应增大侧边栏宽度')
+  await dragSidebarTo(1000)
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), await page.evaluate(() => Math.floor(innerWidth / 2)), '侧栏宽度不应超过页面可视宽度的一半')
+  await dragSidebarTo(-1000)
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 192, '侧栏宽度不应小于 192px')
+
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 240, '刷新后侧栏宽度应恢复默认值')
+  await page.setViewportSize({ width: 600, height: 1000 })
+  assert.equal(await sidebarResizeHandle.isVisible(), false, '窄屏不应显示侧栏宽度拖拽把手')
+  await page.setViewportSize({ width: 1600, height: 1000 })
   await page.getByRole('button', { name: '＋ 新建项目', exact: true }).click()
   await page.getByPlaceholder('例如：深圳 XX 集团总部办公').fill('总部办公大楼')
   await page.getByPlaceholder('记录客户偏好、工位数量、预算或其他需要持续提醒的事项').fill('保留开放办公区，控制预算')
@@ -119,7 +149,11 @@ try {
   await page.getByText('first.png', { exact: true }).last().waitFor()
   await page.getByRole('button', { name: '折叠1F空间', exact: true }).click()
   assert.equal(await page.getByTestId('design-space-switcher').isVisible(), false)
+  await page.goto(`${baseUrl}/canvas?floorId=OFLR-1`, { waitUntil: 'networkidle' })
+  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === 'OFLR-1')
   await page.getByRole('button', { name: '2F', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('floorId') === 'OFLR-2')
+  assert.equal(new URL(page.url()).search, '?floorId=OFLR-2', '侧栏楼层切换应清除原页面查询参数')
   await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
   assert.equal(await page.getByTestId('design-space-switcher').isVisible(), true)
   assert.equal(await page.getByText('first.png', { exact: true }).count(), 0)
@@ -199,9 +233,44 @@ try {
   await page.getByRole('heading', { name: '3F · 上传办公图纸', exact: true }).waitFor()
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '3F · 上传办公图纸', exact: true }).waitFor()
+
+  await page.getByRole('button', { name: '＋ 新建项目', exact: true }).click()
+  await page.getByPlaceholder('例如：深圳 XX 集团总部办公').fill('滨江智能办公')
+  await page.getByRole('button', { name: '创建项目', exact: true }).click()
+  await page.waitForURL(/floorId=OFLR-SECOND-1/)
+  await page.goto(`${baseUrl}/canvas?floorId=OFLR-SECOND-1`, { waitUntil: 'networkidle' })
+  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === 'OFLR-SECOND-1')
+  const projectTree = page.getByRole('region', { name: '项目与楼层', exact: true })
+  assert.equal(await projectTree.getByRole('button', { name: /总部项目双击/ }).count(), 0, '侧栏只显示当前项目')
+  assert.equal(await projectTree.getByRole('button', { name: /滨江智能办公/ }).count(), 1)
+
+  const projectBenchLink = page.getByRole('link', { name: '项目工作台', exact: true })
+  const navigationYBefore = (await projectBenchLink.boundingBox())?.y
+  const projectListToggle = page.getByRole('button', { name: '项目列表', exact: true })
+  await projectListToggle.click()
+  const projectList = page.getByTestId('project-list-popover')
+  await projectList.waitFor()
+  assert.equal(await projectListToggle.getAttribute('aria-expanded'), 'true')
+  assert.ok((await projectListToggle.getAttribute('class') || '').split(/\s+/).includes('bg-cream'), '项目列表打开时按钮应显示选中状态')
+  const navigationYAfter = (await projectBenchLink.boundingBox())?.y
+  assert.equal(navigationYAfter, navigationYBefore, '项目列表应覆盖侧栏内容，不能推挤导航')
+  await page.waitForTimeout(5100)
+  await projectList.waitFor()
+  assert.equal(await projectListToggle.getAttribute('aria-expanded'), 'true')
+  assert.ok((await projectListToggle.getAttribute('class') || '').split(/\s+/).includes('bg-cream'), '项目列表应保持打开，直到用户主动关闭或选择项目')
+  await projectList.getByRole('button', { name: '切换到项目 总部项目双击', exact: true }).click()
+  await projectList.waitFor({ state: 'hidden' })
+  await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('floorId') === 'OFLR-1')
+  assert.equal(new URL(page.url()).search, '?floorId=OFLR-1', '项目切换应清除原页面查询参数')
+  await projectTree.getByRole('button', { name: /总部项目双击/ }).waitFor()
+  assert.equal(await projectTree.getByRole('button', { name: /滨江智能办公/ }).count(), 0, '切换后只保留新当前项目的树')
+
   await page.getByRole('button', { name: '1 项目创建', exact: true }).click()
   await page.getByRole('heading', { name: '创建办公项目', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭创建项目', exact: true }).click()
+  // 项目切换用例已回到 1F；导航回归的空间数据必须写入后续点击的 3F。
+  await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^3F/ }).click()
+  await page.getByRole('heading', { name: '3F · 上传办公图纸', exact: true }).waitFor()
   await page.evaluate(() => {
     const office = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     office.$patch({ objects: [{

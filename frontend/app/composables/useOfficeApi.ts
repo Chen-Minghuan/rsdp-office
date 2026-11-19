@@ -1,6 +1,6 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
-import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
+import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
 import type { CatalogCapabilities, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { WorkspaceType } from '~/utils/workspaceType'
 
@@ -263,6 +263,34 @@ export function useOfficeApi() {
     await request<void>('POST', `/api/v1/office/projects/${requireProjectId()}/reset`, {})
   }
 
+  /** 项目报价试算：仅经销商主号，只读预览，服务端强制校验身份。 */
+  async function previewProjectQuotation(projectId: string, mode: QuotationPricingMode, value: number): Promise<ProjectQuotationPreview> {
+    const query = new URLSearchParams({ mode, value: String(value) })
+    return await request<ProjectQuotationPreview>('GET', `/api/v1/office/projects/${projectId}/quotation/preview?${query.toString()}`)
+  }
+
+  /** 确认报价：落库持久化，服务端按提交明细重算金额。 */
+  async function confirmProjectQuotation(projectId: string, payload: ConfirmQuotationRequest): Promise<ProjectQuotationRecord> {
+    return await request<ProjectQuotationRecord>('POST', `/api/v1/office/projects/${projectId}/quotation/confirm`, payload)
+  }
+
+  /** 导出当前编辑稿；业务错误可能以 JSON 返回，不能误保存为 Excel。 */
+  async function exportProjectQuotation(projectId: string, payload: ConfirmQuotationRequest): Promise<Blob> {
+    const blob = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${projectId}/quotation/export`), {
+      method: 'POST', body: payload, credentials: 'include', responseType: 'blob',
+    })
+    if (blob.type.includes('application/json')) {
+      const result = JSON.parse(await blob.text()) as ApiResponse<unknown>
+      throw new Error(result.message || '报价导出失败')
+    }
+    return blob
+  }
+
+  /** 最近一次确认的报价单；没有确认记录时返回 null。 */
+  async function latestProjectQuotation(projectId: string): Promise<ProjectQuotationRecord | null> {
+    return await request<ProjectQuotationRecord | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest`)
+  }
+
   async function catalogImportHistory<T>(): Promise<T> {
     return await request<T>('GET', '/api/v1/products/import-batches')
   }
@@ -395,6 +423,10 @@ export function useOfficeApi() {
     selectModuleProduct,
     exportProposal,
     checkProposalCatalog,
+    previewProjectQuotation,
+    confirmProjectQuotation,
+    exportProjectQuotation,
+    latestProjectQuotation,
     resetProject,
     loadImportedProducts,
     loadCatalogCapabilities,

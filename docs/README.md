@@ -28,6 +28,7 @@
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
+| [项目报价](tasks/QUOTE-001-project-quotation.md) | 主号专属报价入口、系数与毛利率、多项费用、Excel 预览/下载与确认落库 |
 | [商品主档统一](tasks/INTEG-001-product-master-integration.md) | 商品主档归 rsdp、工厂可见性（放行/黑名单）、office 只读投影（跨仓库方案） |
 | [伟豪商品接入](tasks/INTEG-002-weihao-catalog.md) | 主库写入、录入来源、权限、Excel 批次与试点验收 |
 | [新商品确认后直接上架](tasks/CAT-007-publish-on-entry.md) | 手工录入、批量导入、旧审核入口清理及在售状态 |
