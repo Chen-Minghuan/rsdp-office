@@ -63,6 +63,18 @@ public class RsdpCatalogGateway {
         return result;
     }
 
+    public OfficeProductDto currentVariant(String viewMode, String rspuId, String variantId) {
+        if ("none".equals(viewMode) || rspuId == null) return null;
+        String id = java.net.URLEncoder.encode(rspuId, java.nio.charset.StandardCharsets.UTF_8);
+        JsonNode rows = rsdpClient.get("/api/v1/products?size=1&rspuId=" + id + "&viewMode=" + viewMode
+            + "&status=active").path("rows");
+        if (!rows.isArray() || rows.isEmpty() || !rspuId.equals(rows.get(0).path("rspuId").asText())) {
+            return null;
+        }
+        return toOfficeProductDtos(toListItem(rows.get(0))).stream()
+            .filter(item -> variantId.equals(item.getId())).findFirst().orElse(null);
+    }
+
     private List<OfficeProductDto> fetchOfficeProducts(String viewMode) {
         List<ProductListItemDto> products = listProducts(viewMode);
         if (products.isEmpty()) {

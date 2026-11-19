@@ -247,6 +247,10 @@ export function useOfficeApi() {
     return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-products`, requestBody)
   }
 
+  async function checkProposalCatalog(): Promise<void> {
+    return await request<void>('POST', '/api/v1/office/projects/' + encodeURIComponent(requireProjectId()) + '/proposal/catalog-check')
+  }
+
   async function exportProposal(): Promise<Blob> {
     const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${requireProjectId()}/proposal/export`), {
       method: 'POST',
@@ -390,6 +394,7 @@ export function useOfficeApi() {
     recommendModule,
     selectModuleProduct,
     exportProposal,
+    checkProposalCatalog,
     resetProject,
     loadImportedProducts,
     loadCatalogCapabilities,

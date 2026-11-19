@@ -116,7 +116,14 @@ class OfficeModuleRecommendationServiceTest {
         assertThrows(BusinessException.class, () -> service.select("P", request()));
         verify(carts, never()).insert(any(OfficeCart.class)); verify(office, never()).saveCanvas(any());
     }
+    @Test void rejectsSelectionWhenMainCatalogNoLongerOffersTheCachedVariant() {
+        assertThrows(BusinessException.class, () -> service.select("P", request()));
+        verifyNoInteractions(carts);
+        verify(office).currentProductVariant("MASTER", "FIT");
+    }
+
     @Test void bindsSameModulesWithoutMovingOrResizingAndKeepsOtherRooms() {
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
         var request = request(); request.setApplyToSameModules(true);
         var before = json.valueToTree(canvas.getObjects());
         when(office.saveCanvas(any())).thenAnswer(call -> {
@@ -134,6 +141,7 @@ class OfficeModuleRecommendationServiceTest {
         verify(carts, times(2)).insert(any(OfficeCart.class));
     }
     @Test void selectingAgainUpdatesTheBoundLineInsteadOfAddingQuantity() {
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
         var line = new OfficeCart(); when(carts.selectById(anyString())).thenReturn(line);
         when(office.saveCanvas(any())).thenReturn(canvas);
         service.select("P", request());
@@ -142,6 +150,7 @@ class OfficeModuleRecommendationServiceTest {
     @Test void matchingPriceUnknownStillShowsFootprintButCannotEnterPlan() {
         var product = sku("FIT", "1200", "600"); product.setPrice(BigDecimal.ZERO);
         when(office.listOfficeProducts()).thenReturn(List.of(product));
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(product);
         assertEquals(1, service.recommend("P", request()).getCandidates().size());
         assertThrows(BusinessException.class, () -> service.select("P", request())); verifyNoInteractions(carts);
     }
