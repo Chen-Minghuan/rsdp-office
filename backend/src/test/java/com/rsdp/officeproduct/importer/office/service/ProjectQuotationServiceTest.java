@@ -99,6 +99,43 @@ class ProjectQuotationServiceTest {
     }
 
     @Test
+    void previewDraftAndConfirmSharePricingAndFactoryPriceCache() {
+        stubScenario(true);
+        ProjectQuotationService service = service();
+        ConfirmProjectQuotationRequest request = request("MARGIN", "0.35", "0", "0",
+            List.of(confirmLine("V-DESK", 2, null)));
+
+        ProjectQuotationPreviewDto preview = service.preview(PROJECT_ID, "margin", new BigDecimal("0.35"));
+        ProjectQuotationRecordDto draft = service.previewConfirmation(PROJECT_ID, request);
+        ProjectQuotationRecordDto confirmed = service.confirm(PROJECT_ID, request);
+
+        QuotationLineDto desk = preview.getFloors().getFirst().getSpaces().getFirst().getLines().getFirst();
+        assertAmount("298.46", desk.getUnitPrice());
+        assertEquals(desk.getUnitPrice(), draft.getLines().getFirst().getUnitPrice());
+        assertEquals(draft.getLines(), confirmed.getLines());
+        assertEquals(draft.getTotalAmount(), confirmed.getTotalAmount());
+        verify(catalogGateway).getProductDetail("RSPU-DESK");
+    }
+
+    @Test
+    void previewKeepsCanvasSpaceIdsContainingDelimiters() {
+        stubScenario(true);
+        OfficeCanvas canvas = new OfficeCanvas();
+        canvas.setObjectsJson("""
+            [{"kind":"furniture","id":"F-1","productId":"V-CHAIR","zoneId":"Z|2"},
+             {"kind":"zone","id":"Z|2","name":"会议室"}]
+            """);
+        when(canvasMapper.selectOne(any())).thenReturn(canvas);
+
+        ProjectQuotationPreviewDto preview = service().preview(PROJECT_ID, "COEFFICIENT", null);
+
+        QuotationSpaceDto space = preview.getFloors().getFirst().getSpaces().getLast();
+        assertEquals("Z|2", space.getZoneId());
+        assertEquals("会议室", space.getZoneName());
+        assertAmount("120", space.getLines().getFirst().getUnitPrice());
+    }
+
+    @Test
     void lineWithoutFactoryPriceIsReportedAndExcludedFromTotals() {
         stubScenario(false);
 
@@ -243,13 +280,15 @@ class ProjectQuotationServiceTest {
         line.setZoneName("开放办公区");
         line.setProductId(productId);
         line.setQty(qty);
-        line.setUnitPrice(new BigDecimal(unitPrice));
+        line.setUnitPrice(unitPrice == null ? null : new BigDecimal(unitPrice));
         return line;
     }
 
     private ProjectQuotationService service() {
-        return new ProjectQuotationService(accessService, projectMapper, floorMapper, canvasMapper, cartMapper,
-            quotationMapper, quotationLineMapper, catalogGateway, auditService, json);
+        QuotationCatalog catalog = new QuotationCatalog(catalogGateway);
+        return new ProjectQuotationService(accessService, projectMapper, quotationMapper, quotationLineMapper,
+            auditService, new ProjectQuotationPreviewBuilder(floorMapper, canvasMapper, cartMapper, catalog, json),
+            new ProjectQuotationDraftBuilder(floorMapper, catalog), new QuotationRecordAssembler(json));
     }
 
     /** 一间楼层：清单里 2 张办公桌（空间 Z1），画布里 2 把会议椅（空间 Z2）。 */
