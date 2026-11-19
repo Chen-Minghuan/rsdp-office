@@ -41,7 +41,7 @@ export function useFloorPlanApi() {
     image?: File
     cad?: File
     hint?: string
-    projectId?: string
+    floorId: string
     sourceName?: string
     pageNumber?: number
   }): Promise<FloorPlanAnalyzeResponse> {
@@ -49,7 +49,7 @@ export function useFloorPlanApi() {
     if (params.image) formData.append('image', params.image)
     if (params.cad) formData.append('cad', params.cad)
     if (params.hint) formData.append('hint', params.hint)
-    if (params.projectId) formData.append('projectId', params.projectId)
+    formData.append('projectId', params.floorId)
     if (params.sourceName) formData.append('sourceName', params.sourceName)
     if (params.pageNumber !== undefined) formData.append('pageNumber', String(params.pageNumber))
     if (params.image) formData.append('background', 'true')

@@ -31,6 +31,7 @@ export class LoginError extends Error {
 export function useAuth() {
   const user = useState<AuthUser | null>('rsdp-auth-user', () => null)
   const storageScope = computed(() => authEnabled ? user.value?.userId || 'anonymous' : 'local-dev')
+  const canCreateProject = computed(() => !authEnabled || user.value?.role === 'DEALER')
 
   async function login(username: string, password: string, options: LoginOptions = {}): Promise<AuthUser> {
     try {
@@ -67,5 +68,5 @@ export function useAuth() {
     }
   }
 
-  return { login, me, logout, user, storageScope }
+  return { login, me, logout, user, storageScope, canCreateProject }
 }

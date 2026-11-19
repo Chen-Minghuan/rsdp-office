@@ -1,12 +1,17 @@
 package com.rsdp.officeproduct.importer.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.dto.request.FloorPlanConfirmRequest;
 import com.rsdp.officeproduct.importer.entity.*;
 import com.rsdp.officeproduct.importer.mapper.*;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectService;
 import com.rsdp.officeproduct.importer.service.spatial.SpatialGeometryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -17,8 +22,9 @@ class FloorPlanProgressPersistenceTest {
     private final FloorPlanRoomMapper rooms = mock(FloorPlanRoomMapper.class);
     private final FloorPlanSceneRevisionMapper revisions = mock(FloorPlanSceneRevisionMapper.class);
     private final ImageAssetsMapper assets = mock(ImageAssetsMapper.class);
+    private final OfficeProjectAccessService projectAccess = mock(OfficeProjectAccessService.class);
     private final FloorPlanService service = new FloorPlanService(analyses,
-        mock(com.rsdp.officeproduct.importer.office.service.OfficeProjectService.class), rooms, revisions, assets,
+        mock(OfficeProjectService.class), projectAccess, rooms, revisions, assets,
         mock(CadParseClient.class), mock(VisionRecognitionClient.class), mock(FloorPlanDimensionService.class),
         mock(FloorPlanDesignCorrectionService.class), json, new SpatialGeometryService());
     private FloorPlanAnalysis analysis;
@@ -27,6 +33,7 @@ class FloorPlanProgressPersistenceTest {
     @BeforeEach void setup() {
         analysis = new FloorPlanAnalysis();
         analysis.setAnalysisId("A"); analysis.setStatus("analyzing"); analysis.setPreviewImageId("PREVIEW");
+        analysis.setProjectId("OFLR-1");
         analysis.setLatestAnalysisRevision(1); analysis.setInputMode("image");
         analysis.setRawResult("{\"imageSha256\":\"hash\",\"processing\":{\"stage\":\"RECOGNIZING\"}}");
         revision = new FloorPlanSceneRevision(); revision.setAnalysisId("A"); revision.setAnalysisRevision(1);
@@ -36,6 +43,28 @@ class FloorPlanProgressPersistenceTest {
         when(revisions.selectByRevision("A", 1)).thenReturn(revision);
         when(assets.selectById("PREVIEW")).thenReturn(asset);
         when(rooms.selectByAnalysisRevision("A", 1)).thenReturn(java.util.List.of());
+    }
+
+    @Test void authenticatedUploadRejectsMissingOrUnauthorizedFloorBeforeCreatingTask() {
+        when(projectAccess.enforcementEnabled()).thenReturn(true);
+        doThrow(new AccessDeniedException("无权访问该项目"))
+            .when(projectAccess).requireFloorAccess("OFFICE-PROJECT-001");
+        var image = new MockMultipartFile("image", "plan.png", "image/png", new byte[]{1});
+
+        assertEquals("请先选择项目和楼层，再识别图纸", assertThrows(BusinessException.class,
+            () -> service.beginBackground(image, null, null, "http://test", 1)).getMessage());
+        assertThrows(AccessDeniedException.class,
+            () -> service.beginBackground(image, "OFFICE-PROJECT-001", null, "http://test", 1));
+        assertThrows(AccessDeniedException.class,
+            () -> service.analyze(image, null, null, "OFFICE-PROJECT-001", null, "http://test"));
+        verifyNoInteractions(analyses, revisions, rooms, assets);
+    }
+
+    @Test void analysisReadAndConfirmationRequireMembershipInItsFloor() {
+        doThrow(new AccessDeniedException("无权访问该项目")).when(projectAccess).requireFloorAccess("OFLR-1");
+        assertThrows(AccessDeniedException.class, () -> service.getAnalysis("A", null));
+        assertThrows(AccessDeniedException.class, () -> service.confirmRooms("A", new FloorPlanConfirmRequest()));
+        verifyNoInteractions(revisions, rooms, assets);
     }
 
     @Test void previewAndRealPhaseRemainReadableWhenRecognitionFails() {
