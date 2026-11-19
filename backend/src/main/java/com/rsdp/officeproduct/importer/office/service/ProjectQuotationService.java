@@ -1,6 +1,7 @@
 package com.rsdp.officeproduct.importer.office.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
@@ -339,6 +340,13 @@ public class ProjectQuotationService {
     public ProjectQuotationRecordDto confirm(String projectId, ConfirmProjectQuotationRequest request) {
         PreparedQuotation prepared = prepare(projectId, request);
         OfficeQuotation quotation = prepared.quotation();
+        quotation.setFeesJson(writeFees(prepared.fees()));
+
+        // 锁定项目后再分配版本，首次确认也能串行写入。
+        if (projectMapper.selectOne(new QueryWrapper<OfficeDesignProject>().select("project_id")
+                .eq("project_id", projectId).last("FOR UPDATE")) == null) {
+            throw new BusinessException("项目不存在");
+        }
         String quotationId = "QT-" + UUID.randomUUID().toString().replace("-", "");
         int revision = nextRevision(projectId);
         quotation.setQuotationId(quotationId);
@@ -358,16 +366,17 @@ public class ProjectQuotationService {
             row.setQuotationId(quotationId);
             quotationLineMapper.insert(row);
         }
+        ProjectQuotationRecordDto record = toRecordDto(quotation, prepared.rows(), prepared.fees());
         auditService.record("QUOTATION_CONFIRMED", "PROJECT", projectId,
             "quotationId=" + quotationId + "; revision=" + revision + "; total=" + quotation.getTotalAmount()
-                + "; lines=" + prepared.rows().size() + "; missing=" + quotation.getMissingPriceLines());
-        return toRecordDto(quotation, prepared.rows());
+                + "; lines=" + record.getLineCount() + "; missing=" + record.getMissingPriceLines());
+        return record;
     }
 
     /** 导出前的试算：与确认共用校验和金额计算，但不分配版本、不写数据库或审计。 */
     public ProjectQuotationRecordDto previewConfirmation(String projectId, ConfirmProjectQuotationRequest request) {
         PreparedQuotation prepared = prepare(projectId, request);
-        return toRecordDto(prepared.quotation(), prepared.rows());
+        return toRecordDto(prepared.quotation(), prepared.rows(), prepared.fees());
     }
 
     private PreparedQuotation prepare(String projectId, ConfirmProjectQuotationRequest request) {
@@ -390,11 +399,8 @@ public class ProjectQuotationService {
                 LinkedHashMap::new));
         Map<String, OfficeProductDto> productsById = loadProducts();
 
-        BigDecimal goodsTotal = BigDecimal.ZERO;
-        int missingLines = 0;
-        int sortOrder = 0;
+        BigDecimal goodsTotal = BigDecimal.ZERO.setScale(2);
         List<OfficeQuotationLine> rows = new ArrayList<>();
-        List<QuotationRecordLineDto> recordLines = new ArrayList<>();
         for (ConfirmProjectQuotationRequest.Line line : request.getLines()) {
             if (line == null || !StringUtils.hasText(line.getProductId())) {
                 throw new BusinessException("报价明细缺少商品");
@@ -409,14 +415,13 @@ public class ProjectQuotationService {
             }
 
             OfficeQuotationLine row = new OfficeQuotationLine();
-            row.setLineId("QTL-" + UUID.randomUUID().toString().replace("-", ""));
+            row.setLineNo(rows.size());
             row.setFloorId(floor.getFloorId());
             row.setFloorName(floor.getName());
             row.setZoneId(line.getZoneId());
             row.setZoneName(StringUtils.hasText(line.getZoneName()) ? line.getZoneName() : UNASSIGNED_ZONE_NAME);
             row.setProductId(line.getProductId());
             row.setQty(qty);
-            row.setSortOrder(sortOrder++);
 
             OfficeProductDto product = productsById.get(line.getProductId());
             BigDecimal factoryPrice = product == null ? null : factoryPriceOf(product);
@@ -435,7 +440,6 @@ public class ProjectQuotationService {
             }
 
             BigDecimal unitPrice = null;
-            BigDecimal subtotal = null;
             if (issue == null) {
                 unitPrice = line.getUnitPrice() != null
                     ? line.getUnitPrice() : calcUnitPrice(factoryPrice, pricingMode, pricingValue);
@@ -443,37 +447,14 @@ public class ProjectQuotationService {
                     throw new BusinessException("成交单价不能为负数");
                 }
                 unitPrice = unitPrice.setScale(2, RoundingMode.HALF_UP);
-                subtotal = unitPrice.multiply(BigDecimal.valueOf(qty)).setScale(2, RoundingMode.HALF_UP);
-                goodsTotal = goodsTotal.add(subtotal);
-            } else {
-                missingLines++;
+                goodsTotal = goodsTotal.add(lineSubtotal(unitPrice, qty));
             }
             row.setFactoryPrice(factoryPrice);
             row.setUnitPrice(unitPrice);
-            row.setSubtotal(subtotal);
             row.setIssue(issue);
             rows.add(row);
-
-            QuotationRecordLineDto recordLine = new QuotationRecordLineDto();
-            recordLine.setFloorId(row.getFloorId());
-            recordLine.setFloorName(row.getFloorName());
-            recordLine.setZoneId(row.getZoneId());
-            recordLine.setZoneName(row.getZoneName());
-            recordLine.setProductId(row.getProductId());
-            recordLine.setRspuId(row.getRspuId());
-            recordLine.setProductName(row.getProductName());
-            recordLine.setVariant(row.getVariant());
-            recordLine.setImageUrl(row.getImageUrl());
-            recordLine.setQty(row.getQty());
-            recordLine.setFactoryPrice(factoryPrice);
-            recordLine.setUnitPrice(unitPrice);
-            recordLine.setSubtotal(subtotal);
-            recordLine.setIssue(issue);
-            recordLines.add(recordLine);
         }
 
-        BigDecimal goodsScale = goodsTotal.setScale(2, RoundingMode.HALF_UP);
-        BigDecimal totalAmount = goodsScale.add(feeTotal).setScale(2, RoundingMode.HALF_UP);
         OfficeQuotation quotation = new OfficeQuotation();
         quotation.setProjectId(projectId);
         quotation.setProjectName(project.getName());
@@ -481,15 +462,8 @@ public class ProjectQuotationService {
         quotation.setStatus("DRAFT");
         quotation.setPricingMode(pricingMode);
         quotation.setPricingValue(pricingValue);
-        quotation.setGoodsTotal(goodsScale);
-        quotation.setServiceFee(namedFeeTotal(fees, SERVICE_FEE_NAME));
-        quotation.setLogisticsFee(namedFeeTotal(fees, LOGISTICS_FEE_NAME));
-        quotation.setTotalAmount(totalAmount);
-        quotation.setLineCount(rows.size());
-        quotation.setMissingPriceLines(missingLines);
-        quotation.setSnapshotJson(writeSnapshot(project, pricingMode, pricingValue, fees,
-            goodsScale, totalAmount, recordLines));
-        return new PreparedQuotation(quotation, rows);
+        quotation.setTotalAmount(goodsTotal.add(feeTotal));
+        return new PreparedQuotation(quotation, rows, fees);
     }
 
     /** 最近一次确认的报价单（含已失效版本），没有则返回 null。 */
@@ -501,9 +475,8 @@ public class ProjectQuotationService {
         if (quotation == null) {
             return null;
         }
-        List<OfficeQuotationLine> rows = quotationLineMapper.selectList(new QueryWrapper<OfficeQuotationLine>()
-            .eq("quotation_id", quotation.getQuotationId()).orderByAsc("sort_order"));
-        return toRecordDto(quotation, rows);
+        List<OfficeQuotationLine> rows = quotationLineMapper.findByQuotationId(quotation.getQuotationId());
+        return toRecordDto(quotation, rows, readFees(quotation.getFeesJson()));
     }
 
     private int nextRevision(String projectId) {
@@ -578,60 +551,28 @@ public class ProjectQuotationService {
         return total.setScale(2, RoundingMode.HALF_UP);
     }
 
-    private String writeSnapshot(OfficeDesignProject project, String pricingMode, BigDecimal pricingValue,
-                                 List<QuotationFeeDto> fees, BigDecimal goodsTotal,
-                                 BigDecimal totalAmount, List<QuotationRecordLineDto> lines) {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("projectId", project.getProjectId());
-        snapshot.put("projectName", project.getName());
-        snapshot.put("pricingMode", pricingMode);
-        snapshot.put("pricingValue", pricingValue);
-        snapshot.put("serviceFee", namedFeeTotal(fees, SERVICE_FEE_NAME));
-        snapshot.put("logisticsFee", namedFeeTotal(fees, LOGISTICS_FEE_NAME));
-        snapshot.put("fees", fees);
-        snapshot.put("goodsTotal", goodsTotal);
-        snapshot.put("totalAmount", totalAmount);
-        snapshot.put("lines", lines);
+    private String writeFees(List<QuotationFeeDto> fees) {
         try {
-            return objectMapper.writeValueAsString(snapshot);
+            return objectMapper.writeValueAsString(fees);
         } catch (Exception failure) {
-            throw new BusinessException("报价快照生成失败");
+            throw new BusinessException("报价费用保存失败", failure);
         }
     }
 
-    private List<QuotationFeeDto> readSnapshotFees(OfficeQuotation quotation) {
-        if (StringUtils.hasText(quotation.getSnapshotJson())) {
-            try {
-                JsonNode root = objectMapper.readTree(quotation.getSnapshotJson());
-                JsonNode feeNodes = root == null ? null : root.path("fees");
-                if (feeNodes != null && feeNodes.isArray()) {
-                    List<QuotationFeeDto> fees = new ArrayList<>();
-                    for (JsonNode node : feeNodes) {
-                        QuotationFeeDto fee = new QuotationFeeDto();
-                        fee.setName(node.path("name").asText(""));
-                        fee.setAmount(node.path("amount").decimalValue().setScale(2, RoundingMode.HALF_UP));
-                        fees.add(fee);
-                    }
-                    return fees;
-                }
-            } catch (Exception failure) {
-                throw new BusinessException("报价快照读取失败");
-            }
+    private List<QuotationFeeDto> readFees(String feesJson) {
+        try {
+            return objectMapper.readValue(feesJson, new TypeReference<List<QuotationFeeDto>>() {});
+        } catch (Exception failure) {
+            throw new BusinessException("报价费用读取失败", failure);
         }
-        List<QuotationFeeDto> legacyFees = new ArrayList<>();
-        legacyFees.add(fee(SERVICE_FEE_NAME, quotation.getServiceFee()));
-        legacyFees.add(fee(LOGISTICS_FEE_NAME, quotation.getLogisticsFee()));
-        return legacyFees;
     }
 
-    private QuotationFeeDto fee(String name, BigDecimal amount) {
-        QuotationFeeDto fee = new QuotationFeeDto();
-        fee.setName(name);
-        fee.setAmount(amount == null ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP) : amount);
-        return fee;
+    private BigDecimal lineSubtotal(BigDecimal unitPrice, int qty) {
+        return unitPrice.multiply(BigDecimal.valueOf(qty));
     }
 
-    private ProjectQuotationRecordDto toRecordDto(OfficeQuotation quotation, List<OfficeQuotationLine> rows) {
+    private ProjectQuotationRecordDto toRecordDto(OfficeQuotation quotation, List<OfficeQuotationLine> rows,
+                                                  List<QuotationFeeDto> fees) {
         ProjectQuotationRecordDto dto = new ProjectQuotationRecordDto();
         dto.setQuotationId(quotation.getQuotationId());
         dto.setProjectId(quotation.getProjectId());
@@ -640,15 +581,15 @@ public class ProjectQuotationService {
         dto.setStatus(quotation.getStatus());
         dto.setPricingMode(quotation.getPricingMode());
         dto.setPricingValue(quotation.getPricingValue());
-        dto.setGoodsTotal(quotation.getGoodsTotal());
-        dto.setServiceFee(quotation.getServiceFee());
-        dto.setLogisticsFee(quotation.getLogisticsFee());
-        dto.setFees(readSnapshotFees(quotation));
+        dto.setServiceFee(namedFeeTotal(fees, SERVICE_FEE_NAME));
+        dto.setLogisticsFee(namedFeeTotal(fees, LOGISTICS_FEE_NAME));
+        dto.setFees(fees);
         dto.setTotalAmount(quotation.getTotalAmount());
-        dto.setLineCount(quotation.getLineCount());
-        dto.setMissingPriceLines(quotation.getMissingPriceLines());
+        dto.setLineCount(rows.size());
         dto.setCreatedBy(quotation.getCreatedBy());
         dto.setCreatedAt(quotation.getCreatedAt());
+        BigDecimal goodsTotal = BigDecimal.ZERO.setScale(2);
+        int missingLines = 0;
         for (OfficeQuotationLine row : rows) {
             QuotationRecordLineDto line = new QuotationRecordLineDto();
             line.setFloorId(row.getFloorId());
@@ -663,10 +604,19 @@ public class ProjectQuotationService {
             line.setQty(row.getQty());
             line.setFactoryPrice(row.getFactoryPrice());
             line.setUnitPrice(row.getUnitPrice());
-            line.setSubtotal(row.getSubtotal());
+            if (row.getUnitPrice() != null) {
+                BigDecimal subtotal = lineSubtotal(row.getUnitPrice(), row.getQty());
+                line.setSubtotal(subtotal);
+                goodsTotal = goodsTotal.add(subtotal);
+            }
+            if (row.getIssue() != null) {
+                missingLines++;
+            }
             line.setIssue(row.getIssue());
             dto.getLines().add(line);
         }
+        dto.setGoodsTotal(goodsTotal);
+        dto.setMissingPriceLines(missingLines);
         return dto;
     }
 
@@ -681,7 +631,7 @@ public class ProjectQuotationService {
     private record FactoryPriceCache(Map<String, BigDecimal> prices, long fetchedAt) {
     }
 
-    private record PreparedQuotation(OfficeQuotation quotation, List<OfficeQuotationLine> rows) {
+    private record PreparedQuotation(OfficeQuotation quotation, List<OfficeQuotationLine> rows, List<QuotationFeeDto> fees) {
     }
 
     private record FloorAggregate(OfficeDesignFloor floor, List<ZoneAggregate> zones) {

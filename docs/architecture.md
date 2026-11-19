@@ -180,6 +180,10 @@ Office 将确认后的新商品通过 `POST /api/v1/products/factory-entry` 写�
 
 2026-10-30 设施/点位标注（GEOM-018）：ZoneObject 增加可选 `facilities` 数组（`SpatialFacility`：facilityId/kind/spaceId/shape/pointsMm/sizeMm/clearanceMm/visible 等），与障碍分开建模——点位型（POWER_OUTLET/DATA_OUTLET）、线型（SKIRTING）、占用型（FIRE_FACILITY/ELECTRICAL_BOX），不混入矩形障碍模型。默认语义全部为标注与提示：不扣净面积、不进入 `zoneLayoutExclusions`、不参与排版硬阻断；占用型操作净空 `clearanceMm` 必须来自人工标注（净空环为占地包围盒外扩，诚实标注），缺省只提示；需要实际禁放时另建 NO_PLACEMENT 障碍。pointsMm 为世界毫米 Y 向上；`saveZoneFacility` 校验通过才落库且不失效排版确认；`facilityLayoutHints` 提供提示级排版提醒（踢脚线只承担全局提醒）。服务端无改动（jsonb 透传、不参与确认核验），无数据库迁移。见 [GEOM-018](tasks/GEOM-018-spatial-facilities.md)。
 
+### 5.2 项目报价存储（QUOTE-001）
+
+报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
+
 ## 6. 几何约束与版本失效
 
 最新用户纠正（2026-10-20）：参考图只固定局部样式，不固定整张示例的总数量。实际排数/列数与横纵方向由场地轮廓、保留家具、预留区域、间距和目标人数计算；完整对坐/T/C/十字最小单元可以重复或整单元跳过，不拆坏样式。当前规则为 `2026-10-adaptive-reference-v5`，实例记录 `layoutClusterId`；下方 v4 固定示例数量描述是历史记录。详见 [LAYOUT-016](tasks/LAYOUT-016-space-adaptive-reference-layout.md)。

@@ -14,6 +14,7 @@ import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeQuotation;
+import com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
@@ -133,14 +134,14 @@ class ProjectQuotationServiceTest {
         assertEquals("CONFIRMED", header.getValue().getStatus());
         assertEquals(1, header.getValue().getRevision());
         assertEquals("报价测试项目", header.getValue().getProjectName());
-        assertAmount("600", header.getValue().getGoodsTotal());
-        assertAmount("100", header.getValue().getServiceFee());
         assertAmount("750", header.getValue().getTotalAmount());
-        assertEquals(1, header.getValue().getLineCount());
-        assertNotNull(header.getValue().getSnapshotJson());
+        assertNotNull(header.getValue().getFeesJson());
         verify(quotationMapper).update(any(OfficeQuotation.class), any());
-        verify(quotationLineMapper).insert(any(com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine.class));
+        verify(quotationLineMapper).insert(any(OfficeQuotationLine.class));
+        assertAmount("600", stored.getGoodsTotal());
+        assertAmount("100", stored.getServiceFee());
         assertAmount("750", stored.getTotalAmount());
+        assertEquals(1, stored.getLineCount());
         assertEquals("CONFIRMED", stored.getStatus());
     }
 
@@ -164,17 +165,16 @@ class ProjectQuotationServiceTest {
         stubScenario(false);
         when(quotationMapper.selectOne(any())).thenReturn(null);
 
-        service().confirm(PROJECT_ID, request("COEFFICIENT", "1.2", "0", "0",
+        ProjectQuotationRecordDto stored = service().confirm(PROJECT_ID, request("COEFFICIENT", "1.2", "0", "0",
             List.of(confirmLine("V-DESK", 1, "300"))));
 
-        ArgumentCaptor<OfficeQuotation> header = ArgumentCaptor.forClass(OfficeQuotation.class);
-        verify(quotationMapper).insert(header.capture());
-        assertEquals(1, header.getValue().getMissingPriceLines());
-        assertAmount("0", header.getValue().getTotalAmount());
+        assertEquals(1, stored.getMissingPriceLines());
+        assertNull(stored.getLines().getFirst().getSubtotal());
+        assertAmount("0", stored.getTotalAmount());
     }
 
     @Test
-    void confirmStoresMultipleFeesAndLatestRestoresThem() {
+    void confirmStoresMultipleFeesAndLatestRestoresThem() throws Exception {
         stubScenario(true);
         when(quotationMapper.selectOne(any())).thenReturn(null);
         ConfirmProjectQuotationRequest request = request("COEFFICIENT", "1.25", "100", "50",
@@ -192,10 +192,15 @@ class ProjectQuotationServiceTest {
         assertAmount("100", stored.getServiceFee());
         assertAmount("50", stored.getLogisticsFee());
         ArgumentCaptor<OfficeQuotation> header = ArgumentCaptor.forClass(OfficeQuotation.class);
+        ArgumentCaptor<OfficeQuotationLine> line = ArgumentCaptor.forClass(OfficeQuotationLine.class);
         verify(quotationMapper).insert(header.capture());
+        verify(quotationLineMapper).insert(line.capture());
+        var fees = json.readTree(header.getValue().getFeesJson());
+        assertEquals(true, fees.isArray());
+        assertEquals(4, fees.size());
         when(quotationMapper.selectOne(any())).thenReturn(header.getValue());
-        when(quotationLineMapper.selectList(any())).thenReturn(List.of());
-        assertEquals(4, service.latest(PROJECT_ID).getFees().size());
+        when(quotationLineMapper.findByQuotationId(stored.getQuotationId())).thenReturn(List.of(line.getValue()));
+        assertEquals(stored, service.latest(PROJECT_ID));
     }
 
     @Test
@@ -254,6 +259,7 @@ class ProjectQuotationServiceTest {
         project.setName("报价测试项目");
         project.setWorkspaceId("WS-1");
         when(projectMapper.selectById(PROJECT_ID)).thenReturn(project);
+        when(projectMapper.selectOne(any())).thenReturn(project);
 
         OfficeDesignFloor floor = new OfficeDesignFloor();
         floor.setFloorId(FLOOR_ID);

@@ -1,6 +1,6 @@
 # QUOTE-001 项目报价（试算与确认落库）
 
-状态：已实现待验收（真实主号页面与真实导出链路验收未执行）
+状态：已实现待验收（临时 PostgreSQL 上的迁移、确认、回显和导出已验证，真实经销商主号的端到端流程待验收）
 
 ## 背景与范围
 
@@ -15,16 +15,16 @@
 
 ## 数据模型
 
-新增迁移 `backend/src/main/resources/db/migrations/20261118_project_quotation.sql`，并追加到 `db/schema.sql`、在 `SchemaInitializer` 注册（存量库启动时自动建表）。
+新库从 `db/schema.sql` 创建报价表。存量库在后端启动时运行 [20261119 迁移](../../backend/src/main/resources/db/migrations/20261119_simplify_project_quotation.sql)。
 
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
-| `office_quotation` | `quotation_id`、`project_id`、`project_name`、`workspace_id`、`revision`、`status`、`pricing_mode`、`pricing_value`、`goods_total`、`service_fee`、`logistics_fee`、`total_amount`、`line_count`、`missing_price_lines`、`snapshot_json`、`created_by`、`created_at`、`superseded_at` | 单项目仅一条 `CONFIRMED`（部分唯一索引）；新确认把旧版置 `SUPERSEDED`，`revision` 递增 |
-| `office_quotation_line` | `line_id`、`quotation_id`、`floor_id/name`、`zone_id/name`、`product_id`、`rspu_id`、`product_name`、`variant`、`image_url`、`qty`、`factory_price`、`unit_price`、`subtotal`、`issue`、`sort_order` | 明细行级快照，`quotation_id` 外键级联删除 |
+| `office_quotation` | `quotation_id`、`project_id`、`project_name`、`workspace_id`、`revision`、`status`、`pricing_mode`、`pricing_value`、`fees_json`、`total_amount`、`created_by`、`created_at`、`superseded_at` | 项目内版本唯一，每个项目最多一条 `CONFIRMED`，新确认把旧版置 `SUPERSEDED` |
+| `office_quotation_line` | `quotation_id`、`line_no`、`floor_id/name`、`zone_id/name`、`product_id`、`rspu_id`、`product_name`、`variant`、`image_url`、`qty`、`factory_price`、`unit_price`、`issue` | `(quotation_id, line_no)` 为主键，`quotation_id` 外键级联删除 |
 
-`project_name` 是确认时的名称快照：项目改名后历史报价单仍显示当时名称，业务关联仍以 `project_id` 为准；`snapshot_json` 再冗余一份完整页面快照用于回溯。
+`project_name` 保存确认时的名称，项目改名后历史报价单仍显示当时名称。`fees_json` 只保存有顺序的 `[{name, amount}]` 费用列表，已确认总额保存在主表，商品快照保存在明细表。行小计、商品合计、行数和缺价行数从明细计算。响应中的 `serviceFee` 和 `logisticsFee` 从费用列表按同名费用求和，接口结构沿用原版。
 
-费用明细按 `[{name, amount}]` 顺序保存在 `snapshot_json.fees`，无需新增费用表。`service_fee` / `logistics_fee` 仅保留同名费用的汇总投影；其他费用以 `fees` 为准。旧快照没有 `fees` 字段时按原两列恢复，避免重复计入。
+迁移优先复制旧 `snapshot_json.fees`，包括显式空数组。没有费用数组的早期记录由旧服务费和物流搬运安装费两列恢复，随后删除重复字段。旧明细的排序编号直接作为行号，历史成交价和确认总额保持原值。
 
 ## 接口
 
@@ -40,9 +40,9 @@
 - **权限**：`OfficeProjectAccessService.requireWorkspaceOwner` —— 认证开启时要求 `role=DEALER` 且为项目所属工作区主号。匿名 401、管理员 403。
 - **服务端重算**：`商品合计 = Σ(数量 × 成交单价)`、`合计 = 商品合计 + Σ(全部费用金额)`，不采用前端提交的合计值；导出与确认共用同一准备逻辑。
 - **校验**：明细非空、≤2000 行；数量与金额不得为负；毛利率 `0 < m < 1`；系数 `0 < c ≤ 100`；明细楼层必须属于该项目。费用最多 50 条，名称去首尾空格后必填且不超过 100 字，空名称的零金额行忽略，金额按 `HALF_UP` 保留两位小数。
-- **价格固化**：`factory_price`、`unit_price`、`subtotal`、商品名/规格/图片、楼层与空间名全部写入明细行，费用列表写入快照，后续商品调价不影响历史报价单。
-- **缺价行**：商品不可用或缺出厂价时写入 `issue`，`unit_price`/`subtotal` 为空且不计入合计，`missing_price_lines` 计数。
-- **审计**：确认与写入同事务，记录 `QUOTATION_CONFIRMED`（报价单号、版本、总额、行数、缺价行数）。
+- **价格固化**：`factory_price`、`unit_price`、商品名/规格/图片、楼层与空间名写入明细行，后续商品调价不影响历史报价单。
+- **缺价行**：商品不可用或缺出厂价时写入 `issue`，`unit_price` 和响应的小计为空，该行不计入合计。
+- **版本与审计**：确认事务锁定项目行后分配版本，旧版替代、新版及明细写入、`QUOTATION_CONFIRMED` 审计一并提交。
 - **页面**：底部固定条汇总商品小计 + 全部费用；费用行可命名、添加和删除，默认保留服务费与物流搬运安装费。「确认报价」先冻结当前草稿并打开居中 Excel 风格预览，右上角下载 `.xlsx`，右下角依次为确认、取消；下载与确认使用同一冻结载荷。
 
 ## 数据来源（试算口径）
@@ -69,9 +69,11 @@
 | 审计 | `office_audit_log` | 2 条 `QUOTATION_CONFIRMED` |
 | 权限 | 匿名 / 管理员会话 | 401 / `code=403 只有经销商主号可以查看项目报价` |
 
-验证后已删除测试报价单与对应审计记录（`office_quotation` 当前为空）。
+上表是 PR 原始验证记录，测试报价单与对应审计记录已清理。
 
-未执行：经销商主号真实浏览器点击验收、真实后端 `.xlsx` 下载及打开核验；上游画布/清单变更后的 `STALE` 标记（尚未实现）。本轮 UI 证据均为模拟 API，不作为真实业务验收。
+2026-11-19 存储简化验证：Java 293 项、0 失败、3 跳过。前端构建、`e2e:quotes`、`e2e:workflows`、`MOCK_API=1 e2e:smoke` 通过，UI 使用模拟 API。临时 PostgreSQL 16 验证新建库和旧格式升级，旧固定费用、有序自定义费用、空费用列表及缺价明细都可回显。真实 Office 后端连接临时库和模拟商品主档，验证 Excel 响应、导出不落库、首次并发确认得到第 1 和第 2 版、最近报价回显。真实主号会话及连接真实商品主档的业务验收待执行，上游画布或清单变化后的 `STALE` 标记尚未实现。
+
+同步远程 `main`（`3a01ca1`）后重跑 Java 297 项、0 失败、3 跳过。前端构建、报价专项、工作流和冒烟模拟 UI 回归均通过。
 
 ## 未覆盖与下一步
 

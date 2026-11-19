@@ -25,15 +25,10 @@ public class OfficeQuotation {
     private String status;
     private String pricingMode;
     private BigDecimal pricingValue;
-    private BigDecimal goodsTotal;
-    private BigDecimal serviceFee;
-    private BigDecimal logisticsFee;
     private BigDecimal totalAmount;
-    private Integer lineCount;
-    private Integer missingPriceLines;
 
     @TableField(typeHandler = JsonbTypeHandler.class)
-    private String snapshotJson;
+    private String feesJson;
 
     private String createdBy;
     private LocalDateTime createdAt;
