@@ -41,6 +41,10 @@ function backToOverview() {
       </p>
     </div>
 
+    <!-- 兜底滚动层：高度充足时内容不溢出、本层无滚动条，仅商品列表自滚，表现与原布局一致；
+         视口不足（小屏或浏览器放大）时本层出现滚动条，上方信息区可滚走，结算条在层外钉底 -->
+    <div class="flex-1 min-h-0 overflow-y-auto flex flex-col" data-testid="sidebar-fallback-scroll">
+
     <!-- Zone info -->
     <div v-if="zone" class="px-4 py-3 bg-[#f9f7f4] border-b border-line flex-none">
       <div class="flex justify-between text-xs text-[#78736d] my-1">
@@ -110,8 +114,11 @@ function backToOverview() {
     <template v-else>
       <p v-if="layoutReviewNotice" class="border-b border-[#f0d9b3] bg-[#fff8e8] px-3 py-2 text-[10px] leading-relaxed text-[#8a6a2c]" data-testid="layout-review-notice">{{ layoutReviewNotice }}</p>
       <OfficeCanvasModuleProductRecommendations v-model:selected-id="selectedId" />
+    </template>
+    </div>
 
-      <div class="px-4 py-3 border-t border-line bg-[#fefcfb] flex-none">
+    <!-- 结算条钉底：位于兜底滚动层之外，任何有效视口高度下保持可见，随时可进入方案 -->
+    <div v-if="layoutConfirmed" class="px-4 py-3 border-t border-line bg-[#fefcfb] flex-none">
         <div class="flex justify-between text-xs text-[#78736d] my-1">
           <span>已选商品</span>
           <strong class="text-[#383432]">{{ store.cart.length }}</strong>
@@ -125,7 +132,6 @@ function backToOverview() {
           <AppIcon name="arrowRight" size="3.5" />
         </NuxtLink>
       </div>
-    </template>
     </div>
 
     <!-- Collapsed strip -->
