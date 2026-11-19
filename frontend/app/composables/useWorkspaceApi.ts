@@ -1,4 +1,5 @@
-import type { AssignableUser, CreateProjectRequest, ProjectReferenceImage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
+import type { AssignableUser, CreateProjectRequest, ProjectBudgetStatus, ProjectReferenceImage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
+import { apiBase } from '~/utils/apiBase'
 
 interface ApiResponse<T> {
   code: number
@@ -6,10 +7,8 @@ interface ApiResponse<T> {
   data: T
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
-
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const response = await $fetch<ApiResponse<T>>(`${API_BASE}${path}`, {
+  const response = await $fetch<ApiResponse<T>>(`${apiBase}${path}`, {
     method: method as any,
     body: body as any,
     credentials: 'include',
@@ -20,7 +19,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 type FloorDto = Omit<WorkspaceFloor, 'floorName'> & { name: string }
-type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors'> & { name: string; floors: FloorDto[] }
+type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors' | 'budgetTotal' | 'budgetStatus'> & {
+  name: string
+  floors: FloorDto[]
+  budgetTotal?: number | null
+  budgetStatus?: ProjectBudgetStatus
+}
 
 function floorFromDto(dto: FloorDto): WorkspaceFloor {
   return { ...dto, floorName: dto.name }
@@ -34,6 +38,8 @@ function projectFromDto(dto: ProjectDto): WorkspaceProject {
     collaborators: dto.collaborators ?? [],
     referenceImages: dto.referenceImages ?? [],
     floors: (dto.floors || []).map(floorFromDto),
+    budgetTotal: typeof dto.budgetTotal === 'number' ? dto.budgetTotal : null,
+    budgetStatus: dto.budgetStatus ?? 'UNAVAILABLE',
   }
 }
 

@@ -16,6 +16,8 @@
 | PostgreSQL 与文件存储 | 保存项目数据、商品、版本及资产关联 | 数据库宿主机 5434；资产持久存储方案待任务落实 |
 
 浏览器通过 Java 业务接口调用解析与后续服务，不依赖外部服务的内部端口或直接持有服务凭据。
+
+办公工作区用 `workspaceType` 区分经销商（`DEALER`）和工厂（`FACTORY`）。`GET /api/auth/me` 和登录响应返回账号所属工作区类型，未分配工作区时为 null。系统管理员通过 `POST /api/v1/office/admin/workspaces` 的可选 `workspaceType` 创建，缺省为 `DEALER`。通过 `PATCH /api/v1/office/admin/workspaces/{workspaceId}/type` 提交 `{ workspaceType }` 更新已有工作区并留审计。类型用于工作区和主号展示及开户默认来源，项目访问继续按工作区和项目角色校验。见 [TENANT-001](tasks/TENANT-001-workspace-roles.md#2026-11-19-伟豪账号与工作区)。
 解析算法继续复用已有 CAD 服务。外部响应通过显式适配层进入统一业务模型。
 
 ## 2. 核心数据关系（目标模型）
@@ -144,8 +146,8 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 方案快照包含空间、排版、商品/变体、价格与选择版本；效果图依赖该快照。
 回包带输入版本，收到结果时比较当前版本；过期结果进入历史，不覆盖当前编辑状态。
 
-Office 将确认后的新商品通过 `POST /api/v1/products/factory-entry` 写入 RSDP 主库，由主库将商品与默认规格创建为 `active`。同外部编码更新已有商品时沿用主档的上下架状态。商品下架后禁止新推荐，但保留旧方案选择的快照和提示；确认方案时再次核验商品可用性。
-当前商品导入已把确认后的 `widthMm/depthMm/heightMm` 写入 `rspu_variant.dimensions`（JSONB，`unit=mm`）；尺寸原文保留在 `size_text`。旧 `widthCm/depthCm` 数据仍可读取。画布现有接口显示厘米，读取毫米时向上取整厘米，避免缩小占地；这只是旧候选适配，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
+公有库商品通过 RSDP 工厂管理员个人账号建档，单条录入与 Excel 新建均由 RSDP 保存。Office 通过目录读取角色获得授权商品，保留旧录入页面跳转和历史批次查询。旧商品下架后退出新推荐，现有方案保留选择快照，方案确认时再校验可用性。
+Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `widthCm/depthCm` 数据继续兼容。画布旧候选的厘米字段由毫米向上取整，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
 本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订以及商品和变体的在售状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
 
 品类匹配从已保存家具图例或旧实例名称推导需求。网关保留主库 `categoryPath` 及规格名，目录同步时为分类和名称都模糊的商品补读详情中的 `sixDimTags`。尺寸适配后按品类证据和宽深贴合度计算 `relevanceScore`，`matchReason` 返回依据，旧 `fitRatio` 和 `tier` 继续表示尺寸。推荐和应用共用匹配逻辑，无品类相关性或有明显冲突的商品不会进入候选。
@@ -179,6 +181,10 @@ Office 将确认后的新商品通过 `POST /api/v1/products/factory-entry` 写�
 2026-10-30 家具布置区（GEOM-016）：ZoneObject 增加可选 `layoutRegions` 数组（`LayoutRegion`：regionId/spaceId/name/polygonMm/isPrimary/visible/enabled/wallOffsetsMm），随画布 JSON 持久化，旧画布无该字段一律按空数组、严禁自动创建。polygonMm 为世界毫米 Y 向上（与障碍 `geometry.outer` 同一约定），画布换算用 `layoutRegionRing`/`layoutRegionWorldRing`。有效可排区 `allowedPlacementAreas` 三分支：无启用区返回 null（旧全房间行为）、启用区并集 ∩ 空间净轮廓为空返回 []（当前不可排）、否则返回多块/带孔多边形（polygon-clipping 并集，绝不退化为包围盒）；visible 绝不参与计算，硬禁放区/门洞净空/通道仍由既有机制另行扣除。同空间最多一个 isPrimary（`sanitizeLayoutRegions` 收敛），删除主区时首个剩余区自动升主；绘制/移动/顶点提交经 `saveZoneLayoutRegion` 完整校验（自交/退化/越界拒绝落库），列表操作经 `updateZoneLayoutRegions`（启用集合或多边形签名实际变化才使本空间排版确认失效，不改空间复核确认——reviewConfirmation 白名单不含 layoutRegions）；空间几何变化造成的越界/畸形区域保留并由 UI 标记「需人工修复」，不静默裁切。每条边长度与距墙为只读量测（外法线射线），不用于几何内缩。服务端 `OfficeLayoutValidationPolicy` 对已确认家具核验同一语义（Area 并集∩房间，多边形非包围盒；畸形/归属不符区域跳过不拒存）。手动放置、自动排版 `planLayoutProposal` 与组合布局 `planMixedLayout` 共用 `allowedPlacementAreas`/`ringWithinPlacementAreas`。无数据库迁移（objects_json jsonb 透传）。见 [GEOM-016](tasks/GEOM-016-layout-boundary.md)。
 
 2026-10-30 设施/点位标注（GEOM-018）：ZoneObject 增加可选 `facilities` 数组（`SpatialFacility`：facilityId/kind/spaceId/shape/pointsMm/sizeMm/clearanceMm/visible 等），与障碍分开建模——点位型（POWER_OUTLET/DATA_OUTLET）、线型（SKIRTING）、占用型（FIRE_FACILITY/ELECTRICAL_BOX），不混入矩形障碍模型。默认语义全部为标注与提示：不扣净面积、不进入 `zoneLayoutExclusions`、不参与排版硬阻断；占用型操作净空 `clearanceMm` 必须来自人工标注（净空环为占地包围盒外扩，诚实标注），缺省只提示；需要实际禁放时另建 NO_PLACEMENT 障碍。pointsMm 为世界毫米 Y 向上；`saveZoneFacility` 校验通过才落库且不失效排版确认；`facilityLayoutHints` 提供提示级排版提醒（踢脚线只承担全局提醒）。服务端无改动（jsonb 透传、不参与确认核验），无数据库迁移。见 [GEOM-018](tasks/GEOM-018-spatial-facilities.md)。
+
+### 5.2 项目报价存储（QUOTE-001）
+
+报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
 
 ## 6. 几何约束与版本失效
 

@@ -1,5 +1,4 @@
 import type { ProductImportRecord, ProductImportResult } from '~/types/imported-products'
-import { uid } from '~/utils/helpers'
 
 const storageKey = `rsdp-product-import-history:${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'}`
 
@@ -42,17 +41,6 @@ export function useProductImportHistory() {
     }
   }
 
-  function addRecord(record: Omit<ProductImportRecord, 'id' | 'createdAt'>) {
-    init()
-    records.value = [{ ...record, id: uid('import'), createdAt: new Date().toISOString() }, ...records.value].slice(0, 30)
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(records.value))
-      storageAvailable.value = true
-    } catch {
-      storageAvailable.value = false
-    }
-  }
-
   onMounted(init)
-  return { records, storageAvailable, addRecord }
+  return { records, storageAvailable }
 }

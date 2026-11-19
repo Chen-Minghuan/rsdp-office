@@ -21,6 +21,7 @@ public class SharedCatalogService {
 
     private final CurrentUserService currentUserService;
     private final OfficeWorkspaceMapper workspaceMapper;
+    private final OfficeCatalogAccess catalogAccess;
 
     /**
      * 解析当前用户请求主项目产品列表的 viewMode。
@@ -28,14 +29,17 @@ public class SharedCatalogService {
      * <p>认证关闭（开发模式）、系统管理员、无工作区的平台内部账号默认全库（full）；
      * 工作区账号（主号与成员）一律跟随工作区级开关。</p>
      *
-     * @return "full"=全库只读 / "own"=仅本厂已报价产品
+     * @return "full" 共享目录，"managed" 本厂归属，"none" 无目录权限
      */
     public String resolveViewMode() {
         if (!currentUserService.authEnabled()) {
             return "full";
         }
         OfficeUser user = currentUserService.currentUser();
-        return canViewSharedCatalog(user) ? "full" : "own";
+        if (canViewSharedCatalog(user)) {
+            return "full";
+        }
+        return catalogAccess.capabilities().managed() ? "managed" : "none";
     }
 
     /** 当前用户是否可见公共库（仅工作区级开关；成员无个人开关）。 */

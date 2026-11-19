@@ -92,6 +92,19 @@ public class OfficeModuleRecommendationService {
         var result = recommendations(context, request);
         var match = result.getCandidates().stream().filter(candidate -> Objects.equals(candidate.getProduct().getId(), request.getProductId())).findFirst()
             .orElseThrow(() -> new BusinessException("商品已不可用，或品类、尺寸与当前模块不匹配，请重新选择"));
+        var current = office.currentProductVariant(match.getProduct().getRspuId(), match.getProduct().getId());
+        if (current == null) {
+            throw new BusinessException("商品已不可用，请刷新推荐并重新选择");
+        }
+        var currentMatch = OfficeProductMatching.match(current, result.getWidthMm(), result.getDepthMm(), request.isAllowRotation());
+        var relevanceTarget = OfficeFurnitureRelevance.target(context.module());
+        var relevance = relevanceTarget == null ? null : OfficeFurnitureRelevance.match(relevanceTarget, current);
+        if (currentMatch == null || relevance == null) {
+            throw new BusinessException("商品规格或品类已变化，请刷新推荐并重新选择");
+        }
+        currentMatch.setMatchReason(relevance.reason());
+        currentMatch.setRelevanceScore(BigDecimal.valueOf(relevance.points()).add(currentMatch.getFitRatio().multiply(BigDecimal.valueOf(15))));
+        match = currentMatch;
         if (match.getProduct().getPrice() == null || match.getProduct().getPrice().signum() <= 0) throw new BusinessException("商品尚未报价，请补齐报价后加入方案");
         List<JsonNode> targets = request.isApplyToSameModules() ? context.sameModules() : List.of(context.module());
         List<CartItemDto> lines = new ArrayList<>();

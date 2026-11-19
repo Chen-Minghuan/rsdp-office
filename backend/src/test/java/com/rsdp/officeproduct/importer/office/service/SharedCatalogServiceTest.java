@@ -16,7 +16,7 @@ class SharedCatalogServiceTest {
 
     private final CurrentUserService currentUserService = mock(CurrentUserService.class);
     private final OfficeWorkspaceMapper workspaceMapper = mock(OfficeWorkspaceMapper.class);
-    private final SharedCatalogService service = new SharedCatalogService(currentUserService, workspaceMapper);
+    private final SharedCatalogService service = new SharedCatalogService(currentUserService, workspaceMapper, org.mockito.Mockito.mock(OfficeCatalogAccess.class));
 
     @Test
     void authDisabledDefaultsToFull() {

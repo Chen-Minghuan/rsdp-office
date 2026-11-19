@@ -55,6 +55,7 @@ import { authEnabled, useAuth } from '~/composables/useAuth'
 const STORAGE_KEY = 'rsdp-office-v01'
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
 const LEGACY_WORKSPACE_ID = 'OFFICE-PROJECT-001'
+const CANVAS_HISTORY_LIMIT = 20
 
 function legacyStorageKey(workspaceId: string) {
   return workspaceId === LEGACY_WORKSPACE_ID ? STORAGE_KEY : `${STORAGE_KEY}:${workspaceId}`
@@ -84,6 +85,7 @@ interface OfficeState {
   cart: CartItem[]
   activeZoneId: string | null
   undoStack: string[]
+  redoStack: string[]
   zoom: number
   panX: number
   panY: number
@@ -106,6 +108,14 @@ interface OfficeState {
   syncError: string | null
 }
 
+type CanvasHistorySnapshot = Pick<OfficeState, 'objects' | 'blank' | 'floorPlan' | 'spaceTemplate' | 'cart' | 'submitted'>
+
+function pushCanvasHistory(stack: string[], state: CanvasHistorySnapshot) {
+  const { objects, blank, floorPlan, spaceTemplate, cart, submitted } = state
+  stack.push(JSON.stringify({ objects, blank, floorPlan, spaceTemplate, cart, submitted }))
+  if (stack.length > CANVAS_HISTORY_LIMIT) stack.shift()
+}
+
 function defaultState(): OfficeState {
   return {
     workspaceId: '',
@@ -120,6 +130,7 @@ function defaultState(): OfficeState {
     cart: [],
     activeZoneId: null,
     undoStack: [],
+    redoStack: [],
     zoom: 0.62,
     panX: 0,
     panY: 0,
@@ -178,7 +189,7 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
     } else if (workspaceId === LEGACY_WORKSPACE_ID && !authEnabled) {
       localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
-    const { undoStack, ...rest } = parsed
+    const { undoStack, redoStack, ...rest } = parsed
     return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null }
   } catch {
     return {}
@@ -346,7 +357,7 @@ export const useOfficeStore = defineStore('office', {
 
     saveLocal() {
       if (typeof window === 'undefined' || !this.workspaceId) return
-      const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, reviewFocusZoneId, ...persisted } = this.$state
+      const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, reviewFocusZoneId, redoStack, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(storageKey(this.workspaceId), JSON.stringify(payload))
     },
@@ -362,6 +373,7 @@ export const useOfficeStore = defineStore('office', {
       const api = useOfficeApi()
       const workspaceId = this.workspaceId
       const storageScope = useAuth().storageScope.value
+      const revision = this.canvasRevision
       if (!this.apiReady) {
         this.syncState = 'saved'
         return
@@ -372,11 +384,11 @@ export const useOfficeStore = defineStore('office', {
           files: this.files,
           mode: this.canvasMode,
           designZoneId: this.designZoneId,
-          revision: this.canvasRevision,
+          revision,
           blank: this.blank,
         }, workspaceId)
         if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
-        if (saved?.objects) this.mergeServerReviewConfirmations(saved.objects)
+        if (saved?.objects && this.canvasRevision === revision) this.mergeServerReviewConfirmations(saved.objects)
         this.syncState = 'saved'
         this.syncError = null
       } catch (e) {
@@ -388,8 +400,8 @@ export const useOfficeStore = defineStore('office', {
     }, 800),
 
     snapshotUndo() {
-      this.undoStack.push(JSON.stringify({ objects: this.objects, blank: this.blank, floorPlan: this.floorPlan, spaceTemplate: this.spaceTemplate, cart: this.cart, submitted: this.submitted }))
-      if (this.undoStack.length > 20) this.undoStack.shift()
+      pushCanvasHistory(this.undoStack, this)
+      this.redoStack = []
     },
 
     objectUpdate(fn: () => void) {
@@ -414,6 +426,7 @@ export const useOfficeStore = defineStore('office', {
         cart: [],
         activeZoneId: null,
         undoStack: [],
+        redoStack: [],
       })
       this.saveLocal()
     },
@@ -818,14 +831,28 @@ export const useOfficeStore = defineStore('office', {
     },
 
     undo() {
-      if (!this.undoStack.length) return
-      const prev = JSON.parse(this.undoStack.pop()!)
-      this.objects = prev.objects
-      this.blank = prev.blank
-      if ('floorPlan' in prev) this.floorPlan = prev.floorPlan
-      if ('spaceTemplate' in prev) this.spaceTemplate = prev.spaceTemplate
-      if ('cart' in prev) this.cart = prev.cart
-      if ('submitted' in prev) this.submitted = prev.submitted
+      const snapshot = this.undoStack.pop()
+      if (snapshot === undefined) return
+      pushCanvasHistory(this.redoStack, this)
+      this.restoreCanvasHistory(snapshot)
+    },
+
+    redo() {
+      const snapshot = this.redoStack.pop()
+      if (snapshot === undefined) return
+      pushCanvasHistory(this.undoStack, this)
+      this.restoreCanvasHistory(snapshot)
+    },
+
+    restoreCanvasHistory(snapshot: string) {
+      const state = JSON.parse(snapshot) as CanvasHistorySnapshot
+      this.objects = state.objects
+      this.blank = state.blank
+      if ('floorPlan' in state) this.floorPlan = state.floorPlan
+      if ('spaceTemplate' in state) this.spaceTemplate = state.spaceTemplate
+      if ('cart' in state) this.cart = state.cart
+      if ('submitted' in state) this.submitted = state.submitted
+      if (this.activeZoneId && !this.zones.some(zone => zone.id === this.activeZoneId)) this.activeZoneId = this.zones[0]?.id || null
       if (!this.canEnterLayout) { this.canvasMode = 'overview'; this.designZoneId = null }
       this.canvasRevision++
       this.schedulePersist()
@@ -918,7 +945,10 @@ export const useOfficeStore = defineStore('office', {
           confirmedAt: result.confirmedAt,
         }
       }
-      if (result.canvasRevision > this.canvasRevision) this.canvasRevision = result.canvasRevision
+      if (result.canvasRevision > this.canvasRevision) {
+        this.canvasRevision = result.canvasRevision
+        this.redoStack = []
+      }
       this.saveLocal()
     },
 
@@ -950,7 +980,10 @@ export const useOfficeStore = defineStore('office', {
           }
         }
       }
-      if (result.canvasRevision > this.canvasRevision) this.canvasRevision = result.canvasRevision
+      if (result.canvasRevision > this.canvasRevision) {
+        this.canvasRevision = result.canvasRevision
+        this.redoStack = []
+      }
       this.saveLocal()
       return result
     },

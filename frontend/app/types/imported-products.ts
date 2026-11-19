@@ -1,4 +1,11 @@
+export interface CatalogCapabilities {
+  managed: boolean
+}
+
 export interface ImportedProduct {
+  sourceChannel?: string | null
+  ownerFactoryCode?: string | null
+  sourceFactoryName?: string | null
   rspuId: string
   rspuCode: string | null
   externalCode: string | null
@@ -52,75 +59,6 @@ export interface ProductImportRecord {
   error: string | null
 }
 
-export interface ProductImportColumn {
-  key: string
-  label: string
-  type: 'text' | 'number'
-}
-
-export interface ProductImportPreviewRow {
-  rowIndex: number
-  sourceSheetIndex?: number
-  sourceRowIndex?: number
-  sourceSheetName?: string
-  sourceSizeText?: string
-  sourceVariantCount?: number
-  sourceVariantNote?: string
-  embeddedImageCount?: number
-  primaryEmbeddedImageIndex?: number | null
-  selectedEmbeddedImageIndexes?: number[] | null
-  imagePreviews?: string[]
-  imageWarnings?: string[]
-  reviewWarnings?: string[]
-  fields: Record<string, string>
-  skipped: boolean
-  groupKey: string
-  action: string
-  errors: string[]
-}
-
-export interface ProductImportPreview {
-  columns: ProductImportColumn[]
-  rows: ProductImportPreviewRow[]
-  productCount: number
-  invalidRows: number
-  skippedRows: number
-  embeddedImageCount?: number
-  rowsWithImages?: number
-  cleansingReport: DataCleansingReport
-}
-
-export interface DictItem {
-  dictCode: string
-  dictName: string
-  dictNameEn?: string
-}
-
-export interface ManualProductEntryRequest {
-  productName?: string
-  colorPrimaryName?: string
-  description?: string
-  retailPrice?: number | null
-  externalCode?: string
-
-  variantDisplayName?: string
-  sizeCode?: string
-  sizeText?: string
-  widthMm?: number | null
-  depthMm?: number | null
-  heightMm?: number | null
-  colorCode?: string
-  colorText?: string
-  materialCode?: string
-  materialText?: string
-
-  factoryPrice?: number | null
-  moq?: number | null
-  leadTimeDays?: number | null
-
-  imageUrls?: string[]
-}
-
 export interface ProductVariant {
   variantId: string
   displayName: string
@@ -135,9 +73,6 @@ export interface ProductVariant {
   materialCode: string | null
   materialText: string | null
   status: string
-  factoryPrice: number | null
-  moq: number | null
-  leadTimeDays: number | null
   createdAt: string
   updatedAt: string
 }
@@ -156,6 +91,9 @@ export interface ProductImage {
 }
 
 export interface ProductDetail {
+  sourceChannel?: string | null
+  ownerFactoryCode?: string | null
+  sourceFactoryName?: string | null
   rspuId: string
   rspuCode: string | null
   externalCode: string | null

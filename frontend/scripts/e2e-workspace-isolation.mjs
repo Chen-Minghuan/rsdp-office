@@ -187,7 +187,7 @@ try {
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:USER-A:OFLR-A')).files[0].name), 'a.png')
 
   await logoutAndLogin('admin')
-  await page.getByText('系统管理员用于管理账号和工作区。请使用经销商主号或工作区成员账号进入项目设计。', { exact: true }).waitFor()
+  await page.getByText('系统管理员用于管理账号和工作区。请使用工作区主号或成员账号进入项目设计。', { exact: true }).waitFor()
   await page.getByTestId('topbar-role').filter({ hasText: /^系统管理员$/ }).waitFor()
   assert.equal(await page.getByRole('button', { name: '新建项目', exact: true }).count(), 0)
   assert.equal(await page.getByText('默认办公项目', { exact: true }).count(), 0)

@@ -2,6 +2,8 @@
 
 流水线入口为根目录 [Jenkinsfile](../Jenkinsfile)，生产 Compose 为 [compose.deploy.yaml](../compose.deploy.yaml)。本地开发继续使用原有 Compose；两者项目名和数据存储独立。
 
+独立测试站使用 [Jenkinsfile.test](../Jenkinsfile.test) 与 `test` 分支，每分钟检查新提交，测试和构建通过后自动部署至 `https://office-test.rooom.vip/`，无需勾选发布参数。测试站的数据库、商品源及目录约定见 [DEPLOY-005](tasks/DEPLOY-005-test-environment.md)。下述主分支 Jenkins 任务仍按手动发布参数执行。
+
 ## 服务器约定
 
 Jenkins 构建节点与 Docker、部署目录位于同一台 Linux 服务器。需要 Bash、Git、Docker Compose、Python 3、curl、gzip、flock，以及 Jenkins 的 Pipeline、Git 和 JUnit 插件。节点账号需要现有的 Docker 使用权限。

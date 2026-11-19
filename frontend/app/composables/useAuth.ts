@@ -1,3 +1,5 @@
+import type { WorkspaceType } from '~/utils/workspaceType'
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082').replace(/\/$/, '')
 
 export const authEnabled = !import.meta.dev || import.meta.env.VITE_AUTH_ENABLED !== '0'
@@ -13,6 +15,7 @@ export interface AuthUser {
   username: string
   displayName: string
   role: string
+  workspaceType?: WorkspaceType | null
 }
 
 export interface LoginOptions {

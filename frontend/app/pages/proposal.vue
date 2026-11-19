@@ -50,6 +50,8 @@ const selectedDetail = ref<Detail | null>(null)
 // 效果图详情页签：3D 交互 / AI 概念图 / 2D 布局（RENDER-004）
 const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
 const confirmed = ref(false)
+const checkingCatalog = ref(false)
+const catalogApi = useOfficeApi()
 const notice = ref('')
 const collapsedGroups = ref<Set<string>>(new Set())
 const activeSpaceIds = ref<Record<string, string>>({})
@@ -300,7 +302,20 @@ function confirmGroup(group: ProposalGroup) {
   setNotice(failed.length ? `${failed.length} 个空间暂不能确认，请先处理校验问题` : `${group.name} 已全部确认`)
 }
 
-function confirmProposal() { confirmed.value = true; setNotice('方案确认状态已更新（当前为界面预览）') }
+async function confirmProposal() {
+  if (checkingCatalog.value) return
+  checkingCatalog.value = true
+  confirmed.value = false
+  try {
+    if (spaces.value.some(space => !space.preview)) await catalogApi.checkProposalCatalog()
+    confirmed.value = true
+    setNotice('商品目录已核验，方案确认状态已更新（当前为界面预览）')
+  } catch (e) {
+    setNotice(e instanceof Error ? e.message : '商品目录核验失败，请稍后重试')
+  } finally {
+    checkingCatalog.value = false
+  }
+}
 
 function detailTitle(detail: Detail | null) {
   if (!detail) return ''
@@ -378,7 +393,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </main>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项查看空间分组和具体空间。' }}</p></div></div><button type="button" class="proposal-primary full" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink to="/canvas?mode=design" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink to="/canvas" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />同一张户型图的空间会自动归入同一楼层，正式报价仍需锁定真实 Variant、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项查看空间分组和具体空间。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink to="/canvas?mode=design" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink to="/canvas" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />同一张户型图的空间会自动归入同一楼层，正式报价仍需锁定真实 Variant、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>

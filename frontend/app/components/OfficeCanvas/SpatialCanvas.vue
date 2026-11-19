@@ -6,6 +6,7 @@ import { withApiBase } from '~/utils/apiBase'
 import { polygonCentroid, polygonBounds } from '~/utils/spatial/geometry'
 import type { ContourOperation, ResizeHandle } from '~/utils/spatial/contourTransform'
 import { obstacleLabel, windowLinePoints } from '~/utils/spatial/obstacles'
+import { useCanvasSpacePan } from '~/composables/useCanvasSpacePan'
 
 const props = withDefaults(defineProps<{
   scene: SpatialSceneSnapshot | null
@@ -42,11 +43,19 @@ const emit = defineEmits<{
   (e: 'pointerMove', p: { x: number; y: number }): void
   (e: 'pointerUp', p: { x: number; y: number }): void
   (e: 'updateCamera', camera: CameraTransform): void
+  (e: 'panChange', active: boolean): void
   (e: 'viewport', size: { width: number; height: number }): void
 }>()
 
 const svgRef = ref<SVGSVGElement | null>(null)
-const drag = ref<{ pointerId: number; screen: { x: number; y: number }; camera: CameraTransform; pan: boolean } | null>(null)
+const { spacePanHeld, onCanvasEnter, onCanvasLeave, holdSpace, takeSpacePan, clearSpacePan } = useCanvasSpacePan()
+const drag = ref<{
+  pointerId: number
+  screen: { x: number; y: number }
+  camera: CameraTransform
+  pan: boolean
+  temporaryPan: boolean
+} | null>(null)
 let observer: ResizeObserver | null = null
 const coordinateSystem = computed(() => props.scene?.workingCoordinateSystem ?? 'SOURCE_PAGE')
 const selected = computed(() => props.scene?.spaces.find(space => space.spaceId === props.selectedSpaceId))
@@ -148,13 +157,20 @@ function screenPoint(event: PointerEvent | WheelEvent) {
   const rect = svgRef.value!.getBoundingClientRect()
   return { x: event.clientX - rect.left, y: event.clientY - rect.top }
 }
+function onSpaceDown(event: KeyboardEvent) {
+  holdSpace(event, props.tool === 'select' && !props.interactionActive && !drag.value)
+}
 function onPointerDown(event: PointerEvent) {
-  if (!svgRef.value || drag.value || ![0, 1].includes(event.button)) return
+  if (!svgRef.value || drag.value || (event.button !== 0 && event.button !== 1)) return
+  const temporaryPan = props.tool === 'select' && takeSpacePan(event)
+  if (temporaryPan) event.stopPropagation()
   event.preventDefault()
+  if (event.pointerType === 'mouse') svgRef.value.focus({ preventScroll: true })
   svgRef.value.setPointerCapture(event.pointerId)
   const screen = screenPoint(event)
-  const isPan = props.tool === 'pan' || event.button === 1
-  drag.value = { pointerId: event.pointerId, screen, camera: { ...props.camera }, pan: isPan }
+  const isPan = props.tool === 'pan' || event.button === 1 || temporaryPan
+  drag.value = { pointerId: event.pointerId, screen, camera: { ...props.camera }, pan: isPan, temporaryPan }
+  if (temporaryPan) emit('panChange', true)
   if (isPan) return
   const element = event.target as Element
   const spaceId = element.closest('[data-space-id]')?.getAttribute('data-space-id')
@@ -181,6 +197,10 @@ function onPointerDown(event: PointerEvent) {
 function onPointerMove(event: PointerEvent) {
   if (!drag.value || !svgRef.value || drag.value.pointerId !== event.pointerId) return
   const screen = screenPoint(event), start = drag.value
+  if (start.temporaryPan) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
   if (start.pan) {
     emit('updateCamera', { ...start.camera, panX: start.camera.panX + screen.x - start.screen.x, panY: start.camera.panY + screen.y - start.screen.y })
     return
@@ -189,16 +209,35 @@ function onPointerMove(event: PointerEvent) {
 }
 function onPointerUp(event: PointerEvent) {
   if (!svgRef.value || !drag.value || drag.value.pointerId !== event.pointerId) return
-  if (!drag.value.pan) emit('pointerMove', svgToPoint(screenPoint(event)))
-  emit('pointerUp', svgToPoint(screenPoint(event)))
+  const start = drag.value
+  if (start.temporaryPan) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  if (!start.pan) {
+    const point = svgToPoint(screenPoint(event))
+    emit('pointerMove', point)
+    emit('pointerUp', point)
+  }
   drag.value = null
+  if (start.temporaryPan) emit('panChange', false)
   if (svgRef.value.hasPointerCapture(event.pointerId)) svgRef.value.releasePointerCapture(event.pointerId)
 }
-function onPointerCancel(event: PointerEvent) {
-  if (drag.value?.pointerId !== event.pointerId) return
+function cancelDrag(pointerId?: number) {
+  if (!drag.value || (pointerId !== undefined && drag.value.pointerId !== pointerId)) return
+  const start = drag.value
   drag.value = null
+  if (start.temporaryPan) emit('panChange', false)
   emit('pointerCancel')
-  if (svgRef.value?.hasPointerCapture(event.pointerId)) svgRef.value.releasePointerCapture(event.pointerId)
+  if (svgRef.value?.hasPointerCapture(start.pointerId)) svgRef.value.releasePointerCapture(start.pointerId)
+}
+function onPointerCancel(event: PointerEvent) {
+  if (drag.value?.temporaryPan && drag.value.pointerId === event.pointerId) event.stopPropagation()
+  cancelDrag(event.pointerId)
+}
+function onWindowBlur() {
+  clearSpacePan()
+  cancelDrag()
 }
 function onWheel(event: WheelEvent) {
   if (props.interactionActive || drag.value) return
@@ -218,7 +257,8 @@ function labelVisible(space: SpatialSpace) {
 }
 /** 选中空间的名称标签可点击：打开名称/用途/尺寸快捷编辑。 */
 function labelClickable(space: SpatialSpace) {
-  return space.spaceId === props.selectedSpaceId && props.tool === 'select' && !props.pointerInSourceCoordinates && !props.interactionActive
+  return space.spaceId === props.selectedSpaceId && props.tool === 'select' && !props.pointerInSourceCoordinates
+    && !props.interactionActive && !spacePanHeld.value
 }
 onMounted(() => {
   observer = new ResizeObserver(entries => {
@@ -226,14 +266,21 @@ onMounted(() => {
     if (rect) emit('viewport', { width: rect.width, height: rect.height })
   })
   if (svgRef.value) observer.observe(svgRef.value)
+  window.addEventListener('blur', onWindowBlur)
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  window.removeEventListener('blur', onWindowBlur)
+})
 </script>
 
 <template>
-  <svg ref="svgRef" role="img" aria-label="空间核对画布" class="absolute inset-0 h-full w-full touch-none select-none"
-    :class="tool === 'pan' ? 'cursor-grab' : pointerInSourceCoordinates ? 'cursor-crosshair' : 'cursor-default'"
-    @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerCancel" @wheel.prevent="onWheel">
+  <svg ref="svgRef" role="img" aria-label="空间核对画布" tabindex="0" class="absolute inset-0 h-full w-full touch-none select-none"
+    :class="drag?.pan ? 'cursor-grabbing' : (tool === 'pan' || spacePanHeld) ? 'cursor-grab' : pointerInSourceCoordinates ? 'cursor-crosshair' : 'cursor-default'"
+    @pointerenter="onCanvasEnter" @pointerleave="onCanvasLeave" @blur="clearSpacePan"
+    @keydown.space="onSpaceDown" @keyup.space="clearSpacePan"
+    @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerCancel" @lostpointercapture="onPointerCancel"
+    @wheel.prevent="onWheel">
     <g v-if="scene">
       <g v-if="showUnderlay && scene.underlays[0]" :transform="underlayTransform()" :opacity="underlayOpacity" data-layer="underlay">
         <image v-if="fallbackImageUrl || scene.underlays[0].assetId"
@@ -248,9 +295,9 @@ onBeforeUnmount(() => observer?.disconnect())
             :stroke="selectedSpaceId === space.spaceId ? '#4b8bc6' : '#cc9b4d'"
             :stroke-width="selectedSpaceId === space.spaceId ? 2 : 1.25"
             :stroke-dasharray="selectedSpaceId === space.spaceId ? undefined : '5 4'"
-            :class="tool === 'select' ? 'cursor-move hover:fill-opacity-20' : 'cursor-pointer hover:fill-opacity-20'" />
+            :class="drag?.pan || tool === 'pan' || spacePanHeld ? undefined : tool === 'select' ? 'cursor-move hover:fill-opacity-20' : 'cursor-pointer hover:fill-opacity-20'" />
           <g v-if="labelPosition(space) && labelVisible(space)" :class="labelClickable(space) ? 'space-label-editable' : 'pointer-events-none'" :transform="'translate(' + labelPosition(space)!.x + ',' + labelPosition(space)!.y + ')'"
-            @pointerdown="labelClickable(space) && $event.stopPropagation()" @click.stop="labelClickable(space) && emit('spaceLabel', space.spaceId)">
+            @pointerdown="labelClickable(space) && $event.button === 0 && $event.stopPropagation()" @click.stop="labelClickable(space) && emit('spaceLabel', space.spaceId)">
             <title v-if="labelClickable(space)">点击修改名称与属性</title>
             <rect x="-52" y="-15" width="104" height="40" rx="4" fill="#fff" fill-opacity="0.55" />
             <text text-anchor="middle" fill="#424e47" font-size="12" font-weight="600">{{ space.name }}</text>

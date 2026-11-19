@@ -4,11 +4,12 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 经销商工作区视图；不含任何凭据字段。 */
+/** 办公工作区视图；不含任何凭据字段。 */
 @Data
 public class WorkspaceDto {
     private String workspaceId;
     private String name;
+    private String workspaceType;
     private String ownerUserId;
     private String ownerUsername;
     private String ownerDisplayName;

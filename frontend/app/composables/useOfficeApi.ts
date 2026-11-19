@@ -1,7 +1,8 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
-import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
-import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
+import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
+import type { CatalogCapabilities, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { WorkspaceType } from '~/utils/workspaceType'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -44,6 +45,7 @@ interface AdminUserItem {
 interface WorkspaceItem {
   workspaceId: string
   name: string
+  workspaceType: WorkspaceType
   ownerUserId: string
   ownerUsername: string
   ownerDisplayName: string
@@ -95,12 +97,12 @@ function apiUrl(path: string) {
   return `${API_BASE}${path}`
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
   const res = await $fetch<ApiResponse<T>>(apiUrl(path), {
     method: method as any,
     body: body as any,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   })
   if (res.code !== 200) {
     throw new Error(res.message || '请求失败')
@@ -245,6 +247,10 @@ export function useOfficeApi() {
     return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-products`, requestBody)
   }
 
+  async function checkProposalCatalog(): Promise<void> {
+    return await request<void>('POST', '/api/v1/office/projects/' + encodeURIComponent(requireProjectId()) + '/proposal/catalog-check')
+  }
+
   async function exportProposal(): Promise<Blob> {
     const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${requireProjectId()}/proposal/export`), {
       method: 'POST',
@@ -257,29 +263,48 @@ export function useOfficeApi() {
     await request<void>('POST', `/api/v1/office/projects/${requireProjectId()}/reset`, {})
   }
 
-  async function downloadImportTemplate(): Promise<Blob> {
-    return await $fetch<Blob>(apiUrl('/api/v1/products/import-template'), {
-      method: 'GET',
-      credentials: 'include',
-    })
+  /** 项目报价试算：仅经销商主号，只读预览，服务端强制校验身份。 */
+  async function previewProjectQuotation(projectId: string, mode: QuotationPricingMode, value: number): Promise<ProjectQuotationPreview> {
+    const query = new URLSearchParams({ mode, value: String(value) })
+    return await request<ProjectQuotationPreview>('GET', `/api/v1/office/projects/${projectId}/quotation/preview?${query.toString()}`)
   }
 
-  async function importProducts(file: File, updateIfExists = false): Promise<ProductImportResult> {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await $fetch<ApiResponse<ProductImportResult>>(apiUrl(`/api/v1/products/import?updateIfExists=${updateIfExists}`), {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
+  /** 确认报价：落库持久化，服务端按提交明细重算金额。 */
+  async function confirmProjectQuotation(projectId: string, payload: ConfirmQuotationRequest): Promise<ProjectQuotationRecord> {
+    return await request<ProjectQuotationRecord>('POST', `/api/v1/office/projects/${projectId}/quotation/confirm`, payload)
+  }
+
+  /** 导出当前编辑稿；业务错误可能以 JSON 返回，不能误保存为 Excel。 */
+  async function exportProjectQuotation(projectId: string, payload: ConfirmQuotationRequest): Promise<Blob> {
+    const blob = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${projectId}/quotation/export`), {
+      method: 'POST', body: payload, credentials: 'include', responseType: 'blob',
     })
-    if (res.code !== 200) {
-      throw new Error(res.message || '导入失败')
+    if (blob.type.includes('application/json')) {
+      const result = JSON.parse(await blob.text()) as ApiResponse<unknown>
+      throw new Error(result.message || '报价导出失败')
     }
-    return res.data
+    return blob
   }
 
-  async function loadImportedProducts(): Promise<ImportedProduct[]> {
-    return await request<ImportedProduct[]>('GET', '/api/v1/products')
+  /** 最近一次确认的报价单；没有确认记录时返回 null。 */
+  async function latestProjectQuotation(projectId: string): Promise<ProjectQuotationRecord | null> {
+    return await request<ProjectQuotationRecord | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest`)
+  }
+
+  async function catalogImportHistory<T>(): Promise<T> {
+    return await request<T>('GET', '/api/v1/products/import-batches')
+  }
+
+  async function catalogHistoricalStatus<T>(batchId: string): Promise<T> {
+    return await request<T>('GET', `/api/v1/products/import-batches/${encodeURIComponent(batchId)}/status`)
+  }
+
+  async function loadImportedProducts(managed = false): Promise<ImportedProduct[]> {
+    return await request<ImportedProduct[]>('GET', managed ? '/api/v1/products?managed=true' : '/api/v1/products')
+  }
+
+  async function loadCatalogCapabilities(): Promise<CatalogCapabilities> {
+    return await request('GET', '/api/v1/products/capabilities')
   }
 
 
@@ -302,53 +327,6 @@ export function useOfficeApi() {
     return res.data
   }
 
-  async function previewImport(file: File): Promise<ProductImportPreview> {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await $fetch<ApiResponse<ProductImportPreview>>(apiUrl('/api/v1/products/import-preview'), {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
-    })
-    if (res.code !== 200) {
-      throw new Error(res.message || '预览失败')
-    }
-    return res.data
-  }
-
-  async function validateImportPreview(rows: ProductImportPreviewRow[], updateIfExists = false): Promise<ProductImportPreview> {
-    const requestRows = rows.map(({ imagePreviews: _imagePreviews, ...row }) => row)
-    const res = await $fetch<ApiResponse<ProductImportPreview>>(apiUrl('/api/v1/products/import-preview/validate'), {
-      method: 'POST',
-      body: { rows: requestRows, updateIfExists },
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    if (res.code !== 200) {
-      throw new Error(res.message || '校验失败')
-    }
-    return res.data
-  }
-
-  async function confirmImport(rows: ProductImportPreviewRow[], updateIfExists = false, file?: File): Promise<ProductImportResult> {
-    const requestRows = rows.map(({ imagePreviews: _imagePreviews, ...row }) => row)
-    const formData = new FormData()
-    if (file) {
-      formData.append('file', file)
-      formData.append('request', new Blob([JSON.stringify({ rows: requestRows, updateIfExists })], { type: 'application/json' }))
-    }
-    const res = await $fetch<ApiResponse<ProductImportResult>>(apiUrl('/api/v1/products/import-confirm'), {
-      method: 'POST',
-      body: file ? formData : { rows: requestRows, updateIfExists },
-      credentials: 'include',
-      ...(!file ? { headers: { 'Content-Type': 'application/json' } } : {}),
-    })
-    if (res.code !== 200) {
-      throw new Error(res.message || '导入确认失败')
-    }
-    return res.data
-  }
-
   async function uploadImages(files: File[]): Promise<string[]> {
     const formData = new FormData()
     files.forEach(f => formData.append('files', f))
@@ -361,10 +339,6 @@ export function useOfficeApi() {
       throw new Error(res.message || '图片上传失败')
     }
     return res.data
-  }
-
-  async function loadDicts(type: string): Promise<DictItem[]> {
-    return await request<DictItem[]>('GET', `/api/v1/dicts/${type}`)
   }
 
   /** 系统管理员用户管理；服务端逐接口校验 ADMIN，前端入口只是展示层。 */
@@ -389,13 +363,17 @@ export function useOfficeApi() {
     await request<void>('DELETE', `/api/v1/office/admin/users/${userId}`)
   }
 
-  /** 系统管理员的经销商工作区管理；服务端逐接口校验 ADMIN。 */
+  /** 系统管理员的工作区管理；服务端逐接口校验 ADMIN。 */
   async function listAdminWorkspaces(): Promise<WorkspaceItem[]> {
     return await request<WorkspaceItem[]>('GET', '/api/v1/office/admin/workspaces')
   }
 
-  async function createAdminWorkspace(payload: { name: string; ownerUsername: string; ownerDisplayName: string; ownerPassword: string }): Promise<WorkspaceItem> {
+  async function createAdminWorkspace(payload: { name: string; workspaceType: WorkspaceItem['workspaceType']; ownerUsername: string; ownerDisplayName: string; ownerPassword: string }): Promise<WorkspaceItem> {
     return await request<WorkspaceItem>('POST', '/api/v1/office/admin/workspaces', payload)
+  }
+
+  async function updateAdminWorkspaceType(workspaceId: string, workspaceType: WorkspaceItem['workspaceType']): Promise<WorkspaceItem> {
+    return await request<WorkspaceItem>('PATCH', `/api/v1/office/admin/workspaces/${encodeURIComponent(workspaceId)}/type`, { workspaceType })
   }
 
   /** 经销商主号的工作区账号管理；只能操作自己拥有的工作区。 */
@@ -421,42 +399,8 @@ export function useOfficeApi() {
     return await request<SharedCatalogStatus>('PUT', '/api/v1/office/workspace/shared-catalog', { enabled })
   }
 
-  async function createManualProduct(product: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
-    return await request<{ rspuId: string; message: string }>('POST', '/api/v1/products/manual', product)
-  }
-
   async function getProduct(rspuId: string): Promise<ProductDetail> {
     return await request<ProductDetail>('GET', `/api/v1/products/${rspuId}`)
-  }
-
-  async function updateProduct(rspuId: string, request: ManualProductEntryRequest): Promise<{ rspuId: string; message: string }> {
-    return await request<{ rspuId: string; message: string }>('PUT', `/api/v1/products/${rspuId}`, request)
-  }
-
-  async function deleteProduct(rspuId: string): Promise<void> {
-    await request<void>('DELETE', `/api/v1/products/${rspuId}`)
-  }
-
-  async function deleteProducts(rspuIds: string[]): Promise<number> {
-    return await request<number>('DELETE', '/api/v1/products/batch', rspuIds)
-  }
-
-  async function restoreProduct(rspuId: string): Promise<void> {
-    await request<void>('POST', `/api/v1/products/${rspuId}/restore`, {})
-  }
-
-  async function recognizeImage(file: File): Promise<unknown> {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await $fetch<ApiResponse<unknown>>(apiUrl('/api/v1/vision/recognize'), {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
-    })
-    if (res.code !== 200) {
-      throw new Error(res.message || '图纸识别失败')
-    }
-    return res.data
   }
 
   return {
@@ -478,17 +422,18 @@ export function useOfficeApi() {
     recommendModule,
     selectModuleProduct,
     exportProposal,
+    checkProposalCatalog,
+    previewProjectQuotation,
+    confirmProjectQuotation,
+    exportProjectQuotation,
+    latestProjectQuotation,
     resetProject,
-    downloadImportTemplate,
-    importProducts,
     loadImportedProducts,
+    loadCatalogCapabilities,
+    catalogImportHistory,
+    catalogHistoricalStatus,
     parseCad,
-    recognizeImage,
-    previewImport,
-    validateImportPreview,
-    confirmImport,
     uploadImages,
-    loadDicts,
     listAdminUsers,
     createAdminUser,
     updateAdminUserStatus,
@@ -496,16 +441,12 @@ export function useOfficeApi() {
     deleteAdminUser,
     listAdminWorkspaces,
     createAdminWorkspace,
+    updateAdminWorkspaceType,
     getMyWorkspace,
     listWorkspaceUsers,
     createWorkspaceUser,
     getSharedCatalogStatus,
     setWorkspaceSharedCatalog,
-    createManualProduct,
     getProduct,
-    updateProduct,
-    deleteProduct,
-    deleteProducts,
-    restoreProduct,
   }
 }
