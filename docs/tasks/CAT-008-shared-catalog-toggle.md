@@ -1,7 +1,7 @@
 # CAT-008 测试站商品页恢复公共库开关
 
 日期：2026-11-19
-状态：已编码并通过本地验证，待测试环境部署核验
+状态：已部署并验证（真实站点只读验证，开关写入由模拟回归覆盖）
 基线：`test=935da34`。
 
 ## 问题与范围
@@ -24,4 +24,7 @@
 - 临时 Playwright 模拟 API 验证通过：经销商关闭/刷新保留/重新开启，保存期间禁用，成功刷新商品并回到第一页，写入失败保留原状态与错误提示，状态读取失败保留列表，普通成员和管理员不显示入口，无页面异常。
 - 既有工作流与冒烟模拟 UI 通过；`mvn -f backend/pom.xml -Dtest=SharedCatalogServiceTest test` 7 项通过，后端工作区权限实现未改。
 - `git diff --check` 和任务文档相对链接检查通过。未执行完整 Java/CAD 测试、独立 lint/typecheck 或真实工作区开关修改。
-- 测试环境实际发布及经销商页面只读验证待记录。
+- Jenkins `rsdp-office-test` 第 8 次 SCM 自动构建部署 `365f69e7667c` 成功，结果 SUCCESS。
+- 真实测试站经销商 `dealer`：角色 DEALER，接口返回 `dealer=true / workspaceEnabled=true`，商品页开关数量为 1，`aria-checked=true`，无页面脚本异常。截图 `/tmp/rsdp-shared-toggle-dealer-1.png`。
+- 真实测试站管理员 `admin`：角色 ADMIN，接口返回 `dealer=false`，开关数量为 0，无页面脚本异常；不是账号或商品接口故障。管理员并不代表经销商主号，不能修改某工作区的开关。
+- 真实验证只查询状态、登录和退出，未改变既有工作区公共库设置；线上开关仍为开启。没有发布正式环境或整合其他主分支功能。
