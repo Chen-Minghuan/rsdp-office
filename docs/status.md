@@ -1,5 +1,19 @@
 # 开发进度与下一步
 
+2026-11-19 [录入审核修复](tasks/INTEG-002-weihao-catalog.md#录入审核修复) 清理两端旧 Office 写实现和转发依赖，保留商品只读、旧页面跳转和导入历史。RSDP 收紧单条录入校验及 Excel 确认版本。两端构建和 Java 测试通过，Office 模拟工作流与冒烟通过。
+
+2026-11-19 [公有库和伟豪私有商品边界](tasks/INTEG-002-weihao-catalog.md#公有库和伟豪私有商品边界) 本机 28 个旧写入请求均被拒绝。164 件旧 B001 公有库商品已移入 RSDP 回收站，共享目录剩余 307 件。伟豪 Office 私有商品录入待其他开发人员实现。
+
+2026-11-19 [INTEG-002 录入统一回到 RSDP](tasks/INTEG-002-weihao-catalog.md#2026-11-19-录入统一回到-rsdp) 两端本地已切换，Office 连接账号改为目录只读。共享目录 471 件，本厂范围 164 件，公共库开关及商品详情保留。两端构建、Java、Office 模拟回归及隔离双服务合成样表通过。正式样表与公网部署待办。
+
+2026-11-19 [TENANT-001 伟豪账号与工作区](tasks/TENANT-001-workspace-roles.md#2026-11-19-伟豪账号与工作区) Office 支持工厂工作区类型和工厂工作区主号，RSDP 用户管理独立展示企业名称和关联工厂。本地已配置伟豪办公工作区和 RSDP 工厂测试账号，两个测试账号均通过真实登录。商品录入链路切换列入后续阶段。
+
+2026-11-18 [INTEG-002 存量录入来源回填](tasks/INTEG-002-weihao-catalog.md#本地主库存量来源回填) 本地主库 710 条已补来源（471 在售、239 已删除），伟豪 Office 历史录入 164 条，主项目 Excel 546 条。隔离副本演练后写入并回读核对，留下逐条审计，录入来源不授予维护权。
+
+2026-11-18 商品库恢复经销商主号的公共库开关入口，复用工作区账号页的工作区级设置。前端构建及模拟工作流通过。见 [INTEG-002](tasks/INTEG-002-weihao-catalog.md#商品库公共库开关入口)。
+
+2026-11-18 [INTEG-002 伟豪商品接入](tasks/INTEG-002-weihao-catalog.md) 第一轮实施。两端在集成分支接通可信工厂身份、手工确认上架、来源、精确改价、独立上下架及统一 Excel 批次。V29 隔离库结构校验通过；真实双服务使用合成工厂和样表验证。真表、正式租户与生产迁移待验收。
+
 2026-11-18 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md#2026-11-18-从商品资源返回楼层) 修复从商品库点击楼层后仍停留在商品库的问题，空楼层进入上传页，已有空间的楼层进入总览，重复点击当前楼层也生效。前端构建、四项模拟 UI 通过，本地 3001 已更新，真实负责人会话导航核验通过。
 
 2026-11-17 [TENANT-001](tasks/TENANT-001-workspace-roles.md#2026-11-17-经销商创建项目) 创建项目限经销商主号；普通账号无项目时由项目栏进入「请联系经销商」提示。启动及账号初始化不再自动建项目。隔离数据库验证空库和账号权限通过，前端构建、四项模拟 UI、Java（280 通过、3 跳过）通过。未部署。
@@ -410,7 +424,7 @@ P0 是后续设计流程的数据与业务基础；P1 依赖空间与确认基�
 
 ## 3. 关键源码证据
 
-- 商品：[接口](../backend/src/main/java/com/rsdp/officeproduct/importer/controller/ProductImportController.java)、[录入网关](../backend/src/main/java/com/rsdp/officeproduct/importer/service/MainProductEntryGateway.java)、[商品页](../frontend/app/pages/products/index.vue)。
+- 商品：[目录接口](../backend/src/main/java/com/rsdp/officeproduct/importer/controller/ProductImportController.java)、[只读目录网关](../backend/src/main/java/com/rsdp/officeproduct/importer/service/RsdpCatalogGateway.java)、[商品页](../frontend/app/pages/products/index.vue)。
 - 识别与导入：[上传页](../frontend/app/pages/index.vue)、[API 客户端](../frontend/app/composables/useOfficeApi.ts)、[vision 客户端](../backend/src/main/java/com/rsdp/officeproduct/importer/service/VisionRecognitionClient.java)。
 - 当前画布模型：[类型](../frontend/app/types/office.ts)、[空间核对](../frontend/app/components/OfficeCanvas/SpaceReview.vue)、[统一渲染](../frontend/app/components/OfficeCanvas/SpatialCanvas.vue)、[坐标/几何适配](../frontend/app/utils/spatial/review.ts)；单空间排版保留 [CanvasBoard](../frontend/app/components/OfficeCanvas/CanvasBoard.vue)。
 - 排版：[算法](../frontend/app/utils/layout.ts)、[排版侧栏](../frontend/app/components/OfficeCanvas/DesignLayoutSidebar.vue)、[商品候选侧栏](../frontend/app/components/OfficeCanvas/DesignSidebar.vue)。

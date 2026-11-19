@@ -17,6 +17,9 @@ public class ProductListItemDto {
     private String rspuCode;
     private String externalCode;
     private String productName;
+    private String sourceChannel;
+    private String ownerFactoryCode;
+    private String sourceFactoryName;
     private List<String> categoryPath;
     @JsonIgnore
     private List<String> furnitureTags;

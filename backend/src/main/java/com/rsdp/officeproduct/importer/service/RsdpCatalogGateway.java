@@ -53,6 +53,7 @@ public class RsdpCatalogGateway {
 
     /** 排版选品目录：主项目全量产品的有效变体平铺（含尺寸/价格/图片），30s 缓存。 */
     public List<OfficeProductDto> listOfficeProducts(String viewMode) {
+        if ("none".equals(viewMode)) return List.of();
         CacheEntry cached = officeProductsCache.get(viewMode);
         if (cached != null && System.currentTimeMillis() - cached.fetchedAt() < OFFICE_PRODUCTS_CACHE_TTL_MS) {
             return cached.data();
@@ -243,7 +244,8 @@ public class RsdpCatalogGateway {
         List<ProductListItemDto> all = new ArrayList<>();
         int page = 1;
         while (true) {
-            JsonNode data = rsdpClient.get("/api/v1/products?page=" + page + "&size=" + PAGE_SIZE + "&viewMode=" + viewMode);
+            JsonNode data = rsdpClient.get("/api/v1/products?page=" + page + "&size=" + PAGE_SIZE
+                + "&viewMode=" + viewMode + ("full".equals(viewMode) ? "&status=active" : ""));
             JsonNode rows = data.path("rows");
             if (!rows.isArray() || rows.isEmpty()) {
                 break;
@@ -257,7 +259,15 @@ public class RsdpCatalogGateway {
         return all;
     }
 
-    /** 拉取主项目产品详情（主档 + 变体 + 本厂报价 + 图片）。 */
+    /** 读取指定商品在当前视图中的记录，详情与列表复用主库范围。 */
+    public boolean inView(String rspuId, String viewMode) {
+        String id = java.net.URLEncoder.encode(rspuId, java.nio.charset.StandardCharsets.UTF_8);
+        JsonNode rows = rsdpClient.get("/api/v1/products?size=1&rspuId=" + id + "&viewMode=" + viewMode
+            + ("full".equals(viewMode) ? "&status=active" : "")).path("rows");
+        return rows.isArray() && !rows.isEmpty() && rspuId.equals(rows.get(0).path("rspuId").asText());
+    }
+
+    /** 拉取商品资料供已核验的设计流程使用。 */
     public ProductDetailDto getProductDetail(String rspuId) {
         JsonNode detail = rsdpClient.get("/api/v1/products/" + rspuId);
         JsonNode rspu = detail.path("rspu");
@@ -270,6 +280,11 @@ public class RsdpCatalogGateway {
         dto.setRspuCode(textOrNull(rspu, "rspuCode"));
         dto.setExternalCode(textOrNull(rspu, "externalCode"));
         dto.setProductName(textOrNull(rspu, "productName"));
+        dto.setSourceChannel(textOrNull(rspu, "sourceChannel"));
+        dto.setSourceFactoryName(textOrNull(detail, "sourceFactoryName"));
+        if (rspu.path("ownerVerified").asBoolean()) {
+            dto.setOwnerFactoryCode(textOrNull(rspu, "ownerFactoryCode"));
+        }
         dto.setColorPrimaryName(textOrNull(rspu, "colorPrimaryName"));
         dto.setDescription(textOrNull(rspu, "description"));
         dto.setRetailPrice(decimalOrNull(rspu, "retailPrice"));
@@ -297,21 +312,6 @@ public class RsdpCatalogGateway {
         dto.getImages().stream().filter(img -> Boolean.TRUE.equals(img.getPrimary())).findFirst()
             .ifPresent(img -> dto.setPrimaryImageUrl(img.getStorageUrl()));
 
-        // 本厂报价按变体聚合（数据范围限定本厂，出厂价主项目已解密本厂部分）
-        Map<String, JsonNode> ownQuoteByVariant = new HashMap<>();
-        JsonNode quotes = rsdpClient.get("/api/v1/products/" + rspuId + "/rsku");
-        if (quotes.isArray()) {
-            quotes.forEach(quote -> {
-                String variantId = quote.path("variantId").asText("");
-                // 同一变体多条本厂报价时保留出厂价最低的一条
-                ownQuoteByVariant.merge(variantId, quote, (existing, incoming) -> {
-                    double existingPrice = existing.path("factoryPrice").asDouble(Double.MAX_VALUE);
-                    double incomingPrice = incoming.path("factoryPrice").asDouble(Double.MAX_VALUE);
-                    return incomingPrice < existingPrice ? incoming : existing;
-                });
-            });
-        }
-
         JsonNode variants = rsdpClient.get("/api/v1/products/" + rspuId + "/variants");
         if (variants.isArray()) {
             variants.forEach(v -> {
@@ -328,13 +328,6 @@ public class RsdpCatalogGateway {
                 variant.setStatus(textOrNull(v, "status"));
                 variant.setCreatedAt(dateOrNull(v, "createdAt"));
                 variant.setUpdatedAt(dateOrNull(v, "updatedAt"));
-                // 报价优先精确匹配变体，其次回落到产品级（无变体归属）报价
-                JsonNode quote = ownQuoteByVariant.getOrDefault(variant.getVariantId(), ownQuoteByVariant.get(""));
-                if (quote != null) {
-                    variant.setFactoryPrice(decimalOrNull(quote, "factoryPrice"));
-                    variant.setMoq(quote.path("moq").isNumber() ? quote.path("moq").asInt() : null);
-                    variant.setLeadTimeDays(quote.path("leadTimeDays").isNumber() ? quote.path("leadTimeDays").asInt() : null);
-                }
                 dto.getVariants().add(variant);
             });
         }
@@ -365,7 +358,10 @@ public class RsdpCatalogGateway {
         ProductListItemDto dto = new ProductListItemDto();
         dto.setRspuId(row.path("rspuId").asText());
         dto.setRspuCode(textOrNull(row, "rspuCode"));
-        dto.setExternalCode(null);
+        dto.setExternalCode(textOrNull(row, "externalCode"));
+        dto.setSourceChannel(textOrNull(row, "sourceChannel"));
+        dto.setSourceFactoryName(textOrNull(row, "sourceFactoryName"));
+        dto.setOwnerFactoryCode(textOrNull(row, "ownerFactoryCode"));
         dto.setProductName(textOrNull(row, "productName"));
         dto.setCategoryPath(textValues(embeddedJson(row.path("categoryPath"))));
         dto.setFurnitureTags(furnitureTags(row.path("sixDimTags")));
