@@ -20,8 +20,8 @@ function openSelection(zoneId: string) {
 <template>
   <Teleport to="body">
     <div class="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" @click.self="emit('close')" @keydown.esc.stop.prevent="emit('close')">
-      <section role="dialog" aria-modal="true" aria-labelledby="proposal-furniture-gate-title" class="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-        <div class="flex items-start justify-between gap-4">
+      <section role="dialog" aria-modal="true" aria-labelledby="proposal-furniture-gate-title" class="flex max-h-[80dvh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white p-6 shadow-2xl">
+        <div class="flex flex-none items-start justify-between gap-4">
           <div>
             <h2 id="proposal-furniture-gate-title" class="text-lg font-bold">请先选择家具</h2>
             <p class="mt-1 text-xs leading-5 text-muted">以下画布家具尚未在对应区域的购物车中选择商品：</p>
@@ -29,7 +29,7 @@ function openSelection(zoneId: string) {
           <button type="button" aria-label="关闭缺失家具提示" class="rounded-lg p-2 text-muted hover:bg-cream" @click="emit('close')"><AppIcon name="close" /></button>
         </div>
 
-        <div class="mt-5 max-h-[50vh] space-y-4 overflow-y-auto">
+        <div class="mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
           <section v-for="mismatch in mismatches" :key="mismatch.zoneId" role="button" tabindex="0" :aria-label="`前往${mismatch.zoneName}布局选品`" class="cursor-pointer rounded-xl border border-line bg-[#faf8f5] p-4 text-left transition hover:border-bronze hover:bg-cream focus:outline-none focus:ring-2 focus:ring-bronze" @click="openSelection(mismatch.zoneId)" @keydown.enter.prevent="openSelection(mismatch.zoneId)" @keydown.space.prevent="openSelection(mismatch.zoneId)">
             <div class="flex items-baseline justify-between gap-3">
               <h3 class="text-sm font-semibold text-ink">{{ mismatch.zoneName }}</h3>
@@ -46,7 +46,7 @@ function openSelection(zoneId: string) {
           </section>
         </div>
 
-        <div class="mt-5 flex justify-end">
+        <div class="mt-5 flex flex-none justify-end">
           <button type="button" class="rounded-xl bg-bronze px-4 py-2 text-sm font-semibold text-white hover:bg-bronze-dark" @click="emit('close')">返回选品</button>
         </div>
       </section>
