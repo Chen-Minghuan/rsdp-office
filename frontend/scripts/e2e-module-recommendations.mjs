@@ -97,7 +97,7 @@ try {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     state.objects = [
       { id: 'Z', kind: 'zone', x: 0, y: 0, w: 6000, h: 4000, name: '推荐测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[0,0],[6000,0],[6000,4000],[0,4000]] },
-      ...['A', 'B'].map((id, index) => ({ id, kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '职员桌 ' + id, x: 500 + index * 2000, y: 500, w: 1200, h: 600, rotation: 0, productId: '', layoutConfirmed: true })),
+      ...['A', 'B'].map((id, index) => ({ id, kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '共享职员桌', x: 500 + index * 2000, y: 500, w: 1200, h: 600, rotation: 0, productId: '', layoutConfirmed: true })),
       { id: 'C', kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '小桌 C', x: 500, y: 2300, w: 700, h: 400, rotation: 0, productId: '', layoutConfirmed: true },
       { id: 'OTHER', kind: 'furniture', zoneId: 'OTHER', furnitureTemplateId: 'chair-office', x: 10000, y: 0, w: 650, h: 650, rotation: 0, productId: 'KEEP', layoutConfirmed: true },
     ]
@@ -108,6 +108,17 @@ try {
   await page.getByLabel('布局房间类型').selectOption('MEETING_ROOM')
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'Z').zoneType), 'MEETING_ROOM')
   await page.getByTestId('tab-product-selection').click()
+  const furniture = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
+  assert.equal(await page.locator('[data-furniture-id]').count(), 2, '名称与尺寸完全相同的 A/B 在已排家具列表中只显示一个代表项')
+  assert.equal(await page.locator('[data-furniture-id="A"]').count(), 1)
+  assert.equal(await page.locator('[data-furniture-id="B"]').count(), 0)
+  await furniture('B').click()
+  await page.getByTestId('product-item-editor').waitFor()
+  assert.equal(await page.locator('[data-furniture-id="A"]').getAttribute('aria-pressed'), 'true', '选中隐藏的同组实例时代表项保持高亮')
+  await page.getByTestId('product-copy-furniture').click()
+  const copied = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.kind === 'furniture' && item.zoneId === 'Z' && !['A', 'B', 'C'].includes(item.id)))
+  assert.deepEqual([copied.x, copied.y], [2700, 700], '合并列表后编辑器仍作用于画布实际选中的 B 实例')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
   await page.locator('[data-furniture-id="A"]').click()
   await page.getByTestId('product-copy-furniture').click()
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').length), 4)
@@ -156,7 +167,6 @@ try {
   const panel = page.getByTestId('module-product-recommendations')
   const card = id => panel.locator('[data-product-id="' + id + '"]')
   const matchingModule = panel.getByLabel('匹配单位模块')
-  const furniture = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
   await card('EXACT').waitFor()
   assert.equal(await matchingModule.inputValue(), 'A', '进入推荐时使用画布已选的家具')
   await page.keyboard.press('Escape')
