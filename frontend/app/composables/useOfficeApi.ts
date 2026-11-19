@@ -2,6 +2,7 @@ import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSe
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief } from '~/types/office'
 import type { ImportedProduct, ProductImportResult, ProductImportPreview, ProductImportPreviewRow, DictItem, ManualProductEntryRequest, ProductDetail } from '~/types/imported-products'
+import type { WorkspaceType } from '~/utils/workspaceType'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -44,6 +45,7 @@ interface AdminUserItem {
 interface WorkspaceItem {
   workspaceId: string
   name: string
+  workspaceType: WorkspaceType
   ownerUserId: string
   ownerUsername: string
   ownerDisplayName: string
@@ -394,11 +396,15 @@ export function useOfficeApi() {
     return await request<WorkspaceItem[]>('GET', '/api/v1/office/admin/workspaces')
   }
 
-  async function createAdminWorkspace(payload: { name: string; ownerUsername: string; ownerDisplayName: string; ownerPassword: string }): Promise<WorkspaceItem> {
+  async function createAdminWorkspace(payload: { name: string; workspaceType: WorkspaceItem['workspaceType']; ownerUsername: string; ownerDisplayName: string; ownerPassword: string }): Promise<WorkspaceItem> {
     return await request<WorkspaceItem>('POST', '/api/v1/office/admin/workspaces', payload)
   }
 
   /** 经销商主号的工作区账号管理；只能操作自己拥有的工作区。 */
+  async function updateAdminWorkspaceType(workspaceId: string, workspaceType: WorkspaceItem['workspaceType']): Promise<WorkspaceItem> {
+    return await request<WorkspaceItem>('PATCH', `/api/v1/office/admin/workspaces/${encodeURIComponent(workspaceId)}/type`, { workspaceType })
+  }
+
   async function getMyWorkspace(): Promise<WorkspaceItem> {
     return await request<WorkspaceItem>('GET', '/api/v1/office/workspace/me')
   }
@@ -496,6 +502,7 @@ export function useOfficeApi() {
     deleteAdminUser,
     listAdminWorkspaces,
     createAdminWorkspace,
+    updateAdminWorkspaceType,
     getMyWorkspace,
     listWorkspaceUsers,
     createWorkspaceUser,

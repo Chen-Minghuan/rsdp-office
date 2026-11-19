@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
+import { workspaceTypeLabel } from '~/utils/workspaceType'
 
 const route = useRoute()
+const auth = useAuth()
 const { isProjectWorkflow, lastProjectRoute } = useWorkspaceNavigation()
 const productLinks = [
   { icon: 'cube', label: '商品库', to: '/products' },
@@ -13,7 +15,7 @@ const isAdmin = ref(false)
 const isDealer = ref(false)
 onMounted(async () => {
   if (!authEnabled) { isAdmin.value = true; isDealer.value = true; return }
-  const user = await useAuth().me()
+  const user = await auth.me()
   isAdmin.value = user?.role === 'ADMIN'
   isDealer.value = user?.role === 'DEALER'
 })
@@ -61,7 +63,7 @@ function isActive(to: string) {
       </NuxtLink>
       </div>
       <div v-if="isDealer" class="grid content-start gap-1">
-        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">经销商工作区</div>
+        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">{{ workspaceTypeLabel(auth.user.value?.workspaceType) }}</div>
         <NuxtLink
           to="/workspace/users"
           :aria-current="isActive('/workspace/users') ? 'page' : undefined"
