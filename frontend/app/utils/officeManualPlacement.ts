@@ -7,6 +7,7 @@ import { uid } from '~/utils/helpers'
 import { zoneLayoutExclusions } from './spatial/obstacles'
 import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
 import { rectOverlapsBlocker, rotatedFurnitureFootprint as officeFurnitureFootprint } from './layoutConstraints'
+import { footprintsOverlap, furnitureFootprintRects } from './furnitureFootprint'
 
 export const OFFICE_MODULE_DRAG_TYPE = 'application/x-rsdp-office-module'
 
@@ -45,14 +46,13 @@ export function officePlacementHardProblem(zone: ZoneObject, candidate: Furnitur
     const ring: Array<[number, number]> = [[footprint.x, footprint.y], [footprint.x + footprint.w, footprint.y], [footprint.x + footprint.w, footprint.y + footprint.h], [footprint.x, footprint.y + footprint.h]]
     if (!ringWithinPlacementAreas(areas, ring)) return '此位置超出已启用的家具布置区'
   }
+  // L 型桌按主台面 + 侧翼两块判定，内角可放椅子或相邻家具。
   for (const item of existing) {
     if (item.zoneId !== zone.id) continue
-    const other = officeFurnitureFootprint(item), gap = spacing.gapMm, eps = 0.001
-    if (footprint.x < other.x + other.w + gap - eps && other.x < footprint.x + footprint.w + gap - eps
-      && footprint.y < other.y + other.h + gap - eps && other.y < footprint.y + footprint.h + gap - eps) return '此位置与已有家具重叠或间距不足'
+    if (footprintsOverlap(candidate, item, spacing.gapMm)) return '此位置与已有家具重叠或间距不足'
   }
   for (const area of zoneLayoutExclusions(zone)) {
-    if (rectOverlapsBlocker(footprint, area)) return '此位置占用了入口或禁放区'
+    if (furnitureFootprintRects(candidate).some(rect => rectOverlapsBlocker(rect, area))) return '此位置占用了入口或禁放区'
   }
   return null
 }

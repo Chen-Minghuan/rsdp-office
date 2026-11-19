@@ -84,7 +84,7 @@ export function preferredFurnitureCategory(zone?: Pick<ZoneObject, 'name' | 'zon
   if (/经理|主管/.test(name)) return '主管桌'
   if (/会议|洽谈/.test(name)) return '会议与洽谈'
   if (/前台/.test(name)) return '前台'
-  if (/接待|休闲|会客/.test(name)) return '接待休闲'
+  if (/接待|休闲|会客|茶水/.test(name)) return '接待休闲'
   if (/储物|储藏|收纳/.test(name)) return '收纳'
   if (/打印|设备|机房/.test(name)) return '设备辅助'
   if (/开放办公|员工|职员/.test(name)) return '职员桌'

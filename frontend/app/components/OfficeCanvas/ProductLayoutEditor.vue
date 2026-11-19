@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { FurnitureObject } from '~/types/office'
-import type { FurnitureCategory } from '~/types/manualCanvas'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
 import { furnitureCatalogTemplates, furnitureCategories, furnitureCategoryForItem, preferredFurnitureCategory } from '~/utils/manualFurniture'
 import { moduleGlyphId } from '~/utils/officeModules'
@@ -16,17 +15,15 @@ const catalogCategories = computed(() => zone.value?.zoneType === 'MEETING_ROOM'
 const selectedItem = computed(() => items.value.find(item => item.id === selectedId.value) || null)
 const catalog = ref<HTMLElement | null>(null)
 const preferredCatalogCategory = computed(() => furnitureCategoryForItem(selectedItem.value) || preferredFurnitureCategory(zone.value))
-const openCategories = ref<FurnitureCategory[]>([])
 watch([() => zone.value?.id, preferredCatalogCategory], ([, category]) => {
-  openCategories.value = [category]
-  nextTick(() => catalog.value?.querySelector(`[data-catalog-category="${category}"]`)?.scrollIntoView({ block: 'nearest' }))
+  nextTick(() => {
+    catalog.value?.querySelectorAll<HTMLDetailsElement>('[data-catalog-category]').forEach(group => {
+      const open = group.dataset.catalogCategory === category
+      group.toggleAttribute('open', open)
+      if (open) group.scrollIntoView({ block: 'nearest' })
+    })
+  })
 }, { immediate: true, flush: 'post' })
-function onCategoryToggle(category: FurnitureCategory, event: Event) {
-  const open = (event.target as HTMLDetailsElement).open
-  openCategories.value = open
-    ? [...new Set([...openCategories.value, category])]
-    : openCategories.value.filter(item => item !== category)
-}
 const itemEditor = ref<HTMLElement | null>(null)
 watch(itemEditor, editor => editor?.scrollIntoView({ block: 'nearest' }), { flush: 'post' })
 const confirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
@@ -227,23 +224,16 @@ function confirmLayout() {
                 @dragstart="startModuleDrag(module, $event)"
                 @dragend="endModuleDrag(module, $event)"
               >
-                <div class="h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.glyphTemplateId" :width-mm="module.widthMm" :depth-mm="module.depthMm" thumbnail /></div>
-                <div class="truncate text-[10px] font-medium">{{ module.name }}</div>
-                <div class="mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</div>
+                <span class="block h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.glyphTemplateId" :width-mm="module.widthMm" :depth-mm="module.depthMm" thumbnail /></span>
+                <span class="block truncate text-[10px] font-medium">{{ module.name }}</span>
+                <span class="block mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</span>
               </button>
               <div class="flex border-t border-line text-[9px]"><button class="flex-1 py-1" :aria-label="'编辑模块 ' + module.name" @click="openModuleDialog(module)">编辑</button><button class="flex-1 py-1 text-muted" :aria-label="'删除目录模块 ' + module.name" @click="removeModule(module)">删除</button></div>
             </div>
           </div>
         </details>
         <p v-if="store.furniturePlacement" class="mb-2 bg-[#eef8e7] px-2 py-1.5 text-[10px] text-[#4d713d]">正在摆放：移动到画布点击放置，空格旋转，Esc 或右键结束。</p>
-        <details
-          v-for="category in catalogCategories"
-          :key="category"
-          :data-catalog-category="category"
-          :open="openCategories.includes(category)"
-          class="mb-1.5"
-          @toggle="onCategoryToggle(category, $event)"
-        >
+        <details v-for="category in catalogCategories" :key="category" :data-catalog-category="category" class="mb-1.5">
           <summary class="cursor-pointer py-1.5 text-[11px] text-[#5b5751]">{{ category }} <span class="text-muted">{{ furnitureCatalogTemplates.filter(module => module.category === category).length }} 款</span></summary>
           <div class="grid grid-cols-3 gap-1.5">
             <div v-for="module in furnitureCatalogTemplates.filter(module => module.category === category)" :key="module.id" class="min-w-0 border border-line bg-white">
@@ -260,9 +250,9 @@ function confirmLayout() {
                 @dragstart="startModuleDrag(module, $event)"
                 @dragend="endModuleDrag(module, $event)"
               >
-                <div class="h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></div>
-                <div class="truncate text-[10px] font-medium" :title="module.name">{{ module.name }}</div>
-                <div class="mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</div>
+                <span class="block h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></span>
+                <span class="block truncate text-[10px] font-medium" :title="module.name">{{ module.name }}</span>
+                <span class="block mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</span>
               </button>
             </div>
           </div>

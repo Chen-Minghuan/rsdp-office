@@ -95,6 +95,7 @@ try {
     ['总经办一', 'EXECUTIVE_OFFICE', '高管桌'],
     ['员工办公区', 'OPEN_OFFICE', '职员桌'],
     ['前台', 'RECEPTION', '前台'],
+    ['茶水区', 'COLLABORATION', '接待休闲'],
     ['中会议室', 'MEETING_ROOM', '会议与洽谈'],
   ]) await expectZoneCategory(name, zoneType, category)
   await expectZoneCategory('模块测试空间', 'OPEN_OFFICE', '职员桌')
@@ -227,6 +228,7 @@ try {
   await expectCatalogCategory('座椅')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
+  if (!(await chairs.evaluate(node => node.open))) await chairs.locator('summary').click()
   await page.getByRole('button', { name: '办公转椅', exact: true }).click()
   await clickWorld(room.x + 4500, room.y + 4000)
   assert.equal((await placed()).length, 3)

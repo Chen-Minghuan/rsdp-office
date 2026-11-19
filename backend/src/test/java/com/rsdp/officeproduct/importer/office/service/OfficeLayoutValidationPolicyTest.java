@@ -15,6 +15,23 @@ class OfficeLayoutValidationPolicyTest {
              {"id":"T","kind":"furniture","zoneId":"R","layoutConfirmed":true,"x":2000,"y":2000,"w":2800,"h":1200,"rotation":0,"layoutGroupId":"auto:R","layoutRole":"primary","furnitureTemplateId":"table-conference-rect"}]
             """);
     }
+    @Test void lDeskInnerCornerAllowsChairWhileWingStillBlocks() throws Exception {
+        ArrayNode objects = scene();
+        objects.remove(1);
+        objects.addObject().put("id", "L").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true)
+            .put("x", 1000).put("y", 1000).put("w", 1400).put("h", 1400).put("rotation", 0)
+            .put("wingWidthMm", 550).put("furnitureTemplateId", "desk-l").put("layoutRole", "primary")
+            .put("layoutGroupId", "auto:R");
+        ObjectNode chair = objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R")
+            .put("layoutConfirmed", true).put("x", 1150).put("y", 1750).put("w", 550).put("h", 580)
+            .put("rotation", 0).put("furnitureTemplateId", "chair-office").put("layoutRole", "seat");
+        // 主台面深 650、侧翼从 x=1850 起：内角放椅不算重叠
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        // 压到侧翼上仍判重叠
+        chair.put("x", 1900);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+
     @Test void acceptsValidAndTouchingFurniture() throws Exception {
         ArrayNode objects = scene();
         objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("x", 4800).put("y", 2000).put("w", 550).put("h", 580).put("rotation", 0).put("furnitureTemplateId", "chair-meeting");
