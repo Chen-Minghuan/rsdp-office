@@ -45,7 +45,6 @@ DECLARE
     account_id TEXT;
     new_password TEXT;
     dev_workspace CONSTANT TEXT := 'DEV-OFFICE-WORKSPACE';
-    dev_project CONSTANT TEXT := 'DEV-OFFICE-PROJECT';
 BEGIN
     FOR account IN SELECT * FROM (VALUES
         (1, 'admin',    '开发系统管理员', 'ADMIN', NULL),
@@ -98,19 +97,6 @@ BEGIN
         RAISE EXCEPTION '开发工作区的归属与种子数据不一致';
     END IF;
 
-    INSERT INTO office_design_project (project_id, name, workspace_id)
-    VALUES (dev_project, '本地开发示例项目', dev_workspace)
-    ON CONFLICT (project_id) DO NOTHING;
-
-    IF FOUND THEN
-        INSERT INTO office_design_floor (floor_id, project_id, name)
-        VALUES ('DEV-OFFICE-FLOOR-1', dev_project, '1F');
-
-        INSERT INTO office_project_member (project_id, user_id, role)
-        VALUES (dev_project, 'DEV-OFFICE-DEV_LEAD', 'LEADER'),
-               (dev_project, 'DEV-OFFICE-DEV_DESIGNER', 'COLLABORATOR'),
-               (dev_project, 'DEV-OFFICE-DEV_FACTORY', 'COLLABORATOR');
-    END IF;
 END;
 $$;
 

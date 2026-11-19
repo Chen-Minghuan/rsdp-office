@@ -65,7 +65,7 @@ public class SchemaInitializer {
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");
-            log.info("项目楼层结构及默认工作区映射初始化完成");
+            log.info("项目楼层结构初始化完成");
         } catch (Exception e) {
             throw new IllegalStateException("数据库结构更新失败", e);
         }

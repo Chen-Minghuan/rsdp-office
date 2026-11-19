@@ -3,6 +3,7 @@ import { authEnabled } from '~/composables/useAuth'
 
 const workspace = useWorkspaceStore()
 const auth = useAuth()
+const { canCreateProject } = auth
 const showCreate = ref(false)
 const retrying = ref(false)
 const loading = computed(() => retrying.value || workspace.loading || (!workspace.initialized && !workspace.error))
@@ -32,10 +33,11 @@ async function retry() {
         <AppIcon name="folder" size="8" class="mx-auto mb-4 text-muted" />
         <h1 class="text-lg font-semibold">暂无可访问项目</h1>
         <p v-if="isAdmin" class="mt-2 text-sm leading-6 text-muted">系统管理员用于管理账号和工作区。请使用经销商主号或工作区成员账号进入项目设计。</p>
-        <p v-else class="mt-2 text-sm leading-6 text-muted">当前账号还没有可访问的项目。创建项目后，即可按楼层上传图纸并开始空间设计。</p>
-        <button v-if="!isAdmin" type="button" class="mt-5 bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark" @click="showCreate = true">新建项目</button>
+        <p v-else-if="canCreateProject" class="mt-2 text-sm leading-6 text-muted">创建项目并分配成员后，即可按楼层上传图纸并开始空间设计。</p>
+        <p v-else class="mt-2 text-sm leading-6 text-muted">请联系经销商创建项目并分配给你。</p>
+        <button v-if="canCreateProject" type="button" class="mt-5 bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark" @click="showCreate = true">新建项目</button>
       </template>
     </div>
-    <ProjectCreateDialog v-if="showCreate" @close="showCreate = false" />
+    <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
   </section>
 </template>

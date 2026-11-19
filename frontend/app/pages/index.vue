@@ -316,6 +316,11 @@ const hasRecognizableFiles = computed(() => recognizableFiles.value.length > 0)
 
 async function recognizeFile(file: ProjectFile) {
   if (uploadBusy.value) return
+  const floorId = api.projectId
+  if (!floorId) {
+    parseError.value = '请先选择项目和楼层，再识别图纸'
+    return
+  }
   forgetRecognitionTask()
   const ticket = recognitionSequence
   activeFile.value = file.name
@@ -329,6 +334,7 @@ async function recognizeFile(file: ProjectFile) {
     let rawFile = fileMap.value.get(file.name)
     if (!rawFile && !file.mock) {
       rawFile = await loadPersistedFile(file.name, file.drawingId)
+      if (disposed || ticket !== recognitionSequence || api.projectId !== floorId) return
       if (rawFile) fileMap.value.set(file.name, rawFile)
     }
     if (!rawFile) {
@@ -345,18 +351,18 @@ async function recognizeFile(file: ProjectFile) {
     const result = await floorPlanApi.analyzeFloorPlan({
       image: isCad ? undefined : rawFile,
       cad: isCad ? rawFile : undefined,
-      projectId: api.projectId,
+      floorId,
       sourceName: file.name,
       pageNumber,
     })
-    if (disposed || ticket !== recognitionSequence) return
+    if (disposed || ticket !== recognitionSequence || api.projectId !== floorId) return
     recognitionSource.value = isCad ? 'cad' : 'vision'
     analysisId.value = result.analysisId
     store.$patch({ files: store.files.map(drawing => drawing === file || drawing.drawingId && drawing.drawingId === file.drawingId
       ? { ...drawing, analysisId: result.analysisId, analysisPageNumber: pageNumber } : drawing) })
     store.schedulePersist()
     sessionStorage.setItem(taskStorageKey(), JSON.stringify({ analysisId: result.analysisId, name: file.name, size: file.size,
-      drawingId: file.drawingId, projectId: api.projectId, pageNumber, source: recognitionSource.value }))
+      drawingId: file.drawingId, projectId: floorId, pageNumber, source: recognitionSource.value }))
     await pollRecognition(result.analysisId, ticket)
   } catch (e: any) {
     if (disposed || ticket !== recognitionSequence) return
