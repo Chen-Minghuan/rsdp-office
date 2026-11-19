@@ -19,6 +19,14 @@ export interface ProposalFurnitureCartMismatch {
   missing: ProposalMissingFurniture[]
 }
 
+/** 缺失家具弹窗中的空间入口，始终进入当前楼层的布局选品模式。 */
+export function proposalFurnitureSelectionRoute(floorId: string, zoneId: string) {
+  return {
+    path: '/canvas',
+    query: { floorId, mode: 'design', zoneId },
+  }
+}
+
 function furnitureName(item: FurnitureObject): string {
   return item.label?.trim()
     || item.moduleSnapshot?.name?.trim()
