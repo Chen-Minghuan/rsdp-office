@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class RenderProductReferences {
-    public static final String VERSION = "selected-products-multiview-v2";
+    public static final String VERSION = "selected-products-multiview-v3-furniture-bindings";
     private final OfficeService office;
     private final RsdpCatalogGateway catalogGateway;
     private final RestTemplate restTemplate;
@@ -42,32 +42,36 @@ public class RenderProductReferences {
         public static Prepared empty() { return new Prepared(List.of(), JsonNodeFactory.instance.arrayNode(), ""); }
     }
 
-    public Prepared prepare(JsonNode scene) { return prepare(scene, false); }
+    public Prepared prepare(JsonNode scene) { return prepare(scene,RenderFurnitureBindings.from(scene)); }
 
-    /** guided：图1为白模实时视角截图；否则图1为无文字立体空间引导。 */
-    public Prepared prepare(JsonNode scene, boolean guided) {
-        LinkedHashMap<String, List<Integer>> chosen = new LinkedHashMap<>();
-        int index = 0;
-        for (JsonNode item : scene.path("furniture")) {
-            index++;
-            String id = item.path("productId").asText("");
-            if (id.isBlank()) continue;
-            String selectedId = item.path("productSelection").path("product").path("id").asText(id);
-            if (!id.equals(selectedId)) throw new BusinessException("模块绑定商品与选品记录不一致，请重新选品");
-            chosen.computeIfAbsent(id, key -> new ArrayList<>()).add(index);
+    /** Compatibility overload; new rendering always uses the shared semantic bindings. */
+    @Deprecated
+    public Prepared prepare(JsonNode scene, boolean guided) { return prepare(scene); }
+
+    public Prepared prepare(JsonNode scene, RenderFurnitureBindings.Prepared bindings) {
+        Map<String,JsonNode> furnitureById=new LinkedHashMap<>();
+        Map<String,Integer> furnitureNumbers=new LinkedHashMap<>();
+        int furnitureIndex=0;
+        for(JsonNode item:scene.path("furniture")) { furnitureIndex++; furnitureById.put(item.path("id").asText(),item); furnitureNumbers.put(item.path("id").asText(),furnitureIndex); }
+        LinkedHashMap<String, List<RenderFurnitureBindings.Binding>> chosen = new LinkedHashMap<>();
+        for(var binding:bindings.items()) {
+            if(binding.productId().isBlank()) continue;
+            JsonNode item=furnitureById.get(binding.furnitureId());
+            if(item==null || !binding.productId().equals(item.path("productId").asText())) throw new BusinessException("家具商品绑定关系已变化，请重新保存排版后生成");
+            String selectedId = item.path("productSelection").path("product").path("id").asText(binding.productId());
+            if (!binding.productId().equals(selectedId)) throw new BusinessException("模块绑定商品与选品记录不一致，请重新选品");
+            chosen.computeIfAbsent(binding.productId(), key -> new ArrayList<>()).add(binding);
         }
         if (chosen.isEmpty()) return Prepared.empty();
         if (chosen.size() > 24) throw new BusinessException("单次商品外观参考最多支持 24 种商品，请分空间生成");
         Map<String, OfficeProductDto> catalog = office.listOfficeProducts().stream().collect(Collectors.toMap(OfficeProductDto::getId, Function.identity(), (a,b) -> a));
         ArrayNode manifest = JsonNodeFactory.instance.arrayNode();
         List<BufferedImage> photos = new ArrayList<>();
-        StringBuilder prompt = new StringBuilder(guided
-            ? "\n商品外观约束：图1是白模实时视角截图，只用于视角、空间轮廓、数量和位置；后续图片为所选商品外观参考板，P编号对应下列家具对应关系。每件商品可能包含多视角照片，所有视角属于同一个商品，不得按照片数增加家具。主视角决定整体轮廓，其他角度补充侧面、背面及细节。按照片保留各商品的轮廓、桌腿/扶手/屏风结构、颜色和材质，不得用通用家具或装修风格替换所选款式。不要把参考板、编号、商品文字或照片背景绘入成品。未绑定商品的模块仍按类型表达。\n"
-            : "\n商品外观约束：图1是无文字立体空间引导，只用于空间轮廓、数量和位置；后续图片为所选商品外观参考板，P编号对应下列家具对应关系。每件商品可能包含多视角照片，所有视角属于同一个商品，不得按照片数增加家具。主视角决定整体轮廓，其他角度补充侧面、背面及细节。按照片保留各商品的轮廓、桌腿/扶手/屏风结构、颜色和材质，不得用通用家具或装修风格替换所选款式。不要把参考板、编号、商品文字或照片背景绘入成品。未绑定商品的模块仍按类型表达。\n");
+        StringBuilder prompt = new StringBuilder("\n商品外观约束：图1是带F家具定位标识的45度立体空间引导，只用于空间轮廓、家具类型、数量和位置；后续图片为所选商品外观参考板。P编号对应下列F家具，每件商品可能包含多视角照片，所有视角属于同一个商品，不得按照片数增加家具。主视角决定整体轮廓，其他角度补充侧面、背面及细节。按照片保留各商品的轮廓、桌腿/扶手/屏风结构、柜体位置、颜色和材质，不得用通用家具或装修风格替换所选款式。不要把参考板、编号、商品文字或照片背景绘入成品。未绑定商品的模块仍按类型表达。\n");
         for (var choice : chosen.entrySet()) {
             OfficeProductDto product = catalog.get(choice.getKey());
             if (product == null) throw new BusinessException("所选商品已不可用，请重新核对选品后生成：" + choice.getKey());
-            String referenceId = "P" + (photos.size()+1);
+            String referenceId = choice.getValue().get(0).productReferenceId();
             LinkedHashSet<String> urls=new LinkedHashSet<>();
             if (product.getImageUrl()!=null && !product.getImageUrl().isBlank()) urls.add(product.getImageUrl());
             if (product.getRspuId()!=null) {
@@ -95,20 +99,16 @@ public class RenderProductReferences {
             photos.add(productViews(views));
             entry.put("imageUrl",used.get(0).path("imageUrl").asText()).put("imageSha256",used.get(0).path("imageSha256").asText());
             entry.put("availableImageCount",urls.size()).put("usedImageCount",views.size());
-            var numbers=entry.putArray("furnitureNumbers"); choice.getValue().forEach(numbers::add);
+            var numbers=entry.putArray("furnitureNumbers");choice.getValue().forEach(binding->numbers.add(furnitureNumbers.get(binding.furnitureId())));
+            var furnitureReferences=entry.putArray("furnitureReferenceIds");choice.getValue().forEach(binding->furnitureReferences.add(binding.referenceId()));
+            String furnitureIds=choice.getValue().stream().map(RenderFurnitureBindings.Binding::referenceId).collect(java.util.stream.Collectors.joining("、"));
             prompt.append(referenceId).append(" 包含 ").append(views.size()).append(" 个同款商品视角（不代表多件家具）。");
-            prompt.append(referenceId).append(" → 家具清单序号 ").append(numberRanges(choice.getValue())).append("；商品：").append(product.getName()).append("；规格：").append(product.getVariant()).append("；实际宽深高(mm)：")
+            prompt.append(referenceId).append(" → 图1中的").append(furnitureIds).append("；这些F家具必须使用").append(referenceId).append("，不得替换为通用家具或应用到其他F编号；商品：").append(product.getName()).append("；规格：").append(product.getVariant()).append("；实际宽深高(mm)：")
                 .append(product.getWidthMm()).append('×').append(product.getDepthMm()).append('×').append(product.getHeightMm()).append('\n');
         }
         List<byte[]> images = new ArrayList<>();
         for (int start = 0; start < photos.size(); start += 12) images.add(sheet(photos.subList(start, Math.min(start + 12, photos.size())), start));
         return new Prepared(images, manifest, prompt.toString());
-    }
-
-    private static String numberRanges(List<Integer> numbers) {
-        StringJoiner result=new StringJoiner("、");
-        for(int i=0;i<numbers.size();i++) {int start=numbers.get(i),end=start;while(i+1<numbers.size()&&numbers.get(i+1)==end+1){end=numbers.get(++i);}result.add(start==end?String.valueOf(start):start+"至"+end);}
-        return result.toString();
     }
 
     byte[] readImage(String url, String name) {

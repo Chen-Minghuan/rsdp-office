@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import type { RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
+import type { RenderPreview, RenderPreviewRequest, RenderQualityAudit } from '~/types/renderPreview'
 import { renderPreviewSnapshot, renderSnapshotKey, renderPreviewActive } from '~/utils/renderPreview'
 import { createUuid } from '~/utils/uuid'
 
 const show = defineModel<boolean>('show', { default: false })
-/** 从 3D 白模进入时携带的当前视角截图（RENDER-006）；为空则使用空间立体引导图。 */
-const props = withDefaults(defineProps<{ viewImage?: string }>(), { viewImage: '' })
 const dialogElement = ref<HTMLElement | null>(null)
 const store = useOfficeStore()
 const auth = useAuth()
@@ -15,7 +13,6 @@ const snapshot = computed(() => renderPreviewSnapshot(store.objects, zoneId.valu
 const selectedProductCount = computed(() => new Set(snapshot.value?.furniture.map(item => item.productId).filter(Boolean)).size)
 const currentKey = computed(() => renderSnapshotKey(snapshot.value))
 const style = ref('现代简约')
-const view = ref<'ISOMETRIC' | 'INTERIOR'>('ISOMETRIC')
 const instructions = ref('')
 const jobs = ref<RenderPreview[]>([])
 const selectedId = ref('')
@@ -25,6 +22,10 @@ const ready = computed(() => snapshot.value?.zone.reviewUnit === 'mm' && (snapsh
 const activeCurrent = computed(() => jobs.value.some(item => renderPreviewActive(item.status) && renderSnapshotKey(item.snapshot) === currentKey.value))
 const stale = (job: RenderPreview) => job.stale || renderSnapshotKey(job.snapshot) !== currentKey.value
 const statusText = (status: string) => ({ SUBMITTING: '正在提交', PENDING: '排队中', RUNNING: '生成中', SUCCEEDED: '已生成', FAILED: '生成失败' }[status] || status)
+const qualityText = (audit: RenderQualityAudit) => ({
+  PASS: '布局与商品参考检查通过', FAIL: '布局或商品还原未通过',
+  UNCERTAIN: '部分内容需要人工核对', UNAVAILABLE: '自动检查不可用，请人工核对',
+}[audit.status])
 const message = (failure: any) => failure?.data?.message || failure?.message || '请求失败，请重试'
 const time = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
 let sequence = 0
@@ -87,7 +88,7 @@ async function generate() {
   const ticket = sequence, expectedKey = currentKey.value, storageKey = pendingStorageKey()
   const revision = store.canvasRevision
   const expectedSnapshot = JSON.parse(JSON.stringify(snapshot.value))
-  const options = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: view.value, instructions: instructions.value.trim(), viewImage: props.viewImage || undefined }
+  const options = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: 'ISOMETRIC', instructions: instructions.value.trim() }
   if (!pending || renderSnapshotKey({ ...pending, clientChangeId: '', canvasRevision: 0 }) !== renderSnapshotKey({ ...options, clientChangeId: '', canvasRevision: 0 })) {
     remember({ ...options, clientChangeId: createUuid() })
   } else remember({ ...pending, canvasRevision: revision })
@@ -150,13 +151,9 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
             <div class="render-concept">概念效果图：用于查看空间氛围，家具数量、位置和款式需对照排版核对。</div>
             <p v-if="snapshot?.zone.evidenceKind === 'DEMO'" class="render-hint">当前为演示空间，生成结果也保留演示来源。</p>
             <label>装修风格<input v-model="style" aria-label="效果图风格" maxlength="100" :disabled="submitting" placeholder="例如：现代简约，浅木色与暖白色"></label>
-            <label v-if="!props.viewImage">观察视角<select v-model="view" aria-label="效果图视角" :disabled="submitting"><option value="ISOMETRIC">45° 鸟瞰 · 查看整体布局</option><option value="INTERIOR">室内透视 · 查看空间氛围</option></select></label>
-            <div v-else class="render-view-source">
-              <span>视角：3D 白模当前视角截图</span>
-              <img :src="props.viewImage" alt="生成结构参考：3D 白模当前视角截图" data-testid="render-view-image">
-            </div>
+            <div class="render-view-source"><span>观察视角：45° 斜俯视 · 家具定位结构参考</span></div>
             <label>补充偏好<textarea v-model="instructions" aria-label="效果图补充偏好" maxlength="500" rows="3" :disabled="submitting" placeholder="例如：灰色地毯、柔和自然光"></textarea></label>
-            <p class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成，无需先绑定商品。未提供的层高、门窗和材质由模型作概念补充。<template v-if="props.viewImage">本次以 3D 白模当前视角截图为结构参考（图1），视角与布局由截图锁定。</template></p>
+            <p class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成，无需先绑定商品。未提供的层高、门窗和材质由模型作概念补充。本次使用带家具定位标识的45°空间结构参考（图1）。</p>
             <p v-if="selectedProductCount" class="render-hint" data-testid="render-selected-products">已绑定 {{ selectedProductCount }} 款商品，将使用主图及可用辅助图参考外观，单款最多 4 个不同视角。</p>
             <button class="render-primary" :disabled="!ready || submitting || activeCurrent || !style.trim()" @click="generate">{{ submitting ? '正在保存并提交…' : activeCurrent ? '当前布局正在生成…' : '生成效果预览' }}</button>
             <p v-if="!ready" class="render-hint">请先校准当前空间，并摆放家具。</p>
@@ -177,12 +174,19 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
               <p v-if="selected.snapshot.furniture.some(item => item.productId) && !selected.productImagesUsed" class="render-outdated" role="status">此任务未使用所选商品图片，请重新生成以参考商品外观。</p>
               <p v-if="selected.productImagesUsed" class="render-hint" data-testid="render-product-images-used">已使用 {{ selected.productReferences?.items.length || 0 }} 款所选商品、{{ selected.productReferences?.items.reduce((sum, item) => sum + (item.usedImageCount || 1), 0) || 0 }} 张图片作为外观参考。</p>
               <p v-for="item in selected.productReferences?.items.filter(item => item.warnings?.length)" :key="item.productId" class="render-hint">{{ item.name }}：部分图片不可读，已使用其余可用图片。</p>
+              <div v-if="selected.qualityAudit" class="render-audit" :class="'audit-' + selected.qualityAudit.status.toLowerCase()" data-testid="render-quality-audit">
+                <strong>{{ qualityText(selected.qualityAudit) }}</strong>
+                <p v-if="selected.qualityAudit.furnitureCount">家具数量：要求 {{ selected.qualityAudit.furnitureCount.expected }} 件<template v-if="selected.qualityAudit.furnitureCount.observed !== undefined">，识别到 {{ selected.qualityAudit.furnitureCount.observed }} 件</template>。</p>
+                <p v-if="selected.qualityAudit.layout?.reason">{{ selected.qualityAudit.layout.reason }}</p>
+                <p v-for="item in selected.qualityAudit.items?.filter(item => item.reason)" :key="item.furnitureReferenceId">{{ item.furnitureReferenceId }}<template v-if="item.productReferenceId"> / {{ item.productReferenceId }}</template>：{{ item.reason }}</p>
+                <p v-if="selected.qualityAudit.reason">{{ selected.qualityAudit.reason }}</p>
+              </div>
               <p v-if="stale(selected)" class="render-outdated" role="status">此图绑定生成时的布局快照，仅作为历史预览。</p>
               <img v-if="selected.status === 'SUCCEEDED' && selected.imageUrl" class="render-image" :src="api.imageUrl(selected.imageUrl)" :alt="selected.zoneName + '概念效果图'">
               <div v-else-if="renderPreviewActive(selected.status)" class="render-wait" role="status"><div class="render-spinner"></div><strong>{{ statusText(selected.status) }}，请稍候</strong><p>可关闭窗口继续排版，稍后打开查看。</p></div>
               <div v-else class="render-wait"><strong>本次生成未完成</strong><p>{{ selected.errorMessage || '请重试生成' }}</p><button class="render-primary" :disabled="submitting || !ready || activeCurrent" @click="generate">按当前布局重试生成</button></div>
               <div v-if="selected.status === 'SUCCEEDED'" class="render-actions"><span>AI 生成 · 概念预览 · {{ selected.model }}</span><button @click="download(selected)">下载图片</button></div>
-              <details v-if="selected.productReferences?.sheetUrls.length" class="render-reference"><summary>查看生成时使用的商品图片</summary><img v-for="url in selected.productReferences.sheetUrls" :key="url" :src="api.imageUrl(url)" alt="生成时所选商品外观参考板"><p>图片编号对应家具清单中的商品，生成结果仍需核对外观和布局。</p></details>
+              <details v-if="selected.productReferences?.sheetUrls.length" class="render-reference"><summary>查看生成时使用的商品图片</summary><img v-for="url in selected.productReferences.sheetUrls" :key="url" :src="api.imageUrl(url)" alt="生成时所选商品外观参考板"><p>P商品编号对应结构图中的F家具；生成结果仍需核对外观和布局。</p></details>
               <details v-if="selected.layoutContext" class="render-reference" data-testid="render-layout-context"><summary>查看本次生成参考的空间与间距</summary><div class="render-hint">
                 <p>空间 {{ selected.layoutContext.widthMm }} × {{ selected.layoutContext.depthMm }} mm · 净面积 {{ selected.layoutContext.netAreaM2.toFixed(2) }} ㎡</p>
                 <p>主体 {{ selected.layoutContext.primaryCount }} 件 · {{ selected.layoutContext.rowCount }} 排 × {{ selected.layoutContext.columnCount }} 列（混合尺寸按实际位置）</p>
@@ -190,9 +194,9 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
                 <p v-for="gap in selected.layoutContext.groupGaps" :key="gap.axis + ':' + gap.distanceMm">{{ gap.axis === 'x' ? '横向' : '纵向' }}组间净距 {{ gap.distanceMm }} mm · {{ gap.count }} 处</p>
                 <p>{{ selected.layoutContext.sourceDrawing.status === 'AVAILABLE' ? '已关联原户型中的当前空间，采用当前编辑后的轮廓。' : '原户型来源未能可靠对应，采用当前空间轮廓。' }} 门窗位置未有可靠数据，生成时不作为既有事实。</p>
               </div></details>
-              <details v-if="selected.layoutGuideUrl" class="render-reference"><summary>查看生成时的空间参考</summary><img :src="api.imageUrl(selected.layoutGuideUrl)" alt="生成时使用的空间立体参考"><p>只引导空间与家具位置，最终画面应为完整场景，不包含图纸、清单或参考板。</p></details>
+              <details v-if="selected.layoutGuideUrl" class="render-reference"><summary>查看生成时的空间参考</summary><img :src="api.imageUrl(selected.layoutGuideUrl)" alt="生成时使用的空间立体参考"><p>F编号对应每件家具及其商品参考，只用于生成定位；最终画面应为完整场景，不包含编号、图纸、清单或参考板。</p></details>
               <details v-if="selected.viewImageUrl" class="render-reference" data-testid="render-view-source-detail"><summary>查看生成时的视角截图</summary><img :src="api.imageUrl(selected.viewImageUrl)" alt="生成时使用的 3D 白模视角截图"><p>本图以该白模截图的视角、透视与家具布局为结构参考生成。</p></details>
-              <details v-if="selected.referenceUrl" class="render-reference"><summary>查看生成时的布局参考 · {{ selected.snapshot.furniture.length }} 个模块</summary><img :src="api.imageUrl(selected.referenceUrl)" alt="生成时的空间与家具布局参考图"><p>保留原始毫米轮廓、家具占地和旋转；朝向同时通过家具清单提供给模型。</p></details>
+              <details v-if="selected.referenceUrl" class="render-reference"><summary>查看生成时的布局参考 · {{ selected.snapshot.furniture.length }} 个模块</summary><img :src="api.imageUrl(selected.referenceUrl)" alt="生成时的空间与家具布局参考图"><p>保留原始毫米轮廓、家具占地和旋转；此平面图仅供人工核对，F家具定位标识见上方空间立体参考。</p></details>
             </template>
             <div v-else class="render-empty"><span>空间排版 → 效果预览</span><h3>看看这个空间的立体效果</h3><p>选择风格和视角，生成带有材质、透视和光影的二维效果图。</p></div>
           </main>
@@ -204,4 +208,5 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
 
 <style scoped>
 .render-backdrop{position:fixed;inset:0;z-index:95;background:#25231f85;display:flex;align-items:center;justify-content:center;padding:24px}.render-dialog{width:min(1240px,96vw);height:min(850px,94vh);display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 25px 80px #0003;color:#45413b;overflow:hidden}.render-dialog header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid #e9e3db}.render-dialog h2{font-size:19px;font-weight:700}.render-dialog header p{font-size:12px;color:#8a8073;margin-top:4px}.render-dialog header button{padding:8px 12px;font-size:18px}.render-content{display:flex;flex:1;min-height:0}.render-settings{width:300px;flex:none;border-right:1px solid #e9e3db;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}.render-concept{font-size:12px;line-height:1.7;background:#f7efe1;color:#866a39;padding:12px;border-radius:10px}.render-settings label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:600}.render-settings input,.render-settings select,.render-settings textarea{border:1px solid #ded8cf;border-radius:8px;padding:9px;font-size:12px;font-weight:400;background:white;width:100%}.render-hint{font-size:11px;line-height:1.8;color:#888075}.render-view-source{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:600}.render-view-source span{font-size:12px}.render-view-source img{width:100%;max-height:140px;object-fit:contain;background:#f4f1ec;border:1px solid #ded8cf;border-radius:8px}.render-primary{border-radius:9px;background:#9c7047;color:white;padding:11px 14px;font-size:12px;font-weight:600}.render-primary:disabled{opacity:.5;cursor:not-allowed}.render-history-heading{display:flex;justify-content:space-between;font-size:12px;border-top:1px solid #e9e3db;padding-top:16px}.render-history-heading button,.render-actions button{color:#976c43;font-size:12px}.render-history-item{text-align:left;border:1px solid #e8e1d8;border-radius:8px;padding:10px;font-size:11px}.render-history-item.selected{border-color:#ae8254;background:#fcf7ef}.render-history-item small{display:block;color:#8a8073;margin-top:5px}.render-history-item b{font-size:10px;color:#b17529;margin-left:4px}.render-result{flex:1;min-width:0;overflow:auto;background:#faf8f5;padding:22px;display:flex;flex-direction:column;gap:14px}.render-result-heading{display:flex;justify-content:space-between;gap:10px;font-size:13px}.render-result-heading span{font-size:11px;color:#8a8073}.render-outdated{background:#fff0d9;color:#986f2d;padding:10px;border-radius:8px;font-size:12px}.render-error{background:#fff0ed;color:#a64c38;padding:12px;border-radius:8px;font-size:12px;line-height:1.7}.render-error button{text-decoration:underline;margin-left:8px}.render-image{width:100%;max-height:530px;object-fit:contain;background:#eee9e0;border-radius:12px}.render-wait,.render-empty{flex:1;min-height:280px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;text-align:center;padding:30px}.render-wait p,.render-empty p{font-size:12px;line-height:1.8;color:#8a8073}.render-empty span{font-size:11px;color:#a17d54;letter-spacing:2px}.render-empty h3{font-size:23px;font-weight:600}.render-spinner{width:34px;height:34px;border:3px solid #e8dfd1;border-top-color:#9c7047;border-radius:50%;animation:render-spin 1s linear infinite}.render-actions{display:flex;justify-content:space-between;align-items:center}.render-actions span{font-size:10px;color:#8a8073}.render-actions button{border:1px solid #d9c9b5;border-radius:8px;padding:7px 14px}.render-reference{font-size:11px;color:#82786b}.render-reference summary{cursor:pointer;padding:6px 0}.render-reference img{width:100%;max-height:320px;object-fit:contain;background:white;border-radius:8px}.render-reference p{margin-top:7px}@keyframes render-spin{to{transform:rotate(360deg)}}@media(max-width:760px){.render-backdrop{padding:8px}.render-content{flex-direction:column;overflow:auto}.render-settings{width:auto;border-right:0;border-bottom:1px solid #e9e3db;overflow:visible}.render-result{overflow:visible;min-height:400px}.render-result-heading{flex-direction:column}}
+.render-audit{padding:11px 13px;border-radius:8px;font-size:12px;line-height:1.7}.render-audit p{margin-top:4px}.audit-pass{background:#edf6ed;color:#376b3d}.audit-fail{background:#fff0ed;color:#a64c38}.audit-uncertain,.audit-unavailable{background:#fff0d9;color:#986f2d}
 </style>

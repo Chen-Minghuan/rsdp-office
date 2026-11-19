@@ -15,9 +15,7 @@ const referenceEditing = ref<LayoutReferenceEditing | null>(null)
 const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
-/** 从 3D 白模发起 AI 效果图时携带的当前视角截图；工具栏直接发起时为空（RENDER-006）。 */
-const renderViewImage = ref('')
-function openRenderPreview(viewImage = '') { renderViewImage.value = viewImage; showRenderPreview.value = true }
+function openRenderPreview() { showRenderPreview.value = true }
 const overviewCollapsed = ref(false)
 const viewRotation = ref(0)
 const showDimensions = ref(true)
@@ -259,7 +257,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
     </div>
 
     <OfficeCanvasSubmitDialog v-model:show="showSubmit" />
-    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :view-image="renderViewImage" />
+    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" />
     <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" @ai-render="openRenderPreview" @locate="onLocateFrom3d" />
   </div>
 </template>

@@ -17,6 +17,14 @@ export interface RenderPreviewRequest {
   viewImage?: string
 }
 
+export interface RenderQualityAudit {
+  status: 'PASS' | 'FAIL' | 'UNCERTAIN' | 'UNAVAILABLE'
+  reason?: string
+  furnitureCount?: { expected: number; observed?: number; status: 'PASS' | 'FAIL' | 'UNCERTAIN' }
+  layout?: { status: 'PASS' | 'FAIL' | 'UNCERTAIN'; reason?: string }
+  items?: Array<{ furnitureReferenceId: string; productReferenceId?: string; status: 'PASS' | 'FAIL' | 'UNCERTAIN'; reason?: string }>
+}
+
 export interface RenderPreview {
   previewId: string
   zoneId: string
@@ -38,7 +46,8 @@ export interface RenderPreview {
   /** 生成时使用的白模视角截图（sourceType 为 whiteModelView 时存在） */
   viewImageUrl?: string
   productImagesUsed?: boolean
-  productReferences?: { version: string; items: Array<{ referenceId: string; productId: string; name: string; variant: string; imageUrl: string; imageSha256: string; usedImageCount?: number; availableImageCount?: number; images?: Array<{viewId:string;imageUrl:string;imageSha256:string}>; warnings?: string[]; furnitureNumbers: number[] }>; sheetUrls: string[] }
+  productReferences?: { version: string; items: Array<{ referenceId: string; productId: string; name: string; variant: string; imageUrl: string; imageSha256: string; usedImageCount?: number; availableImageCount?: number; images?: Array<{viewId:string;imageUrl:string;imageSha256:string}>; warnings?: string[]; furnitureNumbers: number[]; furnitureReferenceIds?: string[] }>; sheetUrls: string[] }
+  qualityAudit?: RenderQualityAudit
   referenceUrl?: string
   errorMessage?: string
   providerTaskId?: string

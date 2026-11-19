@@ -27,7 +27,7 @@ class RenderProductReferencesTest {
     private final RenderProductReferences references=spy(new RenderProductReferences(office,gateway,restTemplate,mainProperties));
     private ObjectNode scene(String... ids) {
         ObjectNode scene=json.createObjectNode(); ArrayNode items=scene.putArray("furniture");
-        for(String id:ids) items.addObject().put("productId",id);
+        for(int i=0;i<ids.length;i++) items.addObject().put("id","F"+(i+1)).put("productId",ids[i]).put("label","测试家具").put("x",i*1000).put("y",0).put("w",600).put("h",600).put("rotation",0);
         return scene;
     }
     private OfficeProductDto product(String id) {
@@ -52,7 +52,8 @@ class RenderProductReferencesTest {
         doReturn(photo()).when(references).readImage(p.getImageUrl(),p.getName());
         var prepared=references.prepare(scene("SKU1","SKU1",""));
         assertEquals(1,prepared.images().size()); assertEquals(1,prepared.manifest().size());
-        assertTrue(prepared.prompt().contains("1至2")); assertTrue(prepared.prompt().contains("P1"));
+        assertTrue(prepared.prompt().contains("F1、F2")); assertTrue(prepared.prompt().contains("P1"));
+        assertEquals("F1",prepared.manifest().get(0).path("furnitureReferenceIds").get(0).asText());
         var board=ImageIO.read(new ByteArrayInputStream(prepared.images().get(0)));
         assertEquals(Color.RED.getRGB(),board.getRGB(board.getWidth()/2,board.getHeight()/2));
         assertEquals(64,prepared.manifest().get(0).path("imageSha256").asText().length());

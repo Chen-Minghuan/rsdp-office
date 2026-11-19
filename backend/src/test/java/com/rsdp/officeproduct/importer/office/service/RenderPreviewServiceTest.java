@@ -21,6 +21,7 @@ class RenderPreviewServiceTest {
     private final ObjectMapper json=new ObjectMapper().findAndRegisterModules();
     private final OfficeService office=mock(OfficeService.class);
     private final RenderProductReferences products=mock(RenderProductReferences.class);
+    private final RenderProductAuditService productAudit=mock(RenderProductAuditService.class);
     private final RenderLayoutContext physicalContext=new RenderLayoutContext(mock(FloorPlanService.class));
     private final OfficeWorkspaceLockMapper projects=mock(OfficeWorkspaceLockMapper.class);
     private final RenderPreviewMapper mapper=mock(RenderPreviewMapper.class);
@@ -28,7 +29,7 @@ class RenderPreviewServiceTest {
     private final RenderPreviewFiles files=mock(RenderPreviewFiles.class);
     private final RenderProperties properties=new RenderProperties();
     private final Map<String,RenderPreview> records=new HashMap<>();
-    private final RenderPreviewService service=new RenderPreviewService(office,products,physicalContext,projects,mapper,provider,files,properties,json);
+    private final RenderPreviewService service=new RenderPreviewService(office,products,productAudit,physicalContext,projects,mapper,provider,files,properties,json);
     private CanvasDto canvas;
     private ArrayNode objects;
 
@@ -38,7 +39,7 @@ class RenderPreviewServiceTest {
               "polygon":[[-6000,-4000],[0,-4000],[0,-2000],[-2000,-2000],[-2000,0],[-6000,0]]},
              {"id":"F1","kind":"furniture","zoneId":"ROOM","label":"办公桌","x":-5500,"y":-3500,"w":1200,"h":600,"rotation":90,"productId":""}]
             """);
-        when(products.prepare(any(),anyBoolean())).thenReturn(RenderProductReferences.Prepared.empty());
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenReturn(RenderProductReferences.Prepared.empty());
         canvas=new CanvasDto(); canvas.setRevision(3); sync();
         when(office.getCanvas("PROJECT")).thenAnswer(call->canvas);
         when(projects.lockWorkspace("PROJECT")).thenReturn(1);
@@ -46,9 +47,13 @@ class RenderPreviewServiceTest {
         when(provider.submit(anyList(),anyString())).thenReturn(json.readTree("{\"output\":{\"task_id\":\"task-1\"},\"request_id\":\"req-1\"}"));
         when(files.reference(anyString(),any())).thenReturn("/uploads/render-previews/reference.png");
         when(files.download(anyString(),anyString())).thenReturn("/uploads/render-previews/result.png");
+        when(files.read(anyString())).thenReturn(new byte[]{1,2,3});
+        when(productAudit.audit(any(),any(),anyList(),any(),any())).thenReturn(json.createObjectNode().put("status","PASS"));
+        when(productAudit.unavailable()).thenReturn(json.createObjectNode().put("status","UNAVAILABLE"));
         when(mapper.insert(any())).thenAnswer(call->{ RenderPreview r=call.getArgument(0); records.put(r.getPreviewId(),r); return 1; });
         when(mapper.byChange(eq("PROJECT"),anyString())).thenAnswer(call->records.values().stream().filter(r->r.getClientChangeId().equals(call.getArgument(1))).findFirst().orElse(null));
         when(mapper.lock(eq("PROJECT"),anyString())).thenAnswer(call->records.get(call.getArgument(1)));
+        when(mapper.updateSnapshot(any())).thenReturn(1);
     }
     private void sync() { canvas.setObjects(json.convertValue(objects,new com.fasterxml.jackson.core.type.TypeReference<List<Object>>(){})); }
     private RenderPreviewRequest request() {
@@ -68,7 +73,7 @@ class RenderPreviewServiceTest {
     @Test void sendsSelectedProductPhotosAndKeepsReferencesSeparateFromLayoutSnapshot() throws Exception {
         ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();
         ArrayNode manifest=json.createArrayNode(); manifest.addObject().put("productId","SKU-1").put("referenceId","P1");
-        when(products.prepare(any(),eq(false))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1，保留商品外观"));
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1，保留商品外观"));
         var result=service.create("PROJECT",request());
         assertTrue(result.path("productImagesUsed").asBoolean());
         assertEquals("SKU-1",result.path("productReferences").path("items").get(0).path("productId").asText());
@@ -80,7 +85,7 @@ class RenderPreviewServiceTest {
         assertTrue(stored.contains("guideUrl"));
     }
     @Test void missingSelectedProductPhotoStopsBeforeBilling() {
-        when(products.prepare(any(),anyBoolean())).thenThrow(new BusinessException("所选商品图片缺失"));
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenThrow(new BusinessException("所选商品图片缺失"));
         assertThrows(BusinessException.class,()->service.create("PROJECT",request()));
         verifyNoInteractions(provider); verify(mapper,never()).insert(any());
     }
@@ -101,6 +106,9 @@ class RenderPreviewServiceTest {
         assertEquals("SUCCEEDED",done.path("status").asText()); assertTrue(done.path("stale").asBoolean());
         assertEquals(-5500,done.path("snapshot").path("furniture").get(0).path("x").asInt());
         assertEquals(-5100,objects.get(1).path("x").asInt()); verify(files).download(eq(id),anyString());
+        assertEquals("PASS",done.path("qualityAudit").path("status").asText());
+        assertTrue(records.get(id).getSnapshotJson().contains("qualityAudit")); verify(mapper).updateSnapshot(records.get(id));
+        service.get("PROJECT",id); verify(productAudit,times(1)).audit(any(),any(),anyList(),any(),any());
     }
     @Test void transientPollOrDownloadFailuresDoNotSubmitAnotherBilledTask() {
         String id=service.create("PROJECT",request()).path("previewId").asText();
@@ -151,39 +159,24 @@ class RenderPreviewServiceTest {
         var r=request(); r.setViewImage("data:image/png;base64,"+Base64.getEncoder().encodeToString(png)); return r;
     }
 
-    @Test void guidedWhiteModelViewUsesScreenshotAsFirstReferenceAndSkipsSpaceGuide() throws Exception {
-        byte[] screenshot=viewPng(800,600);
-        var result=service.create("PROJECT",guidedRequest(screenshot));
-        assertEquals("whiteModelView",result.path("sourceType").asText());
-        assertTrue(result.hasNonNull("viewImageUrl")); assertFalse(result.path("productReferences").has("guideUrl"));
-        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==1 && Arrays.equals(refs.get(0),screenshot)),contains("白模的实时相机截图"));
-        String stored=records.values().iterator().next().getSnapshotJson();
-        assertTrue(stored.contains("whiteModelView")); assertTrue(stored.contains("viewUrl")); assertFalse(stored.contains("guideUrl"));
-        // 方案 A：绑定商品时截图为图1、商品外观板随后，仍不加入立体导视图。
-        ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();
-        ArrayNode manifest=json.createArrayNode(); manifest.addObject().put("productId","SKU-1").put("referenceId","P1");
-        when(products.prepare(any(),eq(true))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1"));
-        var withProducts=guidedRequest(screenshot); withProducts.setExpectedSnapshot(RenderPreviewScene.snapshot(objects,"ROOM")); withProducts.setClientChangeId("CHANGE-2");
-        service.create("PROJECT",withProducts);
-        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==2 && Arrays.equals(refs.get(0),screenshot) && Arrays.equals(refs.get(1),new byte[]{9,8,7})),contains("白模的实时相机截图"));
+    @Test void semanticGuideAndPromptShareFurnitureBindings() {
+        var result=service.create("PROJECT",request());
+        assertEquals("spaceGuide",result.path("sourceType").asText());
+        assertEquals("ISOMETRIC",result.path("view").asText());
+        assertEquals("furniture-product-v1",result.path("productReferences").path("bindingVersion").asText());
+        assertEquals("F1",result.path("productReferences").path("furnitureBindings").get(0).path("referenceId").asText());
+        assertEquals("F1",result.path("productReferences").path("guideLabels").get(0).path("referenceId").asText());
+        verify(provider).submit(anyList(),contains("F1是办公桌"));
     }
-    @Test void guidedContentHashSeparatesScreenshotRequests() throws Exception {
-        byte[] screenshot=viewPng(800,600);
-        var first=service.create("PROJECT",guidedRequest(screenshot));
-        assertEquals(first.path("previewId"),service.create("PROJECT",guidedRequest(screenshot)).path("previewId"));
-        var plain=request(); plain.setClientChangeId("CHANGE-1");
-        assertThrows(BusinessException.class,()->service.create("PROJECT",plain));
-        var other=guidedRequest(viewPng(640,480));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",other));
-        verify(provider,times(1)).submit(anyList(),anyString());
+    @Test void legacyScreenshotsAndInteriorRequestsAreRejectedBeforeBilling() throws Exception {
+        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(800,600))));
+        var interior=request();interior.setView("INTERIOR");
+        assertThrows(BusinessException.class,()->service.create("PROJECT",interior));
+        verifyNoInteractions(provider);verify(mapper,never()).insert(any());
     }
-    @Test void invalidViewImageIsRejectedBeforeBilling() throws Exception {
-        var malformed=request(); malformed.setViewImage("data:image/png;base64,%%%not-base64%%%");
+    @Test void invalidViewImageIsRejectedBeforeBilling() {
+        var malformed=request();malformed.setViewImage("data:image/png;base64,%%%not-base64%%%");
         assertThrows(BusinessException.class,()->service.create("PROJECT",malformed));
-        var wrongType=request(); wrongType.setViewImage("data:image/jpeg;base64,"+Base64.getEncoder().encodeToString(new byte[200]));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",wrongType));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(16,16))));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(8000,500))));
-        verifyNoInteractions(provider); verify(mapper,never()).insert(any());
+        verifyNoInteractions(provider);verify(mapper,never()).insert(any());
     }
 }

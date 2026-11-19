@@ -3,6 +3,7 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.config.RenderProperties;
 import com.rsdp.officeproduct.importer.office.dto.RenderPreviewRequest;
@@ -13,10 +14,6 @@ import com.rsdp.officeproduct.importer.service.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -26,6 +23,7 @@ import java.util.*;
 public class RenderPreviewService {
     private final OfficeService office;
     private final RenderProductReferences productReferences;
+    private final RenderProductAuditService productAudit;
     private final RenderLayoutContext layoutContext;
     private final OfficeWorkspaceLockMapper workspaceLocks;
     private final RenderPreviewMapper previews;
@@ -39,10 +37,9 @@ public class RenderPreviewService {
         project(projectId);
         validateRequest(request);
         workspaceLocks.lockWorkspace(projectId);
-        byte[] guidedView=viewImage(request);
         JsonNode expected=RenderPreviewScene.canonical(request.getExpectedSnapshot());
         String hash=VisionImagePreparer.sha256(encode(RenderPreviewScene.canonical(json.valueToTree(Map.of("snapshot",expected,"style",request.getStyle(),"view",request.getView(),
-            "instructions",request.getInstructions(),"model",properties.getModel(),"viewImage",guidedView==null?"":VisionImagePreparer.sha256(guidedView))))).getBytes(StandardCharsets.UTF_8));
+            "instructions",request.getInstructions(),"model",properties.getModel())))).getBytes(StandardCharsets.UTF_8));
         RenderPreview previous=previews.byChange(projectId,request.getClientChangeId());
         if (previous!=null) {
             if (!hash.equals(previous.getContentHash())) throw new BusinessException("同一生成请求对应不同内容，请重新发起");
@@ -55,25 +52,29 @@ public class RenderPreviewService {
         RenderPreviewScene.validate(scene);
         // Concept preview is deliberately allowed before product selection. It cannot confirm a final scheme.
         var physicalContext=layoutContext.prepare(projectId,scene);
-        var products=productReferences.prepare(scene,guidedView!=null);
+        var bindings=RenderFurnitureBindings.from(scene);
+        var products=productReferences.prepare(scene,bindings);
         provider.requireConfigured();
         RenderPreview entry=new RenderPreview();
         entry.setPreviewId("RPRE-"+UUID.randomUUID()); entry.setProjectId(projectId); entry.setZoneId(request.getZoneId());
         entry.setZoneName(scene.path("zone").path("name").asText("未命名空间")); entry.setCanvasRevision(canvas.getRevision());
         entry.setClientChangeId(request.getClientChangeId()); entry.setContentHash(hash); entry.setSnapshotJson(encode(scene));
-        entry.setStyle(request.getStyle()); entry.setView(request.getView()); entry.setInstructions(request.getInstructions());
+        entry.setStyle(request.getStyle()); entry.setView("ISOMETRIC"); entry.setInstructions(request.getInstructions());
         entry.setModel(properties.getModel()); entry.setProviderBaseUrl(provider.base()); entry.setStatus("SUBMITTING");
         entry.setCreatedAt(LocalDateTime.now()); entry.setUpdatedAt(entry.getCreatedAt());
-        entry.setPrompt(RenderPreviewScene.prompt(scene,entry.getStyle(),entry.getView(),entry.getInstructions(),guidedView!=null) + physicalContext.prompt() + products.prompt());
+        entry.setPrompt(RenderPreviewScene.prompt(scene,entry.getStyle(),"ISOMETRIC",entry.getInstructions(),false) + bindings.prompt() + physicalContext.prompt() + products.prompt());
         byte[] reference=RenderPreviewScene.referencePng(scene);
         entry.setReferenceUrl(files.reference(entry.getPreviewId(),reference));
         var referenceImages=new ArrayList<byte[]>();
         ObjectNode storedScene=scene.deepCopy();
         ObjectNode references=storedScene.putObject("renderProductReferences");
-        // 方案 A：白模截图作为主结构参考（图1），替代 2D 立体导视图；商品外观板（至多 2 张）不变。
-        references.put("sourceType",guidedView!=null?"whiteModelView":"spaceGuide");
-        if (guidedView!=null) { referenceImages.add(guidedView); references.put("viewUrl",files.reference(entry.getPreviewId()+"-view",guidedView)); }
-        else { byte[] guide=RenderSceneGuide.png(scene,entry.getView()); referenceImages.add(guide); references.put("guideUrl",files.reference(entry.getPreviewId()+"-space-guide",guide)); }
+        references.put("sourceType","spaceGuide");
+        references.put("bindingVersion","furniture-product-v1");
+        references.set("furnitureBindings",bindings.manifest());
+        var guide=RenderSceneGuide.render(scene,"ISOMETRIC",bindings);
+        referenceImages.add(guide.image()); references.put("guideUrl",files.reference(entry.getPreviewId()+"-space-guide",guide.image()));
+        var guideLabels=references.putArray("guideLabels");
+        for(var label:guide.labels()) guideLabels.addObject().put("referenceId",label.referenceId()).put("furnitureId",label.furnitureId()).put("x",label.x()).put("y",label.y());
         referenceImages.addAll(products.images());
         references.set("layoutContext",physicalContext.facts());
         references.put("version",RenderProductReferences.VERSION); references.set("items",products.manifest());
@@ -120,7 +121,7 @@ public class RenderPreviewService {
                         for (JsonNode choice : output.path("choices")) for (JsonNode part : choice.path("message").path("content"))
                             if (part.hasNonNull("image") && image==null) image=part.path("image").asText();
                         if (image==null || image.isBlank()) { entry.setStatus("FAILED"); entry.setErrorMessage("生图任务已结束，但没有返回图片，请核对百炼请求记录"); }
-                        else { entry.setImageUrl(files.download(entry.getPreviewId(),image)); entry.setStatus("SUCCEEDED"); entry.setErrorMessage(null); }
+                        else { entry.setImageUrl(files.download(entry.getPreviewId(),image)); entry.setStatus("SUCCEEDED"); entry.setErrorMessage(null); auditResult(entry); }
                     }
                     case "FAILED", "CANCELED", "UNKNOWN" -> { entry.setStatus("FAILED"); entry.setErrorMessage("UNKNOWN".equals(status) ? "百炼任务不存在或已过期，请核对任务记录后重新生成" : "生图任务失败或被取消，请检查百炼任务详情、内容要求及额度后重试"); }
                     default -> throw new BusinessException("暂时无法读取生图任务状态，请稍后查询");
@@ -138,7 +139,8 @@ public class RenderPreviewService {
         JsonNode references=snapshot.remove("renderProductReferences");
         result.set("snapshot",snapshot);
         if (references!=null) { result.set("productReferences",references); if(references.has("layoutContext")) result.set("layoutContext",references.get("layoutContext")); if(references.hasNonNull("guideUrl")) result.put("layoutGuideUrl",references.path("guideUrl").asText());
-            result.put("sourceType",references.path("sourceType").asText("spaceGuide")); if(references.hasNonNull("viewUrl")) result.put("viewImageUrl",references.path("viewUrl").asText()); }
+            result.put("sourceType",references.path("sourceType").asText("spaceGuide")); if(references.hasNonNull("viewUrl")) result.put("viewImageUrl",references.path("viewUrl").asText());
+            if(references.has("qualityAudit")) result.set("qualityAudit",references.get("qualityAudit")); }
         result.put("productImagesUsed", references!=null && !references.path("items").isEmpty());
         boolean stale=true;
         try {
@@ -149,34 +151,32 @@ public class RenderPreviewService {
         return result;
     }
 
+    private void auditResult(RenderPreview entry) {
+        ObjectNode stored=(ObjectNode)decode(entry.getSnapshotJson());
+        ObjectNode references=(ObjectNode)stored.path("renderProductReferences");
+        if(!references.isObject() || !"furniture-product-v1".equals(references.path("bindingVersion").asText()) || references.has("qualityAudit")) return;
+        try {
+            List<byte[]> boards=new ArrayList<>();for(JsonNode url:references.path("sheetUrls")) boards.add(files.read(url.asText()));
+            var bindings=RenderFurnitureBindings.from(stored);
+            ObjectNode audit=productAudit.audit(files.read(entry.getImageUrl()),files.read(references.path("guideUrl").asText()),boards,bindings,(ArrayNode)references.path("items"));
+            references.set("qualityAudit",audit);
+        } catch(BusinessException e) {
+            references.set("qualityAudit",productAudit.unavailable());
+        }
+        entry.setSnapshotJson(encode(stored));
+        previews.updateSnapshot(entry);
+    }
+
     private void validateRequest(RenderPreviewRequest request) {
         if (request==null) throw new BusinessException("请提供当前空间和生成参数");
         id(request.getZoneId(),"空间 ID"); id(request.getClientChangeId(),"生成请求 ID");
         if (request.getCanvasRevision()==null || request.getCanvasRevision()<1 || request.getExpectedSnapshot()==null || !request.getExpectedSnapshot().isObject()
             || encode(request.getExpectedSnapshot()).length()>1_000_000) throw new BusinessException("排版快照或版本无效");
         if (request.getStyle()==null || request.getStyle().isBlank() || request.getStyle().length()>100) throw new BusinessException("请填写 1 至 100 字的效果图风格");
-        if (!List.of("ISOMETRIC","INTERIOR").contains(request.getView()==null ? "" : request.getView())) throw new BusinessException("请选择鸟瞰或室内透视视角");
+        if (!"ISOMETRIC".equals(request.getView())) throw new BusinessException("AI效果图统一使用45度斜俯视视角");
         if (request.getInstructions()==null) request.setInstructions("");
         if (request.getInstructions().length()>500) throw new BusinessException("补充偏好最多 500 字");
-        if (request.getViewImage()!=null && request.getViewImage().length()>14_000_000) throw new BusinessException("视角截图过大，请从 3D 白模重新发起生成");
-    }
-    /** 可选的白模视角截图：计费前完成解码与尺寸校验，不信任前端像素内容。 */
-    private byte[] viewImage(RenderPreviewRequest request) {
-        String value=request.getViewImage();
-        if (value==null || value.isBlank()) return null;
-        String prefix="data:image/png;base64,";
-        if (!value.startsWith(prefix) || value.length()>14_000_000) throw new BusinessException("视角截图无效，请从 3D 白模重新发起生成");
-        byte[] bytes;
-        try { bytes=Base64.getDecoder().decode(value.substring(prefix.length())); }
-        catch (IllegalArgumentException e) { throw new BusinessException("视角截图无效，请从 3D 白模重新发起生成"); }
-        if (bytes.length<100 || bytes.length>10_000_000) throw new BusinessException("视角截图大小超出可接受范围");
-        try {
-            BufferedImage image=ImageIO.read(new ByteArrayInputStream(bytes));
-            if (image==null) throw new IOException("unreadable");
-            int w=image.getWidth(), h=image.getHeight();
-            if (w<64 || h<64 || w>8000 || h>8000 || (double)Math.max(w,h)/Math.min(w,h)>10) throw new IOException("size");
-        } catch (IOException e) { throw new BusinessException("视角截图无法读取，请从 3D 白模重新发起生成"); }
-        return bytes;
+        if (request.getViewImage()!=null && !request.getViewImage().isBlank()) throw new BusinessException("AI效果图已统一使用带家具定位标识的45度空间结构参考，请重新打开发起");
     }
     private void project(String value) { id(value,"项目 ID"); }
     private void id(String value,String label) { if (value==null || !value.matches("[A-Za-z0-9_-]{1,128}")) throw new BusinessException(label+"无效"); }

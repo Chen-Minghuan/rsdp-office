@@ -238,3 +238,5 @@ Office 将确认后的新商品通过 `POST /api/v1/products/factory-entry` 写�
 RENDER-004 更新：RenderProductReferences 按有效商品的 rspuId 从 image_assets 读取公共/当前变体图片，主图优先、内容去重、每款最多 4 个角度；每款参考块合图后仍限制为两板。版本 selected-products-multiview-v2，保存每张来源与摘要及实际使用张数。provider 第一张图片改为 RenderSceneGuide 的无文字立体代理图，原 referencePng 仅供平面核对；实际引导 URL 随任务保存并响应 layoutGuideUrl。正向与负向提示共同限定完整场景，不能将图纸或清单绘入场景。见 [RENDER-004](tasks/RENDER-004-multiview-products-and-scene-guide.md)。
 
 RENDER-005 更新：RenderLayoutContext 从不可变当前设计计算多边形净面积、旋转外包离墙/相邻净距、主模块行列与朝向，并按项目/空间稳定 ID/来源修订/图片摘要关联原识别记录。原始轮廓不覆盖用户几何，来源不可用可降级，门窗未知明确标记。汇总提示替代逐件大坐标清单；RenderSceneGuide 支持 L 型与镜像。测量存于服务端附件、响应 layoutContext，客户端 snapshot 投影包含排版角色/分组/设置及来源比例字段。见 [RENDER-005](tasks/RENDER-005-physical-layout-context.md)。
+
+RENDER-009 更新：RenderFurnitureBindings 从后端校验后的scene统一分配逐件F编号和按productId共享的P编号，方位由旋转外包中心与房间边界计算。RenderSceneGuide 保留45°几何并在全部块体后绘制F标签，RenderProductReferences 将P参考板明确映射到F家具；2D工具栏和3D白模AI入口均只提交ISOMETRIC，不再上传白模相机截图，历史whiteModelView仍可读取。生成PNG后由RenderProductAuditService和QwenVisionClient做一次非权威性视觉核对，qualityAudit写回snapshot_json附件；SUCCEEDED不等于商品精确还原，不自动重新生图。见 [RENDER-009](tasks/RENDER-009-furniture-product-bindings.md)。

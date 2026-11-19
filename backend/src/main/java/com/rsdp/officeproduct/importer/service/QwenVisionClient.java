@@ -21,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -55,6 +56,33 @@ public class QwenVisionClient {
     public JsonNode recognize(MultipartFile file, int pageNumber) {
         validateConfiguration();
         return recognizePrepared(imagePreparer.prepare(file, pageNumber), null);
+    }
+
+    /** Generic low-temperature visual comparison for an already generated render; no geometry is inferred into design data. */
+    public JsonNode auditRender(String prompt,List<byte[]> pngImages) {
+        validateConfiguration();
+        if(pngImages==null || pngImages.size()<2 || pngImages.size()>4) throw new BusinessException("效果图检查需要生成图、结构图和可选商品参考图");
+        ObjectNode payload=objectMapper.createObjectNode();payload.put("model",properties.getModel());payload.put("stream",false);
+        payload.put("enable_thinking",false);payload.put("temperature",0);payload.put("max_tokens",4096);
+        payload.putObject("response_format").put("type","json_object");
+        ArrayNode content=payload.putArray("messages").addObject().put("role","user").putArray("content");
+        content.addObject().put("type","text").put("text",prompt);
+        for(byte[] image:pngImages) {
+            if(image==null || image.length<100 || image.length>20_000_000) throw new BusinessException("效果图检查图片无效");
+            content.addObject().put("type","image_url").putObject("image_url").put("url","data:image/png;base64,"+Base64.getEncoder().encodeToString(image));
+        }
+        HttpHeaders headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.setBearerAuth(properties.getApiKey().trim());
+        String endpoint=properties.getBaseUrl().trim().replaceAll("/+$","")+"/chat/completions";
+        try {
+            String body=restTemplate.postForObject(endpoint,new HttpEntity<>(payload.toString(),headers),String.class);
+            JsonNode response=objectMapper.readTree(body==null?"":body),choice=response.path("choices").path(0);
+            if(!"stop".equals(choice.path("finish_reason").asText())) throw new BusinessException("效果图检查响应不完整");
+            JsonNode text=choice.path("message").path("content");if(!text.isTextual()) throw new BusinessException("效果图检查没有返回文字结果");
+            JsonNode parsed=objectMapper.readTree(stripFence(text.asText()));
+            if(parsed==null || !parsed.isObject()) throw new BusinessException("效果图检查没有返回有效对象");
+            ((ObjectNode)parsed).put("providerRequestId",response.path("id").asText("")).put("model",response.path("model").asText(properties.getModel()));return parsed;
+        } catch(BusinessException e) { throw e; }
+        catch(RestClientException | java.io.IOException e) { throw new BusinessException("效果图自动检查暂时不可用，请人工核对"); }
     }
 
     public JsonNode recognizeDimensions(VisionImagePreparer.PreparedImage image) {

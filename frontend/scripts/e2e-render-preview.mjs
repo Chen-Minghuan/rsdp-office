@@ -32,6 +32,7 @@ try {
   await context.route('**/api/v1/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname
     const respond = (data, code = 200, message = 'success') => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code, message, data }) })
+    if (path === '/api/v1/office/projects') return respond([{ projectId: 'OFFICE-PROJECT-001', name: '效果图测试项目', floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }])
     if (path.endsWith('/canvas')) {
       if (req.method() === 'PUT') saved = req.postDataJSON()
       return respond(saved)
@@ -50,12 +51,14 @@ try {
       if (boundProduct) assert.equal(body.expectedSnapshot.furniture[0].productSelection.product.id, 'SKU-SELECTED')
       assert.equal(body.expectedSnapshot.furniture[0].layoutConfirmed, undefined)
       assert.deepEqual(body.expectedSnapshot.furniture[0].x, saved.objects[1].x)
-      assert.equal(body.viewImage, undefined, '工具栏发起不带视角截图，仍用空间立体引导图')
+      assert.equal(body.viewImage, undefined, '所有入口均使用后端45°家具定位结构图')
+      assert.equal(body.view, 'ISOMETRIC')
       const job = { previewId: 'RPRE-' + submissions.length, zoneId: zone.id, zoneName: zone.name, canvasRevision: body.canvasRevision, purpose: 'CONCEPT_PREVIEW',
         model: 'qwen-image-3.0', style: body.style, view: body.view, instructions: body.instructions, snapshot: body.expectedSnapshot,
         status: failedSubmission ? 'FAILED' : 'PENDING', errorMessage: failedSubmission ? '生图鉴权失败，请核对模型调用权限' : null, stale: false,
         layoutContext: {version:'physical-layout-v1',widthMm:6000,depthMm:4000,netAreaM2:20,furnitureCount:1,primaryCount:1,rowCount:1,columnCount:1,wallClearancesMm:{left:500,right:3500,top:500,bottom:700},groupGaps:[],reservedAreas:[],sourceDrawing:{status:'UNAVAILABLE'},openingsKnown:false},
-        layoutGuideUrl: '/uploads/render-previews/space-guide.png', productImagesUsed: boundProduct, productReferences: boundProduct ? {version:'selected-products-multiview-v2',items:[{referenceId:'P1',productId:'SKU-SELECTED',name:'所选红色桌',variant:'1200×600',imageUrl:'/uploads/images/product.png',imageSha256:'hash',usedImageCount:3,availableImageCount:3,images:[{viewId:'P1-V1'},{viewId:'P1-V2'},{viewId:'P1-V3'}],furnitureNumbers:[1]}],sheetUrls:['/uploads/render-previews/product-board.png']} : undefined,
+        layoutGuideUrl: '/uploads/render-previews/space-guide.png', productImagesUsed: boundProduct, productReferences: boundProduct ? {version:'selected-products-multiview-v3-furniture-bindings',items:[{referenceId:'P1',productId:'SKU-SELECTED',name:'所选红色桌',variant:'1200×600',imageUrl:'/uploads/images/product.png',imageSha256:'hash',usedImageCount:3,availableImageCount:3,images:[{viewId:'P1-V1'},{viewId:'P1-V2'},{viewId:'P1-V3'}],furnitureNumbers:[1],furnitureReferenceIds:['F1']}],sheetUrls:['/uploads/render-previews/product-board.png']} : undefined,
+        qualityAudit: { status: 'PASS', furnitureCount: { expected: 1, observed: 1, status: 'PASS' }, layout: { status: 'PASS' }, items: [] },
         referenceUrl: '/uploads/render-previews/reference.png', createdAt: new Date().toISOString() }
       jobs.unshift(job); byChange.set(body.clientChangeId, job)
       if (loseFirstResponse) { loseFirstResponse = false; return route.abort('failed') }
@@ -110,6 +113,7 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await open()
   await page.getByAltText(zone.name + '概念效果图').waitFor()
+  await page.getByText('布局与商品参考检查通过', { exact: true }).waitFor()
   await page.getByText('布局已变化，需重新生成', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(item => item.id === 'F1').x), -5300)
   assert.equal(submissions.length, 1, '恢复查询不得再次提交生图')
@@ -120,10 +124,10 @@ try {
   await page.getByAltText('生成时的空间与家具布局参考图').waitFor()
 
   failedSubmission = true
-  await page.getByLabel('效果图视角').selectOption('INTERIOR')
+
   await page.getByRole('button', { name: '生成效果预览', exact: true }).click()
   await page.getByText('生图鉴权失败，请核对模型调用权限', { exact: true }).waitFor()
-  assert.equal(submissions[1].view, 'INTERIOR')
+  assert.equal(submissions[1].view, 'ISOMETRIC')
   failedSubmission = false; mode = 'ERROR'
   await page.getByRole('button', { name: '按当前布局重试生成', exact: true }).click()
   await page.getByText('暂时无法查询，请稍后重试', { exact: false }).waitFor()
@@ -131,6 +135,7 @@ try {
   mode = 'SUCCEEDED'
   await page.getByRole('button', { name: '重新查询任务', exact: true }).click()
   await page.getByAltText(zone.name + '概念效果图').waitFor()
+  await page.getByText('布局与商品参考检查通过', { exact: true }).waitFor()
   await page.getByText('对应当前布局', { exact: true }).waitFor()
   assert.equal(submissions.length, 3, '查询失败后的重试不得创建新任务')
   assert.ok(polls >= 3)
@@ -167,6 +172,7 @@ try {
   assert.equal(await page.getByRole('dialog', { name: '单空间效果预览' }).count(), 0)
   console.log('Render preview mock UI passed: snapshot, pending/reload, stale result, download, failure/retry, query recovery')
 } catch (error) {
+  if (page) await page.screenshot({ path: '../output/validation/e2e-render-preview-failure.png', fullPage: true })
   throw error
 } finally {
   await browser?.close()
