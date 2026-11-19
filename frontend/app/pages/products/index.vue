@@ -17,6 +17,7 @@ const selectedProduct = ref<ImportedProduct | null>(null)
 const detailDialog = ref<HTMLDialogElement | null>(null)
 /** 公共库工作区级开关状态（仅经销商主号可切换；成员无个人开关，完全跟随主号设置） */
 const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
+const savingCatalogStatus = ref(false)
 const activeCount = computed(() => products.value.filter(product => product.status === 'active').length)
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
 const filteredProducts = computed(() => {
@@ -74,6 +75,26 @@ async function loadCatalogStatus() {
   }
 }
 
+async function toggleWorkspaceSharedCatalog() {
+  const current = catalogStatus.value
+  if (!current?.dealer || savingCatalogStatus.value) return
+
+  savingCatalogStatus.value = true
+  actionError.value = null
+  actionMessage.value = null
+  try {
+    const updated = await api.setWorkspaceSharedCatalog(!current.workspaceEnabled)
+    catalogStatus.value = updated
+    currentPage.value = 1
+    actionMessage.value = updated.workspaceEnabled ? '公共库已开启，对整个工作区生效' : '公共库已关闭，对整个工作区生效'
+    await loadProducts()
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '公共库开关切换失败'
+  } finally {
+    savingCatalogStatus.value = false
+  }
+}
+
 function formatPrice(price: number | null) {
   return price == null ? '—' : `¥ ${price.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
@@ -116,6 +137,15 @@ onMounted(() => {
           <p class="text-xs text-muted">维护办公商品资料，为空间设计与方案报价提供商品资源。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <button v-if="catalogStatus?.dealer" type="button" role="switch" aria-label="公共库"
+            :aria-checked="catalogStatus.workspaceEnabled" :disabled="savingCatalogStatus"
+            class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream disabled:opacity-60"
+            @click="toggleWorkspaceSharedCatalog">
+            <span>公共库</span>
+            <span class="rounded px-1.5 py-0.5 text-xs" :class="catalogStatus.workspaceEnabled ? 'bg-green/10 text-green' : 'bg-bg text-muted'">
+              {{ savingCatalogStatus ? '保存中' : catalogStatus.workspaceEnabled ? '已开启' : '已关闭' }}
+            </span>
+          </button>
           <NuxtLink to="/products/manual" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
             <AppIcon name="plus" size="4" />手工录入
           </NuxtLink>
