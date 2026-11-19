@@ -49,6 +49,7 @@ import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilitie
 import { layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { mixedOfficeSeats, mixedPlacementProblem } from '~/utils/mixedLayout'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
+import { proposalFurnitureCartMismatches, type ProposalFurnitureCartMismatch } from '~/utils/proposalFurnitureGate'
 import { authEnabled, useAuth } from '~/composables/useAuth'
 
 const STORAGE_KEY = 'rsdp-office-v01'
@@ -249,6 +250,9 @@ export const useOfficeStore = defineStore('office', {
         const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
         return items.length > 0 && items.every(item => item.layoutConfirmed)
       }
+    },
+    proposalFurnitureCartMismatches(): ProposalFurnitureCartMismatch[] {
+      return proposalFurnitureCartMismatches(this.zones, this.objects, this.cart)
     },
     comboById(): (id: string) => ProductCombo | undefined {
       const allCombos = this.combos.length ? this.combos : SAMPLE_COMBOS
