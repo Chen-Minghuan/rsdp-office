@@ -1,4 +1,5 @@
 import type { ManualFurnitureItem, ManualLayoutRect, ManualLayoutRoom, FurnitureCategory, FurnitureKind, FurnitureTemplate } from '~/types/manualCanvas'
+import type { FurnitureObject, ZoneObject } from '~/types/office'
 import { manualRectContainedByUnion } from '~/utils/manualLayoutGeometry'
 
 const builtInFurniture: FurnitureTemplate[] = [
@@ -71,6 +72,33 @@ export const furnitureCatalogTemplates = MANUAL_FURNITURE_TEMPLATES.filter(templ
 export const furnitureCategories: FurnitureCategory[] = [
   '职员桌', '主管桌', '高管桌', '前台', '座椅', '会议与洽谈', '收纳', '接待休闲', '设备辅助',
 ]
+
+export function furnitureCategoryForItem(item?: Pick<FurnitureObject, 'furnitureTemplateId' | 'moduleSnapshot'> | null): FurnitureCategory | null {
+  if (!item) return null
+  return item.moduleSnapshot?.category || furnitureById.get(item.moduleSnapshot?.glyphTemplateId || item.furnitureTemplateId || '')?.category || null
+}
+
+export function preferredFurnitureCategory(zone?: Pick<ZoneObject, 'name' | 'zoneType'> | null): FurnitureCategory {
+  const name = zone?.name || ''
+  if (/总经办|总经理|总裁|高管|董事/.test(name)) return '高管桌'
+  if (/经理|主管/.test(name)) return '主管桌'
+  if (/会议|洽谈/.test(name)) return '会议与洽谈'
+  if (/前台/.test(name)) return '前台'
+  if (/接待|休闲|会客|茶水/.test(name)) return '接待休闲'
+  if (/储物|储藏|收纳/.test(name)) return '收纳'
+  if (/打印|设备|机房/.test(name)) return '设备辅助'
+  if (/开放办公|员工|职员/.test(name)) return '职员桌'
+  switch (zone?.zoneType) {
+    case 'MEETING_ROOM': return '会议与洽谈'
+    case 'EXECUTIVE_OFFICE': return '高管桌'
+    case 'RECEPTION':
+    case 'COLLABORATION': return '接待休闲'
+    case 'STORAGE': return '收纳'
+    case 'PRINT_AREA':
+    case 'SERVER_ROOM': return '设备辅助'
+    default: return '职员桌'
+  }
+}
 
 /** 家具按中心点定位；90° 旋转后占地宽深互换。 */
 export function furnitureBounds(item: ManualFurnitureItem): ManualLayoutRect {
