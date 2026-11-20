@@ -12,9 +12,16 @@ import java.util.Set;
 /** Validate confirmed furniture independently of client-side button states. Drafts remain editable. */
 public final class OfficeLayoutValidationPolicy {
 
-    /** 前端的 l-desk / rounded-l-desk 及其模板 ID，均按「主台面 + 侧翼」两块判定。 */
+    /**
+     * 前端的 l-desk / rounded-l-desk 及其模板 ID，均按「主台面 + 侧翼」两块判定。
+     * 必须与 frontend/app/utils/manualFurniture.ts 中 kind 为 l-desk / rounded-l-desk 的模板保持一致，
+     * 否则前端可放、后端仍按整块矩形拒绝（例如漏掉 counter-l 时的 L 形前台）。
+     */
     private static final Set<String> L_DESK_KINDS = Set.of(
-        "l-desk", "rounded-l-desk", "desk-l", "desk-l-rounded", "desk-screen-l", "desk-manager-l", "desk-executive-l");
+        "l-desk", "rounded-l-desk", "desk-l", "desk-l-rounded", "desk-screen-l", "desk-manager-l", "desk-executive-l",
+        "counter-l");
+    /** 前端「单桌」变体的模板 ID 后缀。 */
+    private static final String DESK_ONLY_SUFFIX = "-desk-only";
 
     private OfficeLayoutValidationPolicy() {}
 
@@ -268,7 +275,12 @@ public final class OfficeLayoutValidationPolicy {
     private static String furnitureKind(JsonNode item) {
         String snapshotKind = item.path("moduleSnapshot").path("kind").asText("");
         if (!snapshotKind.isBlank()) return snapshotKind;
-        return L_DESK_KINDS.contains(item.path("furnitureTemplateId").asText("")) ? "l-desk" : "";
+        // 前端目录会把带座椅的模板再生成一个「单桌」变体（id 追加 -desk-only，kind 沿用原模板），
+        // 这里先还原基础模板 ID，否则 desk-l-desk-only 之类会被当成普通整块矩形。
+        String templateId = item.path("furnitureTemplateId").asText("");
+        String baseId = templateId.endsWith(DESK_ONLY_SUFFIX)
+            ? templateId.substring(0, templateId.length() - DESK_ONLY_SUFFIX.length()) : templateId;
+        return L_DESK_KINDS.contains(baseId) ? "l-desk" : "";
     }
 
     private static Rectangle2D.Double rotatedBlock(Rectangle2D.Double origin, double angle,
