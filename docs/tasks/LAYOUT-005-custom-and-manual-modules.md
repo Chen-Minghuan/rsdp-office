@@ -43,3 +43,9 @@
 - 办公转椅、会议椅、访客椅、休闲单椅和吧椅分别使用独立线稿；新增总裁椅（740 × 780 mm，预设高度 1200 mm）。
 
 验证通过 `pnpm build`、`pnpm test:white-model`、`pnpm test:arrangement-presets`、`pnpm test:layout-planning`、`pnpm e2e:custom-modules`、`pnpm e2e:furniture-modules`、`pnpm e2e:multi-furniture`、`pnpm e2e:preview-drag` 和 `pnpm e2e:layout-planning`。UI 使用模拟 API，覆盖九款单桌图例、六种座椅线稿、总裁椅落位、45 款图例自动排布及画布快捷键。已查看座椅目录截图，本次未运行真实服务集成验收。
+
+## 2026-11-19 产品选型直接摆放
+
+- 产品选型的内置和自定义图例移除卡片内“自动 / 逐件”按钮；点击图例即进入手动摆放，画布显示跟随指针的实际尺寸预览，也可拖拽图例到画布落位。两种操作复用既有世界坐标换算、吸附、硬校验、连续放置、旋转、撤销和确认失效链路。
+- 已排家具的模块替换改为编辑区显式进入“选择图例替换当前模块”，避免点击图例新增时误替换；顶部“自动布局”继续承接当前选中图例和自定义模块。
+- 验证：前端生产构建、`e2e:custom-modules`（含真实浏览器点击及拖拽）和 `e2e:module-recommendations`（含显式替换）通过；本机 Edge，全部 API 模拟。按用户要求仅保留核心代码及两份专项测试改动，其他引用旧按钮的 UI 脚本未批量适配或执行；真实业务保存与业务验收未新增。

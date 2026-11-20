@@ -9,6 +9,7 @@ import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layou
 import { facilityLayoutHints } from './spatial/facilities'
 import type { PlacementArea } from './spatial/layoutRegions'
 import { rotatedFurnitureFootprint as officeFurnitureFootprint, rectOverlapsBlocker } from './layoutConstraints'
+import { furnitureFootprintRects, rectsOverlap } from './furnitureFootprint'
 import { channelRects } from './layoutChannels'
 import { ringArea } from './spatial/geometry'
 import { layoutCandidateScoreDetail, layoutFailureAdvice, layoutObjectiveGoal } from './layoutScoring'
@@ -146,13 +147,13 @@ function mixedGuestSeats(items: FurnitureObject[]) {
 export function mixedPlacementProblem(zone: ZoneObject, items: FurnitureObject[], spacing: OfficeLayoutSpacing, geometry = roomGeometry(zone)) {
   if (![spacing.wallMm, spacing.aisleMm, spacing.gapMm].every(value => Number.isFinite(value) && value >= 0)) return '间距必须为非负数'
   const footprints = items.map(officeFurnitureFootprint)
+  const blocks = items.map(furnitureFootprintRects)
   for (const [i, item] of items.entries()) {
     if (!item.mixedBundleId) continue
-    const footprint = footprints[i]!
-    if (!canPlace(geometry, footprint, spacing.wallMm)) return '组合家具越界、离墙不足或占用建筑约束或通道'
+    if (!canPlace(geometry, footprints[i]!, spacing.wallMm)) return '组合家具越界、离墙不足或占用建筑约束或通道'
     for (const [j, other] of items.entries()) {
       if (j === i || (other.mixedBundleId === item.mixedBundleId)) continue
-      if (rectOverlapsBlocker(footprint, footprints[j]!, other.mixedBundleId ? spacing.aisleMm : spacing.gapMm)) return '组合家具的净距不足'
+      if (rectsOverlap(blocks[i]!, blocks[j]!, other.mixedBundleId ? spacing.aisleMm : spacing.gapMm)) return '组合家具的净距不足'
     }
   }
   return null
