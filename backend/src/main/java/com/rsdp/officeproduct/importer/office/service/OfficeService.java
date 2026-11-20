@@ -242,8 +242,9 @@ public class OfficeService {
     public void checkProposalCatalog(String projectId) {
         CanvasDto canvas = getCanvas(projectId);
         if (canvas == null || canvas.getObjects() == null) return;
-        Map<List<String>, OfficeProductDto> checked = new HashMap<>();
         JsonNode items = objectMapper.valueToTree(canvas.getObjects());
+        requireProposalCartMatchesFurniture(projectId, items);
+        Map<List<String>, OfficeProductDto> checked = new HashMap<>();
         for (JsonNode item : items) {
             JsonNode selected = item.path("productSelection").path("product");
             String rspuId = selected.path("rspuId").asText(null);
@@ -257,6 +258,62 @@ public class OfficeService {
                 || changed(selected.get("price"), current.getPrice())) {
                 throw new BusinessException("方案中的商品「" + selected.path("name").asText(variantId)
                     + "」已不可用或规格、价格有变化，请回到款式推荐重新核验");
+            }
+        }
+    }
+
+    private void requireProposalCartMatchesFurniture(String projectId, JsonNode items) {
+        Map<String, String> zoneNames = new LinkedHashMap<>();
+        Map<String, List<JsonNode>> furnitureByZone = new LinkedHashMap<>();
+        for (JsonNode item : items) {
+            String kind = item.path("kind").asText();
+            String zoneId = item.path("id").asText(null);
+            if ("zone".equals(kind) && StringUtils.hasText(zoneId)) {
+                zoneNames.put(zoneId, item.path("name").asText(zoneId));
+            } else if ("furniture".equals(kind)) {
+                zoneId = item.path("zoneId").asText(null);
+                if (StringUtils.hasText(zoneId)) {
+                    furnitureByZone.computeIfAbsent(zoneId, ignored -> new ArrayList<>()).add(item);
+                }
+            }
+        }
+
+        List<OfficeCart> cart = cartMapper.selectList(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
+        Map<String, List<OfficeCart>> cartByZone = cart.stream()
+            .filter(line -> StringUtils.hasText(line.getZoneId()))
+            .collect(Collectors.groupingBy(OfficeCart::getZoneId, LinkedHashMap::new, Collectors.toList()));
+        Set<String> zoneIds = new LinkedHashSet<>(zoneNames.keySet());
+        zoneIds.addAll(furnitureByZone.keySet());
+        zoneIds.addAll(cartByZone.keySet());
+
+        for (String zoneId : zoneIds) {
+            List<JsonNode> furniture = furnitureByZone.getOrDefault(zoneId, List.of());
+            List<OfficeCart> zoneCart = cartByZone.getOrDefault(zoneId, List.of());
+            int furnitureCount = furniture.size();
+            int cartQuantity = zoneCart.stream().map(OfficeCart::getQty)
+                .filter(Objects::nonNull).filter(qty -> qty > 0).mapToInt(Integer::intValue).sum();
+            if (furnitureCount != cartQuantity) {
+                throw new BusinessException("空间「" + zoneNames.getOrDefault(zoneId, zoneId) + "」家具数量为 "
+                    + furnitureCount + "，购物车数量为 " + cartQuantity + "，请回到款式推荐核对选品数量");
+            }
+
+            Map<String, Integer> remainingByLineId = new HashMap<>();
+            Map<String, OfficeCart> cartByLineId = new HashMap<>();
+            for (OfficeCart line : zoneCart) {
+                if (!StringUtils.hasText(line.getLineId())) continue;
+                remainingByLineId.put(line.getLineId(), line.getQty() == null ? 0 : Math.max(0, line.getQty()));
+                cartByLineId.put(line.getLineId(), line);
+            }
+            for (JsonNode item : furniture) {
+                String lineId = item.path("productSelection").path("cartLineId").asText(null);
+                String productId = item.path("productId").asText(null);
+                OfficeCart line = lineId == null ? null : cartByLineId.get(lineId);
+                int remaining = lineId == null ? 0 : remainingByLineId.getOrDefault(lineId, 0);
+                if (line == null || remaining < 1 || !Objects.equals(productId, line.getProductId())) {
+                    throw new BusinessException("空间「" + zoneNames.getOrDefault(zoneId, zoneId)
+                        + "」有家具未关联有效购物车商品，请回到款式推荐重新核验");
+                }
+                remainingByLineId.put(lineId, remaining - 1);
             }
         }
     }
