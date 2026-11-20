@@ -189,6 +189,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           :view-rotation="viewRotation"
           :mode="mode"
           @undo="store.undo"
+          @redo="store.redo"
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
           @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"

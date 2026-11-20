@@ -23,8 +23,9 @@ class OfficeCanvasFloorValidationTest {
     private final OfficeService service = new OfficeService(locks, projects, access, canvases, mock(OfficeCartMapper.class),
         mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
 
-    @Test void blankScopeContinuesToUseValidatedLegacyDefaultFloor() {
+    @Test void explicitLegacyFloorRemainsUsable() {
         var request = new SaveCanvasRequest();
+        request.setProjectId("OFFICE-PROJECT-001");
         request.setMode("overview");
         request.setObjects(List.of());
         request.setFiles(List.of());
@@ -32,6 +33,15 @@ class OfficeCanvasFloorValidationTest {
         verify(projects).requireFloor("OFFICE-PROJECT-001");
         verify(locks).lockWorkspace("OFFICE-PROJECT-001");
         verify(canvases).insert(any(com.rsdp.officeproduct.importer.office.entity.OfficeCanvas.class));
+    }
+
+    @Test void blankScopeIsRejectedWithoutSavingToLegacyFloor() {
+        var request = new SaveCanvasRequest();
+        request.setMode("overview");
+        request.setObjects(List.of());
+        doThrow(new BusinessException("楼层不存在，请先创建项目和楼层")).when(projects).requireFloor(null);
+        assertThrows(BusinessException.class, () -> service.saveCanvas(request));
+        verifyNoInteractions(locks, canvases);
     }
 
     @Test void unknownScopeIsRejectedBeforeCanvasWrite() {

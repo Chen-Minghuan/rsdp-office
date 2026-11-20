@@ -30,7 +30,7 @@ class OfficeModuleRecommendationServiceTest {
              {"id":"OTHER","kind":"furniture","zoneId":"OTHER-ZONE","w":1200,"h":600,"productId":"KEEP","layoutConfirmed":true}]
             """, new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {}));
         when(office.getCanvas("P")).thenReturn(canvas);
-        when(office.listOfficeProducts()).thenReturn(List.of(sku("FIT", "1200", "600"), sku("SMALL", "600", "300"), sku("TOO-WIDE", "1200.01", "600"), new OfficeProductDto()));
+        when(office.listOfficeProducts()).thenReturn(List.of(sku("FIT", "1200", "600"), sku("SMALL", "700", "300"), sku("TOO-WIDE", "1200.01", "600"), new OfficeProductDto()));
     }
     private OfficeProductDto sku(String id, String width, String depth) {
         var p = new OfficeProductDto(); p.setId(id); p.setVariantId(id); p.setRspuId("MASTER"); p.setName("办公桌"); p.setWidthMm(new BigDecimal(width)); p.setDepthMm(new BigDecimal(depth)); p.setPrice(BigDecimal.TEN); return p;
@@ -92,7 +92,7 @@ class OfficeModuleRecommendationServiceTest {
         var module = (Map<String,Object>) canvas.getObjects().get(1);
         module.remove("furnitureTemplateId");
         module.put("label", "原图补录茶几");
-        var variant = sku("V", "500", "500");
+        var variant = sku("V", "700", "500");
         variant.setName("WG");
         variant.setVariantName("方茶几");
         when(office.listOfficeProducts()).thenReturn(List.of(variant));
@@ -116,7 +116,14 @@ class OfficeModuleRecommendationServiceTest {
         assertThrows(BusinessException.class, () -> service.select("P", request()));
         verify(carts, never()).insert(any(OfficeCart.class)); verify(office, never()).saveCanvas(any());
     }
+    @Test void rejectsSelectionWhenMainCatalogNoLongerOffersTheCachedVariant() {
+        assertThrows(BusinessException.class, () -> service.select("P", request()));
+        verifyNoInteractions(carts);
+        verify(office).currentProductVariant("MASTER", "FIT");
+    }
+
     @Test void bindsSameModulesWithoutMovingOrResizingAndKeepsOtherRooms() {
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
         var request = request(); request.setApplyToSameModules(true);
         var before = json.valueToTree(canvas.getObjects());
         when(office.saveCanvas(any())).thenAnswer(call -> {
@@ -134,6 +141,7 @@ class OfficeModuleRecommendationServiceTest {
         verify(carts, times(2)).insert(any(OfficeCart.class));
     }
     @Test void selectingAgainUpdatesTheBoundLineInsteadOfAddingQuantity() {
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
         var line = new OfficeCart(); when(carts.selectById(anyString())).thenReturn(line);
         when(office.saveCanvas(any())).thenReturn(canvas);
         service.select("P", request());
@@ -142,6 +150,7 @@ class OfficeModuleRecommendationServiceTest {
     @Test void matchingPriceUnknownStillShowsFootprintButCannotEnterPlan() {
         var product = sku("FIT", "1200", "600"); product.setPrice(BigDecimal.ZERO);
         when(office.listOfficeProducts()).thenReturn(List.of(product));
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(product);
         assertEquals(1, service.recommend("P", request()).getCandidates().size());
         assertThrows(BusinessException.class, () -> service.select("P", request())); verifyNoInteractions(carts);
     }

@@ -1,3 +1,5 @@
+import type { WorkspaceType } from '~/utils/workspaceType'
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082').replace(/\/$/, '')
 
 export const authEnabled = !import.meta.dev || import.meta.env.VITE_AUTH_ENABLED !== '0'
@@ -13,6 +15,7 @@ export interface AuthUser {
   username: string
   displayName: string
   role: string
+  workspaceType?: WorkspaceType | null
 }
 
 export interface LoginOptions {
@@ -31,6 +34,7 @@ export class LoginError extends Error {
 export function useAuth() {
   const user = useState<AuthUser | null>('rsdp-auth-user', () => null)
   const storageScope = computed(() => authEnabled ? user.value?.userId || 'anonymous' : 'local-dev')
+  const canCreateProject = computed(() => !authEnabled || user.value?.role === 'DEALER')
 
   async function login(username: string, password: string, options: LoginOptions = {}): Promise<AuthUser> {
     try {
@@ -67,5 +71,5 @@ export function useAuth() {
     }
   }
 
-  return { login, me, logout, user, storageScope }
+  return { login, me, logout, user, storageScope, canCreateProject }
 }

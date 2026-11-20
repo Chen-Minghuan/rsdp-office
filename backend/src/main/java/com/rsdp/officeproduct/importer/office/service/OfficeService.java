@@ -42,12 +42,7 @@ public class OfficeService {
     private final SharedCatalogService sharedCatalogService;
     private final ObjectMapper objectMapper;
 
-    private static final String DEFAULT_PROJECT_ID = "OFFICE-PROJECT-001";
-
     public CanvasDto getCanvas(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         List<OfficeCanvas> list = canvasMapper.selectList(
             new QueryWrapper<OfficeCanvas>().eq("project_id", projectId).orderByDesc("created_at").orderByDesc("canvas_id").last("limit 1"));
@@ -66,7 +61,7 @@ public class OfficeService {
         if ("design".equals(request.getMode())) {
             OfficeCanvasReviewPolicy.requireLayoutReady(objectMapper.valueToTree(request.getObjects()), request.getDesignZoneId());
         }
-        String projectId = StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : DEFAULT_PROJECT_ID;
+        String projectId = request.getProjectId();
         projectService.requireFloor(projectId);
         accessService.requireFloorAccess(projectId);
         workspaceLocks.lockWorkspace(projectId);
@@ -146,9 +141,6 @@ public class OfficeService {
     }
 
     public List<CartItemDto> listCart(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         List<OfficeCart> list = cartMapper.selectList(
             new QueryWrapper<OfficeCart>().eq("project_id", projectId).orderByAsc("created_at"));
@@ -212,9 +204,6 @@ public class OfficeService {
     }
 
     public List<AgentMessageDto> listMessages(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         List<OfficeAgentMessage> list = messageMapper.selectList(
             new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId).orderByAsc("created_at"));
@@ -249,11 +238,40 @@ public class OfficeService {
         return rsdpCatalogGateway.listOfficeProducts(sharedCatalogService.resolveViewMode());
     }
 
+    /** Verifies real catalog selections on the saved floor without mutating historical design geometry. */
+    public void checkProposalCatalog(String projectId) {
+        CanvasDto canvas = getCanvas(projectId);
+        if (canvas == null || canvas.getObjects() == null) return;
+        Map<List<String>, OfficeProductDto> checked = new HashMap<>();
+        JsonNode items = objectMapper.valueToTree(canvas.getObjects());
+        for (JsonNode item : items) {
+            JsonNode selected = item.path("productSelection").path("product");
+            String rspuId = selected.path("rspuId").asText(null);
+            String variantId = selected.path("id").asText(null);
+            if (rspuId == null || variantId == null) continue;
+            var key = List.of(rspuId, variantId);
+            var current = checked.computeIfAbsent(key, ignored -> currentProductVariant(rspuId, variantId));
+            if (current == null || changed(selected.get("widthMm"), current.getWidthMm())
+                || changed(selected.get("depthMm"), current.getDepthMm())
+                || changed(selected.get("heightMm"), current.getHeightMm())
+                || changed(selected.get("price"), current.getPrice())) {
+                throw new BusinessException("方案中的商品「" + selected.path("name").asText(variantId)
+                    + "」已不可用或规格、价格有变化，请回到款式推荐重新核验");
+            }
+        }
+    }
+
+    private boolean changed(JsonNode recorded, BigDecimal current) {
+        if (recorded == null || recorded.isNull()) return current != null;
+        return !recorded.isNumber() || current == null || recorded.decimalValue().compareTo(current) != 0;
+    }
+
+    public OfficeProductDto currentProductVariant(String rspuId, String variantId) {
+        return rsdpCatalogGateway.currentVariant(sharedCatalogService.resolveViewMode(), rspuId, variantId);
+    }
+
     @Transactional
     public void resetProjectData(String projectId) {
-        if (!StringUtils.hasText(projectId)) {
-            projectId = DEFAULT_PROJECT_ID;
-        }
         accessService.requireFloorAccess(projectId);
         canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", projectId));
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));

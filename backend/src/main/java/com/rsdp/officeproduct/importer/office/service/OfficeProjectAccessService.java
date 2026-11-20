@@ -53,6 +53,22 @@ public class OfficeProjectAccessService {
         return user != null ? user.getUserId() : null;
     }
 
+    /** 经销商主号在自己拥有的工作区创建项目；认证关闭时返回 null。 */
+    public String workspaceForProjectCreation() {
+        if (!enforcementEnabled()) {
+            return null;
+        }
+        OfficeUser user = currentUserOrNull();
+        if (!"DEALER".equalsIgnoreCase(user.getRole())) {
+            throw new AccessDeniedException("请联系经销商创建项目并分配给你");
+        }
+        OfficeWorkspace workspace = ownedWorkspace(user);
+        if (workspace == null) {
+            throw new AccessDeniedException("当前经销商主号没有工作区，无法创建项目");
+        }
+        return workspace.getWorkspaceId();
+    }
+
     public boolean isMember(String projectId, String userId) {
         if (!StringUtils.hasText(projectId) || !StringUtils.hasText(userId)) {
             return false;
@@ -67,6 +83,22 @@ public class OfficeProjectAccessService {
         }
         if (!canAccessProject(currentUserOrNull(), requireProject(projectId))) {
             throw new AccessDeniedException("无权访问该项目");
+        }
+    }
+
+    /**
+     * 经销商主号专属入口（项目报价等）：认证开启时要求当前账号是项目所属工作区的主号。
+     * 历史无工作区项目没有主号归属，按拒绝处理，避免退化成全员可见。
+     */
+    public void requireWorkspaceOwner(String projectId) {
+        if (!enforcementEnabled()) {
+            return;
+        }
+        OfficeUser user = currentUserOrNull();
+        OfficeDesignProject project = requireProject(projectId);
+        if (user == null || !"DEALER".equalsIgnoreCase(user.getRole())
+            || !isWorkspaceOwner(user, project.getWorkspaceId())) {
+            throw new AccessDeniedException("只有经销商主号可以查看项目报价");
         }
     }
 
@@ -85,10 +117,13 @@ public class OfficeProjectAccessService {
      * 先由楼层查证所属项目，再校验成员权限。
      */
     public void requireFloorAccess(String floorId) {
+        if (!StringUtils.hasText(floorId)) {
+            throw new BusinessException("请先选择项目和楼层");
+        }
         if (!enforcementEnabled()) {
             return;
         }
-        OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
+        OfficeDesignFloor floor = floorMapper.selectById(floorId);
         if (floor == null) {
             throw new BusinessException("楼层不存在，请先创建项目和楼层");
         }

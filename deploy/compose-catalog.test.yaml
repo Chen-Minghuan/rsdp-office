@@ -1,0 +1,87 @@
+name: rsdp-catalog-test
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rsdp_test
+      POSTGRES_USER: rsdp_test
+      POSTGRES_PASSWORD: ${CATALOG_POSTGRES_PASSWORD:?}
+    volumes:
+      - /opt/rsdp-catalog-test/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U rsdp_test -d rsdp_test']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: [redis-server, --requirepass, "${CATALOG_REDIS_PASSWORD:?}"]
+    environment:
+      REDISCLI_AUTH: ${CATALOG_REDIS_PASSWORD:?}
+    volumes:
+      - /opt/rsdp-catalog-test/data/redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  minio:
+    image: bitnamilegacy/minio:2025.2.28
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${CATALOG_MINIO_USER:?}
+      MINIO_ROOT_PASSWORD: ${CATALOG_MINIO_PASSWORD:?}
+    volumes:
+      - /opt/rsdp-catalog-test/data/minio:/bitnami/minio/data
+
+  cad-parser:
+    image: rsdp-cad-parser:${CATALOG_IMAGE_TAG:?}
+    restart: unless-stopped
+
+  server:
+    image: rsdp-server:${CATALOG_IMAGE_TAG:?}
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      TZ: Asia/Shanghai
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_NAME: rsdp_test
+      DB_USERNAME: rsdp_test
+      DB_PASSWORD: ${CATALOG_POSTGRES_PASSWORD:?}
+      REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: ${CATALOG_REDIS_PASSWORD:?}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${CATALOG_MINIO_USER:?}
+      MINIO_SECRET_KEY: ${CATALOG_MINIO_PASSWORD:?}
+      MINIO_BUCKET: rsdp-test
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?}
+      RSDP_ENCRYPTION_KEY: ${CATALOG_ENCRYPTION_KEY:?}
+      RSDP_JWT_SECRET: ${CATALOG_JWT_SECRET:?}
+      RSDP_JWT_COOKIE_SECURE: 'true'
+      RSDP_ALLOWED_ORIGINS: https://rsdp-test.rooom.vip,https://office-test.rooom.vip
+      RSDP_SECURITY_INITIAL_ADMIN_PASSWORD: ${CATALOG_INITIAL_ADMIN_PASSWORD:?}
+      RSDP_ORDER_INVITE_SECRET: ${CATALOG_ORDER_INVITE_SECRET:?}
+      RSDP_CAD_PARSER_BASE_URL: http://cad-parser:8090
+    ports:
+      - '127.0.0.1:3200:8081'
+    volumes:
+      - /opt/rsdp-catalog-test/data/server:/data
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8081/api/v1/public/products']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started

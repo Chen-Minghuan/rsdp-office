@@ -21,7 +21,7 @@ const focusedZoneId = ref<string | null>(null), selectedObstacleId = ref<string 
 const obstacleDraft = ref<{ spaceId: string; kind: SpatialObstacleKind; start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
 const obstacleManipulation = ref<{ spaceId: string; obstacleId: string; handle: string; start: { x: number; y: number }; original: SpatialObstacle; current: SpatialObstacle; snapped: boolean } | null>(null)
 const snapToEdges = ref(true)
-const tool = ref('select'), showAllSpaces = ref(false)
+const tool = ref('select'), temporaryPanning = ref(false), showAllSpaces = ref(false)
 /** GEOM-014 合并/剔除两步点选：第一项为保留/被裁剪空间。 */
 const booleanPicks = ref<string[]>([])
 const showUnderlay = ref(true), showOutline = ref(true), showDimensions = ref(true), showOriginal = ref(false)
@@ -228,6 +228,9 @@ const originalGeometries = computed(() => !showOriginal.value ? [] : store.zones
 })))
 const scaleWidth = computed(() => 2000 * camera.value.zoom)
 const zoomPercent = computed(() => Math.round(camera.value.zoom / fittedZoom.value * 100))
+const zoomHintVisible = ref(false)
+let zoomHintShown = false
+let zoomHintTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(tool, () => { labelEditing.value = false; booleanPicks.value = [] })
 watch(selectedId, id => {
@@ -293,6 +296,20 @@ function zoom(factor: number) {
   const next = Math.max(0.00001, Math.min(20, camera.value.zoom * factor))
   const ratio = next / camera.value.zoom
   camera.value = { zoom: next, panX: center.x - (center.x - camera.value.panX) * ratio, panY: center.y - (center.y - camera.value.panY) * ratio }
+}
+function showZoomHint() {
+  if (zoomHintShown) return
+  zoomHintShown = true
+  zoomHintVisible.value = true
+  zoomHintTimer = setTimeout(() => { zoomHintVisible.value = false }, 2600)
+}
+function onZoomSlider(event: Event) {
+  if (!fittedZoom.value) return
+  const percent = Number((event.target as HTMLInputElement).value)
+  if (Number.isFinite(percent)) {
+    showZoomHint()
+    zoom(fittedZoom.value * percent / 100 / camera.value.zoom)
+  }
 }
 function selectSpace(id: string) {
   if (tracing.value) return
@@ -566,8 +583,8 @@ function saveSketchRing(raw: Array<[number, number]>, snapMm: boolean) {
   const asMm = calibrated.value || !store.floorPlan
   const snap = (v: number) => asMm && snapMm ? Math.round(v / 100) * 100 : Math.round(v * 100) / 100
   let ring = raw.map(([px, py]): [number, number] => [snap(px), snap(calibrated.value ? -py : py)])
-  ring = ring.filter((point, index) => index === 0 || Math.hypot(point[0] - ring[index - 1][0], point[1] - ring[index - 1][1]) > 0.01)
-  if (ring.length > 3 && Math.hypot(ring[0][0] - ring.at(-1)![0], ring[0][1] - ring.at(-1)![1]) < 0.01) ring.pop()
+  ring = ring.filter((point, index) => index === 0 || Math.hypot(point[0] - ring[index - 1]![0], point[1] - ring[index - 1]![1]) > 0.01)
+  if (ring.length > 3 && Math.hypot(ring[0]![0] - ring.at(-1)![0], ring[0]![1] - ring.at(-1)![1]) < 0.01) ring.pop()
   const problem = ringProblem(ring)
   if (problem) { notify(problem + '，请调整后再保存'); return }
   const zone = store.addDrawnZone(ring, asMm)
@@ -581,7 +598,7 @@ function applySketch() {
   const draft = sketching.value
   if (!draft) return
   const points = draft.points
-  if (points.length > 3 && Math.hypot(points[0].x - points.at(-1)!.x, points[0].y - points.at(-1)!.y) * camera.value.zoom < 8) points.pop()
+  if (points.length > 3 && Math.hypot(points[0]!.x - points.at(-1)!.x, points[0]!.y - points.at(-1)!.y) * camera.value.zoom < 8) points.pop()
   saveSketchRing(points.map((point): [number, number] => [point.x, point.y]), false)
 }
 function startRoomRename(zone: ZoneObject) {
@@ -658,7 +675,7 @@ function traceKey(event: KeyboardEvent) {
   }
 }
 function keyUp(event: KeyboardEvent) { shiftPressed.value = event.shiftKey }
-function cancelInteraction() { drag.value = null; obstacleDraft.value = null; obstacleManipulation.value = null; sketchDrag.value = null; labelEditing.value = false; shiftPressed.value = false }
+function cancelInteraction() { drag.value = null; obstacleDraft.value = null; obstacleManipulation.value = null; sketchDrag.value = null; labelEditing.value = false; shiftPressed.value = false; temporaryPanning.value = false }
 function startTransform(zoneId: string, operation: ContourOperation, point: ContourPoint) {
   if (calibrating.value || tracing.value || sketching.value) return
   discardRotatePreview()
@@ -745,7 +762,7 @@ function advance() {
   if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id } })
 }
 onMounted(() => { window.addEventListener('keydown', traceKey); window.addEventListener('keyup', keyUp); window.addEventListener('blur', cancelInteraction) })
-onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
+onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHintTimer) clearTimeout(zoomHintTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
 </script>
 
 <template>
@@ -756,19 +773,57 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
         <div class="review-toolbar">
           <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
-            <button :class="{ active: tool === 'select' }" @click="tool = 'select'"><AppIcon name="cursor" size="3.5" /> 选择 / 缩放</button>
-            <button :class="{ active: tool === 'pan' }" @click="tool = 'pan'"><AppIcon name="hand" size="3.5" /> 拖动画布</button><i></i>
-            <button :class="{ active: tool === 'edit' }" @click="tool = 'edit'"><AppIcon name="pencil" size="3.5" /> 编辑轮廓</button>
-            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" title="在画布上逐点画出新的空间轮廓" @click="startSketch"><AppIcon name="plus" size="3.5" /> 画新空间</button>
-            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')"><AppIcon name="merge" size="3.5" /> 合并空间</button>
-            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')"><AppIcon name="scissors" size="3.5" /> 剔除区域</button>
+            <button :class="{ active: tool === 'select' && !temporaryPanning }" aria-labelledby="review-select-label" aria-describedby="review-select-shortcut" @click="tool = 'select'">
+              <AppIcon name="cursor" size="3.5" />
+              <span id="review-select-label">选择 / 缩放</span>
+              <small id="review-select-shortcut" class="review-tool-shortcut">左拖 · 滚轮</small>
+            </button>
+            <button :class="{ active: tool === 'pan' || temporaryPanning }" aria-labelledby="review-pan-label" aria-describedby="review-pan-shortcut"
+              title="先点击画布，再按住空格用左键拖动，也可用中键拖动" @click="tool = 'pan'">
+              <AppIcon name="hand" size="3.5" />
+              <span id="review-pan-label">拖动画布</span>
+              <small id="review-pan-shortcut" class="review-tool-shortcut"><span class="sr-only">先点击画布，</span><kbd>空格</kbd>＋左拖 · 中键</small>
+            </button><i></i>
+            <button :class="{ active: tool === 'edit' }" aria-labelledby="review-edit-label" aria-describedby="review-edit-shortcut"
+              title="拖动顶点或边线。拖动或重描时按 Esc 取消" @click="tool = 'edit'">
+              <AppIcon name="pencil" size="3.5" />
+              <span id="review-edit-label">编辑轮廓</span>
+              <small id="review-edit-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
+            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" aria-labelledby="review-sketch-label" aria-describedby="review-sketch-shortcut"
+              title="逐点描出至少三点后按 Enter 保存，按 Esc 取消绘制" @click="startSketch">
+              <AppIcon name="plus" size="3.5" />
+              <span id="review-sketch-label">画新空间</span>
+              <small id="review-sketch-shortcut" class="review-tool-shortcut">逐点描 <kbd>Enter</kbd> 保存</small>
+            </button>
+            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" aria-labelledby="review-merge-label" aria-describedby="review-merge-shortcut" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')">
+              <AppIcon name="merge" size="3.5" />
+              <span id="review-merge-label">合并空间</span>
+              <small id="review-merge-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
+            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" aria-labelledby="review-subtract-label" aria-describedby="review-subtract-shortcut" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')">
+              <AppIcon name="scissors" size="3.5" />
+              <span id="review-subtract-label">剔除区域</span>
+              <small id="review-subtract-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
             <button :class="{ active: calibrating }" @click="startCalibration"><AppIcon name="fit" size="3.5" /> 两点校准</button>
             <button :disabled="!store.undoStack.length" @click="store.undo()"><AppIcon name="undo" size="3.5" /> 撤销</button>
+            <button :disabled="!store.redoStack.length" title="恢复上一次撤销的编辑" @click="store.redo()"><AppIcon name="redo" size="3.5" /> 恢复</button>
           </div>
-          <div class="review-zoom"><button aria-label="缩小画布" @click="zoom(1 / 1.2)"><AppIcon name="zoomOut" size="3.5" /></button><span>{{ zoomPercent }}%</span><button aria-label="放大画布" @click="zoom(1.2)"><AppIcon name="zoomIn" size="3.5" /></button><i></i><button @click="fit"><AppIcon name="fitScreen" size="3.5" /> 适屏</button></div>
+          <div class="review-zoom">
+            <div class="review-zoom-slider">
+              <output>{{ zoomPercent }}%</output>
+              <button type="button" title="缩小" aria-label="缩小画布" data-testid="zoom-out-slider" @click="zoom(1 / 1.2)">−</button>
+              <input aria-label="画布缩放百分比" type="range" min="10" max="500" step="5" :value="zoomPercent" @input="onZoomSlider">
+              <button type="button" title="放大" aria-label="放大画布" data-testid="zoom-in-slider" @click="zoom(1.2)">+</button>
+              <div v-if="zoomHintVisible" class="zoom-slider-tip" role="status">可以通过 ALT + 滚轮进行调整</div>
+            </div>
+            <i></i>
+            <button @click="fit"><AppIcon name="fitScreen" size="3.5" /> 适屏</button>
+          </div>
         </div>
           <div v-if="tool === 'select' && !calibrating" class="contour-edit-bar">
-          <span>拖动内部移动；拉边调整宽深，拉角缩放。滚轮缩放视图，中键平移。</span>
+          <span>左拖空间内部可移动，拉边调整宽深，拉角缩放。</span>
           <label><input v-model="keepAspect" type="checkbox"> 锁定比例（角点 / Shift）</label>
           <form v-if="selected?.polygon?.length" class="rotate-form" data-testid="rotate-form" title="调整角度即时预览；仅 Enter 或点「应用」保存，点击其他位置或 Esc 放弃预览" @submit.prevent="applyRotate">
             旋转<input v-model.number="rotateAngle" type="number" min="-360" max="360" step="5" aria-label="空间旋转角度（度，顺时针为正）" @input="onRotateInput" @keydown.enter.prevent="applyRotate" @keydown.esc.prevent="onRotateEsc" @blur="onRotateBlur"><span>°</span>
@@ -826,7 +881,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             :pointer-in-source-coordinates="calibrating || !!tracing || !!sketching" :calibration-points="calibrationPoints" :trace-points="tracing?.points || sketchPreview"
             :fallback-image-url="imageUrl" :show-underlay="showUnderlay || comparingOriginal" :show-outline="showOutline && !comparingOriginal"
             :show-dimensions="showDimensions" :underlay-opacity="underlayOpacity" :original-geometries="comparingOriginal ? [] : originalGeometries"
-            @viewport="onViewport" @update-camera="onCameraUpdate" @select-space="selectSpace" @space-label="onSpaceLabel" @select-obstacle="selectObstacle" @obstacle-transform-start="startObstacleTransform" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
+            @viewport="onViewport" @update-camera="onCameraUpdate" @pan-change="temporaryPanning = $event" @select-space="selectSpace" @space-label="onSpaceLabel" @select-obstacle="selectObstacle" @obstacle-transform-start="startObstacleTransform" @select-vertex="selectVertex" @insert-vertex="insertVertex" @transform-start="startTransform" @pointer-cancel="cancelInteraction"
             @pointer-down="pointerDown" @pointer-move="pointerMove" @pointer-up="pointerUp" />
           <div v-if="!imageReady && !sketching && (store.floorPlan || !zones.length)" class="missing-source-note">
             <template v-if="!store.floorPlan">
@@ -867,7 +922,9 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); window.rem
             <label class="layer-toggle"><span>实际尺寸标注</span><input v-model="showDimensions" type="checkbox" role="switch"></label>
             <label class="layer-toggle"><span>{{ store.floorPlan?.inputMode === 'manual' ? '模板原始轮廓' : '原始识别轮廓' }}</span><input v-model="showOriginal" type="checkbox" role="switch"></label>
           </div>
-          <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button v-if="!focusedZoneId" :disabled="!selectedId" @click="focusSelectedSpace">放大核对当前空间</button><button @click="showEverySpace">显示全部空间</button></div>
+          <div class="review-canvas-bottom">
+            <div v-if="!tracing" class="review-canvas-actions"><button @pointerdown="comparingOriginal = true" @pointerup="comparingOriginal = false" @pointerleave="comparingOriginal = false" @pointercancel="comparingOriginal = false" @keydown.space.prevent="comparingOriginal = true" @keyup.space="comparingOriginal = false" @blur="comparingOriginal = false">{{ store.floorPlan?.inputMode === 'manual' ? '按住对照模板' : '按住对照原图' }}</button><button v-if="!focusedZoneId" :disabled="!selectedId" @click="focusSelectedSpace">放大核对当前空间</button><button @click="showEverySpace">显示全部空间</button></div>
+          </div>
           <div v-if="message" class="review-toast" role="status">{{ message }}</div>
         </div>
         <footer class="review-canvas-footer"><div><span><b>{{ zones.length }}</b> 个空间</span><span><b>{{ scene.obstacles.length }}</b> 处建筑约束</span><span class="pending-total"><b>{{ pendingCount }}</b> 待复核</span></div><button :aria-disabled="!!advanceBlocker" :title="advanceBlocker || undefined" data-testid="advance-layout" @click="onAdvanceLayout">进入家具排版 →</button></footer>

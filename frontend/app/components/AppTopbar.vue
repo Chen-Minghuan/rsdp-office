@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
+import { workspaceOwnerLabel } from '~/utils/workspaceType'
 
 const { isProjectWorkflow } = useWorkspaceNavigation()
 const auth = useAuth()
@@ -11,7 +12,7 @@ const roleLabel = computed(() => {
   const account = user.value
   if (!account) return ''
   if (account.role === 'ADMIN') return '系统管理员'
-  if (account.role === 'DEALER') return '经销商主号'
+  if (account.role === 'DEALER') return workspaceOwnerLabel(account.workspaceType)
   if (!workspace.initialized) return ''
 
   const project = workspace.currentProject

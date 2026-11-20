@@ -82,6 +82,14 @@
 - 本地测试账号 `designer` 的默认显示名称改为「开发项目协作者」。脚本仅更新仍使用旧默认名称的测试账号。
 - `corepack pnpm build`、`corepack pnpm e2e:workspace-isolation` 和 `corepack pnpm e2e:workflows` 通过。无项目账号的「设计师」称呼由模拟回归覆盖。用真实本地账号验证了系统管理员、经销商主号、负责人和两名协作者的顶栏显示。未部署公网。
 
+## 2026-11-17 经销商创建项目
+
+认证开启时，仅经销商主号可在自己拥有的工作区创建项目。创建时指定项目负责人，可同时分配协作者。普通账号没有可访问项目时，点击左侧「项目与楼层」提示「请联系经销商创建项目并分配给你」。已有成员按项目权限进入对应楼层。
+
+启动迁移只建项目及楼层表。本地测试账号脚本只准备账号和工作区，已存历史项目及画布保留。图纸识别、画布和其他楼层接口使用明确的楼层 ID。
+
+独立 PostgreSQL 和 Java 后端验证了空库初始化和账号脚本后的项目及楼层数均为零、经销商创建并分配成功、负责人及协作者可访问所属项目且创建请求返回 `code=403`。前端构建及项目楼层、账号隔离、工作流和冒烟模拟 UI 通过。Java 283 项中 280 项通过、3 项跳过。未部署。
+
 ## 交付与下一步
 
 - 后端：迁移 `20261106_workspace_roles.sql`（SchemaInitializer 已注册）；`OfficeWorkspace`/`OfficeAuditLog` 实体与 Mapper；`OfficeAuditService`（同事务审计）；`OfficeWorkspaceService` + `OfficeWorkspaceAdminController`（`/admin/workspaces`）+ `OfficeWorkspaceController`（`/workspace/me|users`）；`OfficeProjectAccessService` 工作区归属判定；`OfficeProjectService` 创建归属/成员工作区校验/assignable 收缩/替换审计；`OfficeUserAdminService` 主号删除拒绝。
@@ -89,3 +97,12 @@
 - 下一步：认证开启（`rsdp.auth.enabled=true`）下真实链路联调——管理员建工作区 → 主号开户 → 主号/负责人配成员 → 跨工作区 403 与成员移出即时生效实测；真实数据库执行迁移并补录旧项目/旧账号工作区归属；`/users` 与 `/workspace/users` 页专项 e2e；审计日志查询入口。
 
 二期明确不做（依据确认书 M06 与任务说明）：字段级权限（出厂价/毛利/终端客户分权与脱敏）、竞品屏蔽、统一 `visibilityPolicy` 中间层重构、审计查询界面、工作区转让/解散、一个用户属多工作区、旧项目工作区批量补录界面。
+
+## 2026-11-19 伟豪账号与工作区
+
+伟豪 Office 是伟豪的工厂办公系统。Office 主号和成员管理本厂工作区、项目、设计和选品。RSDP 商品负责人用个人工厂管理员账号，关联 B001 伟豪。RSDP 的 `rsdp-office` 是伟豪 Office 的后台连接账号，用户管理显示「伟豪 Office 服务账号」，企业名称「伟豪」，分组「系统集成」。服务连接沿用现有用户名和工厂绑定。
+
+- Office 增加 `office_workspace.workspace_type`。既有记录默认 `DEALER`，新建可选 `DEALER` 或 `FACTORY`。工厂工作区主号的鉴权仍用 `DEALER`，工作区类型与主库授权分别配置。工厂工作区新成员的默认来源为 `FACTORY_SALES`。
+- 管理员可在 `/users` 创建两类工作区，或修改已有工作区类型。工厂主号在顶栏和账号页显示「工厂工作区主号」。本地建立「伟豪办公」工厂工作区，保留「示例经销商」及其示例项目。
+- 本地账号为 RSDP `weihao-product` 和 Office `weihao-office`，已分别完成真实登录。开户未绑定工厂被拒绝，Office 主号修改类型返回 403。管理员在真实接口切换测试工作区类型并恢复，核对主号和项目数一致。真实浏览器核对两端角色和账号行，Office 实际读取共享目录 471 件。两端前端构建、Java 和 Office 模拟账号隔离、工作流及冒烟均通过。未部署到公网。
+- 后续按新方向把公有库录入收口到 RSDP，更新首次录入账号的留痕，切换 Office 读取身份。该阶段单独实施。

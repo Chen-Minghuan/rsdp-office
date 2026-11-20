@@ -3,11 +3,13 @@ package com.rsdp.officeproduct.importer.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.config.VisionProperties;
 import com.rsdp.officeproduct.importer.entity.FloorPlanAnalysis;
 import com.rsdp.officeproduct.importer.entity.FloorPlanSceneRevision;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,15 +26,17 @@ class FloorPlanDimensionServiceTest {
     private final ObjectMapper json = new ObjectMapper();
     private final FloorPlanAnalysisMapper analyses = mock(FloorPlanAnalysisMapper.class);
     private final FloorPlanSceneRevisionMapper revisions = mock(FloorPlanSceneRevisionMapper.class);
+    private final OfficeProjectAccessService projectAccess = mock(OfficeProjectAccessService.class);
     private final QwenVisionClient qwen = mock(QwenVisionClient.class);
     private final VisionImagePreparer preparer = new VisionImagePreparer(new VisionProperties());
-    private final FloorPlanDimensionService service = new FloorPlanDimensionService(analyses, revisions, qwen, preparer, json);
+    private final FloorPlanDimensionService service = new FloorPlanDimensionService(analyses, revisions, projectAccess, qwen, preparer, json);
     private FloorPlanAnalysis analysis;
     private FloorPlanSceneRevision scene;
     private ObjectNode raw;
 
     @BeforeEach void setup() throws Exception {
         analysis = new FloorPlanAnalysis(); analysis.setInputMode("image"); analysis.setWorkingAnalysisRevision(1);
+        analysis.setProjectId("OFLR-1");
         scene = new FloorPlanSceneRevision(); scene.setAnalysisId("A"); scene.setAnalysisRevision(1); scene.setRevisionStatus("READY");
         ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(new BufferedImage(1000, 500, BufferedImage.TYPE_INT_RGB), "png", out);
         String hash = VisionImagePreparer.sha256(out.toByteArray());
@@ -48,6 +52,14 @@ class FloorPlanDimensionServiceTest {
         scene.setRawResult(raw.toString());
         when(analyses.selectById("A")).thenReturn(analysis); when(revisions.selectByRevision("A", 1)).thenReturn(scene);
         when(revisions.compareAndSetDimensionResult(eq("A"), eq(1), anyString(), anyString())).thenAnswer(invocation -> { scene.setRawResult(invocation.getArgument(3)); return 1; });
+    }
+
+    @Test void unauthorizedFloorCannotReadRecognizeOrConfirmDimensions() {
+        doThrow(new AccessDeniedException("无权访问该项目")).when(projectAccess).requireFloorAccess("OFLR-1");
+        assertThrows(AccessDeniedException.class, () -> service.get("A", 1, "mm"));
+        assertThrows(AccessDeniedException.class, () -> service.recognize("A", 1));
+        assertThrows(AccessDeniedException.class, () -> service.confirm("A", 1, "R", "mm"));
+        verifyNoInteractions(revisions, qwen);
     }
 
     @Test void confirmationPersistsProofWithoutChangingRoomsOrSourceUnitsAndIsIdempotent() throws Exception {

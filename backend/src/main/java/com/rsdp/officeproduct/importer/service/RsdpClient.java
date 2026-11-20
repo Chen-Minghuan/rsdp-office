@@ -24,7 +24,7 @@ import java.util.Map;
  *
  * <p>主项目登录成功通过 HttpOnly Cookie 下发 JWT（rsdp_token），响应体不再携带 token；
  * 本客户端登录后缓存该 Cookie，后续请求以 Cookie 头回带，401 时自动重登并重试一次。
- * 读：产品列表/详情/变体/报价/字典；写：office 客户的商品录入/导入转发（落主库、归属本厂）。
+ * 用于读取主项目目录、字典和历史导入记录。
  * 可见性上限由主项目服务端按服务账号身份控制。</p>
  */
 @Slf4j
@@ -86,125 +86,9 @@ public class RsdpClient {
         }
     }
 
-    /** 调用主项目 POST 接口（JSON 体），返回 Result.data 节点。 */
-    public JsonNode postJson(String path, Object body) {
-        return executeWithRetry(() -> {
-            HttpHeaders headers = sessionHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            return restTemplate.postForEntity(baseUrl() + path,
-                new HttpEntity<>(objectMapper.writeValueAsString(body), headers), String.class);
-        }, path);
-    }
-
-    /** 调用主项目 PUT 接口（JSON 体），返回 Result.data 节点。 */
-    public JsonNode putJson(String path, Object body) {
-        return executeWithRetry(() -> {
-            HttpHeaders headers = sessionHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            return restTemplate.exchange(baseUrl() + path, org.springframework.http.HttpMethod.PUT,
-                new HttpEntity<>(objectMapper.writeValueAsString(body), headers), String.class);
-        }, path);
-    }
-
-    /** 调用主项目 multipart POST 接口（request JSON 部件 + images 文件部件），返回 Result.data 节点。 */
-    public JsonNode postMultipart(String path, Object jsonBody, List<ImagePart> images) {
-        return executeWithRetry(() -> {
-            var multipart = new org.springframework.util.LinkedMultiValueMap<String, Object>();
-            HttpHeaders jsonHeaders = new HttpHeaders();
-            jsonHeaders.setContentType(MediaType.APPLICATION_JSON);
-            multipart.add("request", new HttpEntity<>(objectMapper.writeValueAsString(jsonBody), jsonHeaders));
-            for (ImagePart image : images) {
-                HttpHeaders fileHeaders = new HttpHeaders();
-                fileHeaders.setContentType(mediaTypeOf(image.filename()));
-                fileHeaders.setContentDispositionFormData("images", image.filename());
-                multipart.add("images", new HttpEntity<>(image.content(), fileHeaders));
-            }
-            HttpHeaders headers = sessionHeaders();
-            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-            return restTemplate.postForEntity(baseUrl() + path, new HttpEntity<>(multipart, headers), String.class);
-        }, path);
-    }
-
-    /** 主项目服务账号关联的本厂编码（/auth/me 的 factoryCodes 第一个）。 */
-    public String mainFactoryCode() {
-        JsonNode me = get("/api/v1/auth/me");
-        JsonNode codes = me.path("factoryCodes");
-        if (!codes.isArray() || codes.isEmpty()) {
-            throw new BusinessException("主项目服务账号未关联工厂，无法录入商品");
-        }
-        return codes.get(0).asText();
-    }
-
-    /** 待上传的图片部件。 */
-    public record ImagePart(String filename, byte[] content) {}
-
-    private HttpHeaders sessionHeaders() {
-        if (sessionCookie == null) {
-            login();
-        }
-        HttpHeaders headers = new HttpHeaders();
-        headers.add(HttpHeaders.COOKIE, COOKIE_NAME + "=" + sessionCookie);
-        return headers;
-    }
-
-    private JsonNode executeWithRetry(CheckedRequest request, String path) {
-        ensureConfigured();
-        try {
-            return readData(request.execute(), path);
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == 401) {
-                log.info("主项目会话失效，重新登录后重试: {}", path);
-                login();
-                try {
-                    return readData(request.execute(), path);
-                } catch (RestClientResponseException retryError) {
-                    throw translateError(path, retryError);
-                } catch (BusinessException be) {
-                    throw be;
-                } catch (Exception retryException) {
-                    throw unavailable(retryException, path);
-                }
-            }
-            throw translateError(path, e);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            throw unavailable(e, path);
-        }
-    }
-
-    private JsonNode readData(ResponseEntity<String> response, String path) {
-        try {
-            JsonNode root = objectMapper.readTree(response.getBody());
-            int code = root.path("code").asInt(-1);
-            if (code != 200) {
-                throw new BusinessException("主项目接口返回错误: " + root.path("message").asText("未知错误"));
-            }
-            return root.path("data");
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new BusinessException("主项目接口响应解析失败: " + path);
-        }
-    }
-
     private BusinessException unavailable(Exception e, String path) {
         log.error("调用主项目失败: {}", path, e);
         return new BusinessException("主项目数据服务不可用，请确认 RSDP 后端已启动");
-    }
-
-    private interface CheckedRequest {
-        ResponseEntity<String> execute() throws Exception;
-    }
-
-    /** 按扩展名推导图片 Content-Type（主项目按部件类型校验，octet-stream 会被拒）。 */
-    private MediaType mediaTypeOf(String filename) {
-        String ext = filename == null ? "" : filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
-        return switch (ext) {
-            case "png" -> MediaType.IMAGE_PNG;
-            case "gif" -> MediaType.IMAGE_GIF;
-            default -> MediaType.IMAGE_JPEG;
-        };
     }
 
     /** 主项目前端地址（图片等资源的绝对路径拼接用）。 */
@@ -276,7 +160,8 @@ public class RsdpClient {
         }
         int code = root.path("code").asInt(-1);
         if (code != 200) {
-            throw new BusinessException("主项目接口返回错误: " + root.path("message").asText("未知错误"));
+            throw new BusinessException(code >= 400 && code < 500 ? code : 400,
+                    "主项目接口返回错误: " + root.path("message").asText("未知错误"));
         }
         return root.path("data");
     }

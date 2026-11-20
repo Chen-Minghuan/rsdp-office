@@ -32,13 +32,19 @@
 ## 接口
 
 - `GET /api/v1/office/projects`：项目及楼层树。
-- `POST /api/v1/office/projects`：原子创建项目与楼层。
+- `POST /api/v1/office/projects`：经销商主号在所属工作区原子创建项目、楼层和成员。
 - `POST /api/v1/office/projects/{projectId}/floors`：添加楼层。
 - `PATCH /api/v1/office/projects/{projectId}`：修改项目名称，保留项目 ID。
 - `PATCH /api/v1/office/projects/{projectId}/floors/{floorId}`：修改楼层名称，保留楼层 ID 与设计数据关联。
 - `PATCH /api/v1/office/projects/{projectId}/requirements`：更新客户需求并递增修订。
 
 ## 验收与验证记录
+
+### 2026-11-18 从商品资源返回楼层
+
+侧栏点击楼层先加载该楼层，再根据空间状态跳转。空楼层进入上传图纸页，从商品库等资源页面进入已有空间的楼层时打开空间总览。重复点击当前楼层也执行页面跳转。跨楼层进入上传页时，URL 仅保留目标楼层 ID。
+
+前端构建与 `pnpm e2e:project-floors`、`pnpm e2e:workspace-isolation`、`pnpm e2e:workflows`、`MOCK_API=1 pnpm e2e:smoke` 通过。楼层模拟 UI 覆盖商品库点击当前空楼层、点击其他空楼层、从导入记录返回当前空楼层、清理旧空间和分析参数、返回已有空间的楼层及原图记录保留。本地 3001 前端已重新构建并重启。使用真实 `lead` 会话验证商品库点击空楼层及重复点击当前空楼层均回到上传页，业务写请求拦截，仅核验读取和导航。
 
 ### 已执行
 

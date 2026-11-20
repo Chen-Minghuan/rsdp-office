@@ -1,6 +1,7 @@
 package com.rsdp.officeproduct.importer.office.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.rsdp.officeproduct.importer.auth.PasswordHasher;
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
@@ -30,7 +31,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * 经销商工作区：系统管理员创建工作区与主号；经销商主号在自己工作区内开户。
+ * 系统管理员创建工作区与主号，主号在自己工作区内开户。
  * 工作区是项目隔离单位（office_design_project.workspace_id），主号角色为 office_user.role='DEALER'。
  * 认证关闭（开发模式）时无法解析"我的工作区"，经销商接口返回明确业务错误；管理员接口沿用放行约定。
  */
@@ -40,6 +41,8 @@ public class OfficeWorkspaceService {
 
     public static final String SOURCE_DEALER_STAFF = "DEALER_STAFF";
     public static final String SOURCE_FACTORY_SALES = "FACTORY_SALES";
+    private static final String TYPE_DEALER = "DEALER";
+    private static final String TYPE_FACTORY = "FACTORY";
 
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_.\\-]{2,32}$");
     private static final int MIN_PASSWORD_LENGTH = 6;
@@ -73,6 +76,8 @@ public class OfficeWorkspaceService {
             throw new BusinessException("工作区参数不能为空");
         }
         String name = requireName(request.getName(), "工作区名称");
+        String workspaceType = request.getWorkspaceType() == null
+            ? TYPE_DEALER : requireWorkspaceType(request.getWorkspaceType());
         String username = requireUsername(request.getOwnerUsername());
         String displayName = requireDisplayName(request.getOwnerDisplayName());
         String password = requirePassword(request.getOwnerPassword());
@@ -85,7 +90,7 @@ public class OfficeWorkspaceService {
         owner.setDisplayName(displayName);
         owner.setRole("DEALER");
         owner.setStatus("active");
-        owner.setSource(SOURCE_DEALER_STAFF);
+        owner.setSource(defaultMemberSource(workspaceType));
         owner.setCreatedAt(now);
         owner.setUpdatedAt(now);
         try {
@@ -97,6 +102,7 @@ public class OfficeWorkspaceService {
         OfficeWorkspace workspace = new OfficeWorkspace();
         workspace.setWorkspaceId(IdGenerator.spatialId("OWKS"));
         workspace.setName(name);
+        workspace.setWorkspaceType(workspaceType);
         workspace.setOwnerUserId(owner.getUserId());
         workspace.setCreatedAt(now);
         workspace.setUpdatedAt(now);
@@ -106,8 +112,34 @@ public class OfficeWorkspaceService {
         userMapper.updateById(owner);
 
         auditService.record("WORKSPACE_CREATED", "WORKSPACE", workspace.getWorkspaceId(),
-            "name=" + name + "; owner=" + username);
+            "name=" + name + "; owner=" + username + "; type=" + workspaceType);
         return toDto(workspace, owner);
+    }
+
+    /** 更新存量工作区的业务类型，保留账号、项目和公共库设置。 */
+    @Transactional
+    public WorkspaceDto adminUpdateWorkspaceType(String workspaceId, String requestedType) {
+        currentUserService.requireAdmin();
+        String workspaceType = requireWorkspaceType(requestedType);
+        OfficeWorkspace workspace = workspaceMapper.selectById(workspaceId);
+        if (workspace == null) {
+            throw new BusinessException("工作区不存在");
+        }
+        String previousType = workspace.getWorkspaceType();
+        if (!workspaceType.equals(previousType)) {
+            int updated = workspaceMapper.update(null, new LambdaUpdateWrapper<OfficeWorkspace>()
+                .eq(OfficeWorkspace::getWorkspaceId, workspaceId)
+                .eq(OfficeWorkspace::getWorkspaceType, previousType)
+                .set(OfficeWorkspace::getWorkspaceType, workspaceType)
+                .set(OfficeWorkspace::getUpdatedAt, LocalDateTime.now()));
+            if (updated != 1) {
+                throw new BusinessException("工作区已变更，请刷新后重试");
+            }
+            auditService.record("WORKSPACE_TYPE_UPDATED", "WORKSPACE", workspaceId,
+                "before=" + previousType + "; after=" + workspaceType);
+            workspace.setWorkspaceType(workspaceType);
+        }
+        return toDto(workspace, null);
     }
 
     // ---------- 经销商主号：本工作区账号 ----------
@@ -134,7 +166,7 @@ public class OfficeWorkspaceService {
         String displayName = requireDisplayName(request.getDisplayName());
         String password = requirePassword(request.getPassword());
         String source = StringUtils.hasText(request.getSource())
-            ? request.getSource().trim().toUpperCase() : SOURCE_DEALER_STAFF;
+            ? request.getSource().trim().toUpperCase() : defaultMemberSource(workspace.getWorkspaceType());
         if (!SOURCE_DEALER_STAFF.equals(source) && !SOURCE_FACTORY_SALES.equals(source)) {
             throw new BusinessException("账号来源只能是经销商员工或厂家业务员");
         }
@@ -189,6 +221,17 @@ public class OfficeWorkspaceService {
         return name;
     }
 
+    private String requireWorkspaceType(String type) {
+        if (!TYPE_DEALER.equals(type) && !TYPE_FACTORY.equals(type)) {
+            throw new BusinessException("请选择经销商或工厂工作区");
+        }
+        return type;
+    }
+
+    private String defaultMemberSource(String workspaceType) {
+        return TYPE_FACTORY.equals(workspaceType) ? SOURCE_FACTORY_SALES : SOURCE_DEALER_STAFF;
+    }
+
     private String requireUsername(String username) {
         String value = username == null ? "" : username.trim();
         if (!USERNAME_PATTERN.matcher(value).matches()) {
@@ -217,6 +260,7 @@ public class OfficeWorkspaceService {
         WorkspaceDto dto = new WorkspaceDto();
         dto.setWorkspaceId(workspace.getWorkspaceId());
         dto.setName(workspace.getName());
+        dto.setWorkspaceType(workspace.getWorkspaceType());
         dto.setOwnerUserId(workspace.getOwnerUserId());
         dto.setOwnerUsername(resolvedOwner != null ? resolvedOwner.getUsername() : "");
         dto.setOwnerDisplayName(resolvedOwner != null ? resolvedOwner.getDisplayName() : "");

@@ -15,6 +15,10 @@ public class ProductDetailDto {
     private String rspuCode;
     private String externalCode;
     private String productName;
+    private String sourceChannel;
+    private String ownerFactoryCode;
+    private String sourceFactoryName;
+
     private String colorPrimaryName;
     private String description;
     private BigDecimal retailPrice;
@@ -43,9 +47,6 @@ public class ProductDetailDto {
         private String materialCode;
         private String materialText;
         private String status;
-        private BigDecimal factoryPrice;
-        private Integer moq;
-        private Integer leadTimeDays;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }
