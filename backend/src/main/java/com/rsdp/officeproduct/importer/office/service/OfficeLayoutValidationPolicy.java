@@ -7,9 +7,22 @@ import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /** Validate confirmed furniture independently of client-side button states. Drafts remain editable. */
 public final class OfficeLayoutValidationPolicy {
+
+    /**
+     * 前端的 l-desk / rounded-l-desk 及其模板 ID，均按「主台面 + 侧翼」两块判定。
+     * 必须与 frontend/app/utils/manualFurniture.ts 中 kind 为 l-desk / rounded-l-desk 的模板保持一致，
+     * 否则前端可放、后端仍按整块矩形拒绝（例如漏掉 counter-l 时的 L 形前台）。
+     */
+    private static final Set<String> L_DESK_KINDS = Set.of(
+        "l-desk", "rounded-l-desk", "desk-l", "desk-l-rounded", "desk-screen-l", "desk-manager-l", "desk-executive-l",
+        "counter-l");
+    /** 前端「单桌」变体的模板 ID 后缀。 */
+    private static final String DESK_ONLY_SUFFIX = "-desk-only";
+
     private OfficeLayoutValidationPolicy() {}
 
     public static void requireConfirmedValid(JsonNode objects) {
@@ -32,7 +45,7 @@ public final class OfficeLayoutValidationPolicy {
             // GEOM-016：有启用布置区时，已确认家具必须完整落在「启用区并集 ∩ 空间」内（与前端 allowedPlacementAreas 等价，多边形而非包围盒）。
             boolean hasLayoutRegions = hasEnabledLayoutRegions(zone);
             Area placementArea = hasLayoutRegions ? allowedPlacementArea(zone, room) : room;
-            List<Rectangle2D.Double> bounds = furniture.stream().map(OfficeLayoutValidationPolicy::footprint).toList();
+            List<List<Rectangle2D.Double>> bounds = furniture.stream().map(OfficeLayoutValidationPolicy::footprints).toList();
             List<Area> exclusions = new ArrayList<>();
             JsonNode preferences = zone.path("layoutPreferences");
             for (JsonNode area : preferences.path("exclusions")) exclusions.add(new Area(rectangle(area)));
@@ -51,23 +64,25 @@ public final class OfficeLayoutValidationPolicy {
             for (int i = 0; i < furniture.size(); i++) {
                 JsonNode item = furniture.get(i);
                 if (!item.path("layoutConfirmed").asBoolean()) continue;
-                Area outside = new Area(bounds.get(i)); outside.subtract(placementArea);
-                if (!outside.isEmpty()) throw new BusinessException(hasLayoutRegions ? "已确认家具超出已启用的家具布置区" : "已确认家具超出空间轮廓");
+                // L 型桌按主台面 + 侧翼分块判定：内角不属于家具占地，可放椅子。
+                List<Rectangle2D.Double> blocks = bounds.get(i);
+                if (outsidePlacement(blocks, placementArea)) throw new BusinessException(hasLayoutRegions ? "已确认家具超出已启用的家具布置区" : "已确认家具超出空间轮廓");
                 // 座椅侧净空与椅子活动区仅作前端复核提示，不阻止确认保存。
-                for (Area area : exclusions) if (overlaps(bounds.get(i), area)) throw new BusinessException("已确认家具占用了入口或禁放区");
-                for (Rectangle2D.Double band : channelBands) if (bounds.get(i).intersects(band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
-                for (int j = 0; j < furniture.size(); j++) if (i != j && bounds.get(i).intersects(bounds.get(j))) throw new BusinessException("已确认家具存在重叠");
+                for (Area area : exclusions) if (blocksIntersectArea(blocks, area)) throw new BusinessException("已确认家具占用了入口或禁放区");
+                for (Rectangle2D.Double band : channelBands) if (blocksIntersect(blocks, band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
+                for (int j = 0; j < furniture.size(); j++) if (i != j && blocksOverlap(blocks, bounds.get(j))) throw new BusinessException("已确认家具存在重叠");
                 String bundle = item.path("mixedBundleId").asText();
                 if (mixedSpacing.isObject() && !bundle.isBlank()) {
-                    var box = bounds.get(i);
-                    var expanded = new Rectangle2D.Double(box.x - mixedWall, box.y - mixedWall, box.width + 2 * mixedWall, box.height + 2 * mixedWall);
-                    Area beyondWall = new Area(expanded);
-                    beyondWall.subtract(room);
-                    if (!beyondWall.isEmpty()) throw new BusinessException("已确认组合家具离墙净距不足");
+                    for (Rectangle2D.Double block : blocks) {
+                        var expanded = new Rectangle2D.Double(block.x - mixedWall, block.y - mixedWall, block.width + 2 * mixedWall, block.height + 2 * mixedWall);
+                        Area beyondWall = new Area(expanded);
+                        beyondWall.subtract(room);
+                        if (!beyondWall.isEmpty()) throw new BusinessException("已确认组合家具离墙净距不足");
+                    }
                     for (int j = 0; j < furniture.size(); j++) {
                         String other = furniture.get(j).path("mixedBundleId").asText();
                         if (i != j && !bundle.equals(other)
-                            && withinGap(box, bounds.get(j), other.isBlank() ? mixedGap : mixedAisle)) throw new BusinessException("已确认组合家具的净距不足");
+                            && blocksWithinGap(blocks, bounds.get(j), other.isBlank() ? mixedGap : mixedAisle)) throw new BusinessException("已确认组合家具的净距不足");
                     }
                 }
             }
@@ -95,10 +110,36 @@ public final class OfficeLayoutValidationPolicy {
         }
     }
 
-    private static boolean withinGap(Rectangle2D.Double a, Rectangle2D.Double b, double gap) {
+    private static boolean blocksWithinGap(List<Rectangle2D.Double> first, List<Rectangle2D.Double> second, double gap) {
         double epsilon = 0.001;
-        return a.x < b.getMaxX() + gap - epsilon && b.x < a.getMaxX() + gap - epsilon
-            && a.y < b.getMaxY() + gap - epsilon && b.y < a.getMaxY() + gap - epsilon;
+        for (Rectangle2D.Double a : first) for (Rectangle2D.Double b : second) {
+            if (a.x < b.getMaxX() + gap - epsilon && b.x < a.getMaxX() + gap - epsilon
+                && a.y < b.getMaxY() + gap - epsilon && b.y < a.getMaxY() + gap - epsilon) return true;
+        }
+        return false;
+    }
+
+    private static boolean outsidePlacement(List<Rectangle2D.Double> blocks, Area placement) {
+        for (Rectangle2D.Double block : blocks) {
+            Area outside = new Area(block); outside.subtract(placement);
+            if (!outside.isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static boolean blocksIntersectArea(List<Rectangle2D.Double> blocks, Area area) {
+        for (Rectangle2D.Double block : blocks) if (overlaps(block, area)) return true;
+        return false;
+    }
+
+    private static boolean blocksIntersect(List<Rectangle2D.Double> blocks, Rectangle2D.Double rect) {
+        for (Rectangle2D.Double block : blocks) if (block.intersects(rect)) return true;
+        return false;
+    }
+
+    private static boolean blocksOverlap(List<Rectangle2D.Double> first, List<Rectangle2D.Double> second) {
+        for (Rectangle2D.Double a : first) for (Rectangle2D.Double b : second) if (a.intersects(b)) return true;
+        return false;
     }
 
     private static double number(JsonNode node, String key) {
@@ -212,13 +253,55 @@ public final class OfficeLayoutValidationPolicy {
         if (path.getBounds2D().getWidth() <= 0 || path.getBounds2D().getHeight() <= 0) throw new BusinessException("建筑约束尺寸无效");
         return new Area(path);
     }
-    private static Rectangle2D.Double footprint(JsonNode item) {
+    /** 与前端一致：L 型桌拆成主台面 + 侧翼，其余家具是整块旋转外接矩形。 */
+    private static List<Rectangle2D.Double> footprints(JsonNode item) {
         Rectangle2D.Double rect = rectangle(item);
         double angle = Math.toRadians(number(item, "rotation"));
-        double w = Math.abs(rect.width * Math.cos(angle)) + Math.abs(rect.height * Math.sin(angle));
-        double h = Math.abs(rect.width * Math.sin(angle)) + Math.abs(rect.height * Math.cos(angle));
+        boolean lDesk = L_DESK_KINDS.contains(furnitureKind(item));
+        double wing = Math.min(item.path("wingWidthMm").isNumber() ? item.path("wingWidthMm").asDouble() : 550,
+            Math.min(rect.width / 2, rect.height / 2));
+        String templateId = item.path("furnitureTemplateId").asText("");
+        double desktopDepth = Math.min(rect.height * 0.48, templateId.startsWith("desk-executive") ? 800 : 650);
+        if (!lDesk || wing <= 0 || desktopDepth <= 0 || desktopDepth >= rect.height) {
+            return List.of(rotatedBlock(rect, angle, 0, 0, rect.width, rect.height));
+        }
+        boolean mirrorX = item.path("mirrorX").asBoolean(false);
+        double wingX = mirrorX ? 0 : rect.width - wing;
+        return List.of(
+            rotatedBlock(rect, angle, 0, 0, rect.width, desktopDepth),
+            rotatedBlock(rect, angle, wingX, desktopDepth, wing, rect.height - desktopDepth));
+    }
+
+    private static String furnitureKind(JsonNode item) {
+        String snapshotKind = item.path("moduleSnapshot").path("kind").asText("");
+        if (!snapshotKind.isBlank()) return snapshotKind;
+        // 前端目录会把带座椅的模板再生成一个「单桌」变体（id 追加 -desk-only，kind 沿用原模板），
+        // 这里先还原基础模板 ID，否则 desk-l-desk-only 之类会被当成普通整块矩形。
+        String templateId = item.path("furnitureTemplateId").asText("");
+        String baseId = templateId.endsWith(DESK_ONLY_SUFFIX)
+            ? templateId.substring(0, templateId.length() - DESK_ONLY_SUFFIX.length()) : templateId;
+        return L_DESK_KINDS.contains(baseId) ? "l-desk" : "";
+    }
+
+    private static Rectangle2D.Double rotatedBlock(Rectangle2D.Double origin, double angle,
+                                                   double x, double y, double w, double h) {
+        double cos = Math.cos(angle), sin = Math.sin(angle);
+        double cx = origin.width / 2, cy = origin.height / 2;
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+        double[][] corners = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+        for (double[] corner : corners) {
+            double dx = corner[0] - cx, dy = corner[1] - cy;
+            double px = cx + dx * cos - dy * sin;
+            double py = cy + dx * sin + dy * cos;
+            minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+            minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+        }
         // Snap right-angle arithmetic so touching edges remain non-overlapping.
-        w = Math.rint(w * 1000) / 1000; h = Math.rint(h * 1000) / 1000;
-        return new Rectangle2D.Double(rect.x + (rect.width - w) / 2, rect.y + (rect.height - h) / 2, w, h);
+        return new Rectangle2D.Double(origin.x + snap(minX), origin.y + snap(minY),
+            snap(maxX - minX), snap(maxY - minY));
+    }
+
+    private static double snap(double value) {
+        return Math.rint(value * 1000) / 1000;
     }
 }
