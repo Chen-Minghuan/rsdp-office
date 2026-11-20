@@ -19,6 +19,10 @@ export interface ProposalFurnitureCartMismatch {
   missing: ProposalMissingFurniture[]
 }
 
+export function shouldGateProposalRoute(path: string, preview: unknown): boolean {
+  return path.replace(/\/+$/, '') === '/proposal' && preview !== '1'
+}
+
 /** 缺失家具弹窗中的空间入口，始终进入当前楼层的布局选品模式。 */
 export function proposalFurnitureSelectionRoute(floorId: string, zoneId: string) {
   return {

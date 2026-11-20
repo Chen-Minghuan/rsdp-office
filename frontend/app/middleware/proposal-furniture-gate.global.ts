@@ -1,5 +1,7 @@
+import { shouldGateProposalRoute } from '~/utils/proposalFurnitureGate'
+
 export default defineNuxtRouteMiddleware(async (to) => {
-  if (to.path !== '/proposal' || to.query.preview === '1') return
+  if (!shouldGateProposalRoute(to.path, to.query.preview)) return
 
   const workspace = useWorkspaceStore()
   if (!workspace.initialized) await workspace.init()
