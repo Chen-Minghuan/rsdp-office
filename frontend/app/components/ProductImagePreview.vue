@@ -6,10 +6,16 @@ const props = withDefaults(defineProps<{
   alt: string
   size?: 'small' | 'large'
   enableLightbox?: boolean
-}>(), { size: 'large' })
+  // 悬浮框放在缩略图左侧时，右边缘与缩略图左边缘的距离（用于与父容器对齐）
+  leftGap?: number
+}>(), { size: 'large', leftGap: 16 })
 
 // Stored product image URLs may be absolute and tied to another entry point.
 const normalizedSrc = computed(() => props.src ? sameOriginAssetUrl(props.src) : props.src)
+
+const slots = useSlots()
+const hasPreviewSide = computed(() => Boolean(slots['preview-side']))
+const previewSideWidth = 210
 
 const stage = ref<HTMLDivElement | null>(null)
 const imageLoaded = ref(false)
@@ -61,12 +67,13 @@ function calculateListPreview(bounds: DOMRect) {
   const scale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1)
   const width = Math.max(96, Math.round(naturalWidth * scale))
   const height = Math.max(96, Math.round(naturalHeight * scale))
-  const frameWidth = width + 24
-  const frameHeight = height + 24
+  const framePadding = hasPreviewSide.value ? 32 : 24
+  const frameWidth = width + framePadding + (hasPreviewSide.value ? previewSideWidth : 0)
+  const frameHeight = height + framePadding
   const left = bounds.right + 16 + frameWidth <= viewportWidth
     ? bounds.right + 16
-    : bounds.left - 16 - frameWidth >= 0
-      ? bounds.left - 16 - frameWidth
+    : bounds.left - props.leftGap - frameWidth >= 0
+      ? bounds.left - props.leftGap - frameWidth
       : Math.max(12, Math.min(bounds.left, viewportWidth - frameWidth - 12))
   const top = Math.max(12, Math.min(bounds.top - 20, viewportHeight - frameHeight - 12))
   return { left: `${left}px`, top: `${top}px`, width: `${frameWidth}px`, height: `${frameHeight}px` }
@@ -113,13 +120,17 @@ const enlargedStyle = computed(() => ({
 </script>
 
 <template>
-  <div ref="stage" class="relative grid h-full w-full place-items-center overflow-hidden bg-white" :class="enableLightbox && src && imageLoaded ? 'cursor-zoom-in' : ''" @pointerenter="showPreview" @pointermove="showPreview" @pointerleave="hovering = false" @click="openLightbox">
+  <div ref="stage" class="relative grid h-full w-full place-items-center overflow-hidden bg-white" :class="[enableLightbox && src && imageLoaded ? 'cursor-zoom-in' : '', hovering && size === 'small' && hasPreviewSide ? 'pip-soft-hover' : '']" @pointerenter="showPreview" @pointermove="showPreview" @pointerleave="hovering = false" @click="openLightbox">
     <img v-if="src" :src="normalizedSrc" :alt="alt" class="absolute inset-0 h-full w-full object-center object-contain" :loading="size === 'small' ? 'lazy' : 'eager'" @load="onImageLoad" @error="imageLoaded = false; hovering = false">
     <div v-else class="flex flex-col items-center gap-2 text-muted"><AppIcon name="cube" :size="size === 'small' ? '5' : '10'" /><span v-if="size === 'large'" class="text-xs">暂无商品图片</span></div>
   </div>
   <Teleport to="body">
-    <div v-if="hovering && src && size === 'small'" class="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden rounded-xl border border-line bg-white p-3 shadow-[0_18px_55px_rgba(35,29,24,0.22)]" :style="listPreviewStyle" aria-hidden="true">
-      <img :src="normalizedSrc" alt="" class="block h-full w-full object-contain">
+    <div v-if="hovering && src && size === 'small'" class="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden bg-white" :class="hasPreviewSide ? 'pip-soft-float p-4' : 'rounded-xl border border-line p-3 shadow-[0_18px_55px_rgba(35,29,24,0.22)]'" :style="listPreviewStyle" aria-hidden="true">
+      <div v-if="hasPreviewSide" class="flex h-full w-full items-stretch gap-3.5">
+        <div class="grid min-w-0 flex-1 place-items-center"><img :src="normalizedSrc" alt="" class="block h-full w-full object-contain"></div>
+        <div class="pip-soft-side w-[196px] shrink-0 overflow-hidden p-3 text-left"><slot name="preview-side" /></div>
+      </div>
+      <img v-else :src="normalizedSrc" alt="" class="block h-full w-full object-contain">
     </div>
     <div v-if="hovering && src && size === 'large'" class="pointer-events-none fixed z-[100] overflow-hidden rounded-full border-[3px] border-white bg-white shadow-[0_12px_38px_rgba(35,29,24,0.24)]" :style="lensStyle" aria-hidden="true">
       <img :src="normalizedSrc" alt="" class="absolute max-w-none" :style="enlargedStyle">
@@ -135,3 +146,19 @@ const enlargedStyle = computed(() => ({
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* main.css 全局强制 * { border-radius:0 !important; box-shadow:none !important }，悬浮预览卡作为浮层例外 */
+.pip-soft-float {
+  border-radius: 10px !important;
+  box-shadow: 0 24px 60px rgba(80, 64, 45, 0.14), 0 4px 14px rgba(80, 64, 45, 0.08) !important;
+}
+.pip-soft-side {
+  border-radius: 8px !important;
+  background: #faf7f1;
+}
+.pip-soft-hover {
+  outline: 2px solid var(--color-bronze);
+  outline-offset: -2px;
+}
+</style>
