@@ -70,7 +70,16 @@ try {
       if (path === '/api/v1/office/projects/PROJ-PARENT/quotation/confirm' && request.method() === 'POST') {
         confirmRequests.push(request.postDataJSON())
         if (confirmFails) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 400, message: '模拟报价确认失败', data: null }) })
-        return respond({ quotationId: 'QT-MOCK-1', projectId: 'PROJ-PARENT', status: 'CONFIRMED' })
+        return respond({
+          quotationId: 'QT-MOCK-1', projectId: 'PROJ-PARENT', projectName: project.name, revision: 1, status: 'CONFIRMED',
+          pricingMode: 'COEFFICIENT', pricingValue: 1.2, goodsTotal: 0, serviceFee: 0, logisticsFee: 0, fees: [],
+          totalAmount: 0, lineCount: request.postDataJSON().lines.length, missingPriceLines: 0,
+          createdBy: 'DEALER-1', createdAt: new Date().toISOString(),
+          lines: request.postDataJSON().lines.map((line, index) => ({
+            ...line, lineNo: index, floorName: '二楼', rspuId: null, productName: product.name,
+            variant: product.variant, imageUrl: null, factoryPrice: null, subtotal: null, issue: null,
+          })),
+        })
       }
       return respond(null)
     })
