@@ -57,11 +57,14 @@ try {
   const placed = async () => (await state()).objects.filter(item => item.kind === 'furniture')
   const dialog = () => page.getByRole('dialog', { name: /单位模块$/ })
   const save = () => dialog().getByRole('button', { name: '保存模块', exact: true }).click()
-  async function clickWorld(x, y, moveOnly = false) {
-    const point = await page.locator('polygon[data-id="CUSTOM-ROOM"]').evaluate((polygon, point) => {
+  async function worldScreen(x, y) {
+    return page.locator('polygon[data-id="CUSTOM-ROOM"]').evaluate((polygon, point) => {
       const transformed = new DOMPoint(point.x, point.y).matrixTransform(polygon.getScreenCTM())
       return { x: transformed.x, y: transformed.y }
     }, { x, y })
+  }
+  async function clickWorld(x, y, moveOnly = false) {
+    const point = await worldScreen(x, y)
     await page.mouse.move(point.x, point.y)
     if (!moveOnly) await page.mouse.click(point.x, point.y)
   }
@@ -70,6 +73,33 @@ try {
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
   await page.getByTestId('tab-product-selection').click()
+  const productCatalog = page.getByTestId('unit-module-catalog')
+  assert.equal(await productCatalog.locator('[data-auto-module-id]').count(), 0)
+  assert.equal(await productCatalog.getByRole('button', { name: /逐件/ }).count(), 0)
+  async function expectCatalogCategory(category) {
+    await page.waitForFunction(expected => document.querySelector(`[data-catalog-category="${expected}"]`)?.open === true, category)
+    const expanded = await productCatalog.locator('[data-catalog-category]').evaluateAll(nodes => nodes.filter(node => node.open).map(node => node.dataset.catalogCategory))
+    assert.deepEqual(expanded, [category])
+  }
+  async function expectZoneCategory(name, zoneType, category) {
+    await page.evaluate(({ name, zoneType }) => {
+      const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+      const zone = store.objects.find(item => item.id === 'CUSTOM-ROOM')
+      zone.name = name
+      zone.zoneType = zoneType
+    }, { name, zoneType })
+    await expectCatalogCategory(category)
+  }
+  for (const [name, zoneType, category] of [
+    ['主管室', 'EXECUTIVE_OFFICE', '主管桌'],
+    ['总经办一', 'EXECUTIVE_OFFICE', '高管桌'],
+    ['员工办公区', 'OPEN_OFFICE', '职员桌'],
+    ['前台', 'RECEPTION', '前台'],
+    ['茶水区', 'COLLABORATION', '接待休闲'],
+    ['中会议室', 'MEETING_ROOM', '会议与洽谈'],
+  ]) await expectZoneCategory(name, zoneType, category)
+  await expectZoneCategory('模块测试空间', 'OPEN_OFFICE', '职员桌')
+  assert.equal(await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').furniturePlacement), null, '默认展开不得自动开始摆放')
   await page.getByRole('button', { name: /新增单位模块/ }).click()
   await save()
   await dialog().getByRole('alert').filter({ hasText: '模块名称' }).waitFor()
@@ -90,8 +120,9 @@ try {
   assert.equal(module.glyphTemplateId, 'desk-l')
   await page.getByTestId('tab-product-selection').click()
   assert.equal(await page.getByRole('button', { name: '我的长 L 桌', exact: true }).getAttribute('aria-pressed'), 'true')
-  // 新建目录模块只选中不进入自动布局（组合面板改版后需显式点「自动」）
-  await page.locator('[data-auto-module-id="' + module.id + '"]').click()
+  // 新建目录模块保持选中；切换到自动布局后继续用于自动排版
+  await page.locator('[data-module-id="' + module.id + '"]').click()
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByRole('tab', { name: '调整参数', exact: true }).click()
   assert.equal(await page.getByLabel('模块宽度（毫米）').inputValue(), '1800')
   assert.equal((await placed()).length, 0, '保存目录不能自动改动画布')
@@ -105,10 +136,10 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('tab-product-selection').click()
   await page.getByRole('button', { name: '我的长 L 桌', exact: true }).click()
+  await page.getByTestId('canvas-stop-placement').waitFor()
   assert.equal((await state()).customModules[0].id, module.id)
   const room = (await state()).objects.find(item => item.id === 'CUSTOM-ROOM')
   const geometry = structuredClone(room)
-  await page.getByRole('button', { name: '逐件添加', exact: true }).click()
   await clickWorld(room.x + 1500, room.y + 1500, true)
   const placementPreview = page.getByTestId('furniture-placement-preview')
   assert.equal(await placementPreview.getAttribute('data-valid'), 'true')
@@ -151,7 +182,7 @@ try {
   assert.equal(two[1].h, 1400)
   await page.keyboard.press('Escape')
   assert.equal(await page.getByTestId('furniture-placement-preview').count(), 0)
-  await page.getByRole('button', { name: '逐件添加', exact: true }).waitFor()
+  await page.getByTestId('canvas-stop-placement').waitFor({ state: 'detached' })
   await page.screenshot({ path: outDir + '/02-manual-custom-placement.png', animations: 'disabled' })
   await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
   assert.ok((await placed()).every(item => item.layoutConfirmed))
@@ -166,7 +197,18 @@ try {
   }
   const executives = catalog.locator('details').filter({ hasText: /^高管桌/ })
   if (!(await executives.getAttribute('open'))) await executives.locator('summary').click()
-  const placeDeskOnly = page.getByRole('button', { name: '逐件添加 高管直线桌（单桌）', exact: true })
+  const placeDeskOnly = catalog.locator('[data-module-id="desk-executive-desk-only"]')
+  const deskBoard = page.getByTestId('office-design-canvas')
+  const dropPoint = await worldScreen(room.x + 5500, room.y + 4500)
+  const boardBounds = await deskBoard.boundingBox()
+  await placeDeskOnly.dragTo(deskBoard, { targetPosition: { x: dropPoint.x - boardBounds.x, y: dropPoint.y - boardBounds.y } })
+  const draggedDesk = (await placed()).find(item => item.furnitureTemplateId === 'desk-executive-desk-only')
+  assert.ok(draggedDesk, '图例可直接拖拽到画布放置')
+  assert.ok(Math.abs(draggedDesk.x + draggedDesk.w / 2 - (room.x + 5500)) <= 10 && Math.abs(draggedDesk.y + draggedDesk.h / 2 - (room.y + 4500)) <= 10, JSON.stringify({ actual: [draggedDesk.x + draggedDesk.w / 2, draggedDesk.y + draggedDesk.h / 2], expected: [room.x + 5500, room.y + 4500] }))
+  await page.getByTestId('canvas-stop-placement').click()
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.equal((await placed()).length, 2)
+
   await placeDeskOnly.click()
   await clickWorld(room.x + 2000, room.y + 4400, true)
   await page.keyboard.press('Space')
@@ -182,7 +224,6 @@ try {
   assert.equal((await placed()).length, 3, '结束放置保留已添加家具')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   await placeDeskOnly.click()
-  const deskBoard = page.getByTestId('office-design-canvas')
   await deskBoard.click({ button: 'right' })
   assert.equal(await page.getByTestId('canvas-stop-placement').count(), 0, '右键结束连续放置')
   assert.equal((await placed()).length, 2)
@@ -192,15 +233,17 @@ try {
   assert.equal(chairDrawings.length, 6)
   assert.equal(new Set(chairDrawings.map(item => item.glyph)).size, 6, '六种座椅有不同的实际线稿')
   await chairs.screenshot({ path: outDir + '/04-chair-presets.png', animations: 'disabled' })
-  await page.getByRole('button', { name: '逐件添加 总裁椅', exact: true }).click()
+  await catalog.locator('[data-module-id="chair-executive"]').click()
   await clickWorld(room.x + 4700, room.y + 4200)
   const executiveChair = (await placed()).find(item => item.furnitureTemplateId === 'chair-executive')
   assert.equal(executiveChair.heightMm, 1200)
   assert.equal(await deskBoard.locator('[data-id="' + executiveChair.id + '"] [data-chair-glyph="chair-executive"]').count(), 1)
+  await page.locator(`[data-furniture-id="${executiveChair.id}"]`).click()
+  await expectCatalogCategory('座椅')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
+  if (!(await chairs.evaluate(node => node.open))) await chairs.locator('summary').click()
   await page.getByRole('button', { name: '办公转椅', exact: true }).click()
-  await page.getByRole('button', { name: '逐件添加', exact: true }).click()
   await clickWorld(room.x + 4500, room.y + 4000)
   assert.equal((await placed()).length, 3)
   assert.ok((await placed()).every(item => !item.layoutConfirmed))
@@ -217,7 +260,8 @@ try {
   assert.deepEqual(await placed(), beforeEdit, '编辑目录不改写已摆实例的几何和图例快照')
   assert.equal((await state()).customModules[0].glyphTemplateId, 'table-meeting-round')
   assert.equal(await page.getByTestId('office-design-canvas').locator('[data-furniture-template="desk-l"]').count(), 2)
-  await page.locator('[data-auto-module-id="' + module.id + '"]').click()
+  await page.locator('[data-module-id="' + module.id + '"]').click()
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('apply-layout').click()
   const afterAuto = await placed()
   const auto = afterAuto.filter(item => item.layoutGroupId === `auto:${room.id}`)
@@ -252,7 +296,7 @@ try {
   assert.equal(await fresh.getByTestId('office-design-canvas').locator('[data-furniture-template="desk-l"]').count(), 2)
   await freshContext.close()
   assert.deepEqual(errors, [])
-  console.log('自定义/逐件添加 UI 通过：名称尺寸校验、本机目录/刷新、毫米快照、点击/连续放置、旋转、越界/重叠拒绝、保留旧家具/确认失效/撤销、目录编辑移除不改实例、自动排版及无本机目录时从保存快照恢复线稿。全部 API 模拟。')
+  console.log('自定义/直接摆放 UI 通过：名称尺寸校验、本机目录/刷新、毫米快照、点击与拖拽放置、连续放置、旋转、越界/重叠拒绝、保留旧家具/确认失效/撤销、目录编辑移除不改实例、自动排版及无本机目录时从保存快照恢复线稿。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   if (debugPage) console.error(await debugPage.evaluate(() => ({ text: document.body.innerText.slice(-1600), draft: JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))?.customModules })).catch(() => null))
