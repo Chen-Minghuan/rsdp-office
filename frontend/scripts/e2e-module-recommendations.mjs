@@ -27,7 +27,9 @@ try {
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   page = await context.newPage()
   const errors = []
+  const runtimeErrors = []
   page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') runtimeErrors.push(message.text()) })
   let saved = null, empty = false, fail = false, unavailable = false, delayA = false, noCatalog = false
   let waitForSelection
   const selections = [], queries = []
@@ -99,7 +101,7 @@ try {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     state.objects = [
       { id: 'Z', kind: 'zone', x: 0, y: 0, w: 6000, h: 4000, name: '推荐测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[0,0],[6000,0],[6000,4000],[0,4000]] },
-      ...['A', 'B'].map((id, index) => ({ id, kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '职员桌 ' + id, x: 500 + index * 2000, y: 500, w: 1200, h: 600, rotation: 0, productId: '', layoutConfirmed: true })),
+      ...['A', 'B'].map((id, index) => ({ id, kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '共享职员桌', x: 500 + index * 2000, y: 500, w: 1200, h: 600, rotation: 0, productId: '', layoutConfirmed: true })),
       { id: 'C', kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-straight', label: '小桌 C', x: 500, y: 2300, w: 700, h: 400, rotation: 0, productId: '', layoutConfirmed: true },
       { id: 'OTHER', kind: 'furniture', zoneId: 'OTHER', furnitureTemplateId: 'chair-office', x: 10000, y: 0, w: 650, h: 650, rotation: 0, productId: 'KEEP', layoutConfirmed: true },
     ]
@@ -110,6 +112,17 @@ try {
   await page.getByLabel('布局房间类型').selectOption('MEETING_ROOM')
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'Z').zoneType), 'MEETING_ROOM')
   await page.getByTestId('tab-product-selection').click()
+  const furniture = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
+  assert.equal(await page.locator('[data-furniture-id]').count(), 2, '名称与尺寸完全相同的 A/B 在已排家具列表中只显示一个代表项')
+  assert.equal(await page.locator('[data-furniture-id="A"]').count(), 1)
+  assert.equal(await page.locator('[data-furniture-id="B"]').count(), 0)
+  await furniture('B').click()
+  await page.getByTestId('product-item-editor').waitFor()
+  assert.equal(await page.locator('[data-furniture-id="A"]').getAttribute('aria-pressed'), 'true', '选中隐藏的同组实例时代表项保持高亮')
+  await page.getByTestId('product-copy-furniture').click()
+  const copied = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.kind === 'furniture' && item.zoneId === 'Z' && !['A', 'B', 'C'].includes(item.id)))
+  assert.deepEqual([copied.x, copied.y], [2700, 700], '合并列表后编辑器仍作用于画布实际选中的 B 实例')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
   await page.locator('[data-furniture-id="A"]').click()
   await page.getByTestId('product-copy-furniture').click()
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.filter(item => item.kind === 'furniture' && item.zoneId === 'Z').length), 4)
@@ -159,7 +172,6 @@ try {
   const panel = page.getByTestId('module-product-recommendations')
   const card = id => panel.locator('[data-product-id="' + id + '"]')
   const matchingModule = panel.getByLabel('匹配单位模块')
-  const furniture = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
   await card('EXACT').waitFor()
   assert.equal(await matchingModule.inputValue(), 'A', '进入推荐时使用画布已选的家具')
   await page.keyboard.press('Escape')
@@ -194,6 +206,36 @@ try {
   assert.equal(single.objects.find(item => item.id === 'A').productId, '')
   assert.equal(single.objects.find(item => item.id === 'B').productId, 'MEDIUM')
   assert.equal(single.cart.length, 1)
+  const selectedOptions = await matchingModule.locator('option').allTextContents()
+  assert.ok(selectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选 1/2') && !text.includes('已选择')), '同规格模块只选一件时，下拉项显示已选数量')
+  assert.ok(selectedOptions.some(text => text.includes('小桌 C') && !text.includes('已选择')), '不同名称或尺寸的下拉项不应标记为已选择')
+  const legacyBefore = await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const item = store.objects.find(item => item.id === 'A')
+    return { productId: item.productId, productSelection: item.productSelection ? JSON.parse(JSON.stringify(item.productSelection)) : null, cart: JSON.parse(JSON.stringify(store.cart)) }
+  })
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const legacy = store.objects.find(item => item.id === 'A')
+    legacy.productId = 'MEDIUM'
+    legacy.productSelection = { product: null, cartLineId: 'LEGACY-LINE', sourceCanvasRevision: store.canvasRevision }
+    store.cart = [{ id: 'LEGACY-LINE', productId: 'MEDIUM', zoneId: 'Z', zoneName: '推荐测试空间', qty: 1 }]
+    store.saveLocal()
+  })
+  await matchingModule.selectOption('A')
+  await card('EXACT').waitFor()
+  const legacyOption = await matchingModule.locator('option:checked').textContent()
+  assert.match(legacyOption || '', /已选 1\/2/, '旧快照商品详情为空时，有效购物车行仍应计入已选数量')
+  assert.deepEqual(errors, [], `旧快照 product=null 不应触发页面异常：${errors.join('; ')}`)
+  assert.ok(!runtimeErrors.some(error => error.includes("Cannot read properties of null")), `旧快照 product=null 不应读取商品详情：${runtimeErrors.join('; ')}`)
+  await page.evaluate(previous => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const item = store.objects.find(item => item.id === 'A')
+    item.productId = previous.productId
+    item.productSelection = previous.productSelection
+    store.cart = previous.cart
+    store.saveLocal()
+  }, legacyBefore)
   await matchingModule.selectOption('A')
   await card('EXACT').waitFor()
   assert.equal(await furniture('A').locator('.manual-furniture-glyph.selected').count(), 1)
@@ -297,6 +339,8 @@ try {
   }
   assert.equal(state.cart.length, 2)
   assert.equal(state.cart.every(item => item.qty === 1), true)
+  const fullySelectedOptions = await matchingModule.locator('option').allTextContents()
+  assert.ok(fullySelectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选 2/2')), '同规格模块全部选中时，下拉项显示完整已选数量')
   assert.deepEqual(state.objects.find(item => item.id === 'OTHER'), before.find(item => item.id === 'OTHER'))
   assert.equal(selections[1].applyToSameModules, true)
   unavailable = true

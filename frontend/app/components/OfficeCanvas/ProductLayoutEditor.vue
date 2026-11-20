@@ -11,6 +11,16 @@ const selectedId = defineModel<string | null>('selectedId')
 const emit = defineEmits<{ confirmed: [] }>()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const items = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
+type FurnitureDisplayGroup = { representative: FurnitureObject; items: FurnitureObject[] }
+const displayedItemGroups = computed<FurnitureDisplayGroup[]>(() => {
+  const groups: FurnitureDisplayGroup[] = []
+  for (const item of items.value) {
+    const group = groups.find(entry => entry.representative.label === item.label && entry.representative.w === item.w && entry.representative.h === item.h)
+    if (group) group.items.push(item)
+    else groups.push({ representative: item, items: [item] })
+  }
+  return groups
+})
 const catalogCategories = computed(() => zone.value?.zoneType === 'MEETING_ROOM' ? ['会议与洽谈', ...furnitureCategories.filter(category => category !== '会议与洽谈')] : furnitureCategories)
 const selectedItem = computed(() => items.value.find(item => item.id === selectedId.value) || null)
 const catalog = ref<HTMLElement | null>(null)
@@ -41,6 +51,9 @@ watch(() => [selectedItem.value?.id, selectedItem.value?.w, selectedItem.value?.
 
 function glyph(item: FurnitureObject) {
   return item.moduleSnapshot?.glyphTemplateId || item.furnitureTemplateId || 'desk-straight'
+}
+function groupSelected(group: FurnitureDisplayGroup) {
+  return group.items.some(item => item.id === selectedId.value)
 }
 function resizeSelected() {
   if (!selectedItem.value) return
@@ -166,20 +179,20 @@ function confirmLayout() {
           <h3 class="mb-2 text-[11px] font-semibold text-[#56614f]">已排家具</h3>
           <div class="grid gap-1">
             <button
-              v-for="item in items"
-              :key="item.id"
+              v-for="group in displayedItemGroups"
+              :key="group.representative.id"
               type="button"
-              :data-furniture-id="item.id"
-              :aria-pressed="selectedItem?.id === item.id"
-              :class="['flex min-w-0 items-center gap-2 rounded-none border px-2 py-1.5 text-left', selectedItem?.id === item.id ? 'border-[#83c95a] bg-[#eef8e7]' : 'border-line bg-white hover:bg-[#f7f9f4]']"
-              @click="selectedId = item.id"
+              :data-furniture-id="group.representative.id"
+              :aria-pressed="groupSelected(group)"
+              :class="['flex min-w-0 items-center gap-2 rounded-none border px-2 py-1.5 text-left', groupSelected(group) ? 'border-[#83c95a] bg-[#eef8e7]' : 'border-line bg-white hover:bg-[#f7f9f4]']"
+              @click="selectedId = group.representative.id"
             >
-              <span class="h-9 w-12 flex-none"><OfficeCanvasFurniturePreview :template-id="glyph(item)" :width-mm="item.w" :depth-mm="item.h" thumbnail /></span>
+              <span class="h-9 w-12 flex-none"><OfficeCanvasFurniturePreview :template-id="glyph(group.representative)" :width-mm="group.representative.w" :depth-mm="group.representative.h" thumbnail /></span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-[11px] font-medium text-[#4f493f]">{{ item.label || '单位模块' }}</span>
-                <span class="mt-0.5 block text-[10px] text-muted">{{ Math.round(item.w) }} × {{ Math.round(item.h) }} mm</span>
+                <span class="block truncate text-[11px] font-medium text-[#4f493f]">{{ group.representative.label || '单位模块' }}</span>
+                <span class="mt-0.5 block text-[10px] text-muted">{{ Math.round(group.representative.w) }} × {{ Math.round(group.representative.h) }} mm</span>
               </span>
-              <AppIcon v-if="selectedItem?.id === item.id" name="check" size="3.5" class="flex-none text-[#55a138]" />
+              <AppIcon v-if="groupSelected(group)" name="check" size="3.5" class="flex-none text-[#55a138]" />
             </button>
           </div>
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
+const proposalFurnitureGateDialog = useProposalFurnitureGateDialog()
 const { isProjectWorkflow } = useWorkspaceNavigation()
 // 应用外壳先决定挂载哪个页面，不能等 NuxtPage 渲染完成后才读取路由。
 const route = useRouter().currentRoute
@@ -37,5 +38,6 @@ watch(() => route.value.path, () => {
         <NuxtPage v-else :key="workspace.currentFloorId" />
       </div>
     </main>
+    <ProposalFurnitureGateDialog v-if="proposalFurnitureGateDialog.mismatches.value.length" :mismatches="proposalFurnitureGateDialog.mismatches.value" @close="proposalFurnitureGateDialog.close" />
   </div>
 </template>
