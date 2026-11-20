@@ -71,9 +71,8 @@ function selectModule(module: OfficeModuleTemplate) {
   activePage.value = 'auto'
   nextTick(() => autoLayout.value?.selectModule(module))
 }
+/** 页签切换只切页签；点击图例回填模块由 selectModule 自己处理，避免覆盖已有多选。 */
 function openPage(page: WorkflowPage) {
-  const module = store.customModules.find(item => item.id === selectedCatalogId.value) || furnitureById.get(selectedCatalogId.value)
-  if (page === 'auto' && module) { selectModule(module); return }
   activePage.value = page
 }
 function confirmAndRecommend() {
