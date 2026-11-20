@@ -1,23 +1,23 @@
 <script setup lang="ts">
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { ZoneObject } from '~/types/office'
-import type { LayoutReference, LayoutReferenceEditing } from '~/types/layoutPlanning'
+import type { LayoutReference, LayoutReferenceEditing, LayoutReferenceRecognitionTask } from '~/types/layoutPlanning'
 import { canvasDrawingRect, canvasZoneBounds } from '~/utils/officeCanvasView'
 import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import { deleteReferenceSelection, rotateReferenceSelection, MIXED_CATEGORY_IDS, MIXED_LAYOUT_CATEGORIES, REFERENCE_TEMPLATES } from '~/utils/mixedLayout'
 
-const props = defineProps<{ plan: FloorPlanAnalysisResponse; zone: ZoneObject; categoryIds: string[]; existing: LayoutReference | null; problem: string }>()
-const emit = defineEmits<{ close: []; apply: [value: LayoutReference] }>()
-const api = useOfficeApi()
+const emit = defineEmits<{ close: []; apply: [value: LayoutReference]; recognize: [value: { image: Blob; analysisId: string; revision: number; zoneId: string }] }>()
+const props = defineProps<{ plan: FloorPlanAnalysisResponse; zone: ZoneObject; categoryIds: string[]; existing: LayoutReference | null; problem: string; recognition: LayoutReferenceRecognitionTask }>()
 const editing = defineModel<LayoutReferenceEditing | null>({ required: true })
+const api = useOfficeApi()
 const upload = ref<Blob>()
 const category = ref(props.categoryIds[0] || 'workstation')
 const template = ref('')
 const addToExistingGroup = ref(false)
 const includeOtherCategories = ref(props.existing?.includeOtherCategories ?? !props.categoryIds.length)
 const status = ref('正在读取当前空间底图…')
-const busy = ref(false)
+const statusText = computed(() => props.recognition.status === 'running' ? '正在识别裁图中的家具…' : props.recognition.message || status.value)
 const options = (id: string) => (REFERENCE_TEMPLATES[id] || []).filter(key => furnitureById.has(key))
 const selected = computed(() => editing.value?.selected == null ? null : editing.value.marks[editing.value.selected])
 const label = (id: string) => furnitureById.get(id)?.name || id
@@ -68,36 +68,28 @@ onMounted(async () => {
     if (!editing.value) return
     upload.value = blob
     const previous = props.existing
-    editing.value = { ...editing.value, crop: worldCrop, marks: previous && JSON.stringify(previous.crop) === JSON.stringify(worldCrop) ? previous.marks.map(mark => ({ ...mark })) : [] }
+    const current = editing.value
+    const marks = JSON.stringify(current.crop) === JSON.stringify(worldCrop)
+      ? current.marks.map(mark => ({ ...mark }))
+      : previous && JSON.stringify(previous.crop) === JSON.stringify(worldCrop)
+        ? previous.marks.map(mark => ({ ...mark }))
+        : []
+    editing.value = { ...current, crop: worldCrop, marks }
     status.value = ''
   } catch (error) {
     if (!disposed) status.value = error instanceof Error ? '无法读取空间底图 · ' + error.message : '无法读取空间底图'
   }
 })
 
-async function recognize() {
-  if (!upload.value || busy.value) return
-  busy.value = true
-  status.value = '正在识别裁图中的家具…'
-  try {
-    const detected = await api.recognizeLayoutReference(upload.value, props.plan.analysisId, revision)
-    if (disposed || !editing.value) return
-    const valid = detected.filter(mark => options(mark.categoryId).includes(mark.templateId))
-    // Preserve user edits across retries and filter nearly coincident machine suggestions.
-    const manual = editing.value.marks.filter(mark => mark.confidence === 'manual')
-    const newMarks = valid.filter(mark => !manual.some(item => item.categoryId === mark.categoryId
-      && Math.hypot(item.x + item.width / 2 - mark.x - mark.width / 2, item.y + item.depth / 2 - mark.y - mark.depth / 2) < 0.04))
-    editing.value = { ...editing.value, marks: [...manual, ...newMarks], selected: null, placement: null }
-    status.value = valid.length ? `识别到 ${valid.length} 个家具标记，请核对图例、方向和分组` : '裁图中未识别到可靠家具，可以在画布手动添加'
-  } catch (error) {
-    if (!disposed) status.value = error instanceof Error ? error.message : '识别失败，可手动添加'
-  } finally { if (!disposed) busy.value = false }
+function recognize() {
+  if (!upload.value || props.recognition.status === 'running') return
+  emit('recognize', { image: upload.value, analysisId: props.plan.analysisId, revision, zoneId: props.zone.id })
 }
 
 
 function add() {
   const state = editing.value
-  if (!state?.crop || !template.value || busy.value) return
+  if (!state?.crop || !template.value || props.recognition.status === 'running') return
   const group = addToExistingGroup.value && selected.value?.categoryId === category.value ? selected.value.group : uid('ref')
   editing.value = { ...state, placement: { templateId: template.value, categoryId: category.value, group, rotation: 0 } }
 }
@@ -115,9 +107,9 @@ function applyCurrent() {
         <div><h2 class="text-sm font-bold text-[#403a33]">参考原图摆位</h2><p class="text-[10px] text-muted">{{ zone.name }}</p></div>
         <button type="button" class="shrink-0 border border-line px-2 py-1 text-[10px]" @click="emit('close')">返回组合布局</button>
       </div>
-      <p v-if="status" class="text-[11px] text-muted" role="status">{{ status }}</p>
+      <p v-if="statusText" class="text-[11px] text-muted" role="status">{{ statusText }}</p>
       <template v-if="editing?.crop">
-        <button type="button" data-testid="reference-recognize" class="w-full border border-line px-2 py-2 text-xs font-medium disabled:opacity-50" :disabled="busy" @click="recognize">{{ busy ? '正在识别…' : '识别原图家具' }}</button>
+        <button type="button" data-testid="reference-recognize" class="w-full border border-line px-2 py-2 text-xs font-medium disabled:opacity-50" :disabled="recognition.status === 'running'" @click="recognize">{{ recognition.status === 'running' ? '正在识别…' : '识别原图家具' }}</button>
         <p class="text-[10px] text-muted">在画布上点选家具，拖动调整位置。橙色图例待确认。</p>
         <div class="space-y-2 border-y border-line py-2 text-xs">
           <div class="grid grid-cols-2 gap-1">
@@ -126,7 +118,7 @@ function applyCurrent() {
           </div>
           <label v-if="selected?.categoryId === category" class="flex items-center gap-1"><input v-model="addToExistingGroup" type="checkbox"> 与选中家具同组</label>
           <button v-if="editing.placement" type="button" class="w-full border border-line px-2 py-1" @click="editing.placement = null">取消放置</button>
-          <button v-else type="button" data-testid="reference-add" class="w-full border border-line px-2 py-1 disabled:opacity-50" :disabled="busy" @click="add">在画布添加家具</button>
+          <button v-else type="button" data-testid="reference-add" class="w-full border border-line px-2 py-1 disabled:opacity-50" :disabled="recognition.status === 'running'" @click="add">在画布添加家具</button>
           <p v-if="editing.placement" class="text-[10px] text-muted">点击布局画布放置 {{ label(editing.placement.templateId) }}</p>
         </div>
         <div v-for="(mark, index) in editing.marks" :key="index" class="border-b border-line pb-2 text-xs">
@@ -143,7 +135,7 @@ function applyCurrent() {
     </div>
     <div class="border-t border-line px-3 py-2">
       <p v-if="problem" class="mb-2 text-[10px] text-[#a65e4c]" role="status">{{ problem }}</p>
-      <button type="button" data-testid="reference-apply" class="w-full bg-[#83d94f] px-3 py-2 text-xs font-semibold disabled:opacity-50" :disabled="busy || !editing?.crop || !editing.marks.length" @click="applyCurrent">应用当前方案</button>
+      <button type="button" data-testid="reference-apply" class="w-full bg-[#83d94f] px-3 py-2 text-xs font-semibold disabled:opacity-50" :disabled="recognition.status === 'running' || !editing?.crop || !editing.marks.length" @click="applyCurrent">应用当前方案</button>
     </div>
   </section>
 </template>

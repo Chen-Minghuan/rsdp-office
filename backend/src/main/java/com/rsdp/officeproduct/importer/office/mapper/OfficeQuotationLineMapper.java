@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
+import java.util.Collection;
 
 @Mapper
 public interface OfficeQuotationLineMapper {
@@ -24,4 +25,12 @@ public interface OfficeQuotationLineMapper {
 
     @Select("select * from office_quotation_line where quotation_id = #{quotationId} order by line_no")
     List<OfficeQuotationLine> findByQuotationId(@Param("quotationId") String quotationId);
+
+    @Select({
+        "<script>",
+        "select * from office_quotation_line where quotation_id in",
+        "<foreach collection='quotationIds' item='quotationId' open='(' separator=',' close=')'>#{quotationId}</foreach>",
+        "</script>"
+    })
+    List<OfficeQuotationLine> findByQuotationIds(@Param("quotationIds") Collection<String> quotationIds);
 }

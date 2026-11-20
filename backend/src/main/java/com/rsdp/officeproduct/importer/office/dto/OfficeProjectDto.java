@@ -8,6 +8,8 @@ import java.util.List;
 
 @Data
 public class OfficeProjectDto {
+    /** DESIGNING / DELIVERING。项目列表看板使用的业务阶段。 */
+    private String stage;
     private String projectId;
     private String name;
     private String customerRequirements;

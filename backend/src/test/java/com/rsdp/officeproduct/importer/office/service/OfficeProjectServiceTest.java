@@ -19,11 +19,15 @@ import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeAuditLog;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
+import com.rsdp.officeproduct.importer.office.entity.OfficeQuotation;
+import com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeAuditLogMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeQuotationLineMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeQuotationMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -46,6 +50,8 @@ class OfficeProjectServiceTest {
     private final List<OfficeProjectMember> members = new ArrayList<>();
     private final List<OfficeAuditLog> auditLogs = new ArrayList<>();
     private final List<OfficeCart> cartLines = new ArrayList<>();
+    private final List<OfficeQuotation> quotations = new ArrayList<>();
+    private final List<OfficeQuotationLine> quotationLines = new ArrayList<>();
     private OfficeDesignProjectMapper projectMapper;
     private OfficeDesignFloorMapper floorMapper;
     private OfficeProjectMemberMapper memberMapper;
@@ -55,6 +61,8 @@ class OfficeProjectServiceTest {
     private OfficeCartMapper cartMapper;
     private RsdpCatalogGateway catalogGateway;
     private SharedCatalogService sharedCatalogService;
+    private OfficeQuotationMapper quotationMapper;
+    private OfficeQuotationLineMapper quotationLineMapper;
     private OfficeProjectService service;
 
     @BeforeEach void setup() {
@@ -64,6 +72,8 @@ class OfficeProjectServiceTest {
         members.clear();
         auditLogs.clear();
         cartLines.clear();
+        quotations.clear();
+        quotationLines.clear();
         projectMapper = mock(OfficeDesignProjectMapper.class);
         floorMapper = mock(OfficeDesignFloorMapper.class);
         memberMapper = mock(OfficeProjectMemberMapper.class);
@@ -71,6 +81,8 @@ class OfficeProjectServiceTest {
         var auditLogMapper = mock(OfficeAuditLogMapper.class);
         access = mock(OfficeProjectAccessService.class);
         cartMapper = mock(OfficeCartMapper.class);
+        quotationMapper = mock(OfficeQuotationMapper.class);
+        quotationLineMapper = mock(OfficeQuotationLineMapper.class);
         catalogGateway = mock(RsdpCatalogGateway.class);
         sharedCatalogService = mock(SharedCatalogService.class);
         when(access.enforcementEnabled()).thenReturn(false);
@@ -95,6 +107,10 @@ class OfficeProjectServiceTest {
         when(memberMapper.delete(any())).thenAnswer(call -> { members.removeIf(member -> scopeIds(call.getArgument(0)).contains(member.getProjectId())); return 1; });
         when(cartMapper.selectList(any())).thenAnswer(call -> cartLines.stream()
             .filter(cart -> scopeIds(call.getArgument(0)).contains(cart.getProjectId())).toList());
+        when(quotationMapper.selectList(any())).thenAnswer(call -> quotations.stream()
+            .filter(quotation -> "CONFIRMED".equals(quotation.getStatus())).toList());
+        when(quotationLineMapper.findByQuotationIds(any())).thenAnswer(call -> quotationLines.stream()
+            .filter(line -> ((Collection<?>) call.getArgument(0)).contains(line.getQuotationId())).toList());
         when(sharedCatalogService.resolveViewMode()).thenReturn("full");
         when(userMapper.selectById(anyString())).thenAnswer(call -> users.get(call.getArgument(0)));
         when(userMapper.selectBatchIds(any(Collection.class))).thenAnswer(call -> users.values().stream()
@@ -110,7 +126,7 @@ class OfficeProjectServiceTest {
         });
         auditService = new OfficeAuditService(auditLogMapper, currentUserService);
         service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
-            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService);
+            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService, quotationMapper, quotationLineMapper);
     }
 
     private OfficeUser activeUser(String userId, String username) {
@@ -175,6 +191,47 @@ class OfficeProjectServiceTest {
         assertEquals(BigDecimal.ZERO, budgetTotal(project));
         assertEquals("COMPLETE", budgetStatus(project));
         verifyNoInteractions(catalogGateway);
+    }
+
+    @Test void classifiesProjectsByConfirmedQuotationLinesAcrossAllFloors() {
+        var designing = service.createProject(request("设计中", List.of("一层", "二层")));
+        var confirmedEmpty = service.createProject(request("确认无明细", List.of("一层")));
+        var delivering = service.createProject(request("交付中", List.of("一层", "二层")));
+        var partial = service.createProject(request("部分明细", List.of("一层", "二层")));
+        quotation("Q-D", designing.getProjectId(), "SUPERSEDED");
+        quotation("Q-E", confirmedEmpty.getProjectId(), "CONFIRMED");
+        quotation("Q-L", delivering.getProjectId(), "CONFIRMED");
+        quotation("Q-P", partial.getProjectId(), "CONFIRMED");
+        quotationLines.add(line("Q-D", "OLD-FLOOR-1"));
+        quotationLines.add(line("Q-D", "OLD-FLOOR-2"));
+        quotationLines.add(line("Q-L", "EXTERNAL-FLOOR-1"));
+        quotationLines.add(line("Q-L", "EXTERNAL-FLOOR-1"));
+        quotationLines.add(line("Q-L", "EXTERNAL-FLOOR-2"));
+        quotationLines.add(line("Q-P", partial.getFloors().get(0).getFloorId()));
+
+        var result = service.listProjects();
+
+        assertEquals("DESIGNING", project(result, designing.getProjectId()).getStage());
+        assertEquals("DESIGNING", project(result, confirmedEmpty.getProjectId()).getStage());
+        assertEquals("DELIVERING", project(result, delivering.getProjectId()).getStage());
+        assertEquals("DESIGNING", project(result, partial.getProjectId()).getStage());
+    }
+
+    private OfficeQuotation quotation(String id, String projectId, String status) {
+        var quotation = new OfficeQuotation();
+        quotation.setQuotationId(id);
+        quotation.setProjectId(projectId);
+        quotation.setStatus(status);
+        quotation.setRevision(1);
+        quotations.add(quotation);
+        return quotation;
+    }
+
+    private OfficeQuotationLine line(String quotationId, String floorId) {
+        var line = new OfficeQuotationLine();
+        line.setQuotationId(quotationId);
+        line.setFloorId(floorId);
+        return line;
     }
 
     @Test void keepsProjectListAvailableWhenCatalogPricingFails() {

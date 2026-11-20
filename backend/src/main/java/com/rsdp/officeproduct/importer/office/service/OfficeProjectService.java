@@ -22,10 +22,14 @@ import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
+import com.rsdp.officeproduct.importer.office.entity.OfficeQuotation;
+import com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeQuotationLineMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeQuotationMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -69,6 +73,8 @@ public class OfficeProjectService {
     private final OfficeCartMapper cartMapper;
     private final RsdpCatalogGateway catalogGateway;
     private final SharedCatalogService sharedCatalogService;
+    private final OfficeQuotationMapper quotationMapper;
+    private final OfficeQuotationLineMapper quotationLineMapper;
 
     public List<OfficeProjectDto> listProjects() {
         List<OfficeDesignProject> projects = projectMapper.selectList(
@@ -88,6 +94,7 @@ public class OfficeProjectService {
         Map<String, List<OfficeProjectMember>> membersByProject = membersByProject(projectIds);
         Map<String, OfficeUser> usersById = usersById(membersByProject);
         Map<String, ProjectBudget> budgetsByProject = budgetsByProject(projectIds, floors);
+        Map<String, String> stagesByProject = stagesByProject(projectIds, floors);
         return projects.stream()
             .map(project -> {
                 OfficeProjectDto dto = toProjectDto(project,
@@ -97,9 +104,48 @@ public class OfficeProjectService {
                 ProjectBudget budget = budgetsByProject.getOrDefault(project.getProjectId(), ProjectBudget.complete());
                 dto.setBudgetTotal(budget.total());
                 dto.setBudgetStatus(budget.status());
+                dto.setStage(stagesByProject.getOrDefault(project.getProjectId(), "DESIGNING"));
                 return dto;
             })
             .toList();
+    }
+
+    private Map<String, String> stagesByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {
+        Map<String, String> stages = projectIds.stream()
+            .collect(Collectors.toMap(Function.identity(), ignored -> "DESIGNING"));
+        if (projectIds.isEmpty()) {
+            return stages;
+        }
+
+        List<OfficeQuotation> confirmed = quotationMapper.selectList(new QueryWrapper<OfficeQuotation>()
+            .in("project_id", projectIds).eq("status", "CONFIRMED")
+            .orderByDesc("revision").orderByDesc("created_at"));
+        Map<String, OfficeQuotation> quotationByProject = confirmed.stream()
+            .collect(Collectors.toMap(OfficeQuotation::getProjectId, Function.identity(), (first, ignored) -> first));
+        if (quotationByProject.isEmpty()) {
+            return stages;
+        }
+
+        Map<String, Set<String>> floorsByQuotation = new HashMap<>();
+        List<String> quotationIds = quotationByProject.values().stream()
+            .map(OfficeQuotation::getQuotationId).filter(StringUtils::hasText).toList();
+        if (!quotationIds.isEmpty()) {
+            for (OfficeQuotationLine line : quotationLineMapper.findByQuotationIds(quotationIds)) {
+                if (StringUtils.hasText(line.getFloorId())) {
+                    floorsByQuotation.computeIfAbsent(line.getQuotationId(), ignored -> new HashSet<>()).add(line.getFloorId());
+                }
+            }
+        }
+        for (Map.Entry<String, OfficeQuotation> entry : quotationByProject.entrySet()) {
+            String projectId = entry.getKey();
+            OfficeQuotation quotation = entry.getValue();
+            long floorCount = floors.stream().filter(floor -> projectId.equals(floor.getProjectId())).count();
+            Set<String> quotedFloors = floorsByQuotation.getOrDefault(quotation.getQuotationId(), Set.of());
+            if (floorCount > 0 && quotedFloors.size() == floorCount) {
+                stages.put(projectId, "DELIVERING");
+            }
+        }
+        return stages;
     }
 
     private Map<String, ProjectBudget> budgetsByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {

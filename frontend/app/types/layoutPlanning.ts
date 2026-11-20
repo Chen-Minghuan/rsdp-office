@@ -141,6 +141,19 @@ export interface LayoutReferenceEditing {
   selected: number | null
   placement: { templateId: string; categoryId: string; group: string; rotation: number } | null
 }
+
+export type LayoutReferenceRecognitionStatus = 'idle' | 'running' | 'success' | 'error'
+
+export interface LayoutReferenceRecognitionTask {
+  status: LayoutReferenceRecognitionStatus
+  workspaceId: string
+  analysisId: string
+  revision: number
+  zoneId: string
+  message: string
+  result: LayoutReferenceMark[] | null
+  sequence: number
+}
 /** 画布中可拖动的待应用排版；手动调整后，应用必须提交这份快照而不是重新求解。 */
 export interface LayoutPreview {
   zoneId: string

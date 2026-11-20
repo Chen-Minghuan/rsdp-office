@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { LayoutPreview, LayoutProposal, LayoutReference, LayoutReferenceEditing } from '~/types/layoutPlanning'
+import type { LayoutPreview, LayoutProposal, LayoutReference, LayoutReferenceEditing, LayoutReferenceRecognitionTask } from '~/types/layoutPlanning'
 import type { ZoneObject } from '~/types/office'
 import type { OfficeLayoutSpacing } from '~/utils/officeAutoLayout'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
@@ -7,8 +7,8 @@ import { confirmedLayoutProblem, defaultLayoutPreferences } from '~/utils/layout
 import { mixedPlacementProblem, planMixedLayout, referenceLayoutSnapshot, MIXED_LAYOUT_CATEGORIES, MIXED_CATEGORY_IDS } from '~/utils/mixedLayout'
 import { AREA_PER_SEAT_HINT_M2, zoneNetAreaMm2 } from '~/utils/layoutWarnings'
 
-const props = defineProps<{ categoryIds: string[]; currentPreview?: LayoutPreview | null }>()
-const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
+const props = defineProps<{ categoryIds: string[]; currentPreview?: LayoutPreview | null; recognition: LayoutReferenceRecognitionTask }>()
+const emit = defineEmits<{ preview: [value: LayoutPreview | null]; recognize: [value: { image: Blob; analysisId: string; revision: number; zoneId: string }] }>()
 const store = useOfficeStore()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const preferences = reactive(defaultLayoutPreferences())
@@ -62,7 +62,6 @@ watch([activeProposal, previewReady, () => !!referenceEditing.value], () => {
   } : null)
 }, { immediate: true, deep: true })
 onUnmounted(() => {
-  referenceEditing.value = null
   emit('preview', null)
 })
 function openReference() {
@@ -125,7 +124,7 @@ function apply() {
 
 <template>
   <section class="flex min-h-0 flex-1 flex-col" data-testid="mixed-auto-layout-panel">
-    <OfficeCanvasLayoutReferencePanel v-if="referenceEditing && plan && zone" v-model="referenceEditing" :plan="plan" :zone="zone" :category-ids="categoryIds" :existing="reference" :problem="referenceMessage" @close="referenceEditing = null" @apply="applyReference" />
+    <OfficeCanvasLayoutReferencePanel v-if="referenceEditing && plan && zone" v-model="referenceEditing" :plan="plan" :zone="zone" :category-ids="categoryIds" :existing="reference" :problem="referenceMessage" :recognition="recognition" @close="referenceEditing = null" @recognize="emit('recognize', $event)" @apply="applyReference" />
     <template v-else>
     <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
       <div class="border-b border-line pb-2.5">
