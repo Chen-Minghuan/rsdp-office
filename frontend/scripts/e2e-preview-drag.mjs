@@ -34,14 +34,20 @@ try {
     rooms: [{ roomId: 'DRAG-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0, 0], [16000, 0], [16000, 10000], [0, 10000]] }],
   }
   let floorPlanRequests = 0
+  let releaseRecognition
+  let recognitionStartedResolve
+  const recognitionStarted = new Promise(resolve => { recognitionStartedResolve = resolve })
+  const recognitionReleased = new Promise(resolve => { releaseRecognition = resolve })
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
-  await context.route('**/api/v1/**', route => {
+  await context.route('**/api/v1/**', async route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/layout-reference/source')) return route.fulfill({ contentType: 'image/svg+xml', body: decodeURIComponent(source.previewUrl.split(',')[1]) })
     if (path.endsWith('/layout-reference/recognize')) {
       assert.equal(route.request().method(), 'POST')
+      recognitionStartedResolve()
+      await recognitionReleased
       return route.fulfill({ json: { code: 200, data: [
         { templateId: 'desk-straight', categoryId: 'workstation', group: 'office', x: 0.12, y: 0.22, width: 0.16, depth: 0.11, rotation: 0, confidence: 'high' },
         { templateId: 'chair-office', categoryId: 'workstation', group: 'office', x: 0.165, y: 0.35, width: 0.04, depth: 0.05, rotation: 0, confidence: 'low' },
@@ -164,7 +170,23 @@ try {
   assert.equal(await page.getByRole('dialog', { name: '参考原图摆位' }).count(), 0)
   const referenceLayer = page.getByTestId('reference-canvas-layer')
   await referenceLayer.waitFor()
+  await page.getByRole('combobox', { name: '标注功能' }).selectOption('entry')
+  await page.getByTestId('reference-add').click()
+  const canvasBox = await page.getByTestId('office-design-canvas').boundingBox()
+  await page.mouse.click(canvasBox.x + canvasBox.width * 0.25, canvasBox.y + canvasBox.height * 0.25)
+  const pendingManual = referenceLayer.locator('[data-reference-confidence="manual"]')
+  await pendingManual.waitFor()
   await page.getByTestId('reference-recognize').click()
+  await recognitionStarted
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('tab-style-recommendation').click()
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await page.getByText('正在识别裁图中的家具…', { exact: true }).waitFor()
+  releaseRecognition()
+  await pendingManual.click()
+  await page.keyboard.press('Delete')
+  await pendingManual.waitFor({ state: 'detached' })
   const suggestedDesk = referenceLayer.locator('[data-reference-index="0"]')
   await suggestedDesk.locator('svg[data-furniture-template="desk-straight"]').waitFor()
   const deskBox = await suggestedDesk.boundingBox()
