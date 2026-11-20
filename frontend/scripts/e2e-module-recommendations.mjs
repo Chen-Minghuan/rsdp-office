@@ -206,7 +206,7 @@ try {
   assert.equal(single.objects.find(item => item.id === 'B').productId, 'MEDIUM')
   assert.equal(single.cart.length, 1)
   const selectedOptions = await matchingModule.locator('option').allTextContents()
-  assert.ok(selectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选择')), '模块选品写入当前楼层购物车后，同名称同尺寸的下拉项标记为已选择')
+  assert.ok(selectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选 1/2') && !text.includes('已选择')), '同规格模块只选一件时，下拉项显示已选数量')
   assert.ok(selectedOptions.some(text => text.includes('小桌 C') && !text.includes('已选择')), '不同名称或尺寸的下拉项不应标记为已选择')
   const legacyBefore = await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
@@ -224,7 +224,7 @@ try {
   await matchingModule.selectOption('A')
   await card('EXACT').waitFor()
   const legacyOption = await matchingModule.locator('option:checked').textContent()
-  assert.match(legacyOption || '', /已选择/, '旧快照商品详情为空时，有效购物车行仍应显示已选择')
+  assert.match(legacyOption || '', /已选 1\/2/, '旧快照商品详情为空时，有效购物车行仍应计入已选数量')
   assert.deepEqual(errors, [], `旧快照 product=null 不应触发页面异常：${errors.join('; ')}`)
   assert.ok(!runtimeErrors.some(error => error.includes("Cannot read properties of null")), `旧快照 product=null 不应读取商品详情：${runtimeErrors.join('; ')}`)
   await page.evaluate(previous => {
@@ -338,6 +338,8 @@ try {
   }
   assert.equal(state.cart.length, 2)
   assert.equal(state.cart.every(item => item.qty === 1), true)
+  const fullySelectedOptions = await matchingModule.locator('option').allTextContents()
+  assert.ok(fullySelectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选 2/2')), '同规格模块全部选中时，下拉项显示完整已选数量')
   assert.deepEqual(state.objects.find(item => item.id === 'OTHER'), before.find(item => item.id === 'OTHER'))
   assert.equal(selections[1].applyToSameModules, true)
   unavailable = true

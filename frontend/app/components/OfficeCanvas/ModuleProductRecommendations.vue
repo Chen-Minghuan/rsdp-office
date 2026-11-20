@@ -54,17 +54,21 @@ const moduleGroups = computed<ModuleDisplayGroup[]>(() => {
   return [...groups.values()]
 })
 
-const selectedModuleSpecifications = computed(() => {
+const selectedModuleCounts = computed(() => {
   const cartByLineId = new Map(store.cart.map(item => [item.id, item]))
-  return new Set(modules.value.filter((item) => {
+  const counts = new Map<string, number>()
+  for (const item of modules.value) {
     const selection = item.productSelection
     const cartItem = selection ? cartByLineId.get(selection.cartLineId) : undefined
-    return Boolean(selection?.cartLineId && cartItem?.productId === item.productId)
-  }).map(moduleSpecificationKey))
+    if (!selection?.cartLineId || cartItem?.productId !== item.productId) continue
+    const key = moduleSpecificationKey(item)
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return counts
 })
 
-function groupSelectedInCart(group: ModuleDisplayGroup): boolean {
-  return selectedModuleSpecifications.value.has(moduleSpecificationKey(group.representative))
+function groupSelectedCount(group: ModuleDisplayGroup): number {
+  return selectedModuleCounts.value.get(moduleSpecificationKey(group.representative)) || 0
 }
 
 function groupOptionValue(group: ModuleDisplayGroup): string {
@@ -196,7 +200,7 @@ async function choose(candidate: ModuleProductCandidate) {
       <label class="block text-[11px] text-muted">当前家具
         <select aria-label="匹配单位模块" :value="module?.id || ''" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="selectedId = ($event.target as HTMLSelectElement).value || null">
           <option value="" disabled>选择家具</option>
-          <option v-for="(group, index) in moduleGroups" :key="group.key" :value="groupOptionValue(group)">{{ index + 1 }}. {{ group.representative.label || '单位模块' }} · {{ number(group.representative.w) }} × {{ number(group.representative.h) }} mm · 数量：{{ group.modules.length }}<template v-if="groupSelectedInCart(group)"> · 已选择</template></option>
+          <option v-for="(group, index) in moduleGroups" :key="group.key" :value="groupOptionValue(group)">{{ index + 1 }}. {{ group.representative.label || '单位模块' }} · {{ number(group.representative.w) }} × {{ number(group.representative.h) }} mm · 数量：{{ group.modules.length }}<template v-if="groupSelectedCount(group) > 0"> · 已选 {{ groupSelectedCount(group) }}/{{ group.modules.length }}</template></option>
         </select>
       </label>
       <div class="flex items-center gap-2">
