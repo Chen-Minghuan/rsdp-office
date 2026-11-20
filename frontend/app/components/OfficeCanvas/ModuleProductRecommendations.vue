@@ -59,7 +59,7 @@ const selectedModuleSpecifications = computed(() => {
   return new Set(modules.value.filter((item) => {
     const selection = item.productSelection
     const cartItem = selection ? cartByLineId.get(selection.cartLineId) : undefined
-    return cartItem?.productId === item.productId && selection?.product.id === item.productId
+    return Boolean(selection?.cartLineId && cartItem?.productId === item.productId)
   }).map(moduleSpecificationKey))
 })
 

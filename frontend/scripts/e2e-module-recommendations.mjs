@@ -27,7 +27,9 @@ try {
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   page = await context.newPage()
   const errors = []
+  const runtimeErrors = []
   page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') runtimeErrors.push(message.text()) })
   let saved = null, empty = false, fail = false, unavailable = false, delayA = false, noCatalog = false
   let waitForSelection
   const selections = [], queries = []
@@ -206,6 +208,33 @@ try {
   const selectedOptions = await matchingModule.locator('option').allTextContents()
   assert.ok(selectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选择')), '模块选品写入当前楼层购物车后，同名称同尺寸的下拉项标记为已选择')
   assert.ok(selectedOptions.some(text => text.includes('小桌 C') && !text.includes('已选择')), '不同名称或尺寸的下拉项不应标记为已选择')
+  const legacyBefore = await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const item = store.objects.find(item => item.id === 'A')
+    return { productId: item.productId, productSelection: item.productSelection ? JSON.parse(JSON.stringify(item.productSelection)) : null, cart: JSON.parse(JSON.stringify(store.cart)) }
+  })
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const legacy = store.objects.find(item => item.id === 'A')
+    legacy.productId = 'MEDIUM'
+    legacy.productSelection = { product: null, cartLineId: 'LEGACY-LINE', sourceCanvasRevision: store.canvasRevision }
+    store.cart = [{ id: 'LEGACY-LINE', productId: 'MEDIUM', zoneId: 'Z', zoneName: '推荐测试空间', qty: 1 }]
+    store.saveLocal()
+  })
+  await matchingModule.selectOption('A')
+  await card('EXACT').waitFor()
+  const legacyOption = await matchingModule.locator('option:checked').textContent()
+  assert.match(legacyOption || '', /已选择/, '旧快照商品详情为空时，有效购物车行仍应显示已选择')
+  assert.deepEqual(errors, [], `旧快照 product=null 不应触发页面异常：${errors.join('; ')}`)
+  assert.ok(!runtimeErrors.some(error => error.includes("Cannot read properties of null")), `旧快照 product=null 不应读取商品详情：${runtimeErrors.join('; ')}`)
+  await page.evaluate(previous => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const item = store.objects.find(item => item.id === 'A')
+    item.productId = previous.productId
+    item.productSelection = previous.productSelection
+    store.cart = previous.cart
+    store.saveLocal()
+  }, legacyBefore)
   await matchingModule.selectOption('A')
   await card('EXACT').waitFor()
   assert.equal(await furniture('A').locator('.manual-furniture-glyph.selected').count(), 1)
