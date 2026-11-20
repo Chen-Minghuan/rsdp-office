@@ -1,4 +1,4 @@
-import type { AssignableUser, CreateProjectRequest, ProjectBudgetStatus, ProjectReferenceImage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
+import type { AssignableUser, CreateProjectRequest, ProjectBudgetStatus, ProjectReferenceImage, ProjectStage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
 import { apiBase } from '~/utils/apiBase'
 
 interface ApiResponse<T> {
@@ -19,11 +19,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 type FloorDto = Omit<WorkspaceFloor, 'floorName'> & { name: string }
-type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors' | 'budgetTotal' | 'budgetStatus'> & {
+type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors' | 'budgetTotal' | 'budgetStatus' | 'stage'> & {
   name: string
   floors: FloorDto[]
   budgetTotal?: number | null
   budgetStatus?: ProjectBudgetStatus
+  stage?: ProjectStage
 }
 
 function floorFromDto(dto: FloorDto): WorkspaceFloor {
@@ -40,6 +41,7 @@ function projectFromDto(dto: ProjectDto): WorkspaceProject {
     floors: (dto.floors || []).map(floorFromDto),
     budgetTotal: typeof dto.budgetTotal === 'number' ? dto.budgetTotal : null,
     budgetStatus: dto.budgetStatus ?? 'UNAVAILABLE',
+    stage: dto.stage ?? 'DESIGNING',
   }
 }
 

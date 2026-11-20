@@ -14,6 +14,8 @@ const greeting = computed(() => {
 
 // 项目计数与项目列表同源，直接读 store（app.vue 挂载时已 init() 拉取）。
 const projectCount = computed(() => workspace.initialized ? workspace.projects.length : '—')
+const designingCount = computed(() => workspace.initialized ? workspace.projects.filter(project => project.stage === 'DESIGNING').length : '—')
+const deliveringCount = computed(() => workspace.initialized ? workspace.projects.filter(project => project.stage === 'DELIVERING').length : '—')
 </script>
 
 <template>
@@ -31,11 +33,17 @@ const projectCount = computed(() => workspace.initialized ? workspace.projects.l
         <div class="text-1xs text-muted">全部项目</div>
         <div class="mt-2 text-3xl font-bold tracking-tight">{{ projectCount }}</div>
       </section>
-      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="数据看板占位">
+      <section class="rounded-xl border border-line bg-white p-6 shadow-panel" aria-label="项目设计中">
+        <div class="text-1xs text-muted">项目设计中</div>
+        <div class="mt-2 text-3xl font-bold tracking-tight">{{ designingCount }}</div>
       </section>
-      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="数据看板占位">
+      <section class="rounded-xl border border-line bg-white p-6 shadow-panel" aria-label="项目交付中">
+        <div class="text-1xs text-muted">项目交付中</div>
+        <div class="mt-2 text-3xl font-bold tracking-tight">{{ deliveringCount }}</div>
       </section>
-      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="数据看板占位">
+      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="项目已完成">
+        <div class="text-1xs text-muted"></div>
+        <div class="mt-2 text-3xl font-bold tracking-tight">{{  }}</div>
       </section>
     </div>
     <div class="mt-5 flex flex-col items-start gap-5 lg:flex-row">

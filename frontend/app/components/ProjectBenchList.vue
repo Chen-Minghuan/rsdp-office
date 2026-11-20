@@ -17,6 +17,10 @@ function leaderName(project: WorkspaceProject) {
   return project.leader ? project.leader.displayName || project.leader.username : ''
 }
 
+function stageLabel(project: WorkspaceProject) {
+  return project.stage === 'DELIVERING' ? '交付中' : '设计中'
+}
+
 async function openProject(project: WorkspaceProject) {
   const firstFloor = [...project.floors].sort((a, b) => a.sortOrder - b.sortOrder)[0]
   if (!firstFloor || workspace.switching) return
@@ -71,12 +75,13 @@ const visibleProjects = computed(() => {
     <p v-else-if="!workspace.projects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">当前账号暂无可访问项目</p>
     <p v-else-if="!visibleProjects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">没有匹配的项目，换个关键词试试。</p>
     <div v-else class="overflow-x-auto border-t border-line">
-      <table class="w-full min-w-[600px] border-collapse text-left">
+      <table class="w-full min-w-[720px] border-collapse text-left">
         <thead class="bg-bg">
           <tr class="text-xs text-muted">
             <th scope="col" class="px-5 py-2.5 text-left font-normal">项目名</th>
             <th scope="col" class="px-4 py-2.5 font-normal">负责人</th>
             <th scope="col" class="px-4 py-2.5 font-normal">楼层数</th>
+            <th scope="col" class="px-4 py-2.5 font-normal">项目状态</th>
             <th scope="col" class="px-5 py-2.5 font-normal">项目预算</th>
             <th scope="col" class="w-12 px-3 py-2.5"><span class="sr-only">进入项目</span></th>
           </tr>
@@ -103,6 +108,7 @@ const visibleProjects = computed(() => {
               <span v-else class="text-muted">—</span>
             </td>
             <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
+            <td class="px-4 py-3.5 text-sm whitespace-nowrap">{{ stageLabel(project) }}</td>
             <td class="px-5 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
               <template v-if="project.budgetTotal !== null && project.budgetStatus !== 'UNAVAILABLE'">
                 <span>{{ money(project.budgetTotal) }}</span>

@@ -18,6 +18,7 @@ export interface ProjectReferenceImage {
 }
 
 export type ProjectBudgetStatus = 'COMPLETE' | 'PENDING_PRICING' | 'UNAVAILABLE'
+export type ProjectStage = 'DESIGNING' | 'DELIVERING'
 
 export interface AssignableUser {
   userId: string
@@ -26,6 +27,7 @@ export interface AssignableUser {
 }
 
 export interface WorkspaceProject {
+  stage: ProjectStage
   projectId: string
   projectName: string
   customerRequirements: string
