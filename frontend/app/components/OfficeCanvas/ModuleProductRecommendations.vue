@@ -178,7 +178,7 @@ async function choose(candidate: ModuleProductCandidate) {
         <article v-for="candidate in group.items" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-none p-2.5 space-y-1.5">
           <div class="flex gap-2">
             <div class="h-14 w-14 shrink-0 overflow-hidden bg-[#f7f4f0]">
-              <ProductImagePreview :src="candidate.product.imageUrl" :alt="candidate.product.name || '商品图片'" size="small" :left-gap="23">
+              <ProductImagePreview :src="candidate.product.imageUrl" :alt="candidate.product.name || '商品图片'" size="small" :left-gap="23" preview-boundary-selector="[data-testid='office-design-canvas']">
                 <template #preview-side>
                   <div class="flex flex-col text-xs text-ink">
                     <div class="text-[15px] font-bold leading-snug">{{ candidate.product.name }}</div>

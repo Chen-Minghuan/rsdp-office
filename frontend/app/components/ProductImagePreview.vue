@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { sameOriginAssetUrl } from '~/utils/apiBase'
+import { calculateProductImagePreview, productImagePreviewStyle } from '~/utils/productImagePreview'
 
 const props = withDefaults(defineProps<{
   src: string | null | undefined
@@ -8,19 +9,33 @@ const props = withDefaults(defineProps<{
   enableLightbox?: boolean
   // 悬浮框放在缩略图左侧时，右边缘与缩略图左边缘的距离（用于与父容器对齐）
   leftGap?: number
-}>(), { size: 'large', leftGap: 16 })
+  // 可选：将小图悬浮预览限制在指定容器内；未传时使用整个视口
+  previewBoundarySelector?: string
+}>(), { size: 'large', leftGap: 16, previewBoundarySelector: undefined })
 
 // Stored product image URLs may be absolute and tied to another entry point.
 const normalizedSrc = computed(() => props.src ? sameOriginAssetUrl(props.src) : props.src)
 
 const slots = useSlots()
 const hasPreviewSide = computed(() => Boolean(slots['preview-side']))
-const previewSideWidth = 210
-
 const stage = ref<HTMLDivElement | null>(null)
 const imageLoaded = ref(false)
 const hovering = ref(false)
-const listPreviewStyle = ref<Record<string, string>>({})
+const previewBounds = ref<DOMRect | null>(null)
+const sideRef = ref<HTMLElement | null>(null)
+const sideContentHeight = ref(0)
+let sideObserver: ResizeObserver | undefined
+
+// 数据栏内容由插槽传入、高度不可预知，实测后参与浮层高度计算
+watch(sideRef, element => {
+  sideObserver?.disconnect()
+  if (element && typeof ResizeObserver !== 'undefined') {
+    sideObserver = sideObserver || new ResizeObserver(entries => {
+      for (const entry of entries) sideContentHeight.value = entry.contentRect.height
+    })
+    sideObserver.observe(element)
+  }
+})
 const naturalSize = ref({ width: 0, height: 0 })
 const displayedSize = ref({ width: 0, height: 0 })
 const imagePoint = ref({ x: 0, y: 0 })
@@ -56,34 +71,32 @@ function onKeydown(event: KeyboardEvent) {
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => sideObserver?.disconnect())
 
 function calculateListPreview(bounds: DOMRect) {
-  const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth
-  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
-  const naturalWidth = naturalSize.value.width || 1
-  const naturalHeight = naturalSize.value.height || 1
-  const maxWidth = Math.min(560, viewportWidth - 40)
-  const maxHeight = Math.min(620, viewportHeight - 40)
-  const scale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1)
-  const width = Math.max(96, Math.round(naturalWidth * scale))
-  const height = Math.max(96, Math.round(naturalHeight * scale))
-  const framePadding = hasPreviewSide.value ? 32 : 24
-  const frameWidth = width + framePadding + (hasPreviewSide.value ? previewSideWidth : 0)
-  const frameHeight = height + framePadding
-  const left = bounds.right + 16 + frameWidth <= viewportWidth
-    ? bounds.right + 16
-    : bounds.left - props.leftGap - frameWidth >= 0
-      ? bounds.left - props.leftGap - frameWidth
-      : Math.max(12, Math.min(bounds.left, viewportWidth - frameWidth - 12))
-  const top = Math.max(12, Math.min(bounds.top - 20, viewportHeight - frameHeight - 12))
-  return { left: `${left}px`, top: `${top}px`, width: `${frameWidth}px`, height: `${frameHeight}px` }
+  const boundary = props.previewBoundarySelector && typeof document !== 'undefined'
+    ? document.querySelector<HTMLElement>(props.previewBoundarySelector)?.getBoundingClientRect()
+    : undefined
+  return calculateProductImagePreview({
+    anchor: bounds,
+    boundary,
+    viewportWidth: typeof window === 'undefined' ? 1200 : window.innerWidth,
+    viewportHeight: typeof window === 'undefined' ? 800 : window.innerHeight,
+    naturalWidth: naturalSize.value.width,
+    naturalHeight: naturalSize.value.height,
+    hasSide: hasPreviewSide.value,
+    sideContentHeight: sideContentHeight.value,
+    leftGap: props.leftGap,
+  })
 }
+const listPreviewStyle = computed(() => previewBounds.value
+  ? productImagePreviewStyle(calculateListPreview(previewBounds.value))
+  : {})
 
 function showPreview(event: PointerEvent) {
   if (event.pointerType === 'touch' || !props.src || !imageLoaded.value || !stage.value) return
   if (props.size === 'small') {
-    const bounds = stage.value.getBoundingClientRect()
-    listPreviewStyle.value = calculateListPreview(bounds)
+    previewBounds.value = stage.value.getBoundingClientRect()
   } else {
     const bounds = stage.value.getBoundingClientRect()
     const scale = Math.min(bounds.width / naturalSize.value.width, bounds.height / naturalSize.value.height)
@@ -125,12 +138,12 @@ const enlargedStyle = computed(() => ({
     <div v-else class="flex flex-col items-center gap-2 text-muted"><AppIcon name="cube" :size="size === 'small' ? '5' : '10'" /><span v-if="size === 'large'" class="text-xs">暂无商品图片</span></div>
   </div>
   <Teleport to="body">
-    <div v-if="hovering && src && size === 'small'" class="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden bg-white" :class="hasPreviewSide ? 'pip-soft-float p-4' : 'rounded-xl border border-line p-3 shadow-[0_18px_55px_rgba(35,29,24,0.22)]'" :style="listPreviewStyle" aria-hidden="true">
-      <div v-if="hasPreviewSide" class="flex h-full w-full items-stretch gap-3.5">
-        <div class="grid min-w-0 flex-1 place-items-center"><img :src="normalizedSrc" alt="" class="block h-full w-full object-contain"></div>
-        <div class="pip-soft-side w-[196px] shrink-0 overflow-hidden p-3 text-left"><slot name="preview-side" /></div>
+    <div v-if="hovering && src && size === 'small'" class="pointer-events-none fixed z-[100] overflow-hidden bg-white" :class="hasPreviewSide ? 'pip-soft-float' : 'rounded-xl border border-line shadow-[0_18px_55px_rgba(35,29,24,0.22)]'" :style="listPreviewStyle" aria-hidden="true">
+      <div v-if="hasPreviewSide" class="pip-scaled-content flex items-stretch gap-3.5 p-4">
+        <div class="grid min-w-0 shrink-0 place-items-center" style="width:var(--pip-image-width)"><img :src="normalizedSrc" alt="" class="block h-full w-full object-contain"></div>
+        <div class="pip-soft-side shrink-0 overflow-hidden p-3 text-left" style="width:var(--pip-side-width)"><div ref="sideRef"><slot name="preview-side" /></div></div>
       </div>
-      <img v-else :src="normalizedSrc" alt="" class="block h-full w-full object-contain">
+      <div v-else class="pip-scaled-content grid place-items-center p-3"><img :src="normalizedSrc" alt="" class="block h-full w-full object-contain"></div>
     </div>
     <div v-if="hovering && src && size === 'large'" class="pointer-events-none fixed z-[100] overflow-hidden rounded-full border-[3px] border-white bg-white shadow-[0_12px_38px_rgba(35,29,24,0.24)]" :style="lensStyle" aria-hidden="true">
       <img :src="normalizedSrc" alt="" class="absolute max-w-none" :style="enlargedStyle">
@@ -160,5 +173,11 @@ const enlargedStyle = computed(() => ({
 .pip-soft-hover {
   outline: 2px solid var(--color-bronze);
   outline-offset: -2px;
+}
+.pip-scaled-content {
+  width: var(--pip-base-width);
+  height: var(--pip-base-height);
+  transform: scale(var(--pip-content-scale));
+  transform-origin: left top;
 }
 </style>
