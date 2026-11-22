@@ -1,7 +1,7 @@
 # WORKSPACE-004 项目需求 AI 总结
 
 状态：已编码待验证（真实模型单次链路已验证，用户业务验收待确认）
-更新日期：2026-11-20
+更新日期：2026-11-22
 基线/交付版本：工作区，基线提交 `928c3b3`
 关联：[WORKSPACE-003](WORKSPACE-003-project-floors.md)、[产品需求](../product-requirements.md)、[架构契约](../architecture.md)
 
@@ -75,5 +75,7 @@ POST /api/v1/office/projects/{projectId}/requirements/summary
 | 2026-11-20 | 本地真实项目 `OPRJ-FBEAEA2A`、`qwen3-vl-plus` | 已登录页面点击“总结”并核对数据库 | 真实模型返回 4 个关键点并翻转；原文和总结 revision 均为 3；模型和提示词版本及 JSONB 内容已保存 | 仅单项目单次结果，未做多模型、多样本准确率或性能验收 |
 
 ## 交付与下一步
+
+2026-11-22 补齐部署配置：`compose.deploy.yaml` 将 `RSDP_REQUIREMENTS_SUMMARY_MODEL` 传入后端容器，服务器环境模板同步提供默认值。使用占位密钥解析 Compose，核验未设置、空值和自定义模型三种情况的容器环境；`git diff --check` 通过。本次仅验证配置，未执行服务器发布或真实模型调用。
 
 当前真实闭环可用，业务验收尚未完成。下一阶段如需降低首次点击等待，可在同一 `ensureSummary` 链路增加受控空闲预热、真实耗时与预热命中率记录；不要直接新增另一套生成逻辑。多实例部署前需将请求合并升级为数据库或分布式协调。

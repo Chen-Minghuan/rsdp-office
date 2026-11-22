@@ -22,6 +22,8 @@ Jenkins 构建节点与 Docker、部署目录位于同一台 Linux 服务器。�
 
 配置模板为 [deploy/.env.example](../deploy/.env.example)。百炼配置从已有后端配置迁移；数据库密码、会话密钥、首个应用账号密码分别生成随机值，不使用 SSH 登录密码。应用初始账号默认 `admin`，密码在服务器 `.env` 的 `RSDP_BOOTSTRAP_PASSWORD` 中。
 
+项目需求 AI 总结复用 `DASHSCOPE_API_KEY` 和 `DASHSCOPE_BASE_URL`，模型由 `RSDP_REQUIREMENTS_SUMMARY_MODEL` 指定，默认 `qwen3-vl-plus`。部署 Compose 将该变量传入后端容器；修改服务器 `.env` 后需重新执行部署、重新创建后端容器以应用配置。
+
 首次部署必须提供引导密码；账号创建后不会在下次启动时覆盖其密码。可清空引导密码，但预检会通过正在运行的 PostgreSQL 检查已有 active 用户；数据库停止时需先恢复数据库或暂留引导配置。
 
 ## Jenkins 使用
