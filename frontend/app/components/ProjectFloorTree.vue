@@ -135,6 +135,7 @@ async function selectFloor(floorId: string) {
 
 <template>
   <section class="project-floor-tree" aria-label="项目与楼层">
+    <ProjectRequirementsPanel v-if="requirements" class="mb-3 px-1 pt-1" />
     <NuxtLink
       v-if="workspace.initialized && !workspace.projects.length && !canCreateProject"
       to="/"
@@ -222,7 +223,6 @@ async function selectFloor(floorId: string) {
       <button class="rounded-none bg-bronze px-2 text-xs text-white disabled:opacity-50" :disabled="savingFloor">添加</button>
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
-    <CustomerRequirementsBlock v-if="requirements" class="mt-2 border-t border-line px-2 py-2 hover:bg-cream" />
     <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
     <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />

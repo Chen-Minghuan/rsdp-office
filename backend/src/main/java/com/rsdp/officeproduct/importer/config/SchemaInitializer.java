@@ -66,6 +66,7 @@ public class SchemaInitializer {
             Resource projectQuotation = new ClassPathResource("db/migrations/20261119_simplify_project_quotation.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(projectQuotation), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261120_office_requirements_summary.sql"));
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

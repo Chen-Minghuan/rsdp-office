@@ -186,10 +186,13 @@ onBeforeUnmount(() => {
         </NuxtLink>
       </div>
     </nav>
-    <div class="hidden mt-auto pt-4 border-t border-line md:block">
-      <div class="text-xs text-muted px-3 flex items-center gap-1.5">
-        <span class="w-1.5 h-1.5 rounded-full bg-green"></span>
-        办公空间智能设计平台
+    <div class="mt-auto">
+      <AppUserSession />
+      <div class="hidden pt-4 border-t border-line md:block">
+        <div class="text-xs text-muted px-3 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-green"></span>
+          办公空间智能设计平台
+        </div>
       </div>
     </div>
     <div
