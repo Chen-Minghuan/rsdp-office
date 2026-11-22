@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { projectBenchPath, projectDrawingRoute } from '~/utils/projectBenchRoutes'
+
 withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
 const office = useOfficeStore()
 const { canCreateProject } = useAuth()
 const route = useRoute()
 const router = useRouter()
-const { isProjectWorkflow } = useWorkspaceNavigation()
+const { isProjectWorkflow, floorReady } = useWorkspaceNavigation()
 const showCreate = ref(false)
 const showProjectList = ref(false)
 const showSettings = ref(false)
@@ -125,10 +127,7 @@ async function selectFloor(floorId: string) {
   await workspace.activateFloor(floorId)
   if (workspace.currentFloorId !== floorId || workspace.error) return
   if (!office.zones.length || !isProjectWorkflow.value) {
-    await router.push({
-      path: office.zones.length ? '/canvas' : '/',
-      query: { floorId },
-    })
+    await router.push(office.zones.length ? { path: '/canvas', query: { floorId } } : projectDrawingRoute(floorId))
   }
 }
 </script>
@@ -138,7 +137,7 @@ async function selectFloor(floorId: string) {
     <ProjectRequirementsPanel v-if="requirements" class="mb-3 px-1 pt-1" />
     <NuxtLink
       v-if="workspace.initialized && !workspace.projects.length && !canCreateProject"
-      to="/"
+      :to="projectBenchPath"
       class="block hover:bg-cream"
     >
       <span class="mb-1 block px-1 text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
@@ -206,7 +205,7 @@ async function selectFloor(floorId: string) {
               </button>
             </div>
             <OfficeCanvasDesignSpaceSwitcher
-              v-if="floor.floorId === workspace.currentFloorId"
+              v-if="floorReady && floor.floorId === workspace.currentFloorId"
               v-show="!workspace.collapsedFloorIds.includes(floor.floorId)"
               :mode="route.path === '/canvas' && office.canvasMode === 'overview' ? 'review' : 'design'"
               :zone-id="route.path === '/canvas' && office.canvasMode === 'overview' ? office.activeZoneId : office.designZoneId"

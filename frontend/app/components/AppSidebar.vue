@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
 import { workspaceTypeLabel } from '~/utils/workspaceType'
+import { projectBenchPath } from '~/utils/projectBenchRoutes'
 
 const router = useRouter()
 const auth = useAuth()
-const { lastProjectRoute } = useWorkspaceNavigation()
+const { isProjectBench, isDesignWorkflow, lastProjectRoute } = useWorkspaceNavigation()
 const productLinks = [
   { icon: 'cube', label: '商品库', to: '/products' },
   { icon: 'documentText', label: '导入记录', to: '/products/import-records' },
@@ -17,13 +18,6 @@ const isSidebarResizing = ref(false)
 let sidebarResizeStartX = 0
 let sidebarResizeStartWidth = defaultSidebarWidth
 let activeSidebarResizePointerId: number | null = null
-
-// 两个工作空间入口共享同一活动键，避免路由切换期间出现双高亮。
-const activeWorkspaceTab = computed<'project-bench' | 'space-design' | null>(() => {
-  const path = router.currentRoute.value.path
-  if (path === '/workspace/project-bench') return 'project-bench'
-  return ['/', '/canvas', '/proposal', '/agent'].includes(path) ? 'space-design' : null
-})
 
 // 用户管理入口只对系统管理员可见，工作区账号入口只对经销商主号可见；服务端仍逐接口校验
 const isAdmin = ref(false)
@@ -109,11 +103,11 @@ onBeforeUnmount(() => {
       <div>
         <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">工作空间</div>
         <NuxtLink
-          to="/workspace/project-bench"
-          :aria-current="activeWorkspaceTab === 'project-bench' ? 'page' : undefined"
+          :to="projectBenchPath"
+          :aria-current="isProjectBench ? 'page' : undefined"
           :class="[
             'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
-            activeWorkspaceTab === 'project-bench' ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
+            isProjectBench ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
           ]"
         >
           <AppIcon name="zone" />
@@ -121,9 +115,9 @@ onBeforeUnmount(() => {
         </NuxtLink>
         <NuxtLink
           :to="lastProjectRoute"
-          :aria-current="activeWorkspaceTab === 'space-design' ? 'page' : undefined"
+          :aria-current="isDesignWorkflow ? 'page' : undefined"
           class="flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition"
-          :class="activeWorkspaceTab === 'space-design' ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]'"
+          :class="isDesignWorkflow ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]'"
         >
           <AppIcon name="map" />
           <span>空间设计</span>
