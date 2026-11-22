@@ -32,6 +32,16 @@ try {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
   const projects = []
   const saves = []
+  const summaryRequests = []
+  const summaryPlans = []
+  function planSummary(fail = false) {
+    let release
+    const promise = new Promise(resolve => { release = resolve })
+    const plan = { promise, release, fail }
+    summaryPlans.push(plan)
+    return plan
+  }
+  planSummary()
   await context.route('**/api/v1/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -60,6 +70,21 @@ try {
       const floor = projects[0].floors.find(item => item.floorId === path.split('/').at(-1))
       floor.name = request.postDataJSON().name
       return respond(floor)
+    }
+    if (path === '/api/v1/office/projects/OPRJ-TEST/requirements/summary' && request.method() === 'POST') {
+      const body = request.postDataJSON()
+      summaryRequests.push(body)
+      const plan = summaryPlans[summaryRequests.length - 1]
+      if (plan) await plan.promise
+      if (plan?.fail) {
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 500, message: '模型暂不可用', data: null }) })
+      }
+      return respond({ keyPoints: [
+        '总裁办公室采用现代简约风格，整体偏深色系。',
+        '保留独立会客区，配置沙发、茶几与储物柜。',
+        '开放办公区计划容纳60人，需保证通道顺畅。',
+        '会议室配置长桌、会议椅及饮水设备。',
+      ], sourceRevision: body.requirementsRevision, cacheHit: false })
     }
     if (path === '/api/v1/office/projects/OPRJ-TEST/requirements') {
       const project = projects[0]
@@ -113,6 +138,90 @@ try {
   await page.getByRole('button', { name: '创建项目', exact: true }).click()
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
   assert.match(page.url(), /floorId=OFLR-1/)
+
+  const requirementsPanel = page.getByTestId('project-requirements-panel')
+  await requirementsPanel.waitFor()
+  const floorSectionLabel = page.getByText('项目与楼层', { exact: true }).first()
+  const panelBox = await requirementsPanel.boundingBox()
+  const floorLabelBox = await floorSectionLabel.boundingBox()
+  assert.ok(panelBox && floorLabelBox && panelBox.y < floorLabelBox.y, '项目需求面板应位于项目与楼层上方')
+  const userSession = appSidebar.getByTestId('user-session')
+  await userSession.waitFor()
+  const sessionBox = await userSession.boundingBox()
+  const footerBox = await appSidebar.getByText('办公空间智能设计平台', { exact: true }).last().boundingBox()
+  assert.ok(sessionBox && footerBox && sessionBox.y + sessionBox.height <= footerBox.y, '用户信息与退出登录应位于侧栏底部平台标识上方')
+  assert.equal(await page.locator('header').getByRole('button', { name: '退出登录', exact: true }).count(), 0, '顶栏不再显示退出登录')
+  assert.equal(await appSidebar.getByRole('button', { name: '退出登录', exact: true }).count(), 1, '退出登录应移到侧栏底部')
+  const rawRequirements = requirementsPanel.getByRole('textbox', { name: '项目需求原文', exact: true })
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '保留开放办公区，控制预算')
+  assert.equal(await rawRequirements.evaluate(element => element.readOnly), true, '原文展示面应使用只读文本框')
+  assert.equal(await requirementsPanel.getByTestId('requirements-summary-face').getAttribute('aria-hidden'), 'true', '初始应显示原文而不是演示总结')
+  const editRequirementsButton = requirementsPanel.getByRole('button', { name: '编辑', exact: true })
+  const summarizeButton = requirementsPanel.getByRole('switch', { name: '总结', exact: true })
+  const flipCard = requirementsPanel.getByTestId('requirements-flip-card')
+  const summaryThumb = summarizeButton.getByTestId('summary-switch-thumb')
+  assert.equal(await summarizeButton.getAttribute('aria-checked'), 'false', '原文时滑动开关应处于关闭状态')
+  const rawThumbX = (await summaryThumb.boundingBox())?.x
+  const summaryLabel = summarizeButton.locator('.requirements-summary-label')
+  assert.ok(rawThumbX !== undefined && (await summaryLabel.boundingBox()).x > rawThumbX, '原文时“总结”文字应在滑块右侧')
+  assert.equal(await summaryThumb.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '滑块应为白色圆钮')
+  const rawFace = requirementsPanel.getByTestId('requirements-raw-face')
+  const summaryFace = requirementsPanel.getByTestId('requirements-summary-face')
+  const summaryTextarea = summaryFace.locator('textarea[aria-label="AI总结关键点"]')
+  assert.equal(await summaryTextarea.count(), 1, '总结面应使用独立文本框')
+  assert.equal(await summaryTextarea.evaluate(element => element.readOnly), true, 'AI总结文本框应只读')
+  for (const [name, locator] of [['编辑按钮', editRequirementsButton], ['总结开关', summarizeButton], ['原文卡片', rawFace], ['总结卡片', summaryFace]]) {
+    assert.notEqual(await locator.evaluate(element => getComputedStyle(element).borderTopLeftRadius), '0px', `${name}应显示圆角`)
+  }
+  assert.equal(await summaryThumb.evaluate(element => getComputedStyle(element).borderTopLeftRadius), '50%', '滑钮应为圆形')
+  assert.notEqual(await summaryFace.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '总结面保留一条原生滚动条')
+  assert.notEqual(await rawFace.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '原文面同样保留原生滚动条')
+  assert.equal(await summaryTextarea.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '总结文本框不应出现第二条滚动条')
+  assert.equal(await summaryTextarea.evaluate(element => getComputedStyle(element).overflowY), 'hidden', '总结文本框自身不滚动')
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw')
+  const summaryRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/office/projects/OPRJ-TEST/requirements/summary')
+  await summarizeButton.click()
+  await summaryRequest
+  await requirementsPanel.getByText('生成中…', { exact: true }).waitFor()
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw', 'AI返回成功前应保持原文面')
+  summaryPlans[0].release()
+  await page.waitForFunction(() => document.querySelector('[data-testid="requirements-flip-card"]')?.getAttribute('data-view') === 'summary')
+  assert.equal(await flipCard.getAttribute('data-view'), 'summary', '第一次点击总结应在AI返回后翻到总结面')
+  assert.equal(await rawFace.getAttribute('aria-hidden'), 'true')
+  assert.equal(await summaryFace.getAttribute('aria-hidden'), 'false')
+  assert.equal(await requirementsPanel.getByText('演示数据', { exact: true }).count(), 0, '真实接口接入后不应再显示演示标记')
+  assert.deepEqual(summaryRequests, [{ requirementsRevision: 1 }], '总结请求必须携带当前原文版本')
+  assert.match(await summaryTextarea.inputValue(), /^1\. 总裁办公室采用现代简约风格，整体偏深色系。[\s\S]*4\. 会议室配置长桌、会议椅及饮水设备。$/, 'AI关键点应在文本框内按编号换行')
+  await page.waitForTimeout(1000)
+  assert.match(await flipCard.evaluate(element => getComputedStyle(element).transform), /^matrix3d\(/, '白色原文面与灰色总结面应作为正反两面一起3D翻转')
+  assert.equal(await flipCard.evaluate(element => element.querySelectorAll(':scope > .requirements-face').length), 2, '两个文本框必须同属一张翻转卡片')
+  assert.equal(await rawFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '正面应为白色原文')
+  assert.equal(await summaryFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(241, 239, 235)', '背面应为灰色AI总结')
+  assert.ok(await summaryTextarea.evaluate(element => element.scrollHeight <= element.clientHeight + 1), '总结文本框应随内容撑高，滚动只发生在卡片层')
+  assert.equal(await summarizeButton.getAttribute('aria-checked'), 'true', '总结面应打开滑动开关')
+  const summaryThumbX = (await summaryThumb.boundingBox())?.x
+  assert.ok(rawThumbX !== undefined && summaryThumbX !== undefined && summaryThumbX > rawThumbX, '总结时滑块应实际向右滑动')
+  assert.ok((await summaryLabel.boundingBox()).x < summaryThumbX, '总结时“总结”文字应换到滑块左侧')
+  assert.equal(await summaryThumb.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '总结状态滑块仍为白色')
+  await summarizeButton.click()
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw', '再次点击总结应翻回原文')
+  assert.equal(await summarizeButton.getAttribute('aria-checked'), 'false')
+  await page.waitForTimeout(1000)
+  assert.equal((await summaryThumb.boundingBox())?.x, rawThumbX, '返回原文时滑块应回到左侧')
+  assert.equal(await flipCard.evaluate(element => getComputedStyle(element).transform), 'none', '返回原文时整卡应翻回正面')
+  assert.equal(await rawFace.getAttribute('aria-hidden'), 'false')
+  assert.equal(await summaryFace.getAttribute('aria-hidden'), 'true')
+  await summarizeButton.click()
+  assert.equal(summaryRequests.length, 1, '同一版本再次查看总结不应重复调用生成接口')
+  await editRequirementsButton.click()
+  await page.getByRole('heading', { name: '客户需求备注', exact: true }).waitFor()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await rawRequirements.waitFor()
+  await summarizeButton.click()
+  await page.reload({ waitUntil: 'networkidle' })
+  await rawRequirements.waitFor()
+  assert.equal(await requirementsPanel.getByTestId('requirements-summary-face').getAttribute('aria-hidden'), 'true', '刷新后仍应默认显示原文')
 
   const navigation = page.getByRole('navigation', { name: '工作区导航' })
   await navigation.getByRole('link', { name: '商品库', exact: true }).click()
@@ -190,12 +299,33 @@ try {
   await page.getByRole('button', { name: '保存备注', exact: true }).click()
   await page.getByText('已保存。既有推荐和方案请结合新需求重新复核。', { exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭', exact: true }).click()
-  await page.getByText('新增 20 个工位，保留会议室', { exact: true }).waitFor()
-  await page.getByText('新增 20 个工位，保留会议室', { exact: true }).dblclick()
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '新增 20 个工位，保留会议室')
+  await rawRequirements.dblclick()
   await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).fill('双击补充需求\n第二行备注')
   await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).press('Control+Enter')
-  await page.getByText('双击补充需求 第二行备注', { exact: true }).waitFor()
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '双击补充需求\n第二行备注')
   assert.equal(await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).count(), 0)
+
+  const oldFailure = planSummary(true)
+  await summarizeButton.click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="project-requirements-panel"]')?.querySelector('button[aria-busy="true"]'))
+  await rawRequirements.dblclick()
+  await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).fill('旧请求完成后再次编辑')
+  await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).press('Control+Enter')
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '旧请求完成后再次编辑')
+  const newSummary = planSummary(false)
+  await summarizeButton.click()
+  await requirementsPanel.getByText('生成中…', { exact: true }).waitFor()
+  oldFailure.release()
+  await page.waitForTimeout(100)
+  assert.equal(await requirementsPanel.getByRole('alert').filter({ hasText: '模型暂不可用' }).count(), 0, '旧请求失败不能污染新原文')
+  await requirementsPanel.getByText('生成中…', { exact: true }).waitFor()
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw', '旧请求失败不能清除新请求加载状态')
+  newSummary.release()
+  await page.waitForFunction(() => document.querySelector('[data-testid="requirements-flip-card"]')?.getAttribute('data-view') === 'summary')
 
   await page.getByTitle('编辑项目名称和楼层名称', { exact: true }).click()
   await page.getByRole('textbox', { name: '编辑项目名称' }).fill('总部办公项目（已编辑）')
