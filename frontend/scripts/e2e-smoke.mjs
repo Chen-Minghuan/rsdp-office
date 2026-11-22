@@ -42,7 +42,7 @@ async function shot(name) {
 // 1. 上传页
 console.log('Step 1: upload page')
 await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' })
-await page.waitForSelector('h1:has-text("上传办公图纸")', { timeout: 10000 })
+await page.getByRole('heading', { name: /上传办公图纸$/ }).waitFor({ timeout: 10000 })
 await shot('01-upload')
 
 // 2. 空间总览
@@ -200,7 +200,7 @@ await shot('04-design-with-cart')
 // 5. 整体方案
 console.log('Step 5: proposal')
 await page.click('text=生成整体方案')
-await page.waitForURL('**/proposal', { timeout: 10000 })
+await page.waitForURL(url => url.pathname === '/proposal', { timeout: 10000 })
 await page.waitForSelector('h1:has-text("整体方案与清单")', { timeout: 10000 })
 await shot('05-proposal')
 

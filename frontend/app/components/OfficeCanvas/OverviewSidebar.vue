@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { ZoneObject } from '~/types/office'
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 
 const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const selectedId = defineModel<string | null>('selectedId')
 
 const editingZoneId = ref<string | null>(null)
@@ -74,7 +76,7 @@ function calibrateByPrompt(z: ZoneObject) {
     <div class="h-px bg-[#f0ece8]" />
     <div class="flex items-center justify-between flex-none">
       <strong class="text-xs">项目资料</strong>
-      <NuxtLink to="/" class="text-bronze text-xs flex items-center gap-1 hover:underline">
+      <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)" class="text-bronze text-xs flex items-center gap-1 hover:underline">
         <AppIcon name="plus" size="3" />
         <span>添加</span>
       </NuxtLink>

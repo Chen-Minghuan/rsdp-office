@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { projectBenchPath, projectDrawingRoute } from '~/utils/projectBenchRoutes'
+
 withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
 const office = useOfficeStore()
 const { canCreateProject } = useAuth()
 const route = useRoute()
 const router = useRouter()
-const { isProjectWorkflow } = useWorkspaceNavigation()
+const { isProjectWorkflow, floorReady } = useWorkspaceNavigation()
 const isCanvasOverview = computed(() => route.name === 'canvas' && office.canvasMode === 'overview')
 const showCreate = ref(false)
 const showProjectList = ref(false)
@@ -126,19 +128,17 @@ async function selectFloor(floorId: string) {
   await workspace.activateFloor(floorId)
   if (workspace.currentFloorId !== floorId || workspace.error) return
   if (!office.zones.length || !isProjectWorkflow.value) {
-    await router.push({
-      path: office.zones.length ? '/canvas' : '/',
-      query: { floorId },
-    })
+    await router.push(office.zones.length ? { path: '/canvas', query: { floorId } } : projectDrawingRoute(floorId))
   }
 }
 </script>
 
 <template>
   <section class="project-floor-tree" aria-label="项目与楼层">
+    <ProjectRequirementsPanel v-if="requirements" class="mb-3 px-1 pt-1" />
     <NuxtLink
       v-if="workspace.initialized && !workspace.projects.length && !canCreateProject"
-      to="/"
+      :to="projectBenchPath"
       class="block hover:bg-cream"
     >
       <span class="mb-1 block px-1 text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
@@ -206,7 +206,7 @@ async function selectFloor(floorId: string) {
               </button>
             </div>
             <OfficeCanvasDesignSpaceSwitcher
-              v-if="floor.floorId === workspace.currentFloorId"
+              v-if="floorReady && floor.floorId === workspace.currentFloorId"
               v-show="!workspace.collapsedFloorIds.includes(floor.floorId)"
               :mode="isCanvasOverview ? 'review' : 'design'"
               :zone-id="isCanvasOverview ? office.activeZoneId : office.designZoneId"
@@ -223,7 +223,6 @@ async function selectFloor(floorId: string) {
       <button class="rounded-none bg-bronze px-2 text-xs text-white disabled:opacity-50" :disabled="savingFloor">添加</button>
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
-    <CustomerRequirementsBlock v-if="requirements" class="mt-2 border-t border-line px-2 py-2 hover:bg-cream" />
     <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
     <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { CreateProjectRequest, ProjectReferenceImage, WorkspaceProject } from '~/types/workspace'
 import { authEnabled, useAuth } from '~/composables/useAuth'
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 
 const SELECTION_KEY = 'rsdp-office-workspace-v1'
 
@@ -77,20 +78,26 @@ export const useWorkspaceStore = defineStore('workspace', {
       await this.init()
       await useOfficeStore().init()
     },
-    async activateFloor(floorId: string, returnToRoot = false) {
+    async activateFloor(floorId: string, openDrawing = false) {
       const floor = this.projects.flatMap(project => project.floors).find(item => item.floorId === floorId)
       if (!floor || this.switching) return
-      if (floorId === this.currentFloorId && useOfficeStore().initialized) return
+      const router = useRouter()
+      if (floorId === this.currentFloorId && useOfficeStore().initialized) {
+        if (openDrawing) await router.push(projectDrawingRoute(floorId))
+        return
+      }
       this.switching = true
       this.error = ''
       try {
         this.currentFloorId = floor.floorId
         this.currentProjectId = floor.projectId
         this.rememberSelection()
-        const router = useRouter()
-        await router.replace(returnToRoot
-          ? { path: '/', query: { floorId: floor.floorId } }
-          : { query: { ...useRoute().query, floorId: floor.floorId } })
+        if (openDrawing) await router.push(projectDrawingRoute(floorId))
+        else if (router.currentRoute.value.query.floorId !== floorId) {
+          const { name, path, query } = router.currentRoute.value
+          // 切换按钮只保留当前阶段。带目标楼层 ID 的直达链接由上面的判断保留其参数。
+          await router.replace({ path, query: { floorId, ...(name === 'canvas' && query.mode === 'design' ? { mode: 'design' } : {}) } })
+        }
         await useOfficeStore().activateFloor(floor.floorId)
       } catch (error) {
         this.error = error instanceof Error ? error.message : '楼层切换失败'
@@ -114,7 +121,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       const project = await useWorkspaceApi().createProject(payload)
       this.projects = [...this.projects, project]
       this.rememberSelection()
-      await this.activateFloor(project.floors[0]!.floorId)
+      await this.activateFloor(project.floors[0]!.floorId, true)
       return project
     },
     async addFloor(floorName: string) {
@@ -123,7 +130,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.currentProject.floors.push(floor)
       this.currentProject.floors.sort((a, b) => a.sortOrder - b.sortOrder)
       this.collapsedProjectIds = this.collapsedProjectIds.filter(id => id !== this.currentProjectId)
-      await this.activateFloor(floor.floorId)
+      await this.activateFloor(floor.floorId, true)
       return floor
     },
     async updateProjectName(projectId: string, projectName: string) {
