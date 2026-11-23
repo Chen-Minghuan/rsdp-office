@@ -93,7 +93,7 @@ try {
     comments.forEach(node => node.remove())
     return { id: card.dataset.moduleId, name: card.getAttribute('aria-label'), geometry: glyph.innerHTML }
   }))
-  assert.equal(modules.length, 45)
+  assert.equal(modules.length, 79)
   assert.equal(await catalog().locator('details').count(), 9)
   assert.ok(modules.every(module => module.name && module.geometry.includes('<')), '每个目录项都有名称与参数化线稿')
   assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '不暴露隐藏目录项')
@@ -137,9 +137,9 @@ try {
   assert.ok(await page.getByTestId('apply-layout').isDisabled())
   assert.deepEqual(await furniture(), beforeInvalid, '无效或放不下不能清空已有布局')
 
-  await choose('table-conference-oval')
+  await choose('table-meeting-boat')
   await layout()
-  assert.ok((await furniture()).filter(item => item.layoutRole !== 'seat').every(item => item.furnitureTemplateId === 'table-conference-oval'))
+  assert.ok((await furniture()).filter(item => item.layoutRole !== 'seat').every(item => item.furnitureTemplateId === 'table-meeting-boat'))
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await furniture(), beforeInvalid, '撤销恢复图例、尺寸及归属')
   await page.reload({ waitUntil: 'networkidle' })

@@ -212,7 +212,7 @@ function confirmLayout() {
               >
                 <div class="h-9"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></div>
                 <div class="truncate text-[10px] font-medium" :title="module.name">{{ module.name }}</div>
-                <div class="mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</div>
+                <div class="mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}<span v-if="module.reference"> · {{ module.reference.code }}</span></div>
               </button>
               <div class="grid grid-cols-2 border-t border-line text-[9px]">
                 <button type="button" :data-auto-module-id="module.id" :aria-label="'用于自动布局 ' + module.name" class="py-1 text-[#4d713d] hover:bg-[#eef8e7]" @click="selectForAuto(module)">自动</button>

@@ -3,12 +3,17 @@ import { computed } from 'vue'
 import type { ManualFurnitureItem } from '~/types/manualCanvas'
 import { furnitureById } from '~/utils/manualFurniture'
 import { workstationSeatGeometry } from '~/utils/furniture3d/workstationSeating'
+import { meetingFurnitureLinework } from '~/utils/meetingFurnitureLinework'
+import { meetingRingLinework } from '~/utils/meetingRingTable'
 
 const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number; showSeat?: boolean }>()
 const template = computed(() => furnitureById.get(props.item.templateId))
 const deskTemplateId = computed(() => template.value?.seatlessOf || props.item.templateId)
 const w = computed(() => props.item.widthMm)
 const d = computed(() => props.item.depthMm)
+const referenceCode = computed(() => template.value?.reference?.code || '')
+const referencePaths = computed(() => meetingFurnitureLinework[referenceCode.value])
+const ring = computed(() => meetingRingLinework(props.item.templateId, w.value, d.value))
 const wing = computed(() => Math.min(props.item.wingWidthMm ?? 550, w.value / 2, d.value / 2))
 const transform = computed(() => `translate(${props.item.xMm} ${props.item.yMm}) rotate(${props.item.rotationDeg}) translate(${-w.value / 2} ${-d.value / 2})`)
 const sofaSeats = computed(() => props.item.templateId === 'sofa-triple' ? 3 : props.item.templateId === 'sofa-double' ? 2 : 1)
@@ -40,7 +45,15 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
 
 <template>
   <g v-if="template" :transform="transform" class="manual-furniture-glyph" :class="{ selected, invalid }" :style="{ strokeWidth: (selected ? 2 : 1.3) * (strokeScale ?? 1) }">
-    <template v-if="isReferenceStraightDesk">
+    <template v-if="ring">
+      <path :d="ring.body" fill-rule="evenodd" />
+      <path :d="ring.seams" fill="none" />
+    </template>
+    <g v-else-if="referencePaths" :data-reference-furniture="referenceCode" :transform="`scale(${w / 100} ${d / 100})`">
+      <rect width="100" height="100" fill="transparent" stroke="none" />
+      <path v-for="(path, index) in referencePaths" :key="index" :d="path" fill="none" />
+    </g>
+    <template v-else-if="isReferenceStraightDesk">
       <rect x="0" y="0" :width="w" :height="d" />
       <rect v-if="rightPanel" class="reference-guide" :x="w - panelWidth" y="0" :width="panelWidth" :height="d" />
       <rect v-if="leftPanel" class="reference-guide" x="0" y="0" :width="panelWidth" :height="d" />
