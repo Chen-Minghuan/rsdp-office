@@ -3,6 +3,7 @@ import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanning'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const route = useRoute()
@@ -23,7 +24,6 @@ const viewRotation = ref(0)
 const showDimensions = ref(true)
 const snapEnabled = ref(true)
 const showUnderlay = ref(true)
-const underlayOpacity = ref(0.5)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
 const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void } | null>(null)
 watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
@@ -172,7 +172,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
     <RecognitionProgress v-if="entryLoading || entryResult?.processing" :progress="entryResult?.processing" :pending="entryLoading" />
     <img v-if="entryResult?.previewUrl" :src="sameOriginAssetUrl(entryResult.previewUrl)" alt="当前图纸预览" class="min-h-0 max-h-[60vh] w-full object-contain">
     <div class="flex gap-3">
-      <NuxtLink to="/" class="rounded-none border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
+      <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)" class="rounded-none border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
       <button v-if="entryError && targetAnalysisId" class="rounded-none border border-line px-4 py-2 text-sm" @click="entryRetry++">重试查询当前图纸</button>
     </div>
   </section>
@@ -199,7 +199,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" v-model:underlay-opacity="underlayOpacity" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" />
         <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">

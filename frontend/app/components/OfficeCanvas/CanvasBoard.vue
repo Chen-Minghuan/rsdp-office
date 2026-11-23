@@ -37,7 +37,7 @@ const showSubmit = defineModel<boolean>('showSubmit')
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
 const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
-const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
+const underlayOpacity = ref(0.15)
 const showOutline = ref(true)
 const showOriginal = ref(false)
 

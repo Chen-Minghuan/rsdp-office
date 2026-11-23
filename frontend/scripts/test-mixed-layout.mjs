@@ -13,16 +13,27 @@ const canvasViewUrl = await moduleUrl('../app/utils/officeCanvasView.ts', { '~/u
 const channelsUrl = await moduleUrl('../app/utils/layoutChannels.ts', { '~/utils/officeCanvasView': canvasViewUrl, '~/utils/spatial/geometry': geometryUrl })
 const autoUrl = await moduleUrl('../app/utils/officeAutoLayout.ts', { '~/utils/floorPlan': boundsUrl, '~/utils/layoutChannels': channelsUrl })
 const manualGeometryUrl = await moduleUrl('../app/utils/manualLayoutGeometry.ts')
-const manualUrl = await moduleUrl('../app/utils/manualFurniture.ts', { '~/utils/manualLayoutGeometry': manualGeometryUrl })
+const meetingCatalogUrl = await moduleUrl('../app/utils/meetingFurnitureCatalog.ts')
+const ringUrl = await moduleUrl('../app/utils/meetingRingTable.ts')
+const meetingLayoutUrl = await moduleUrl('../app/utils/meetingReferenceLayout.ts', { './meetingRingTable': ringUrl, './meetingFurnitureCatalog': meetingCatalogUrl })
+const manualUrl = await moduleUrl('../app/utils/manualFurniture.ts', { '~/utils/manualLayoutGeometry': manualGeometryUrl, './meetingFurnitureCatalog': meetingCatalogUrl })
 const uuidUrl = await moduleUrl('../app/utils/uuid.ts')
 const obstaclesUrl = await moduleUrl('../app/utils/spatial/obstacles.ts', { './geometry': geometryUrl, '~/utils/uuid': uuidUrl })
 const reviewUrl = await moduleUrl('../app/utils/spatial/review.ts', { '~/utils/spatial/geometry': geometryUrl, './obstacles': obstaclesUrl })
 const constraintsUrl = await moduleUrl('../app/utils/layoutConstraints.ts', { './spatial/review': reviewUrl })
+const workstationSeatingUrl = await moduleUrl('../app/utils/furniture3d/workstationSeating.ts', { '~/utils/manualFurniture': manualUrl })
+const footprintUrl = await moduleUrl('../app/utils/furnitureFootprint.ts', {
+  '~/utils/manualFurniture': manualUrl,
+  '~/utils/layoutConstraints': constraintsUrl,
+  '~/utils/furniture3d/workstationSeating': workstationSeatingUrl,
+})
 const regionsUrl = await moduleUrl('../app/utils/spatial/layoutRegions.ts', { 'polygon-clipping': new URL('../node_modules/polygon-clipping/dist/polygon-clipping.esm.js', import.meta.url).href, './review': reviewUrl })
 const facilitiesUrl = await moduleUrl('../app/utils/spatial/facilities.ts', { './review': reviewUrl })
 const scoringUrl = await moduleUrl('../app/utils/layoutScoring.ts', { './spatial/layoutRegions': regionsUrl, './spatial/obstacles': obstaclesUrl })
 const { planMixedLayout, referenceLayoutSnapshot, mixedPlacementProblem } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
   './manualFurniture': manualUrl,
+  './meetingReferenceLayout': meetingLayoutUrl,
+  './furnitureFootprint': footprintUrl,
   './officeCanvasView': canvasViewUrl,
   './officeAutoLayout': autoUrl,
   './spatial/obstacles': obstaclesUrl,
@@ -53,7 +64,7 @@ assert.equal(targeted.furniture.filter(item => item.furnitureTemplateId === 'des
 assert.equal(targeted.furniture.filter(item => item.furnitureTemplateId === 'table-tea-rect').length, 1)
 assert.equal(targeted.seats, 5)
 const meetingScene = planMixedLayout(zone, [], ['meeting'], spacing)
-assert.equal(meetingScene.furniture.length, 11, '会议场景桌居中并生成双侧及短边座椅')
+assert.equal(meetingScene.furniture.length, 9, 'L06 会议场景桌居中并生成 8 席')
 const meetingChairs = meetingScene.furniture.filter(item => item.layoutRole === 'seat')
 assert.ok(new Set(meetingChairs.map(item => item.y)).size >= 3, '会议椅围绕桌子多侧布置，而非单行排列')
 assert.ok(meetingChairs.some(item => item.rotation === 90) && meetingChairs.some(item => item.rotation === 270), '短边座椅具有相向朝向')
@@ -63,7 +74,7 @@ assert.ok(Math.abs(meetingCenterX - 6000) < 0.001 && Math.abs(meetingTable.y + m
 for (const rotation of [0, 180]) {
   const row = meetingChairs.filter(item => item.rotation === rotation)
   const rowCenter = (Math.min(...row.map(item => item.x)) + Math.max(...row.map(item => item.x + item.w))) / 2
-  assert.equal(row.length, 4, '长边两侧各有四把椅子')
+  assert.equal(row.length, 3, '长边两侧各有三把椅子')
   assert.ok(Math.abs(rowCenter - meetingCenterX) < 0.001, '上下排椅子必须相对桌面居中，不能偏向一端')
   assert.ok(row.every(item => item.x >= meetingTable.x && item.x + item.w <= meetingTable.x + meetingTable.w), '长边椅子不得排出桌面覆盖范围')
 }

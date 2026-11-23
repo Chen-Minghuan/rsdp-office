@@ -71,6 +71,29 @@ class OfficeLayoutValidationPolicyTest {
         objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true).put("x", 4800).put("y", 2000).put("w", 550).put("h", 580).put("rotation", 0).put("furnitureTemplateId", "chair-meeting");
         assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
     }
+    @Test void checksCurvedMeetingTableAndSeatAgainstTheirPlanGeometry() throws Exception {
+        ArrayNode objects = scene();
+        ObjectNode table = (ObjectNode) objects.get(1);
+        table.put("furnitureTemplateId", "table-conference-racetrack").put("x", 1000).put("y", 1500).put("w", 6000).put("h", 3000);
+        ObjectNode chair = objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true)
+            .put("furnitureTemplateId", "chair-meeting-upholstered").put("x", 850).put("y", 1400).put("w", 600).put("h", 630).put("rotation", 315);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects), "曲线端角的外包框可相交");
+        chair.put("x", 1400).put("y", 1800);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        chair.put("x", 850).put("y", 1400);
+        table.put("w", 2500);
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
+
+    @Test void observerChairsDoNotCountTowardsMainMeetingSeats() throws Exception {
+        ArrayNode objects = scene();
+        ((ObjectNode) objects.get(0).path("layoutPreferences")).put("targetSeats", 1);
+        ObjectNode chair = objects.addObject().put("id", "C").put("kind", "furniture").put("zoneId", "R").put("layoutConfirmed", true)
+            .put("x", 2500).put("y", 3400).put("w", 480).put("h", 520).put("rotation", 0).put("furnitureTemplateId", "chair-meeting-observer");
+        assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        chair.put("furnitureTemplateId", "chair-meeting-arm");
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+    }
     @Test void mixedLayoutUsesOfficeSeatsAndSymmetricBundleClearance() throws Exception {
         ArrayNode objects = scene();
         ObjectNode prefs = (ObjectNode) objects.get(0).path("layoutPreferences");

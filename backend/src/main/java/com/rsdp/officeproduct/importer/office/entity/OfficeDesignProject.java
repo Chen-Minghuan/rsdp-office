@@ -18,6 +18,13 @@ public class OfficeDesignProject {
     private String customerRequirements;
     private Integer requirementsRevision;
 
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private String requirementsSummary;
+    private Integer requirementsSummaryRevision;
+    private String requirementsSummaryModel;
+    private String requirementsSummaryPromptVersion;
+    private LocalDateTime requirementsSummaryGeneratedAt;
+
     /** 项目唯一归属的经销商工作区；旧项目为空，补录前保持项目成员判定。 */
     private String workspaceId;
 

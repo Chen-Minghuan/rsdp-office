@@ -13,7 +13,7 @@ const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEd
 const props = defineProps<{ currentPreview?: LayoutPreview | null }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
-type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void }
+type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void }
 const activePage = ref<WorkflowPage>('auto')
 watch(activePage, () => store.cancelFurniturePlacement())
 function openFurniture(id: string, fromGroup: boolean) {
@@ -43,6 +43,12 @@ const categories = [
 ]
 // 进入排版默认不选中任何功能模块，由用户按需点选，避免未操作就生成办公桌椅预览。
 const selectedCategories = ref<string[]>([]), selectedCatalogId = ref('')
+const automaticModuleId = ref('')
+const isSingleModule = computed(() => selectedCategories.value.length === 1)
+watch([activePage, isSingleModule], () => emit('preview', null))
+function forwardPreview(single: boolean, preview: LayoutPreview | null) {
+  if (activePage.value === 'auto' && isSingleModule.value === single) emit('preview', preview)
+}
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const hasLayout = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
 const zoneType = computed({
@@ -55,23 +61,24 @@ watch(() => store.designZoneId, () => {
   activePage.value = 'auto'
   selectedCategories.value = []
   selectedCatalogId.value = ''
+  automaticModuleId.value = ''
 }, { immediate: true })
 function selectCategory(id: string) {
   selectedCategories.value = selectedCategories.value.includes(id) ? selectedCategories.value.filter(item => item !== id) : [...selectedCategories.value, id]
   const category = categories.find(item => item.id === id)
   const module = category ? furnitureById.get(category.moduleId) : null
   if (module) {
-    selectedCatalogId.value = module.id
+    automaticModuleId.value = module.id
     if (selectedCategories.value.length === 1) nextTick(() => autoLayout.value?.selectModule(module))
   }
 }
-function selectModule(module: OfficeModuleTemplate) {
-  selectedCatalogId.value = module.id
+function selectModule(module: OfficeModuleTemplate, size?: [number, number]) {
+  automaticModuleId.value = module.id
   selectedCategories.value = [module.category === '会议与洽谈' ? 'meeting' : module.category === '接待休闲' ? 'sofa' : module.category === '前台' ? 'bar' : module.category === '收纳' ? 'entry' : 'workstation']
   activePage.value = 'auto'
-  nextTick(() => autoLayout.value?.selectModule(module))
+  nextTick(() => autoLayout.value?.selectModule(module, size))
 }
-/** 页签切换只切页签；点击图例回填模块由 selectModule 自己处理，避免覆盖已有多选。 */
+/** 页签切换保留组合品类选择，已有家具的尺寸重算可显式打开单模块排版。 */
 function openPage(page: WorkflowPage) {
   activePage.value = page
 }
@@ -93,6 +100,7 @@ function clearAutomaticLayout() {
   store.unconfirmLayout(zone.value.id)
   selectedCategories.value = []
   selectedCatalogId.value = ''
+  automaticModuleId.value = ''
   selectedId.value = null
   actionMessage.value = ''
   emit('preview', null)
@@ -159,9 +167,9 @@ function clearAutomaticLayout() {
     </template>
 
     <div v-show="!collapsed" class="flex min-h-0 flex-1 flex-col">
-      <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && selectedCategories.length !== 1" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="emit('preview', $event)" />
-      <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="selectedCatalogId" :current-preview="currentPreview" @preview="emit('preview', $event)" />
-      <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @confirmed="activePage = 'recommendations'" />
+      <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && !isSingleModule" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="forwardPreview(false, $event)" />
+      <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="automaticModuleId" :current-preview="currentPreview" @module-change="automaticModuleId = $event" @preview="forwardPreview(true, $event)" />
+      <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
       <OfficeCanvasDesignSidebar v-else embedded v-model:selected-id="selectedId" />
     </div>
     <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-[#fafbf7] px-3 py-2.5" data-testid="auto-layout-next-actions">

@@ -57,12 +57,13 @@ try {
   const canvas = () => page.getByTestId('office-design-canvas')
   const width = () => page.getByLabel('模块宽度（毫米）')
   const depth = () => page.getByLabel('模块进深（毫米）')
+  const automaticModule = page.getByLabel('自动布局家具模块')
   async function choose(id) {
-    await page.getByTestId('tab-product-selection').click()
-    const card = catalog().locator('[data-auto-module-id="' + id + '"]')
-    const section = card.locator('xpath=ancestor::details')
-    if (!(await section.getAttribute('open') !== null)) await section.locator('summary').click()
-    await card.click()
+    await page.getByTestId('tab-auto-layout').click()
+    const category = page.getByTestId('functional-category-workstation')
+    if (await category.getAttribute('aria-pressed') !== 'true') await category.click()
+    await page.getByRole('tab', { name: '调整参数', exact: true }).click()
+    await automaticModule.selectOption(id)
   }
   await page.goto(baseUrl + '/canvas?analysisId=MODULE-TEST', { waitUntil: 'networkidle' })
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 办公家具测试空间', exact: true }).waitFor()
@@ -72,12 +73,9 @@ try {
   await catalog().waitFor()
   assert.equal(await catalog().locator('[data-module-id="desk-l-rounded"]').count(), 0, '职员圆角 L 桌并入 L 型屏风卡位，不再出现在目录')
   await choose('desk-l')
-  await page.getByTestId('tab-product-selection').click()
-  assert.equal(await catalog().locator('[data-module-id="desk-l"]').getAttribute('aria-pressed'), 'true', '选择职员 L 桌模块')
+  assert.equal(await automaticModule.inputValue(), 'desk-l', '选择职员 L 桌模块')
   await choose('desk-screen-l')
-  await page.getByTestId('tab-product-selection').click()
-  assert.equal(await catalog().locator('[data-module-id="desk-screen-l"]').getAttribute('aria-pressed'), 'true', '选择 L 型屏风卡位模块')
-  await page.getByTestId('tab-auto-layout').click()
+  assert.equal(await automaticModule.inputValue(), 'desk-screen-l', '选择 L 型屏风卡位模块')
   await page.getByRole('tab', { name: '选择排布', exact: true }).click()
   for (const label of ['L 型单排', 'L 型对坐', 'F 型单排', 'T 型对坐', 'C 型对坐', '十字型对坐']) {
     assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1, 'L 型屏风卡位提供' + label)
@@ -93,10 +91,27 @@ try {
     comments.forEach(node => node.remove())
     return { id: card.dataset.moduleId, name: card.getAttribute('aria-label'), geometry: glyph.innerHTML }
   }))
-  assert.equal(modules.length, 45)
+  assert.equal(modules.length, 79)
   assert.equal(await catalog().locator('details').count(), 9)
   assert.ok(modules.every(module => module.name && module.geometry.includes('<')), '每个目录项都有名称与参数化线稿')
   assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '不暴露隐藏目录项')
+
+  for (const [sheet, ids] of [
+    ['meeting-tables', ['table-meeting-wall-high', 'table-meeting-bar-high', 'table-meeting-standing', 'table-meeting-observer', 'table-meeting-training', 'table-meeting-training-flip', 'table-conference-racetrack-straight']],
+    ['reception-tables', ['coffee-rect', 'coffee-round', 'table-tea-rect', 'table-dining-rect', 'table-game']],
+  ]) {
+    const details = []
+    for (const id of ids) {
+      const card = catalog().locator(`[data-product-module-id="${id}"]`)
+      details.push(await card.locator('.table-feature').getAttribute('d'))
+    }
+    assert.ok(details.every(Boolean) && new Set(details).size === ids.length, `${sheet} 的相似桌型各有独立特征线`)
+    const firstCard = catalog().locator(`[data-product-module-id="${ids[0]}"]`)
+    const section = firstCard.locator('xpath=ancestor::details')
+    if (await section.getAttribute('open') === null) await section.locator('summary').click()
+    await firstCard.scrollIntoViewIfNeeded()
+    await page.getByTestId('design-workflow-sidebar').screenshot({ path: outDir + `/${sheet}.png` })
+  }
 
   for (const module of modules) {
     await choose(module.id)
@@ -107,8 +122,10 @@ try {
     await layout()
     const placed = await furniture()
     assert.equal(placed.length, capacity, `${module.name} 应按当前空间类型应用当前预估`)
-    const primary = placed.filter(item => item.layoutRole !== 'seat')
+    const primary = placed.filter(item => item.furnitureTemplateId === module.id && item.layoutRole !== 'seat')
     assert.ok(primary.length && primary.every(item => item.furnitureTemplateId === module.id && item.productId === '' && item.w === w && item.h === d && item.zoneId === 'MODULE-ROOM' && item.spaceTemplateId && item.templateSpaceId === 'MODULE-ROOM'))
+    if (module.id === 'table-conference-long') assert.equal(placed.filter(item => item.furnitureTemplateId === 'table-meeting-observer').length, 2)
+    if (['sofa-meeting-single', 'sofa-meeting-double'].includes(module.id)) assert.equal(placed.filter(item => item.furnitureTemplateId === 'coffee-meeting-side').length, 3)
     assert.equal(await canvas().locator('[data-furniture-template="' + module.id + '"] .manual-furniture-glyph').count(), primary.length)
   }
   await choose('desk-screen-l')
@@ -137,9 +154,9 @@ try {
   assert.ok(await page.getByTestId('apply-layout').isDisabled())
   assert.deepEqual(await furniture(), beforeInvalid, '无效或放不下不能清空已有布局')
 
-  await choose('table-conference-oval')
+  await choose('table-meeting-boat')
   await layout()
-  assert.ok((await furniture()).filter(item => item.layoutRole !== 'seat').every(item => item.furnitureTemplateId === 'table-conference-oval'))
+  assert.ok((await furniture()).filter(item => item.layoutRole !== 'seat').every(item => item.furnitureTemplateId === 'table-meeting-boat'))
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await furniture(), beforeInvalid, '撤销恢复图例、尺寸及归属')
   await page.reload({ waitUntil: 'networkidle' })

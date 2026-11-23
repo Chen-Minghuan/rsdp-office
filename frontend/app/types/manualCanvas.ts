@@ -111,4 +111,5 @@ export interface FurnitureTemplate {
   /** Desk-only preset sharing the dimensions and desk geometry of this built-in template. */
   seatlessOf?: string
   catalogHidden?: true
+  reference?: { code: string; sizeSource: '原表' | '区间取值' | '试排' }
 }

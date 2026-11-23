@@ -32,10 +32,27 @@ try {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
   const projects = []
   const saves = []
+  const scopedCarts = new Map()
+  const pendingCartReads = new Map()
+  const summaryRequests = []
+  const summaryPlans = []
+  function planSummary(fail = false) {
+    let release
+    const promise = new Promise(resolve => { release = resolve })
+    const plan = { promise, release, fail }
+    summaryPlans.push(plan)
+    return plan
+  }
+  planSummary()
   await context.route('**/api/v1/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
+    const cartFloorId = path.match(/^\/api\/v1\/office\/projects\/([^/]+)\/cart$/)?.[1]
+    if (request.method() === 'GET' && cartFloorId && scopedCarts.has(cartFloorId)) {
+      await pendingCartReads.get(cartFloorId)
+      return respond(scopedCarts.get(cartFloorId))
+    }
     if (path === '/api/v1/office/projects' && request.method() === 'GET') return respond(projects)
     if (path === '/api/v1/floor-plan/analyze') return respond({ analysisId: 'ANALYSIS-2F', taskId: 'TASK-2F' })
     if (path === '/api/v1/floor-plan/ANALYSIS-2F') {
@@ -61,6 +78,21 @@ try {
       floor.name = request.postDataJSON().name
       return respond(floor)
     }
+    if (path === '/api/v1/office/projects/OPRJ-TEST/requirements/summary' && request.method() === 'POST') {
+      const body = request.postDataJSON()
+      summaryRequests.push(body)
+      const plan = summaryPlans[summaryRequests.length - 1]
+      if (plan) await plan.promise
+      if (plan?.fail) {
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 500, message: '模型暂不可用', data: null }) })
+      }
+      return respond({ keyPoints: [
+        '总裁办公室采用现代简约风格，整体偏深色系。',
+        '保留独立会客区，配置沙发、茶几与储物柜。',
+        '开放办公区计划容纳60人，需保证通道顺畅。',
+        '会议室配置长桌、会议椅及饮水设备。',
+      ], sourceRevision: body.requirementsRevision, cacheHit: false })
+    }
     if (path === '/api/v1/office/projects/OPRJ-TEST/requirements') {
       const project = projects[0]
       project.customerRequirements = request.postDataJSON().customerRequirements
@@ -76,7 +108,9 @@ try {
     return respond(path.endsWith('/canvas') ? null : [])
   })
 
-  await page.goto(baseUrl, { waitUntil: 'networkidle' })
+  const workbenchPath = '/workspace/project-bench'
+  await page.goto(baseUrl + workbenchPath, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: '项目工作台', exact: true }).waitFor()
   const appSidebar = page.getByTestId('app-sidebar')
   assert.equal(await appSidebar.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '侧栏应隐藏原生纵向滚动条，但保留滚动能力')
   const sidebarResizeHandle = page.getByTestId('sidebar-resize-handle')
@@ -104,7 +138,7 @@ try {
   await page.setViewportSize({ width: 600, height: 1000 })
   assert.equal(await sidebarResizeHandle.isVisible(), false, '窄屏不应显示侧栏宽度拖拽把手')
   await page.setViewportSize({ width: 1600, height: 1000 })
-  await page.getByRole('button', { name: '＋ 新建项目', exact: true }).click()
+  await page.getByRole('button', { name: '新建项目', exact: true }).click()
   await page.getByPlaceholder('例如：深圳 XX 集团总部办公').fill('总部办公大楼')
   await page.getByPlaceholder('记录客户偏好、工位数量、预算或其他需要持续提醒的事项').fill('保留开放办公区，控制预算')
   await page.getByPlaceholder('例如：1F, 2F, 7~9F, 11F').fill('2F')
@@ -112,28 +146,113 @@ try {
   assert.deepEqual(await page.locator('form span').filter({ hasText: /^1F$|^2F$/ }).allTextContents(), ['1F', '2F'])
   await page.getByRole('button', { name: '创建项目', exact: true }).click()
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, workbenchPath)
   assert.match(page.url(), /floorId=OFLR-1/)
+
+  const requirementsPanel = page.getByTestId('project-requirements-panel')
+  await requirementsPanel.waitFor()
+  const floorSectionLabel = page.getByText('项目与楼层', { exact: true }).first()
+  const panelBox = await requirementsPanel.boundingBox()
+  const floorLabelBox = await floorSectionLabel.boundingBox()
+  assert.ok(panelBox && floorLabelBox && panelBox.y < floorLabelBox.y, '项目需求面板应位于项目与楼层上方')
+  const userSession = appSidebar.getByTestId('user-session')
+  await userSession.waitFor()
+  const sessionBox = await userSession.boundingBox()
+  const footerBox = await appSidebar.getByText('办公空间智能设计平台', { exact: true }).last().boundingBox()
+  assert.ok(sessionBox && footerBox && sessionBox.y + sessionBox.height <= footerBox.y, '用户信息与退出登录应位于侧栏底部平台标识上方')
+  assert.equal(await page.locator('header').getByRole('button', { name: '退出登录', exact: true }).count(), 0, '顶栏不再显示退出登录')
+  assert.equal(await appSidebar.getByRole('button', { name: '退出登录', exact: true }).count(), 1, '退出登录应移到侧栏底部')
+  const rawRequirements = requirementsPanel.getByRole('textbox', { name: '项目需求原文', exact: true })
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '保留开放办公区，控制预算')
+  assert.equal(await rawRequirements.evaluate(element => element.readOnly), true, '原文展示面应使用只读文本框')
+  assert.equal(await requirementsPanel.getByTestId('requirements-summary-face').getAttribute('aria-hidden'), 'true', '初始应显示原文而不是演示总结')
+  const editRequirementsButton = requirementsPanel.getByRole('button', { name: '编辑', exact: true })
+  const summarizeButton = requirementsPanel.getByRole('switch', { name: '总结', exact: true })
+  const flipCard = requirementsPanel.getByTestId('requirements-flip-card')
+  const summaryThumb = summarizeButton.getByTestId('summary-switch-thumb')
+  assert.equal(await summarizeButton.getAttribute('aria-checked'), 'false', '原文时滑动开关应处于关闭状态')
+  const rawThumbX = (await summaryThumb.boundingBox())?.x
+  const summaryLabel = summarizeButton.locator('.requirements-summary-label')
+  assert.ok(rawThumbX !== undefined && (await summaryLabel.boundingBox()).x > rawThumbX, '原文时“总结”文字应在滑块右侧')
+  assert.equal(await summaryThumb.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '滑块应为白色圆钮')
+  const rawFace = requirementsPanel.getByTestId('requirements-raw-face')
+  const summaryFace = requirementsPanel.getByTestId('requirements-summary-face')
+  const summaryTextarea = summaryFace.locator('textarea[aria-label="AI总结关键点"]')
+  assert.equal(await summaryTextarea.count(), 1, '总结面应使用独立文本框')
+  assert.equal(await summaryTextarea.evaluate(element => element.readOnly), true, 'AI总结文本框应只读')
+  for (const [name, locator] of [['编辑按钮', editRequirementsButton], ['总结开关', summarizeButton], ['原文卡片', rawFace], ['总结卡片', summaryFace]]) {
+    assert.notEqual(await locator.evaluate(element => getComputedStyle(element).borderTopLeftRadius), '0px', `${name}应显示圆角`)
+  }
+  assert.equal(await summaryThumb.evaluate(element => getComputedStyle(element).borderTopLeftRadius), '50%', '滑钮应为圆形')
+  assert.notEqual(await summaryFace.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '总结面保留一条原生滚动条')
+  assert.notEqual(await rawFace.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '原文面同样保留原生滚动条')
+  assert.equal(await summaryTextarea.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '总结文本框不应出现第二条滚动条')
+  assert.equal(await summaryTextarea.evaluate(element => getComputedStyle(element).overflowY), 'hidden', '总结文本框自身不滚动')
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw')
+  const summaryRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/office/projects/OPRJ-TEST/requirements/summary')
+  await summarizeButton.click()
+  await summaryRequest
+  await requirementsPanel.getByText('生成中…', { exact: true }).waitFor()
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw', 'AI返回成功前应保持原文面')
+  summaryPlans[0].release()
+  await page.waitForFunction(() => document.querySelector('[data-testid="requirements-flip-card"]')?.getAttribute('data-view') === 'summary')
+  assert.equal(await flipCard.getAttribute('data-view'), 'summary', '第一次点击总结应在AI返回后翻到总结面')
+  assert.equal(await rawFace.getAttribute('aria-hidden'), 'true')
+  assert.equal(await summaryFace.getAttribute('aria-hidden'), 'false')
+  assert.equal(await requirementsPanel.getByText('演示数据', { exact: true }).count(), 0, '真实接口接入后不应再显示演示标记')
+  assert.deepEqual(summaryRequests, [{ requirementsRevision: 1 }], '总结请求必须携带当前原文版本')
+  assert.match(await summaryTextarea.inputValue(), /^1\. 总裁办公室采用现代简约风格，整体偏深色系。[\s\S]*4\. 会议室配置长桌、会议椅及饮水设备。$/, 'AI关键点应在文本框内按编号换行')
+  await page.waitForTimeout(1000)
+  assert.match(await flipCard.evaluate(element => getComputedStyle(element).transform), /^matrix3d\(/, '白色原文面与灰色总结面应作为正反两面一起3D翻转')
+  assert.equal(await flipCard.evaluate(element => element.querySelectorAll(':scope > .requirements-face').length), 2, '两个文本框必须同属一张翻转卡片')
+  assert.equal(await rawFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '正面应为白色原文')
+  assert.equal(await summaryFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(241, 239, 235)', '背面应为灰色AI总结')
+  assert.ok(await summaryTextarea.evaluate(element => element.scrollHeight <= element.clientHeight + 1), '总结文本框应随内容撑高，滚动只发生在卡片层')
+  assert.equal(await summarizeButton.getAttribute('aria-checked'), 'true', '总结面应打开滑动开关')
+  const summaryThumbX = (await summaryThumb.boundingBox())?.x
+  assert.ok(rawThumbX !== undefined && summaryThumbX !== undefined && summaryThumbX > rawThumbX, '总结时滑块应实际向右滑动')
+  assert.ok((await summaryLabel.boundingBox()).x < summaryThumbX, '总结时“总结”文字应换到滑块左侧')
+  assert.equal(await summaryThumb.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '总结状态滑块仍为白色')
+  await summarizeButton.click()
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw', '再次点击总结应翻回原文')
+  assert.equal(await summarizeButton.getAttribute('aria-checked'), 'false')
+  await page.waitForTimeout(1000)
+  assert.equal((await summaryThumb.boundingBox())?.x, rawThumbX, '返回原文时滑块应回到左侧')
+  assert.equal(await flipCard.evaluate(element => getComputedStyle(element).transform), 'none', '返回原文时整卡应翻回正面')
+  assert.equal(await rawFace.getAttribute('aria-hidden'), 'false')
+  assert.equal(await summaryFace.getAttribute('aria-hidden'), 'true')
+  await summarizeButton.click()
+  assert.equal(summaryRequests.length, 1, '同一版本再次查看总结不应重复调用生成接口')
+  await editRequirementsButton.click()
+  await page.getByRole('heading', { name: '客户需求备注', exact: true }).waitFor()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await rawRequirements.waitFor()
+  await summarizeButton.click()
+  await page.reload({ waitUntil: 'networkidle' })
+  await rawRequirements.waitFor()
+  assert.equal(await requirementsPanel.getByTestId('requirements-summary-face').getAttribute('aria-hidden'), 'true', '刷新后仍应默认显示原文')
 
   const navigation = page.getByRole('navigation', { name: '工作区导航' })
   await navigation.getByRole('link', { name: '商品库', exact: true }).click()
   await page.waitForURL(url => url.pathname === '/products')
   await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^1F/ }).click()
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
-  assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).pathname, workbenchPath)
   assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-1')
 
   await navigation.getByRole('link', { name: '商品库', exact: true }).click()
   await page.waitForURL(url => url.pathname === '/products')
   await page.getByRole('button', { name: '2F', exact: true }).click()
   await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
-  assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).pathname, workbenchPath)
   assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-2')
 
   await navigation.getByRole('link', { name: '导入记录', exact: true }).click()
   await page.waitForURL(url => url.pathname === '/products/import-records')
   await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^2F/ }).click()
   await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
-  assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).pathname, workbenchPath)
   assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-2')
   await page.getByRole('button', { name: '1F', exact: true }).click()
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
@@ -152,7 +271,7 @@ try {
   await page.goto(`${baseUrl}/canvas?floorId=OFLR-1`, { waitUntil: 'networkidle' })
   await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === 'OFLR-1')
   await page.getByRole('button', { name: '2F', exact: true }).click()
-  await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('floorId') === 'OFLR-2')
+  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-2')
   assert.equal(new URL(page.url()).search, '?floorId=OFLR-2', '侧栏楼层切换应清除原页面查询参数')
   await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
   assert.equal(await page.getByTestId('design-space-switcher').isVisible(), true)
@@ -190,12 +309,33 @@ try {
   await page.getByRole('button', { name: '保存备注', exact: true }).click()
   await page.getByText('已保存。既有推荐和方案请结合新需求重新复核。', { exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭', exact: true }).click()
-  await page.getByText('新增 20 个工位，保留会议室', { exact: true }).waitFor()
-  await page.getByText('新增 20 个工位，保留会议室', { exact: true }).dblclick()
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '新增 20 个工位，保留会议室')
+  await rawRequirements.dblclick()
   await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).fill('双击补充需求\n第二行备注')
   await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).press('Control+Enter')
-  await page.getByText('双击补充需求 第二行备注', { exact: true }).waitFor()
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '双击补充需求\n第二行备注')
   assert.equal(await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).count(), 0)
+
+  const oldFailure = planSummary(true)
+  await summarizeButton.click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="project-requirements-panel"]')?.querySelector('button[aria-busy="true"]'))
+  await rawRequirements.dblclick()
+  await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).fill('旧请求完成后再次编辑')
+  await page.getByRole('textbox', { name: '双击填写客户需求', exact: true }).press('Control+Enter')
+  await rawRequirements.waitFor()
+  assert.equal(await rawRequirements.inputValue(), '旧请求完成后再次编辑')
+  const newSummary = planSummary(false)
+  await summarizeButton.click()
+  await requirementsPanel.getByText('生成中…', { exact: true }).waitFor()
+  oldFailure.release()
+  await page.waitForTimeout(100)
+  assert.equal(await requirementsPanel.getByRole('alert').filter({ hasText: '模型暂不可用' }).count(), 0, '旧请求失败不能污染新原文')
+  await requirementsPanel.getByText('生成中…', { exact: true }).waitFor()
+  assert.equal(await flipCard.getAttribute('data-view'), 'raw', '旧请求失败不能清除新请求加载状态')
+  newSummary.release()
+  await page.waitForFunction(() => document.querySelector('[data-testid="requirements-flip-card"]')?.getAttribute('data-view') === 'summary')
 
   await page.getByTitle('编辑项目名称和楼层名称', { exact: true }).click()
   await page.getByRole('textbox', { name: '编辑项目名称' }).fill('总部办公项目（已编辑）')
@@ -260,12 +400,17 @@ try {
   assert.ok((await projectListToggle.getAttribute('class') || '').split(/\s+/).includes('bg-cream'), '项目列表应保持打开，直到用户主动关闭或选择项目')
   await projectList.getByRole('button', { name: '切换到项目 总部项目双击', exact: true }).click()
   await projectList.waitFor({ state: 'hidden' })
-  await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('floorId') === 'OFLR-1')
+  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-1')
   assert.equal(new URL(page.url()).search, '?floorId=OFLR-1', '项目切换应清除原页面查询参数')
   await projectTree.getByRole('button', { name: /总部项目双击/ }).waitFor()
   assert.equal(await projectTree.getByRole('button', { name: /滨江智能办公/ }).count(), 0, '切换后只保留新当前项目的树')
 
-  await page.getByRole('button', { name: '1 项目创建', exact: true }).click()
+  await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
+  const workbenchList = page.getByRole('region', { name: '项目列表', exact: true })
+  await workbenchList.getByRole('button', { name: '进入项目 总部项目双击', exact: true }).first().click()
+  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-1')
+  await page.getByText('first.png', { exact: true }).last().waitFor()
+  await page.getByRole('button', { name: '新建项目', exact: true }).click()
   await page.getByRole('heading', { name: '创建办公项目', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭创建项目', exact: true }).click()
   // 项目切换用例已回到 1F；导航回归的空间数据必须写入后续点击的 3F。
@@ -286,6 +431,85 @@ try {
   await page.getByRole('heading', { name: '一层 · 上传办公图纸', exact: true }).waitFor()
   assert.deepEqual([...new URL(page.url()).searchParams.entries()], [['floorId', 'OFLR-1']])
   await page.getByText('first.png', { exact: true }).last().waitFor()
+  await page.goto(`${baseUrl}/?floorId=OFLR-1`, { waitUntil: 'networkidle' })
+  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-1')
+  await page.getByRole('heading', { name: '一层 · 上传办公图纸', exact: true }).waitFor()
+  await page.goto(`${baseUrl}${workbenchPath}/?floorId=OFLR-1`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: '一层 · 上传办公图纸', exact: true }).waitFor()
+
+  const first = { floorId: 'OFLR-1', project: '总部项目双击', floor: '一层', zoneId: 'PROJECT-A-ROOM', name: '总部独立会议室', qty: 2 }
+  const second = { floorId: 'OFLR-SECOND-1', project: '滨江智能办公', floor: '1F', zoneId: 'PROJECT-B-ROOM', name: '滨江独立会议室', qty: 7 }
+  for (const { floorId, zoneId, name, qty } of [first, second]) {
+    scopedCarts.set(floorId, [{ lineId: `cart-${floorId}`, projectId: floorId, zoneId, zoneName: name, productId: 'SAMPLE-OF-03', qty }])
+  }
+  await page.evaluate(fixtures => {
+    for (const { floorId, zoneId, name } of fixtures) {
+      const key = `rsdp-office-v01:MOCK-USER:${floorId}`
+      const zone = {
+        id: zoneId, kind: 'zone', name, zoneType: 'MEETING_ROOM', x: 0, y: 0, w: 4000, h: 3000,
+        polygon: [[0, 0], [4000, 0], [4000, 3000], [0, 3000]], reviewUnit: 'mm', evidenceKind: 'MANUAL',
+        geometrySource: 'manual_geometry', reviewConfirmation: { status: 'CONFIRMED' },
+      }
+      localStorage.setItem(key, JSON.stringify({
+        ...JSON.parse(localStorage.getItem(key) || '{}'), files: [], floorPlan: null, spaceTemplate: null,
+        canvasMode: 'overview', designZoneId: null, objects: [zone],
+        initialized: true, workspaceId: 'old-saved-workspace',
+        cart: [{ id: `cart-${floorId}`, projectId: floorId, zoneId, zoneName: name, productId: 'SAMPLE-OF-03', qty: 99 }],
+      }))
+    }
+  }, [first, second])
+
+  const steps = page.getByRole('navigation', { name: '项目设计步骤' })
+  const overviewStep = steps.getByRole('link', { name: '2 空间总览', exact: true })
+  const layoutStep = steps.getByRole('link', { name: '3 布局选品', exact: true })
+  const budgetStep = steps.getByRole('link', { name: '4 预算清单', exact: true })
+  const budget = page.locator('.proposal-page')
+  async function verifyProjectSteps(active, other) {
+    for (const step of [overviewStep, layoutStep, budgetStep]) {
+      assert.equal(new URL(await step.getAttribute('href'), baseUrl).searchParams.get('floorId'), active.floorId)
+    }
+    await overviewStep.click()
+    await page.locator('.review-rooms').getByRole('button', { name: `选择空间 ${active.name}`, exact: true }).waitFor()
+    assert.equal(await page.getByText(other.name, { exact: true }).count(), 0)
+    await layoutStep.click()
+    await page.waitForURL(url => url.searchParams.get('mode') === 'design' && url.searchParams.get('zoneId') === active.zoneId && url.searchParams.get('floorId') === active.floorId)
+    await page.getByTestId('office-design-canvas').waitFor()
+    await budgetStep.click()
+    await budget.getByText(`${active.project} / ${active.floor}`, { exact: true }).waitFor()
+    await budget.getByRole('button', { name: new RegExp(active.name) }).first().waitFor()
+    await budget.locator('.aside-summary').filter({ hasText: '商品总数' }).getByText(`${active.qty} 件`, { exact: true }).waitFor()
+    assert.equal(await budget.getByText(other.name, { exact: true }).count(), 0)
+  }
+  await page.goto(`${baseUrl}/canvas?floorId=${first.floorId}`, { waitUntil: 'networkidle' })
+  await verifyProjectSteps(first, second)
+  let releaseCartRead
+  pendingCartReads.set(second.floorId, new Promise(resolve => { releaseCartRead = resolve }))
+  const secondCartRequest = page.waitForRequest(request => new URL(request.url()).pathname === `/api/v1/office/projects/${second.floorId}/cart`)
+  await projectListToggle.click()
+  await projectList.getByRole('button', { name: `切换到项目 ${second.project}`, exact: true }).click()
+  try {
+    await secondCartRequest
+    await page.getByText('正在加载当前楼层…', { exact: true }).waitFor()
+    assert.equal(await budget.count(), 0)
+    assert.equal(await steps.count(), 0)
+    assert.equal(await projectTree.getByText(first.name, { exact: true }).count(), 0)
+  } finally {
+    pendingCartReads.delete(second.floorId)
+    releaseCartRead()
+  }
+  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === second.floorId)
+  await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
+  await verifyProjectSteps(second, first)
+  // 跨项目直达保留目标楼层的空间参数，同楼层切换入口不会沿用演示参数。
+  await page.evaluate(({ floorId, zoneId }) => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/canvas', query: { floorId, mode: 'design', zoneId } }), first)
+  await page.waitForURL(url => url.searchParams.get('floorId') === first.floorId && url.searchParams.get('zoneId') === first.zoneId)
+  await page.getByTestId('office-design-canvas').waitFor()
+  await page.goto(`${baseUrl}/proposal?floorId=${first.floorId}&preview=1`, { waitUntil: 'networkidle' })
+  await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^3F/ }).click()
+  await page.waitForURL(url => url.pathname === '/proposal' && url.search === '?floorId=OFLR-3')
+  await budget.getByText(`${first.project} / 3F`, { exact: true }).waitFor()
+  assert.equal(await budget.getByText('方案演示', { exact: true }).count(), 0)
+
   assert.ok(saves.every(save => save.path.includes(save.body.projectId)), '画布保存必须使用原楼层隔离键')
   assert.deepEqual(errors, [])
   console.log('E2E project floors passed')
