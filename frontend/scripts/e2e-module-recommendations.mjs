@@ -31,6 +31,7 @@ try {
   let saved = null, empty = false, fail = false, unavailable = false, delayA = false, noCatalog = false
   let waitForSelection
   const selections = [], queries = []
+  const previewImage = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#f7f4f0"/><rect x="170" y="210" width="460" height="170" rx="20" fill="#a67c52"/><rect x="210" y="380" width="35" height="100" fill="#6e5138"/><rect x="555" y="380" width="35" height="100" fill="#6e5138"/></svg>')
   const products = [
     ['EXACT', '精确尺寸办公桌', 1200, 600, 1000, '暮山黑橡+深灰银钢脚+灯带'],
     ['MEDIUM', '宽松办公桌', 1000, 500, 800, '蜜芽胡桃+雅士白'],
@@ -38,6 +39,7 @@ try {
     ['ROTATED', '旋转适配长桌', 550, 1150, 900, '雾山核桃+液态银'],
     ['QUOTE', '待报价办公桌', 1100, 500, 0, '雅士白+爱马仕橙'],
   ].map(([id, name, widthMm, depthMm, price, colorPrimaryName]) => ({ id, rspuId: 'MASTER-' + id, variantId: id, name, colorPrimaryName, widthMm, depthMm, price, widthCm: widthMm / 10, depthCm: depthMm / 10, desc: '', variant: '真实规格 API 模拟', kind: 'other', uses: ['OTHER'] }))
+  products.forEach(product => { product.imageUrl = previewImage })
   products.push(...Array.from({ length: 30 }, (_, index) => ({
     id: `FILL-${index}`, rspuId: `MASTER-FILL-${index}`, variantId: `FILL-${index}`, name: `滚动候选 ${index + 1}`,
     widthMm: 1190, depthMm: 590, price: 100 + index, widthCm: 119, depthCm: 59, desc: '', variant: '滚动回归模拟', kind: 'other', uses: ['OTHER'],
@@ -205,7 +207,7 @@ try {
   assert.ok(scrollMetrics.scrollHeight > scrollMetrics.clientHeight, '多候选时应形成列表内部滚动区域')
   await recommendationList.hover()
   await page.mouse.wheel(0, 600)
-  await page.waitForTimeout(200)
+  await page.waitForFunction(element => element.scrollTop > 0, await recommendationList.elementHandle(), { timeout: 2000 })
   assert.ok(await recommendationList.evaluate(element => element.scrollTop > 0), '滚轮必须实际滚动推荐列表')
   await recommendationList.evaluate(element => { element.scrollTop = 0 })
 
@@ -224,8 +226,43 @@ try {
   await fallback.evaluate(element => { element.scrollTop = 120 })
   assert.ok(await fallback.evaluate(element => element.scrollTop > 0), '兜底滚动层必须实际可滚动')
   await page.screenshot({ path: outDir + '/03-narrow-viewport-fallback.png', animations: 'disabled' })
+  const previewTrigger = card('EXACT').getByTestId('product-image-trigger')
+  await previewTrigger.locator('img').evaluate(image => image.decode())
+  await previewTrigger.hover()
+  assert.equal(await previewTrigger.getAttribute('data-preview-mode'), 'click', '正常卡片放不进中央画布时切换到点击预览')
+  assert.equal(await page.getByTestId('product-hover-preview').count(), 0, '窄画布不再显示整体缩小的悬停卡片')
+  await previewTrigger.click()
+  const detailPreview = page.getByTestId('product-detail-preview')
+  await detailPreview.waitFor()
+  assert.equal(await detailPreview.getByTestId('preview-price').evaluate(element => getComputedStyle(element).fontSize), '22px', '点击预览中的价格保持原始字号')
+  assert.equal(await detailPreview.locator('.pip-detail-side').evaluate(element => getComputedStyle(element).transform), 'none', '点击预览的数据栏不做整体缩放')
+  await page.screenshot({ path: outDir + '/04-narrow-canvas-click-preview.png', animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 400 })
+  await page.waitForTimeout(150)
+  const mobilePreviewBody = detailPreview.locator('.pip-detail-body')
+  const mobilePreviewMetrics = await mobilePreviewBody.evaluate(element => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }))
+  assert.ok(mobilePreviewMetrics.scrollHeight > mobilePreviewMetrics.clientHeight, '小窗口预览放不下时滚动而不是缩小文字')
+  await mobilePreviewBody.evaluate(element => { element.scrollTop = 80 })
+  assert.ok(await mobilePreviewBody.evaluate(element => element.scrollTop > 0), '小窗口预览内容必须实际可滚动')
+  assert.equal(await detailPreview.getByTestId('preview-price').evaluate(element => getComputedStyle(element).fontSize), '22px', '小窗口滚动后价格字号仍保持不变')
+  await page.screenshot({ path: outDir + '/05-small-window-scroll-preview.png', animations: 'disabled' })
+  await page.keyboard.press('Escape')
+  assert.equal(await detailPreview.count(), 0, 'Esc 关闭点击预览')
+  await card('EXACT').waitFor()
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.waitForTimeout(200)
+  await previewTrigger.hover()
+  assert.equal(await previewTrigger.getAttribute('data-preview-mode'), 'hover', '正常卡片能完整放入画布时保留悬停预览')
+  assert.equal(await page.getByTestId('product-hover-preview').count(), 1, '宽屏正常显示悬停预览')
+  await page.mouse.move(0, 0)
+  await previewTrigger.dispatchEvent('pointerenter', { pointerType: 'touch' })
+  assert.equal(await previewTrigger.getAttribute('data-preview-mode'), 'click', '触屏指针始终使用点击预览')
+  assert.equal(await page.getByTestId('product-hover-preview').count(), 0, '触屏不打开悬停浮层')
+  await previewTrigger.focus()
+  await page.keyboard.press('Enter')
+  await detailPreview.waitFor()
+  await detailPreview.getByRole('button', { name: '关闭图片预览' }).click()
+  assert.equal(await detailPreview.count(), 0, '关闭按钮关闭键盘打开的预览')
   assert.equal(await card('ROTATED').count(), 1)
   assert.match(await card('ROTATED').innerText(), /需旋转 90°/)
   await panel.getByText('推荐品类：办公桌').waitFor()
