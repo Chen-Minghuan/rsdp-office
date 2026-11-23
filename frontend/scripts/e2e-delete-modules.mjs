@@ -30,7 +30,9 @@ try {
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const deletedCartLineIds = []
   const cartMutations = []
-  await context.route('**/api/v1/**', route => {
+  const serverCartQuantities = new Map()
+  let holdSharedUpdate = null
+  await context.route('**/api/v1/**', async route => {
     const url = new URL(route.request().url())
     const path = url.pathname
     const floorId = path.match(/^\/api\/v1\/office\/projects\/([^/]+)\/cart/)?.[1] || null
@@ -49,14 +51,21 @@ try {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
     }
     if (path.includes('/cart/') && route.request().method() === 'PUT') {
+      const lineId = path.split('/').pop()
+      const qty = Number(url.searchParams.get('qty'))
+      if (lineId === 'CART-SHARED' && holdSharedUpdate) await holdSharedUpdate
+      serverCartQuantities.set(lineId, qty)
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { lineId: path.split('/').pop(), projectId: 'OFFICE-PROJECT-001', zoneId: 'DELETE-ROOM', zoneName: '删除测试空间', productId: 'SHARED-PRODUCT', qty: Number(url.searchParams.get('qty')) } }) })
     }
     if (path.endsWith('/cart') && route.request().method() === 'POST') {
       const body = JSON.parse(route.request().postData() || '{}')
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { ...body, lineId: 'RESTORED-' + body.lineId } }) })
+      const lineId = 'RESTORED-' + body.lineId
+      serverCartQuantities.set(lineId, body.qty)
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { ...body, lineId } }) })
     }
     if (path.includes('/cart/') && route.request().method() === 'DELETE') {
       deletedCartLineIds.push(path.split('/').pop())
+      serverCartQuantities.delete(path.split('/').pop())
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: null }) })
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : [] }) })
@@ -166,7 +175,38 @@ try {
   assert.equal((await furniture()).some(item => item.id === 'SHARED-A'), false)
   const sharedCart = (await state()).cart.find(item => item.id === 'CART-SHARED')
   assert.equal(sharedCart.qty, 1, '共享行删除一件家具只扣减到 1，不整行删除')
+  assert.equal(serverCartQuantities.get('CART-SHARED'), 1)
   assert.equal(deletedCartLineIds.includes('CART-SHARED'), false)
+  const sharedQtyResponse = qty => page.waitForResponse(response => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname.endsWith('/cart/CART-SHARED')
+    && new URL(response.url()).searchParams.get('qty') === String(qty))
+  const sharedUndoResponse = sharedQtyResponse(2)
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await sharedUndoResponse
+  assert.equal((await furniture()).some(item => item.id === 'SHARED-A'), true)
+  assert.equal((await state()).cart.find(item => item.id === 'CART-SHARED').qty, 2)
+  assert.equal(serverCartQuantities.get('CART-SHARED'), 2, '撤销共享行扣减必须恢复服务端数量')
+  const sharedRedoResponse = sharedQtyResponse(1)
+  await page.getByRole('button', { name: '恢复', exact: true }).click()
+  await sharedRedoResponse
+  assert.equal((await furniture()).some(item => item.id === 'SHARED-A'), false)
+  assert.equal((await state()).cart.find(item => item.id === 'CART-SHARED').qty, 1)
+  assert.equal(serverCartQuantities.get('CART-SHARED'), 1, '重做共享行扣减必须同步服务端数量')
+  // 较早请求返回时，不能把连续撤销/重做后的最新本地数量覆盖掉。
+  let releaseSharedUpdate
+  holdSharedUpdate = new Promise(resolve => { releaseSharedUpdate = resolve })
+  const queuedUndoRequest = page.waitForRequest(request => request.method() === 'PUT'
+    && new URL(request.url()).pathname.endsWith('/cart/CART-SHARED')
+    && new URL(request.url()).searchParams.get('qty') === '2')
+  await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').undo())
+  await queuedUndoRequest
+  await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').redo())
+  const queuedRedoResponse = sharedQtyResponse(1)
+  holdSharedUpdate = null
+  releaseSharedUpdate()
+  await queuedRedoResponse
+  assert.equal((await state()).cart.find(item => item.id === 'CART-SHARED').qty, 1)
+  assert.equal(serverCartQuantities.get('CART-SHARED'), 1, '排队请求按顺序落库并保留最新数量')
   // 跨楼层删除：入队后切到二层，请求仍发往原楼层
   const floorTwoKey = 'rsdp-office-v01:MOCK-USER:OFFICE-FLOOR-002'
   await page.evaluate(key => {
@@ -215,8 +255,36 @@ try {
   assert.equal(afterClear.objects.some(item => item.id === 'CLEAR-A'), false)
   assert.equal(afterClear.cart.some(item => item.id === 'CART-CLEAR'), false, '清空排版同步删除关联购物车行')
   assert.deepEqual(afterClear.cart.map(item => item.id), ['RESTORED-RESTORED-CART-DELETE-A', 'CART-DELETE-B', 'CART-EXTRA'], '清空排版只移除关联行，其余保留')
+  // 整行恢复生成新 ID 后，多次撤销/重做仍需引用同一条有效的服务端行。
+  serverCartQuantities.set('HISTORY-LINE', 1)
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.objects.push({ id: 'HISTORY-A', kind: 'furniture', zoneId: 'OTHER-ROOM', productId: 'P', x: 11000, y: 500, w: 1200, h: 600, productSelection: { cartLineId: 'HISTORY-LINE' } })
+    store.cart.push({ id: 'HISTORY-LINE', projectId: store.workspaceId, productId: 'P', zoneId: 'OTHER-ROOM', qty: 1 })
+  })
+  const historyResponse = method => page.waitForResponse(response => response.request().method() === method
+    && (method === 'POST'
+      ? new URL(response.url()).pathname.endsWith('/cart') && response.request().postDataJSON()?.lineId?.includes('HISTORY-LINE')
+      : new URL(response.url()).pathname.includes('/cart/') && new URL(response.url()).pathname.includes('HISTORY-LINE')))
+  const historyDelete = historyResponse('DELETE')
+  await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').deleteObject('HISTORY-A'))
+  await historyDelete
+  for (let round = 0; round < 3; round++) {
+    const restoredResponse = historyResponse('POST')
+    await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').undo())
+    await restoredResponse
+    const restoredState = await state()
+    const restoredId = restoredState.objects.find(item => item.id === 'HISTORY-A').productSelection.cartLineId
+    assert.equal(restoredState.cart.find(item => item.id === restoredId)?.qty, 1)
+    assert.deepEqual([...serverCartQuantities].filter(([id]) => id.includes('HISTORY-LINE')), [[restoredId, 1]], '重复撤销不能遗留旧行或丢失新行关联')
+    if (round === 2) break
+    const removedResponse = historyResponse('DELETE')
+    await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').redo())
+    await removedResponse
+    assert.equal([...serverCartQuantities.keys()].some(id => id.includes('HISTORY-LINE')), false)
+  }
   assert.deepEqual(errors, [])
-  console.log('删除模块 UI 通过：按 cartLineId 删除对应行并保留额外行；共享行按引用数扣减（PUT qty）；切楼层后请求仍发往原楼层；清空排版同步清理关联行；撤销恢复服务端行并更新关联 ID。全部 API 模拟。')
+  console.log('删除模块 UI 通过：按 cartLineId 删除对应行并保留额外行；共享行扣减、撤销、重做及延迟请求保持服务端数量一致；切楼层后请求仍发往原楼层；清空排版同步清理关联行；撤销恢复服务端行并更新关联 ID。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

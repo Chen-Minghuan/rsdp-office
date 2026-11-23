@@ -66,7 +66,12 @@ function enqueueCartMutation(task: () => Promise<void>) {
 }
 
 function currentCartLineId(id: string) {
-  return cartLineIdAliases.get(id) || id
+  const seen = new Set<string>()
+  while (cartLineIdAliases.has(id) && !seen.has(id)) {
+    seen.add(id)
+    id = cartLineIdAliases.get(id)!
+  }
+  return id
 }
 
 /** 串行执行购物车行的服务端删除/扣减，固定使用行所属楼层，不受楼层切换影响。 */
@@ -867,33 +872,19 @@ export const useOfficeStore = defineStore('office', {
     undo() {
       const snapshot = this.undoStack.pop()
       if (snapshot === undefined) return
-      const currentCartLineIds = new Set(this.cart.map(item => item.id))
+      const currentCartLines = this.cart.map(item => ({ ...item }))
       pushCanvasHistory(this.redoStack, this)
       this.restoreCanvasHistory(snapshot)
-      const restoredCartLines = this.cart.filter(item => !currentCartLineIds.has(item.id))
-      if (restoredCartLines.length) void this.restoreCartLinesOnServer(restoredCartLines)
+      void this.syncCartHistoryOnServer(currentCartLines)
     },
 
     redo() {
       const snapshot = this.redoStack.pop()
       if (snapshot === undefined) return
-      const currentCartLines = [...this.cart]
+      const currentCartLines = this.cart.map(item => ({ ...item }))
       pushCanvasHistory(this.undoStack, this)
       this.restoreCanvasHistory(snapshot)
-      const removedCartLineIds = new Set(this.cart.map(item => item.id))
-      const removedCartLines = currentCartLines.filter(item => !removedCartLineIds.has(item.id))
-      if (removedCartLines.length && this.apiReady) {
-        const workspaceId = this.workspaceId
-        void enqueueCartMutation(async () => {
-          for (const line of removedCartLines) {
-            try {
-              await useOfficeApi().deleteCartItem(currentCartLineId(line.id), workspaceId)
-            } catch (error) {
-              console.warn('重做时删除购物车商品失败', error)
-            }
-          }
-        })
-      }
+      void this.syncCartHistoryOnServer(currentCartLines)
     },
 
     restoreCanvasHistory(snapshot: string) {
@@ -902,7 +893,11 @@ export const useOfficeStore = defineStore('office', {
       this.blank = state.blank
       if ('floorPlan' in state) this.floorPlan = state.floorPlan
       if ('spaceTemplate' in state) this.spaceTemplate = state.spaceTemplate
-      if ('cart' in state) this.cart = state.cart
+      if ('cart' in state) this.cart = state.cart.map(item => ({ ...item, id: currentCartLineId(item.id) }))
+      this.objects.forEach(object => {
+        if (object.kind !== 'furniture' || !object.productSelection?.cartLineId) return
+        object.productSelection.cartLineId = currentCartLineId(object.productSelection.cartLineId)
+      })
       if ('submitted' in state) this.submitted = state.submitted
       if (this.activeZoneId && !this.zones.some(zone => zone.id === this.activeZoneId)) this.activeZoneId = this.zones[0]?.id || null
       if (!this.canEnterLayout) { this.canvasMode = 'overview'; this.designZoneId = null }
@@ -910,24 +905,51 @@ export const useOfficeStore = defineStore('office', {
       this.schedulePersist()
     },
 
-    async restoreCartLinesOnServer(lines: CartItem[]) {
+    async syncCartHistoryOnServer(previousCart: CartItem[]) {
       if (!this.apiReady) return
       const workspaceId = this.workspaceId
+      const storageScope = useAuth().storageScope.value
+      const previousById = new Map(previousCart.map(item => [currentCartLineId(item.id), item]))
+      const nextById = new Map(this.cart.map(item => [currentCartLineId(item.id), { ...item }]))
+      const removed = [...previousById].filter(([id]) => !nextById.has(id)).map(([id]) => id)
+      const restored = [...nextById].filter(([id]) => !previousById.has(id)).map(([, item]) => item)
+      const changed = [...nextById].filter(([id, item]) => previousById.has(id) && previousById.get(id)!.qty !== item.qty).map(([, item]) => item)
+      if (!removed.length && !restored.length && !changed.length) return
       await enqueueCartMutation(async () => {
-        for (const line of lines) {
+        const api = useOfficeApi()
+        for (const id of removed) {
           try {
-            const restored = await useOfficeApi().addCartItem(line, workspaceId)
-            cartLineIdAliases.set(line.id, restored.id)
-            this.cart = this.cart.map(item => item.id === line.id ? restored : item)
+            await api.deleteCartItem(currentCartLineId(id), workspaceId)
+          } catch (error) {
+            console.warn('同步历史购物车删除失败', error)
+          }
+        }
+        for (const line of changed) {
+          try {
+            await api.updateCartItemQty(currentCartLineId(line.id), line.qty, workspaceId)
+          } catch (error) {
+            console.warn('同步历史购物车数量失败', error)
+          }
+        }
+        for (const line of restored) {
+          try {
+            const requestedId = currentCartLineId(line.id)
+            const saved = await api.addCartItem({ ...line, id: requestedId }, workspaceId)
+            if (saved.id === requestedId) continue
+            cartLineIdAliases.set(requestedId, saved.id)
+            if (this.workspaceId !== workspaceId || useAuth().storageScope.value !== storageScope) continue
+            // 只回写服务端生成的行 ID；较早响应不能覆盖连续撤销/重做后的最新数量。
+            this.cart = this.cart.map(item => currentCartLineId(item.id) === saved.id ? { ...item, id: saved.id } : item)
             this.objects.forEach(object => {
-              if (object.kind !== 'furniture' || object.productSelection?.cartLineId !== line.id) return
-              object.productSelection = { ...object.productSelection, cartLineId: restored.id }
+              if (object.kind !== 'furniture' || !object.productSelection?.cartLineId
+                || currentCartLineId(object.productSelection.cartLineId) !== saved.id) return
+              object.productSelection = { ...object.productSelection, cartLineId: saved.id }
             })
+            this.schedulePersist()
           } catch (error) {
             console.warn('恢复购物车商品失败', error)
           }
         }
-        this.saveLocal()
       })
     },
 
