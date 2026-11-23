@@ -37,6 +37,7 @@ const tools = computed(() => mode.value === 'design' ? designTools : overviewToo
 
 const emit = defineEmits<{
   undo: []
+  redo: []
   zoomIn: []
   zoomOut: []
   fit: []
@@ -113,12 +114,12 @@ function removeChannel(id: string) {
 </script>
 
 <template>
-  <div class="relative h-14 flex items-center justify-between border-b border-line px-2.5 flex-none bg-white">
-    <div class="flex items-center gap-2">
+  <div class="relative flex min-h-14 flex-none flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-white px-2.5 py-1">
+    <div class="flex min-w-0 max-w-full flex-wrap items-center gap-2">
       <span class="text-[10px] px-1.5 py-0.5 rounded-none bg-[#f4eee5] text-[#946c45]">
         {{ mode === 'design' ? '单空间设计' : '空间总览' }}
       </span>
-      <div class="flex gap-1">
+      <div class="flex flex-wrap gap-1">
         <button
           v-for="t in tools"
           :key="t.key"
@@ -128,22 +129,29 @@ function removeChannel(id: string) {
           ]"
           :data-testid="t.key === 'constraints' ? 'toolbar-constraints' : t.key === 'channels' ? 'toolbar-channels' : t.key === 'regions' ? 'toolbar-regions' : t.key === 'facilities' ? 'toolbar-facilities' : undefined"
           :aria-expanded="t.key === 'constraints' ? constraintsOpen : t.key === 'channels' ? channelsOpen : t.key === 'regions' ? regionsOpen : t.key === 'facilities' ? facilitiesOpen : undefined"
+          :aria-label="t.key === 'pan' ? t.label : undefined"
+          :aria-describedby="t.key === 'pan' ? 'layout-pan-shortcut' : undefined"
+          :title="t.key === 'pan' ? '先点击画布，再按住空格用左键拖动，也可用中键拖动' : undefined"
           @click="t.key === 'render' ? emit('render') : t.key === 'white-model' ? emit('whiteModel') : t.key === 'constraints' ? openConstraints() : t.key === 'channels' ? togglePopover('channels') : t.key === 'regions' ? togglePopover('regions') : t.key === 'facilities' ? togglePopover('facilities') : tool = t.key"
         >
           <AppIcon :name="t.icon" size="4" />
           <span>{{ t.label }}</span>
+          <small v-if="t.key === 'pan'" id="layout-pan-shortcut" class="whitespace-nowrap text-[9px] font-normal text-[#646b60]">空格＋左拖 · 中键</small>
         </button>
       </div>
     </div>
-    <div class="flex gap-1 items-center text-sm">
+    <div class="ml-auto flex flex-wrap items-center gap-1 text-sm">
       <template v-if="mode === 'design'">
         <button class="px-2 py-1.5 rounded-none text-[11px] border border-line" :aria-pressed="showDimensions" aria-label="显示参考尺寸" @click="showDimensions = !showDimensions">尺寸</button>
         <button class="px-2 py-1.5 rounded-none text-[11px] border border-line" :aria-pressed="snapEnabled" aria-label="家具吸附" title="拖动/放置家具时吸附到墙面和其他模块（50mm）" @click="snapEnabled = !snapEnabled">吸附</button>
         <button class="px-2 py-1.5 rounded-none text-[11px] border border-line" aria-label="旋转场景视图" title="顺时针旋转视图 90°，不改变排版" @click="emit('rotate', 90)">↻ {{ props.viewRotation || 0 }}°</button>
         <button v-if="props.viewRotation" class="px-2 py-1.5 rounded-none text-[11px] border border-line" aria-label="复位场景视图" @click="emit('rotate', -props.viewRotation)">复位</button>
       </template>
-      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef] flex items-center gap-1" title="撤销" @click="emit('undo')">
+      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef] disabled:opacity-40" aria-label="撤销" title="撤销" :disabled="!store.undoStack.length" @click="emit('undo')">
         <AppIcon name="undo" size="4" />
+      </button>
+      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef] disabled:opacity-40" aria-label="恢复" title="恢复上一次撤销的编辑" :disabled="!store.redoStack.length" @click="emit('redo')">
+        <AppIcon name="redo" size="4" />
       </button>
       <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef]" aria-label="缩小画布" @click="emit('zoomOut')">
         <AppIcon name="zoomOut" size="4" />

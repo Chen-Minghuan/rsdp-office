@@ -35,14 +35,15 @@ try {
   })
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const items = async () => (await state()).objects.filter(item => item.kind === 'furniture')
-  const item = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
-  const dragBy = async (locator, dx, dy) => {
+  const canvas = page.getByTestId('office-design-canvas')
+  const item = id => canvas.locator(`[data-id="${id}"]`)
+  const dragBy = async (locator, dx, dy, button = 'left') => {
     const box = await locator.boundingBox()
     const x = box.x + box.width / 2, y = box.y + box.height / 2
     await page.mouse.move(x, y)
-    await page.mouse.down()
+    await page.mouse.down({ button })
     await page.mouse.move(x + dx, y + dy, { steps: 5 })
-    await page.mouse.up()
+    await page.mouse.up({ button })
   }
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
@@ -62,6 +63,34 @@ try {
   await item('B').click({ modifiers: ['Shift'] })
   await page.getByText('已选 2 件模块').waitFor()
   const initial = await items()
+  const startRevision = (await state()).canvasRevision
+  const redo = page.getByRole('button', { name: '恢复', exact: true })
+  assert.ok(await redo.isDisabled())
+  assert.equal(await page.getByRole('button', { name: '拖动', exact: true }).locator('small').innerText(), '空格＋左拖 · 中键')
+
+  const assertViewShift = async (before, dx, dy) => {
+    const after = await item('A').boundingBox()
+    assert.ok(Math.abs(after.x - before.x - dx) < 1 && Math.abs(after.y - before.y - dy) < 1)
+    assert.deepEqual(await items(), initial, '平移不改变家具的位置或角度')
+    assert.equal((await state()).canvasRevision, startRevision)
+    assert.ok(await page.getByText('已选 2 件模块').isVisible(), '平移保留原来的选择')
+  }
+  const beforeSpacePan = await item('A').boundingBox()
+  await page.keyboard.down('Space')
+  await dragBy(item('A'), 38, 25)
+  await page.keyboard.up('Space')
+  await assertViewShift(beforeSpacePan, 38, 25)
+  const beforeMiddle = await item('A').boundingBox()
+  await dragBy(item('A'), -18, -11, 'middle')
+  await assertViewShift(beforeMiddle, -18, -11)
+
+  const fit = page.getByRole('button', { name: '适屏', exact: true })
+  await fit.hover()
+  const outsideSpaceProceeds = await canvas.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', {
+    key: ' ', code: 'Space', bubbles: true, cancelable: true,
+  })))
+  assert.ok(outsideSpaceProceeds, '指针在画布外时不拦截空格')
+  await fit.click()
   await dragBy(item('A'), 20, 0)
   const moved = await items()
   const deltaA = moved.find(f => f.id === 'A').x - initial.find(f => f.id === 'A').x
@@ -77,6 +106,10 @@ try {
   assert.deepEqual(await items(), moved, '越界时整组不写入')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await items(), initial, '整组移动只产生一次撤销记录')
+  await redo.click()
+  assert.deepEqual(await items(), moved, '恢复整组移动及其排版状态')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  assert.deepEqual(await items(), initial, '恢复后可以再次撤销')
   await page.reload({ waitUntil: 'networkidle' })
   assert.deepEqual(await items(), initial, '刷新保持撤销结果')
   const aBox = await item('A').boundingBox(), bBox = await item('B').boundingBox()

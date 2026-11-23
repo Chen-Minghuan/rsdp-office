@@ -1,9 +1,10 @@
 import type { FurnitureObject } from '~/types/office'
 import { rectOverlapsBlocker, rotatedFurnitureFootprint } from './layoutConstraints'
 import { meetingRingTable } from './meetingRingTable'
+import { footprintsOverlap, furnitureFootprintRects } from './furnitureFootprint'
 
 type Point = [number, number]
-type Footprint = Pick<FurnitureObject, 'x' | 'y' | 'w' | 'h' | 'rotation' | 'furnitureTemplateId' | 'moduleSnapshot'>
+type Footprint = Pick<FurnitureObject, 'x' | 'y' | 'w' | 'h' | 'rotation' | 'furnitureTemplateId' | 'moduleSnapshot' | 'mirrorX' | 'wingWidthMm'>
 const V_TABLE = 'table-meeting-video-v'
 const ROUND_TABLES = ['table-meeting-round', 'table-meeting-round-two']
 
@@ -15,6 +16,8 @@ function hasMeetingGeometry(id: string) {
 
 /** Convex parts used for furniture-to-furniture checks. Ring openings remain reserved. */
 function parts(item: Footprint): Point[][] {
+  const blocks = furnitureFootprintRects(item)
+  if (blocks.length > 1) return blocks.map(({ x, y, w, h }) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]])
   const { w, h } = item
   const id = glyphId(item)
   const ring = meetingRingTable(id, w, h)
@@ -59,7 +62,7 @@ function separated(a: Point[], b: Point[], gap: number) {
 
 export function furnitureIntersects(a: Footprint, b: Footprint, gap = 0) {
   if (!rectOverlapsBlocker(rotatedFurnitureFootprint(a), rotatedFurnitureFootprint(b), gap)) return false
-  if (!hasMeetingGeometry(glyphId(a)) && !hasMeetingGeometry(glyphId(b))) return true
+  if (!hasMeetingGeometry(glyphId(a)) && !hasMeetingGeometry(glyphId(b))) return footprintsOverlap(a, b, gap)
   const otherParts = parts(b)
   return parts(a).some(first => otherParts.some(second => !separated(first, second, gap) && !separated(second, first, gap)))
 }

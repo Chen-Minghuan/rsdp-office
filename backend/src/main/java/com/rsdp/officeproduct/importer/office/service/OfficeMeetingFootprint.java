@@ -1,6 +1,7 @@
 package com.rsdp.officeproduct.importer.office.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,7 +20,10 @@ final class OfficeMeetingFootprint {
         return item.path("moduleSnapshot").path("glyphTemplateId").asText(item.path("furnitureTemplateId").asText());
     }
 
-    static List<List<Point>> parts(JsonNode item) {
+    static List<List<Point>> parts(JsonNode item, List<Rectangle2D.Double> blocks) {
+        if (blocks.size() > 1) return blocks.stream().map(block -> List.of(
+            new Point(block.x, block.y), new Point(block.getMaxX(), block.y),
+            new Point(block.getMaxX(), block.getMaxY()), new Point(block.x, block.getMaxY()))).toList();
         String id = glyphId(item);
         double w = item.path("w").asDouble(), h = item.path("h").asDouble();
         double x = item.path("x").asDouble(), y = item.path("y").asDouble();

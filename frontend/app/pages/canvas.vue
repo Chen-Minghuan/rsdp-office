@@ -3,6 +3,7 @@ import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanning'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const route = useRoute()
@@ -171,7 +172,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
     <RecognitionProgress v-if="entryLoading || entryResult?.processing" :progress="entryResult?.processing" :pending="entryLoading" />
     <img v-if="entryResult?.previewUrl" :src="sameOriginAssetUrl(entryResult.previewUrl)" alt="当前图纸预览" class="min-h-0 max-h-[60vh] w-full object-contain">
     <div class="flex gap-3">
-      <NuxtLink to="/" class="rounded-none border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
+      <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)" class="rounded-none border border-line px-4 py-2 text-sm">返回图纸识别</NuxtLink>
       <button v-if="entryError && targetAnalysisId" class="rounded-none border border-line px-4 py-2 text-sm" @click="entryRetry++">重试查询当前图纸</button>
     </div>
   </section>
@@ -190,6 +191,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           :view-rotation="viewRotation"
           :mode="mode"
           @undo="store.undo"
+          @redo="store.redo"
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
           @zoom-out="store.zoom = Math.max(0.00001, store.zoom / 1.17)"
           @fit="fitBoard"

@@ -21,12 +21,19 @@ const uuidUrl = await moduleUrl('../app/utils/uuid.ts')
 const obstaclesUrl = await moduleUrl('../app/utils/spatial/obstacles.ts', { './geometry': geometryUrl, '~/utils/uuid': uuidUrl })
 const reviewUrl = await moduleUrl('../app/utils/spatial/review.ts', { '~/utils/spatial/geometry': geometryUrl, './obstacles': obstaclesUrl })
 const constraintsUrl = await moduleUrl('../app/utils/layoutConstraints.ts', { './spatial/review': reviewUrl })
+const workstationSeatingUrl = await moduleUrl('../app/utils/furniture3d/workstationSeating.ts', { '~/utils/manualFurniture': manualUrl })
+const footprintUrl = await moduleUrl('../app/utils/furnitureFootprint.ts', {
+  '~/utils/manualFurniture': manualUrl,
+  '~/utils/layoutConstraints': constraintsUrl,
+  '~/utils/furniture3d/workstationSeating': workstationSeatingUrl,
+})
 const regionsUrl = await moduleUrl('../app/utils/spatial/layoutRegions.ts', { 'polygon-clipping': new URL('../node_modules/polygon-clipping/dist/polygon-clipping.esm.js', import.meta.url).href, './review': reviewUrl })
 const facilitiesUrl = await moduleUrl('../app/utils/spatial/facilities.ts', { './review': reviewUrl })
 const scoringUrl = await moduleUrl('../app/utils/layoutScoring.ts', { './spatial/layoutRegions': regionsUrl, './spatial/obstacles': obstaclesUrl })
 const { planMixedLayout, referenceLayoutSnapshot, mixedPlacementProblem } = await import(await moduleUrl('../app/utils/mixedLayout.ts', {
   './manualFurniture': manualUrl,
   './meetingReferenceLayout': meetingLayoutUrl,
+  './furnitureFootprint': footprintUrl,
   './officeCanvasView': canvasViewUrl,
   './officeAutoLayout': autoUrl,
   './spatial/obstacles': obstaclesUrl,

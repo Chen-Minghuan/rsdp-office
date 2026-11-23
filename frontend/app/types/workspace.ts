@@ -38,6 +38,12 @@ export interface WorkspaceProject {
   budgetStatus: ProjectBudgetStatus
 }
 
+export interface WorkspaceRequirementsSummary {
+  keyPoints: string[]
+  sourceRevision: number
+  cacheHit: boolean
+}
+
 export interface CreateProjectRequest {
   projectName: string
   customerRequirements: string

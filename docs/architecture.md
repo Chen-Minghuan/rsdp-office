@@ -43,6 +43,8 @@ Viewport（平移、缩放）独立于上述物理几何
 
 楼层的 `floorId` 直接作为既有业务表 `project_id` 与路径 `projectId` 的隔离键，复用上传、画布、模板、选品和预览能力。旧 `OFFICE-PROJECT-001` 项目与楼层映射保留历史数据。启动时只初始化表结构，项目和楼层由用户创建；上传与画布保存核验所选楼层存在。前端按楼层隔离 Office localStorage、识别 sessionStorage 和 IndexedDB 原图，切层时保存旧层并完整加载目标层，过期响应不得污染当前层。客户需求只作提醒，不自动使几何变化或替代下游复核。实现见 [WORKSPACE-003](tasks/WORKSPACE-003-project-floors.md)。
 
+2026-11-20 项目需求增加只读展示用 AI 总结：`POST /api/v1/office/projects/{projectId}/requirements/summary` 按 `requirementsRevision` 获取或生成结构化 `keyPoints`，后端核验项目权限并读取当前原文。原文仍由 `customerRequirements` 保存，AI 总结单独写入 JSONB 及原文修订、模型、提示词版本和生成时间；总结不参与下游排版、推荐或报价输入。需求修订由专用 Mapper 原子递增，总结写入使用显式 JSONB 转换和原文修订条件；旧响应与过期结果不得成为当前展示。缓存请求合并当前仅覆盖单 JVM。实现和验证边界见 [WORKSPACE-004](tasks/WORKSPACE-004-project-requirements-ai-summary.md)。
+
 2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换为同事务删除+插入的原子操作且仅负责人可用。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
 
 2026-10-29 系统管理员与用户管理（AUTH-003）：全局角色只用既有 `office_user.role` 的 ADMIN/USER 两档，与项目内 LEADER/COLLABORATOR 无关（负责人不从管理员链路任命）。`/api/v1/office/admin/users` 提供列表/创建/停用启用/重置密码/删除，服务端逐接口 `requireAdmin`（认证关闭放行）；只存 PBKDF2 哈希，接口不返回哈希；停用与重置密码即删该用户全部会话；删除为硬删除，仍是项目负责人的账号拒绝删除（协作者关系与会话一并清除）。前端 `/users` 页与侧栏入口仅管理员可见。2026-11-06 按用户要求修订（见 TENANT-001）：**系统管理员唯一**——创建接口只接受 USER（设计师），经销商主号随工作区创建；停用/重置/删除只能作用于 USER/DEALER，任何 ADMIN 目标一律拒绝（含自己与开发模式），原「不能停自己/至少保留一位管理员」兜底随之移除；界面 USER 称「设计师」。见 [AUTH-003](tasks/AUTH-003-user-admin.md)。
@@ -156,7 +158,7 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 
 ### 5.1 分组排版与待应用预览（当前实现，2026-10-20）
 
-会议线稿以目录稳定 ID、二维矢量图块和毫米规格为输入，组合规划输出独立桌、椅及附件实例。培训拓扑以可选 `layoutPreferences.meetingTrainingArrangement` 保存在现有画布 JSON 中，缺省为单向课堂。环桌分段数为实例宽深的派生值，完整环桌仍按单件保存，可在预览和已排实例查看其组成。前后端对曲线桌外轮廓及斜向座椅相交使用相同几何规则。详见 [LAYOUT-045](tasks/LAYOUT-045-meeting-furniture-reference.md)。
+会议线稿以目录稳定 ID、二维矢量图块和毫米规格为输入，组合规划输出独立桌、椅及附件实例。培训拓扑以可选 `layoutPreferences.meetingTrainingArrangement` 保存在现有画布 JSON 中，缺省为单向课堂。环桌分段数为实例宽深的派生值，完整环桌仍按单件保存，可在预览和已排实例查看其组成。前后端对曲线桌外轮廓及斜向座椅相交使用相同几何规则。详见 [LAYOUT-047](tasks/LAYOUT-047-meeting-furniture-reference.md)。
 
 2026-11-16 组合布局按设计策略比较候选。经理办公室使用主管桌或高管桌，组合位置含横纵向和边界锚点，以办公工位及功能达成优先，入口通路采样、椅后与柜前净空参与排序。组合组间净距、保留家具净距与离墙距离随候选应用保存，客户端和 Java 保存核验按同一组标识读取。单模块面板仍保留三档间距。
 

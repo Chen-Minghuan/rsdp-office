@@ -9,6 +9,7 @@ import { zoneLayoutExclusions } from './spatial/obstacles'
 import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layoutRegions'
 import { facilityLayoutHints } from './spatial/facilities'
 import { rectOverlapsBlocker } from './layoutConstraints'
+import { footprintsOverlap, furnitureFootprintRects, rectOverlapsFootprints } from './furnitureFootprint'
 import { channelRects, validateChannels } from './layoutChannels'
 import { zoneNetAreaMm2 } from './layoutWarnings'
 import { furnitureIntersects } from './meetingFurnitureCollision'
@@ -69,9 +70,6 @@ export function replaceableLayoutIds(zone: ZoneObject, existing: FurnitureObject
 }
 
 type Rect = { x: number; y: number; w: number; h: number }
-function overlap(a: Rect, b: Rect, gap = 0) {
-  return a.x < b.x + b.w + gap - 0.001 && b.x < a.x + a.w + gap - 0.001 && a.y < b.y + b.h + gap - 0.001 && b.y < a.y + a.h + gap - 0.001
-}
 
 /** Chair-front clearance rotates with the chair; it is separate from the physical footprint. */
 export function chairActivityRect(item: FurnitureObject, clearance: number): Rect | null {
@@ -99,7 +97,7 @@ export function confirmedLayoutProblem(zone: ZoneObject, furniture: FurnitureObj
     const saved = item.layoutGroupId && !item.mixedBundleId ? item.layoutSettings?.spacing : undefined
     const problem = officePlacementHardProblem(zone, item, others, { wallMm: item.layoutRole === 'seat' ? Math.max(saved?.wallMm || 0, saved?.aisleMm || 0) : saved?.wallMm || 0, gapMm: saved?.gapMm || 0, aisleMm: 0 })
     if (problem) return problem
-    if (channelBlockers.some(rect => rectOverlapsBlocker(officeFurnitureFootprint(item), rect))) return '家具压占通道，请调整家具或通道位置'
+    if (furnitureFootprintRects(item).some(block => channelBlockers.some(rect => rectOverlapsBlocker(block, rect)))) return '家具压占通道，请调整家具或通道位置'
   }
   return null
 }
@@ -157,12 +155,18 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   // 课桌式网格由 planOfficeFurniture 原生切段排版，通道不进 blockers（否则首排豁免和贴边落子会被间距规则误杀）；
   // 会议/职员桌等排布把通道作为硬阻挡并入既有避障。
   const channelBlockers = general ? [] : channelRects(zone, channels)
-  const blockers = [...retained.map(officeFurnitureFootprint), ...exclusions, ...channelBlockers]
+  const blockerAreas = [...exclusions, ...channelBlockers]
+  // 家具按有效占地面判断重叠：L 型桌拆成两块，内角不再算占用。
+  const retainedBlocks = retained.flatMap(furnitureFootprintRects)
   const valid = (item: FurnitureObject, peers: FurnitureObject[], wall = spacing.wallMm, clearance = 0) => {
     const footprint = officeFurnitureFootprint(item)
     const expanded = { x: footprint.x - wall, y: footprint.y - wall, w: footprint.w + wall * 2, h: footprint.h + wall * 2 }
-    return insideLayout(expanded) && !blockers.some(b => rectOverlapsBlocker(footprint, b, Math.max(spacing.gapMm, clearance)))
-      && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
+    const blocks = furnitureFootprintRects(item)
+    const blockerGap = Math.max(spacing.gapMm, clearance)
+    return insideLayout(expanded)
+      && !blocks.some(block => retainedBlocks.some(other => rectOverlapsBlocker(block, other, blockerGap)))
+      && !blocks.some(block => blockerAreas.some(area => rectOverlapsBlocker(block, area, blockerGap)))
+      && !peers.some(other => footprintsOverlap(item, other, spacing.gapMm))
   }
   // Adaptive workstation entries are checked like the planner: the wall
   // clearance only applies on the seat side; panel sides may touch the wall.
@@ -170,9 +174,11 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
   const seatCorner = workstationSeatCorner(request.productStyleId)
   const validAdaptive = (entry: FurnitureObject, peers: FurnitureObject[]) => {
     const footprint = officeFurnitureFootprint(entry)
+    const blocks = furnitureFootprintRects(entry)
     return insideLayout(seatSideRect({ ...footprint, rotation: entry.rotation, mirrorX: entry.mirrorX }, seatWallClearance(spacing, seatOverhang), seatCorner))
-      && !blockers.some(b => rectOverlapsBlocker(footprint, b, spacing.aisleMm))
-      && !peers.some(other => overlap(footprint, officeFurnitureFootprint(other), spacing.gapMm))
+      && !blocks.some(block => retainedBlocks.some(other => rectOverlapsBlocker(block, other, spacing.aisleMm)))
+      && !blocks.some(block => blockerAreas.some(area => rectOverlapsBlocker(block, area, spacing.aisleMm)))
+      && !peers.some(other => footprintsOverlap(entry, other, spacing.gapMm))
   }
   const item = (id: string, x: number, y: number, width: number, depth: number, rotation: number, seat = false): FurnitureObject => ({
     id, kind: 'furniture', zoneId: zone.id, productId: '', x, y, w: width, h: depth, rotation,
@@ -238,7 +244,8 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
             const rect = activity && officeFurnitureFootprint(activity)
             if (!valid(entry, [], seat ? Math.max(spacing.wallMm, spacing.aisleMm) : spacing.wallMm)
               || furniture.some(other => furnitureIntersects(entry, other, spacing.gapMm))
-              || activity && rect && (!insideLayout(rect) || blockers.some(blocker => rectOverlapsBlocker(rect, blocker)) || furniture.some(other => furnitureIntersects(activity, other)))
+              || activity && rect && (!insideLayout(rect) || blockerAreas.some(blocker => rectOverlapsBlocker(rect, blocker))
+                || retained.some(other => furnitureIntersects(activity, other)) || furniture.some(other => furnitureIntersects(activity, other)))
               || furniture.some(other => { const area = chairActivityFootprint(other, prefs.seatClearanceMm); return area && furnitureIntersects(area, entry) })) {
               if (!seat || training || code.startsWith('S') || count === 0) { complete = false; break }
               continue
@@ -292,8 +299,11 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
           const chair = item(`plan-chair-${furniture.length}`, cx + x - 275, cy + y - 290, 550, 580, (local.rotation + angle + 360) % 360, true)
           const activity = chairActivityRect(chair, prefs.seatClearanceMm)
           if (valid(chair, furniture, Math.max(spacing.wallMm, spacing.aisleMm), prefs.seatClearanceMm)
-            && (!activity || layoutRectInsideRing(activity, zone.polygon!) && ![...blockers, ...furniture.map(officeFurnitureFootprint)].some(rect => rectOverlapsBlocker(activity, rect)))
-            && !furniture.some(other => { const area = chairActivityRect(other, prefs.seatClearanceMm); return area && overlap(area, officeFurnitureFootprint(chair)) })) furniture.push(chair)
+            && (!activity || layoutRectInsideRing(activity, zone.polygon!)
+              && !retainedBlocks.some(rect => rectOverlapsBlocker(activity, rect))
+              && !blockerAreas.some(area => rectOverlapsBlocker(activity, area))
+              && !furniture.some(other => rectOverlapsFootprints(activity, other)))
+            && !furniture.some(other => { const area = chairActivityRect(other, prefs.seatClearanceMm); return area && rectOverlapsFootprints(area, chair) })) furniture.push(chair)
         }
         candidates.push({ furniture, seats: furniture.length - 1 + retainedSeats, label: `会议桌椅组合 · ${angle ? '纵向' : '横向'}${width !== w ? ' · 调整桌长' : ''}` })
       }
@@ -302,7 +312,7 @@ export function planLayoutProposal(zone: ZoneObject, existing: FurnitureObject[]
     // LAYOUT-034：课桌式网格把 auto 内部评估过的其他有效变体（朝向/对齐）也作为候选；首个仍是既有默认方案。
     const primary = general
       ? request.presetId === 'general-center' ? planMeetingFurniture(zone, w, d, spacing) : planOfficeFurniture(zone, w, d, 'auto', spacing, channels, prefs.seatClearanceMm)
-      : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, blockers, neededSeats)
+      : planAdaptiveArrangement(zone, w, d, request.productStyleId, request.presetId, spacing, [...retainedBlocks, ...blockerAreas], neededSeats)
     const plans = [primary, ...(primary.alternates || [])]
     for (const plan of plans) {
       const furniture: FurnitureObject[] = []

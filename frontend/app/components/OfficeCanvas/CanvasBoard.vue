@@ -5,7 +5,7 @@ import { TONES } from '~/utils/sample'
 import type { OfficeObject, ZoneObject, FurnitureObject, NoteObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
-import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
+import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint, OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
 import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
@@ -20,6 +20,7 @@ import { facilityCanvasPoints, facilityFootprintRing, facilityClearanceRing, fac
 import type { LayoutChannel, LayoutExclusion, LayoutPreview, LayoutReferenceEditing, LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { LayoutBlocker } from '~/utils/layoutConstraints'
 import { channelRects, channelOffsetRange, channelTravelSpan, channelTravelDeltaRange, shiftChannelTravel, clampChannelTravelEndpoint, CHANNEL_WIDTH_HINT_MM } from '~/utils/layoutChannels'
+import { useCanvasSpacePan } from '~/composables/useCanvasSpacePan'
 
 
 const store = useOfficeStore()
@@ -50,6 +51,7 @@ const NOTE_SCREEN_FONT_SIZE = 14
 const canvasWindow = ref<HTMLDivElement | null>(null)
 const board = ref<HTMLDivElement | null>(null)
 const drawPreview = ref<HTMLDivElement | null>(null)
+const { spacePanHeld, onCanvasEnter, onCanvasLeave, holdSpace, takeSpacePan, releaseSpace, clearSpacePan } = useCanvasSpacePan()
 
 const visibleObjects = computed(() => canvasObjectsForView(store.objects, mode.value, store.designZoneId))
 const worldBounds = computed(() => {
@@ -504,7 +506,7 @@ function fitZone(z: ZoneObject, padding = 80) {
   placeBoard()
 }
 
-function point(e: PointerEvent) {
+function point(e: MouseEvent) {
   const rect = canvasWindow.value!.getBoundingClientRect()
   const world = canvasPointerWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }, { width: rect.width, height: rect.height }, worldBounds.value, store, viewRotation.value)
   return { x: Math.round(world.x), y: Math.round(world.y) }
@@ -519,6 +521,7 @@ function rotateView(degrees: number) {
 
 interface DragState {
   mode: 'pan' | 'move' | 'furniture' | 'preview-furniture' | 'marquee' | 'zone' | 'arrow' | 'channel' | 'channel-width' | 'channel-travel' | 'constraints' | 'constraint' | 'region-draw' | 'region' | 'region-vertex' | 'facility-draw' | 'facility' | 'facility-vertex'
+  pointerId?: number
   cx?: number
   cy?: number
   px?: number
@@ -1090,17 +1093,56 @@ function placeReferenceAt(p: { x: number; y: number }) {
   placementPointer.value = null
 }
 
+function placeCurrentFurniture(p: { x: number; y: number }) {
+  placementPointer.value = p
+  const placed = placementSnap.value.item
+  const problem = store.placeFurnitureAt(placed ? placed.x + placed.w / 2 : p.x, placed ? placed.y + placed.h / 2 : p.y)
+  placementMessage.value = problem || `已添加 ${store.furniturePlacement?.template.name || '家具'}，可继续放置`
+}
+
+function onModuleDragOver(e: DragEvent) {
+  if (!placing.value || !canvasWindow.value || !e.dataTransfer?.types.includes(OFFICE_MODULE_DRAG_TYPE)) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+  placementPointer.value = point(e)
+  placementMessage.value = ''
+}
+
+function onModuleDrop(e: DragEvent) {
+  if (!placing.value || !canvasWindow.value || !e.dataTransfer?.types.includes(OFFICE_MODULE_DRAG_TYPE)) return
+  e.preventDefault()
+  placeCurrentFurniture(point(e))
+}
+
+function onCanvasPointerDownCapture(event: PointerEvent) {
+  const viewport = canvasWindow.value
+  if (!viewport || drag.value || (event.button !== 0 && event.button !== 1)) return
+  const control = (event.target as Element).closest('button, a, input, textarea, select, [contenteditable], [role="button"]')
+  if (control && !control.matches('[data-reference-index]')) return
+  if (event.pointerType === 'mouse') viewport.focus({ preventScroll: true })
+  const spacePan = tool.value === 'select' && takeSpacePan(event)
+  if (event.button !== 1 && tool.value !== 'pan' && !spacePan) return
+
+  // 平移先于家具、预览及标注的按下处理，保留它们的选择和编辑状态。
+  event.preventDefault()
+  event.stopPropagation()
+  drag.value = { mode: 'pan', pointerId: event.pointerId, cx: event.clientX, cy: event.clientY, px: store.panX, py: store.panY }
+  viewport.setPointerCapture(event.pointerId)
+}
+
+function finishViewportPan(pointerId?: number) {
+  const current = drag.value
+  if (current?.mode !== 'pan' || (pointerId !== undefined && current.pointerId !== pointerId)) return
+  drag.value = null
+  const viewport = canvasWindow.value
+  if (current.pointerId !== undefined && viewport?.hasPointerCapture(current.pointerId)) viewport.releasePointerCapture(current.pointerId)
+}
+
 function onPointerDown(e: PointerEvent) {
-  if (e.button !== 0 || !canvasWindow.value) return
+  if (e.button !== 0 || !canvasWindow.value || tool.value === 'pan' || drag.value?.mode === 'pan') return
   const target = e.target as HTMLElement
   const hit = target.closest('.board-element') as HTMLElement | null
   const p = point(e)
-
-  if (tool.value === 'pan') {
-    drag.value = { mode: 'pan', cx: e.clientX, cy: e.clientY, px: store.panX, py: store.panY }
-    canvasWindow.value.setPointerCapture(e.pointerId)
-    return
-  }
 
   if (activeReference.value) {
     e.preventDefault()
@@ -1113,10 +1155,7 @@ function onPointerDown(e: PointerEvent) {
 
   if (placing.value) {
     e.preventDefault()
-    placementPointer.value = p
-    const placed = placementSnap.value.item
-    const problem = store.placeFurnitureAt(placed ? placed.x + placed.w / 2 : p.x, placed ? placed.y + placed.h / 2 : p.y)
-    placementMessage.value = problem || `已添加 ${store.furniturePlacement?.template.name || '家具'}，可继续放置`
+    placeCurrentFurniture(p)
     return
   }
 
@@ -1239,19 +1278,23 @@ function updatePreview(a: { x: number; y: number }, b: { x: number; y: number })
 }
 
 function onPointerMove(e: PointerEvent) {
-  if (placing.value && canvasWindow.value) { placementPointer.value = point(e); placementMessage.value = '' }
-  if (activeReference.value?.placement && canvasWindow.value && tool.value === 'select') placementPointer.value = point(e)
-  if (sketchActive.value && sketchPoints.value.length && canvasWindow.value) {
-    const hover = point(e)
-    sketchHover.value = [hover.x, hover.y]
-  }
-  if (!drag.value || !canvasWindow.value) return
+  if (!canvasWindow.value) return
   const d = drag.value
-  if (d.mode === 'pan') {
+  if (d?.mode === 'pan') {
+    if (d.pointerId !== e.pointerId) return
     store.panX = (d.px || 0) + (e.clientX - (d.cx || 0))
     store.panY = (d.py || 0) + (e.clientY - (d.cy || 0))
     placeBoard()
-  } else if (d.mode === 'furniture' && d.ids?.length && designZone.value) {
+    return
+  }
+  if (placing.value) { placementPointer.value = point(e); placementMessage.value = '' }
+  if (activeReference.value?.placement && tool.value === 'select') placementPointer.value = point(e)
+  if (sketchActive.value && sketchPoints.value.length) {
+    const hover = point(e)
+    sketchHover.value = [hover.x, hover.y]
+  }
+  if (!d) return
+  if (d.mode === 'furniture' && d.ids?.length && designZone.value) {
     const delta = furnitureDragDelta(d, point(e))
     d.dx = delta.dx
     d.dy = delta.dy
@@ -1402,6 +1445,10 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  if (drag.value?.mode === 'pan') {
+    finishViewportPan(e.pointerId)
+    return
+  }
   dragSnapGuides.value = { x: null, y: null }
   if (!drag.value || !drawPreview.value) {
     drag.value = null
@@ -1572,7 +1619,11 @@ function onPointerUp(e: PointerEvent) {
   }
 }
 
-function onPointerCancel() {
+function onPointerCancel(event: PointerEvent) {
+  if (drag.value?.mode === 'pan') {
+    finishViewportPan(event.pointerId)
+    return
+  }
   dragSnapGuides.value = { x: null, y: null }
   const d = drag.value
   if (d?.mode === 'move' && d.id) {
@@ -1610,6 +1661,29 @@ function rotatePlacement() {
   else store.rotateFurniturePlacement()
 }
 
+function onCanvasSpaceDown(event: KeyboardEvent) {
+  if (event.target !== canvasWindow.value) return
+  const placementActive = placing.value || !!activeReference.value?.placement
+  holdSpace(event, tool.value === 'select' && !drag.value && !showSubmit.value
+    && !document.querySelector('[role="dialog"][aria-modal="true"]'), placementActive)
+}
+
+function onCanvasSpaceUp() {
+  if (!releaseSpace() || drag.value || tool.value !== 'select') return
+  if (placing.value || activeReference.value?.placement) rotatePlacement()
+  else if (selectedFurnitureIds.value.length || selectedReference.value) rotateSelection()
+}
+
+function onCanvasPointerLeave() {
+  onCanvasLeave()
+  placementPointer.value = null
+}
+
+function onWindowBlur() {
+  clearSpacePan()
+  finishViewportPan()
+}
+
 function onKeydown(e: KeyboardEvent) {
   const active = document.activeElement as HTMLElement
   const typing = active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)
@@ -1638,7 +1712,8 @@ function onKeydown(e: KeyboardEvent) {
   if (typing || showSubmit.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (activeReference.value && (drag.value || e.ctrlKey || e.metaKey || e.altKey)) return
   const placementActive = placing.value || !!activeReference.value?.placement
-  if ((e.code === 'Space' || e.key === ' ') && !drag.value && !e.ctrlKey && !e.metaKey && !e.altKey
+  if ((e.code === 'Space' || e.key === ' ') && active !== canvasWindow.value && !e.defaultPrevented
+    && !drag.value && !e.ctrlKey && !e.metaKey && !e.altKey
     && !active?.closest('button, a, [role="button"]')
     && (placementActive || mode.value === 'design' && (selectedFurnitureIds.value.length || selectedReference.value))) {
     e.preventDefault()
@@ -1672,6 +1747,7 @@ onMounted(() => {
   })
   if (canvasWindow.value) resizeObserver.observe(canvasWindow.value)
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('blur', onWindowBlur)
   nextTick(() => {
     fitBoard()
   })
@@ -1680,6 +1756,7 @@ onUnmounted(() => {
   store.cancelFurniturePlacement()
   resizeObserver?.disconnect()
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('blur', onWindowBlur)
 })
 
 watch([() => store.zoom, () => store.panX, () => store.panY, viewRotation], placeBoard)
@@ -1693,6 +1770,8 @@ watch([mode, () => store.workspaceId, () => {
   const zone = designZone.value
   return zone ? JSON.stringify([zone.id, zone.x, zone.y, zone.w, zone.h, zone.polygon]) : null
 }], () => {
+  clearSpacePan()
+  finishViewportPan()
   if (store.furniturePlacement && store.furniturePlacement.zoneId !== store.designZoneId) store.cancelFurniturePlacement()
   selectedId.value = null
   selectedFurnitureIds.value = []
@@ -1772,15 +1851,24 @@ function furnitureProduct(o: FurnitureObject) {
     ref="canvasWindow"
     tabindex="-1"
     data-testid="office-design-canvas"
-    class="relative flex-1 overflow-hidden bg-[#faf9f7] cursor-crosshair touch-none"
+    class="relative flex-1 overflow-hidden bg-[#faf9f7] touch-none"
+    :class="drag?.mode === 'pan' ? 'cursor-grabbing' : tool === 'pan' || spacePanHeld ? 'cursor-grab' : 'cursor-crosshair'"
     style="background-image: radial-gradient(#dfdad4 1px, transparent 1px); background-size: 18px 18px;"
     @wheel.prevent="onWheel"
+    @pointerdown.capture="onCanvasPointerDownCapture"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
+    @dragover="onModuleDragOver"
+    @drop="onModuleDrop"
     @pointerup="onPointerUp"
     @pointercancel="onPointerCancel"
+    @lostpointercapture="finishViewportPan($event.pointerId)"
     @contextmenu="onCanvasContextMenu"
-    @pointerleave="placementPointer = null"
+    @pointerenter="onCanvasEnter"
+    @pointerleave="onCanvasPointerLeave"
+    @keydown.space="onCanvasSpaceDown"
+    @keyup.space="onCanvasSpaceUp"
+    @blur="clearSpacePan"
     @dblclick="onDoubleClick"
   >
     <div v-if="mode === 'design' && floorPlanImageUrl" class="canvas-layers" data-testid="design-underlay-controls" @pointerdown.stop>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
@@ -16,6 +17,7 @@ import { doorClearanceObstacle, moveObstacle, obstacleLabel, rectangleObstacle, 
 import type { SpatialObstacle, SpatialObstacleKind } from '~/types/spatial'
 
 const store = useOfficeStore(), router = useRouter(), route = useRoute()
+const workspace = useWorkspaceStore()
 const selectedId = ref<string | null>(store.activeZoneId)
 const focusedZoneId = ref<string | null>(null), selectedObstacleId = ref<string | null>(null)
 const obstacleDraft = ref<{ spaceId: string; kind: SpatialObstacleKind; start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
@@ -759,7 +761,7 @@ function advance() {
   if (tracing.value || sketching.value || obstacleDraft.value || obstacleManipulation.value) return
   if (!store.canEnterLayout || store.floorPlanLoading || store.floorPlanError) return
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
-  if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id } })
+  if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id, floorId: workspace.currentFloorId } })
 }
 onMounted(() => { window.addEventListener('keydown', traceKey); window.addEventListener('keyup', keyUp); window.addEventListener('blur', cancelInteraction) })
 onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHintTimer) clearTimeout(zoomHintTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
@@ -771,16 +773,44 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
     <div class="review-columns">
       <section class="review-canvas-panel review-panel">
         <div class="review-toolbar">
-          <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
+          <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
-            <button :class="{ active: tool === 'select' && !temporaryPanning }" @click="tool = 'select'"><AppIcon name="cursor" size="3.5" /> 选择 / 缩放</button>
-            <button :class="{ active: tool === 'pan' || temporaryPanning }" @click="tool = 'pan'"><AppIcon name="hand" size="3.5" /> 拖动画布</button><i></i>
-            <button :class="{ active: tool === 'edit' }" @click="tool = 'edit'"><AppIcon name="pencil" size="3.5" /> 编辑轮廓</button>
-            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" title="在画布上逐点画出新的空间轮廓" @click="startSketch"><AppIcon name="plus" size="3.5" /> 画新空间</button>
-            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')"><AppIcon name="merge" size="3.5" /> 合并空间</button>
-            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')"><AppIcon name="scissors" size="3.5" /> 剔除区域</button>
+            <button :class="{ active: tool === 'select' && !temporaryPanning }" aria-labelledby="review-select-label" aria-describedby="review-select-shortcut" @click="tool = 'select'">
+              <AppIcon name="cursor" size="3.5" />
+              <span id="review-select-label">选择 / 缩放</span>
+              <small id="review-select-shortcut" class="review-tool-shortcut">左拖 · 滚轮</small>
+            </button>
+            <button :class="{ active: tool === 'pan' || temporaryPanning }" aria-labelledby="review-pan-label" aria-describedby="review-pan-shortcut"
+              title="先点击画布，再按住空格用左键拖动，也可用中键拖动" @click="tool = 'pan'">
+              <AppIcon name="hand" size="3.5" />
+              <span id="review-pan-label">拖动画布</span>
+              <small id="review-pan-shortcut" class="review-tool-shortcut"><span class="sr-only">先点击画布，</span><kbd>空格</kbd>＋左拖 · 中键</small>
+            </button><i></i>
+            <button :class="{ active: tool === 'edit' }" aria-labelledby="review-edit-label" aria-describedby="review-edit-shortcut"
+              title="拖动顶点或边线。拖动或重描时按 Esc 取消" @click="tool = 'edit'">
+              <AppIcon name="pencil" size="3.5" />
+              <span id="review-edit-label">编辑轮廓</span>
+              <small id="review-edit-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
+            <button :class="{ active: tool === 'draw-space' }" :disabled="calibrating" aria-labelledby="review-sketch-label" aria-describedby="review-sketch-shortcut"
+              title="逐点描出至少三点后按 Enter 保存，按 Esc 取消绘制" @click="startSketch">
+              <AppIcon name="plus" size="3.5" />
+              <span id="review-sketch-label">画新空间</span>
+              <small id="review-sketch-shortcut" class="review-tool-shortcut">逐点描 <kbd>Enter</kbd> 保存</small>
+            </button>
+            <button :class="{ active: tool === 'merge' }" :disabled="calibrating || zones.length < 2" data-testid="tool-merge" aria-labelledby="review-merge-label" aria-describedby="review-merge-shortcut" title="把另一个空间并入保留空间：先点保留空间，再点要并入的空间" @click="startBoolean('merge')">
+              <AppIcon name="merge" size="3.5" />
+              <span id="review-merge-label">合并空间</span>
+              <small id="review-merge-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
+            <button :class="{ active: tool === 'subtract' }" :disabled="calibrating || zones.length < 2" data-testid="tool-subtract" aria-labelledby="review-subtract-label" aria-describedby="review-subtract-shortcut" title="从空间轮廓中剔除与另一空间重叠的区域：先点被裁剪空间，再点用作剔除的空间（保持不变）" @click="startBoolean('subtract')">
+              <AppIcon name="scissors" size="3.5" />
+              <span id="review-subtract-label">剔除区域</span>
+              <small id="review-subtract-shortcut" class="review-tool-shortcut"><kbd>Esc</kbd> 取消</small>
+            </button>
             <button :class="{ active: calibrating }" @click="startCalibration"><AppIcon name="fit" size="3.5" /> 两点校准</button>
             <button :disabled="!store.undoStack.length" @click="store.undo()"><AppIcon name="undo" size="3.5" /> 撤销</button>
+            <button :disabled="!store.redoStack.length" title="恢复上一次撤销的编辑" @click="store.redo()"><AppIcon name="redo" size="3.5" /> 恢复</button>
           </div>
           <div class="review-zoom">
             <div class="review-zoom-slider">
@@ -795,7 +825,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
           </div>
         </div>
           <div v-if="tool === 'select' && !calibrating" class="contour-edit-bar">
-          <span>拖动内部移动；拉边调整宽深，拉角缩放。滚轮缩放视图，中键或按住右键平移，松开右键返回选择。</span>
+          <span>左拖空间内部可移动，拉边调整宽深，拉角缩放。</span>
           <label><input v-model="keepAspect" type="checkbox"> 锁定比例（角点 / Shift）</label>
           <form v-if="selected?.polygon?.length" class="rotate-form" data-testid="rotate-form" title="调整角度即时预览；仅 Enter 或点「应用」保存，点击其他位置或 Esc 放弃预览" @submit.prevent="applyRotate">
             旋转<input v-model.number="rotateAngle" type="number" min="-360" max="360" step="5" aria-label="空间旋转角度（度，顺时针为正）" @input="onRotateInput" @keydown.enter.prevent="applyRotate" @keydown.esc.prevent="onRotateEsc" @blur="onRotateBlur"><span>°</span>
@@ -860,10 +890,10 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
               <strong>空白手动画布</strong>
               <p>无需图纸：点击「画新空间」逐点描出房间轮廓，单位为毫米；也可以返回上传图纸识别。</p>
               <button type="button" data-testid="sketch-start-overlay" @click="startSketch">开始画空间</button>
-              <NuxtLink to="/">返回图纸识别 →</NuxtLink>
+              <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)">返回图纸识别 →</NuxtLink>
             </template>
             <template v-else>
-              <strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink>
+              <strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)">返回图纸识别 →</NuxtLink>
             </template>
           </div>
           <template v-if="calibrating">
@@ -929,7 +959,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
         </div>
       </aside>
     </div>
-    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
+    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId, floorId: workspace.currentFloorId } })" />
   </div>
 </template>
 

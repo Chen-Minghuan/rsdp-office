@@ -1,46 +1,31 @@
 <script setup lang="ts">
-const auth = useAuth()
+import { projectBenchPath } from '~/utils/projectBenchRoutes'
+
 const workspace = useWorkspaceStore()
-
-const displayName = computed(() => auth.user.value?.displayName || auth.user.value?.username || '')
-
-const greeting = computed(() => {
-  const hour = new Date().getHours()
-  if (hour >= 5 && hour < 11) return '早上好'
-  if (hour >= 11 && hour < 14) return '中午好'
-  if (hour >= 14 && hour < 18) return '下午好'
-  return '晚上好'
-})
-
-// 项目计数与项目列表同源，直接读 store（app.vue 挂载时已 init() 拉取）。
-const projectCount = computed(() => workspace.initialized ? workspace.projects.length : '—')
+const { canCreateProject } = useAuth()
+const { isProjectDrawing } = useWorkspaceNavigation()
+const showCreate = ref(false)
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col overflow-y-auto">
-    <div class="flex-none">
-      <div class="mb-3 text-xs text-muted">工作空间 / 项目工作台</div>
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 class="mb-2 text-[25px] font-bold tracking-tight">{{ greeting }}{{ displayName ? `，${displayName}` : '' }}</h1>
-        </div>
+  <div class="flex h-full min-h-0 flex-col gap-4 p-4 lg:p-5">
+    <header class="flex flex-none flex-wrap items-center justify-between gap-3">
+      <h1 class="text-[25px] font-bold tracking-tight">项目工作台</h1>
+      <div class="flex items-center gap-3">
+        <NuxtLink v-if="isProjectDrawing && workspace.currentFloorId" :to="projectBenchPath" class="text-sm text-bronze hover:underline">返回项目列表</NuxtLink>
+        <button v-if="canCreateProject && workspace.projects.length" type="button" class="bg-bronze px-4 py-2 text-sm font-semibold text-white hover:bg-bronze-dark" @click="showCreate = true">新建项目</button>
       </div>
+    </header>
+
+    <ProjectEmptyState v-if="!workspace.projects.length" />
+    <div v-else-if="isProjectDrawing && workspace.currentFloorId" class="min-h-0 flex-1">
+      <ProjectDrawingRecognition :key="workspace.currentFloorId" />
     </div>
-    <div class="mt-5 grid flex-none grid-cols-4">
-      <section class="rounded-xl border border-line bg-white p-6 shadow-panel" aria-label="全部项目">
-        <div class="text-1xs text-muted">全部项目</div>
-        <div class="mt-2 text-3xl font-bold tracking-tight">{{ projectCount }}</div>
-      </section>
-      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="数据看板占位">
-      </section>
-      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="数据看板占位">
-      </section>
-      <section class="rounded-xl border border-line bg-white p-5 shadow-panel" aria-label="数据看板占位">
-      </section>
+    <div v-else class="flex min-h-0 flex-1 flex-col items-start gap-5 overflow-y-auto lg:flex-row">
+      <ProjectBenchList class="w-full min-w-0 lg:flex-1" />
+      <ProjectBenchPoster v-if="workspace.currentFloorId" class="w-full flex-none lg:w-[300px]" />
     </div>
-    <div class="mt-5 flex flex-col items-start gap-5 lg:flex-row">
-      <ProjectBenchList class="min-w-0 flex-1" />
-      <ProjectBenchPoster class="w-full flex-none lg:w-[300px]" />
-    </div>
+
+    <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
   </div>
 </template>
