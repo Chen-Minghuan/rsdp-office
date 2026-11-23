@@ -7,7 +7,7 @@ async function loadTypeScript(path) {
   return `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 }
 
-const { calculateProductImagePreview, productImagePreviewStyle } = await import(await loadTypeScript(new URL('../app/utils/productImagePreview.ts', import.meta.url)))
+const { calculateProductImagePreview, productImagePreviewStyle, shouldUseClickPreview } = await import(await loadTypeScript(new URL('../app/utils/productImagePreview.ts', import.meta.url)))
 
 function assertInsideViewport(rect, viewportWidth, viewportHeight) {
   assert.ok(rect.left >= 12, `left edge ${rect.left}px is inside the safety margin`)
@@ -55,6 +55,7 @@ assertInsideViewport(narrow, 768, 640)
 assertRatio(narrow, 1200, 900, 'narrow viewport does not distort the image')
 assert.equal(narrow.sideWidth, 196, 'narrow viewport keeps the sidebar in the same proportional layout')
 assert.ok(narrow.contentScale < 1, 'narrow viewport scales the complete card instead of clipping it')
+assert.equal(shouldUseClickPreview(narrow), true, 'recommendation cards switch to click preview instead of shrinking text')
 assert.equal(narrow.width, narrow.baseWidth * narrow.contentScale, 'frame width is the proportionally scaled card width')
 assert.equal(narrow.height, narrow.baseHeight * narrow.contentScale, 'frame height is the proportionally scaled card height')
 assert.deepEqual(productImagePreviewStyle(narrow), {
@@ -94,6 +95,7 @@ const tallSide = calculateProductImagePreview({
 assertInsideViewport(tallSide, 900, 500)
 assert.equal(tallSide.height, 476, 'tall sidebar is capped by 12px top and bottom safety margins')
 assert.ok(tallSide.contentScale < 1, 'tall sidebar scales with the complete card instead of being clipped or scrolled')
+assert.equal(shouldUseClickPreview(tallSide), true, 'insufficient height also switches recommendation cards to click preview')
 
 const ultraTall = calculateProductImagePreview({
   anchor: { left: 300, right: 372, top: 100 },
@@ -136,5 +138,8 @@ const canvasConstrained = calculateProductImagePreview({
 })
 assertInsideBoundary(canvasConstrained, canvasBoundary)
 assertRatio(canvasConstrained, 1600, 1000, 'canvas-constrained image keeps its natural ratio')
+assert.equal(shouldUseClickPreview(canvasConstrained), false, 'a full-size card that fits the canvas keeps hover preview')
+assert.equal(shouldUseClickPreview({ contentScale: 1 }), false, 'the cutoff does not require a readability scale tolerance')
+assert.equal(shouldUseClickPreview({ contentScale: 0.999 }), true, 'any text scaling activates click preview')
 
 console.log('PASS: responsive product image preview geometry')

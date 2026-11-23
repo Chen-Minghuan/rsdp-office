@@ -178,19 +178,19 @@ async function choose(candidate: ModuleProductCandidate) {
         <article v-for="candidate in group.items" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-none p-2.5 space-y-1.5">
           <div class="flex gap-2">
             <div class="h-14 w-14 shrink-0 overflow-hidden bg-[#f7f4f0]">
-              <ProductImagePreview :src="candidate.product.imageUrl" :alt="candidate.product.name || '商品图片'" size="small" :left-gap="23" preview-boundary-selector="[data-testid='office-design-canvas']">
+              <ProductImagePreview :src="candidate.product.imageUrl" :alt="candidate.product.name || '商品图片'" size="small" :left-gap="23" preview-boundary-selector="[data-testid='office-design-canvas']" click-fallback>
                 <template #preview-side>
                   <div class="flex flex-col text-xs text-ink">
                     <div class="text-[15px] font-bold leading-snug">{{ candidate.product.name }}</div>
                     <div v-if="candidate.product.variant" class="mt-0.5 text-[11px] text-muted">{{ candidate.product.variant }}</div>
                     <div class="my-3">
                       <div class="text-[10px] text-muted">价格</div>
-                      <div class="text-[22px] font-bold leading-snug text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</div>
+                      <div data-testid="preview-price" class="text-[22px] font-bold leading-snug text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</div>
                     </div>
-                    <div class="flex items-center justify-between leading-7"><span class="text-muted">尺寸</span><strong class="font-semibold">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</strong></div>
-                    <div v-if="candidate.product.heightMm" class="flex items-center justify-between leading-7"><span class="text-muted">高度</span><strong class="font-semibold">{{ number(candidate.product.heightMm) }} mm</strong></div>
-                    <div class="flex items-center justify-between leading-7"><span class="text-muted">贴合度</span><strong class="font-semibold">{{ Math.floor(candidate.fitRatio * 100) }}% · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</strong></div>
-                    <div class="flex items-center justify-between leading-7"><span class="text-muted">主色</span><strong class="font-semibold">{{ candidate.product.colorPrimaryName || '未分类' }}<span v-if="candidate.product.colorPrimaryName"> · {{ colorToneLabel(colorInfo(candidate).tone) }}</span></strong></div>
+                    <div class="flex items-start justify-between gap-3 leading-7"><span class="shrink-0 text-muted">尺寸</span><strong class="min-w-0 break-words text-right font-semibold">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</strong></div>
+                    <div v-if="candidate.product.heightMm" class="flex items-start justify-between gap-3 leading-7"><span class="shrink-0 text-muted">高度</span><strong class="min-w-0 break-words text-right font-semibold">{{ number(candidate.product.heightMm) }} mm</strong></div>
+                    <div class="flex items-start justify-between gap-3 leading-7"><span class="shrink-0 text-muted">贴合度</span><strong class="min-w-0 break-words text-right font-semibold">{{ Math.floor(candidate.fitRatio * 100) }}% · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</strong></div>
+                    <div class="leading-7"><span class="text-muted">主色</span><strong class="block break-words font-semibold">{{ candidate.product.colorPrimaryName || '未分类' }}<span v-if="candidate.product.colorPrimaryName"> · {{ colorToneLabel(colorInfo(candidate).tone) }}</span></strong></div>
                     <div v-if="candidate.relevanceScore != null" class="mt-3"><span class="rec-badge inline-block bg-bronze px-3 py-1 text-[11px] font-semibold text-white">适配度 {{ number(candidate.relevanceScore) }} / 100</span></div>
                   </div>
                 </template>

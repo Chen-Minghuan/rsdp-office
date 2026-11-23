@@ -25,6 +25,11 @@ export interface ProductImagePreviewRect {
 
 export type ProductImagePreviewStyle = Record<string, string>
 
+// 推荐卡片只在不缩小文字的情况下悬停展示；其余情况由组件改为点击完整预览。
+export function shouldUseClickPreview(rect: Pick<ProductImagePreviewRect, 'contentScale'>): boolean {
+  return rect.contentScale < 1
+}
+
 const VIEWPORT_MARGIN = 12
 const ANCHOR_GAP = 16
 const IMAGE_MAX_WIDTH = 560
