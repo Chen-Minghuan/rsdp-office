@@ -22,6 +22,7 @@
     "test:furniture-snap": "node scripts/test-furniture-snap.mjs",
     "test:product-image-preview": "node scripts/test-product-image-preview.mjs",
     "test:furniture-footprint": "node scripts/test-furniture-footprint.mjs",
+    "test:cart-line-reduction": "node scripts/test-cart-line-reduction.mjs",
     "e2e:auto-layout": "node scripts/e2e-auto-layout.mjs",
     "e2e:preview-drag": "node scripts/e2e-preview-drag.mjs",
     "e2e:delete-modules": "node scripts/e2e-delete-modules.mjs",

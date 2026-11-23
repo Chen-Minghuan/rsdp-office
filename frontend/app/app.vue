@@ -3,6 +3,7 @@ import { projectBenchPath } from '~/utils/projectBenchRoutes'
 
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
+const proposalFurnitureGateDialog = useProposalFurnitureGateDialog()
 const { isProjectBench, isProjectWorkflow, isDesignWorkflow, floorReady } = useWorkspaceNavigation()
 // 应用外壳先决定挂载哪个页面，不能等 NuxtPage 渲染完成后才读取路由。
 const router = useRouter()
@@ -17,7 +18,11 @@ async function initializeWorkspace() {
   if (!store.initialized) await store.init()
 }
 watch([() => route.value.query.floorId, () => workspace.initialized, () => workspace.switching], ([floorId, initialized, switching]) => {
-  if (!initialized || switching || typeof floorId !== 'string' || floorId === workspace.currentFloorId) return
+  if (!initialized || switching || typeof floorId !== 'string') return
+  // proposal 守卫正在加载目标楼层时，当前 URL 仍可能保留来源楼层；此时不能反向切回旧楼层。
+  if (workspace.routeFloorActivationId && floorId !== workspace.routeFloorActivationId) return
+  if (workspace.routeFloorActivationId === floorId) workspace.releaseRouteFloorActivation(floorId)
+  if (floorId === workspace.currentFloorId) return
   if (workspace.projects.some(project => project.floors.some(floor => floor.floorId === floorId))) {
     void workspace.activateFloor(floorId)
   } else if (isProjectPage.value) {
@@ -46,5 +51,6 @@ watch(() => route.value.path, () => {
         <NuxtPage v-else :key="workspace.currentFloorId" />
       </div>
     </main>
+    <ProposalFurnitureGateDialog v-if="proposalFurnitureGateDialog.mismatches.value.length" :mismatches="proposalFurnitureGateDialog.mismatches.value" @close="proposalFurnitureGateDialog.close" />
   </div>
 </template>

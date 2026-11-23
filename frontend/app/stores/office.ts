@@ -49,12 +49,47 @@ import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilitie
 import { layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
 import { mixedOfficeSeats, mixedPlacementProblem } from '~/utils/mixedLayout'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
+import { proposalFurnitureCartMismatches, type ProposalFurnitureCartMismatch } from '~/utils/proposalFurnitureGate'
+import { planCartLineReduction } from '~/utils/cartLineReduction'
 import { authEnabled, useAuth } from '~/composables/useAuth'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
 const LEGACY_WORKSPACE_ID = 'OFFICE-PROJECT-001'
 const CANVAS_HISTORY_LIMIT = 20
+let cartMutationQueue = Promise.resolve()
+const cartLineIdAliases = new Map<string, string>()
+
+function enqueueCartMutation(task: () => Promise<void>) {
+  cartMutationQueue = cartMutationQueue.catch(() => undefined).then(task)
+  return cartMutationQueue
+}
+
+function currentCartLineId(id: string) {
+  return cartLineIdAliases.get(id) || id
+}
+
+/** 串行执行购物车行的服务端删除/扣减，固定使用行所属楼层，不受楼层切换影响。 */
+function syncCartLineReductions(toDelete: CartItem[], toUpdate: Array<{ line: CartItem, qty: number }>, workspaceId: string) {
+  if (!toDelete.length && !toUpdate.length) return
+  void enqueueCartMutation(async () => {
+    const api = useOfficeApi()
+    for (const entry of toUpdate) {
+      try {
+        await api.updateCartItemQty(currentCartLineId(entry.line.id), entry.qty, workspaceId)
+      } catch (error) {
+        console.warn('扣减购物车商品数量失败', error)
+      }
+    }
+    for (const line of toDelete) {
+      try {
+        await api.deleteCartItem(currentCartLineId(line.id), workspaceId)
+      } catch (error) {
+        console.warn('删除购物车商品失败', error)
+      }
+    }
+  })
+}
 
 function legacyStorageKey(workspaceId: string) {
   return workspaceId === LEGACY_WORKSPACE_ID ? STORAGE_KEY : `${STORAGE_KEY}:${workspaceId}`
@@ -260,6 +295,9 @@ export const useOfficeStore = defineStore('office', {
         const items = this.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId)
         return items.length > 0 && items.every(item => item.layoutConfirmed)
       }
+    },
+    proposalFurnitureCartMismatches(): ProposalFurnitureCartMismatch[] {
+      return proposalFurnitureCartMismatches(this.zones, this.objects, this.cart)
     },
     comboById(): (id: string) => ProductCombo | undefined {
       const allCombos = this.combos.length ? this.combos : SAMPLE_COMBOS
@@ -542,13 +580,9 @@ export const useOfficeStore = defineStore('office', {
     deleteObject(id: string) {
       const target = this.objects.find(object => object.id === id)
       if (!target) return false
+      if (target.kind === 'furniture') return this.deleteFurnitureGroup([target.id], target.zoneId)
       this.objectUpdate(() => {
         this.objects = this.objects.filter(object => object.id !== id)
-        if (target.kind === 'furniture') {
-          this.lastManualFurnitureEdit = { zoneId: target.zoneId, at: Date.now() }
-          this.furnitureForZone(target.zoneId).forEach(item => { item.layoutConfirmed = false })
-          this.submitted = null
-        }
       })
       return true
     },
@@ -656,12 +690,16 @@ export const useOfficeStore = defineStore('office', {
       const selected = new Set(ids)
       const items = this.furnitureForZone(zoneId).filter(item => selected.has(item.id))
       if (!items.length || items.length !== selected.size) return false
+      const { nextCart, toDelete, toUpdate } = planCartLineReduction(this.cart, items)
+      const workspaceId = this.workspaceId
       this.objectUpdate(() => {
       this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
         this.objects = this.objects.filter(object => !selected.has(object.id))
+        this.cart = nextCart
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
         this.submitted = null
       })
+      if (this.apiReady) syncCartLineReductions(toDelete, toUpdate, workspaceId)
       return true
     },
 
@@ -829,15 +867,33 @@ export const useOfficeStore = defineStore('office', {
     undo() {
       const snapshot = this.undoStack.pop()
       if (snapshot === undefined) return
+      const currentCartLineIds = new Set(this.cart.map(item => item.id))
       pushCanvasHistory(this.redoStack, this)
       this.restoreCanvasHistory(snapshot)
+      const restoredCartLines = this.cart.filter(item => !currentCartLineIds.has(item.id))
+      if (restoredCartLines.length) void this.restoreCartLinesOnServer(restoredCartLines)
     },
 
     redo() {
       const snapshot = this.redoStack.pop()
       if (snapshot === undefined) return
+      const currentCartLines = [...this.cart]
       pushCanvasHistory(this.undoStack, this)
       this.restoreCanvasHistory(snapshot)
+      const removedCartLineIds = new Set(this.cart.map(item => item.id))
+      const removedCartLines = currentCartLines.filter(item => !removedCartLineIds.has(item.id))
+      if (removedCartLines.length && this.apiReady) {
+        const workspaceId = this.workspaceId
+        void enqueueCartMutation(async () => {
+          for (const line of removedCartLines) {
+            try {
+              await useOfficeApi().deleteCartItem(currentCartLineId(line.id), workspaceId)
+            } catch (error) {
+              console.warn('重做时删除购物车商品失败', error)
+            }
+          }
+        })
+      }
     },
 
     restoreCanvasHistory(snapshot: string) {
@@ -852,6 +908,27 @@ export const useOfficeStore = defineStore('office', {
       if (!this.canEnterLayout) { this.canvasMode = 'overview'; this.designZoneId = null }
       this.canvasRevision++
       this.schedulePersist()
+    },
+
+    async restoreCartLinesOnServer(lines: CartItem[]) {
+      if (!this.apiReady) return
+      const workspaceId = this.workspaceId
+      await enqueueCartMutation(async () => {
+        for (const line of lines) {
+          try {
+            const restored = await useOfficeApi().addCartItem(line, workspaceId)
+            cartLineIdAliases.set(line.id, restored.id)
+            this.cart = this.cart.map(item => item.id === line.id ? restored : item)
+            this.objects.forEach(object => {
+              if (object.kind !== 'furniture' || object.productSelection?.cartLineId !== line.id) return
+              object.productSelection = { ...object.productSelection, cartLineId: restored.id }
+            })
+          } catch (error) {
+            console.warn('恢复购物车商品失败', error)
+          }
+        }
+        this.saveLocal()
+      })
     },
 
     setActiveZone(id: string | null) {
@@ -1489,7 +1566,7 @@ export const useOfficeStore = defineStore('office', {
         existing.qty++
         if (this.apiReady) {
           try {
-            await useOfficeApi().updateCartItemQty(existing.id, existing.qty)
+            await useOfficeApi().updateCartItemQty(existing.id, existing.qty, this.workspaceId)
           } catch (e) {
             console.warn('更新购物车失败', e)
           }
@@ -1504,7 +1581,7 @@ export const useOfficeStore = defineStore('office', {
         }
         if (this.apiReady) {
           try {
-            const saved = await useOfficeApi().addCartItem(item)
+            const saved = await useOfficeApi().addCartItem(item, this.workspaceId)
             item.id = saved.id
           } catch (e) {
             console.warn('添加购物车失败', e)
@@ -1534,7 +1611,7 @@ export const useOfficeStore = defineStore('office', {
           }
           if (this.apiReady) {
             try {
-              useOfficeApi().addCartItem(cartItem).then((saved) => { cartItem.id = saved.id }).catch(() => {})
+              useOfficeApi().addCartItem(cartItem, this.workspaceId).then((saved) => { cartItem.id = saved.id }).catch(() => {})
             } catch (e) {
               console.warn('添加购物车失败', e)
             }
@@ -1553,7 +1630,7 @@ export const useOfficeStore = defineStore('office', {
         this.cart = this.cart.filter((c) => c.id !== lineId)
         if (this.apiReady) {
           try {
-            await useOfficeApi().deleteCartItem(lineId)
+            await useOfficeApi().deleteCartItem(lineId, this.workspaceId)
           } catch (e) {
             console.warn('删除购物车失败', e)
           }
@@ -1561,7 +1638,7 @@ export const useOfficeStore = defineStore('office', {
       } else {
         if (this.apiReady) {
           try {
-            await useOfficeApi().updateCartItemQty(lineId, item.qty)
+            await useOfficeApi().updateCartItemQty(lineId, item.qty, this.workspaceId)
           } catch (e) {
             console.warn('更新购物车失败', e)
           }
@@ -1638,10 +1715,15 @@ export const useOfficeStore = defineStore('office', {
 
     clearFurniture(zoneId: string) {
       this.cancelFurniturePlacement()
-      if (this.objects.some(o => o.kind === 'furniture' && o.zoneId === zoneId)) this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
+      const cleared = this.furnitureForZone(zoneId)
+      if (cleared.length) this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
+      const { nextCart, toDelete, toUpdate } = planCartLineReduction(this.cart, cleared)
+      const workspaceId = this.workspaceId
       this.objectUpdate(() => {
         this.objects = this.objects.filter((o) => !(o.kind === 'furniture' && o.zoneId === zoneId))
+        this.cart = nextCart
       })
+      if (this.apiReady) syncCartLineReductions(toDelete, toUpdate, workspaceId)
     },
 
     updateZoneChannels(zoneId: string, channels: LayoutChannel[]) {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ModuleRecommendation, ModuleProductCandidate } from '~/types/moduleRecommendation'
+import type { FurnitureObject } from '~/types/office'
 import { applyModuleProductSelection } from '~/utils/moduleProductSelection'
 import { money } from '~/utils/helpers'
 import { colorToneLabel, matchesProductColorSearch, primaryColorName, productColorTone } from '~/utils/productColor'
@@ -16,6 +17,64 @@ const result = ref<ModuleRecommendation | null>(null)
 const loading = ref(false), applying = ref(false), error = ref(''), feedback = ref('')
 const modules = computed(() => store.furnitureForZone(store.designZoneId || ''))
 const module = computed(() => modules.value.find(item => item.id === selectedId.value))
+type ModuleDisplayGroup = { key: string; representative: FurnitureObject; modules: FurnitureObject[] }
+
+function stableJson(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return `[${value.map(item => stableJson(item)).join(',')}]`
+  if (typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined && typeof item !== 'function' && typeof item !== 'symbol')
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+function sameModuleKey(item: FurnitureObject): string {
+  const savedField = (key: 'furnitureTemplateId' | 'moduleSnapshot' | 'heightMm') =>
+    item[key] === undefined ? '__missing__' : stableJson(item[key])
+  return [savedField('furnitureTemplateId'), savedField('moduleSnapshot'), savedField('heightMm'), stableJson(item.w), stableJson(item.h)].join('\u001f')
+}
+
+/** 选品计数与分组共用同一份键（含高度/模板），与服务端 sameModule 对齐，避免不同规格串用计数。 */
+function moduleSpecificationKey(item: FurnitureObject): string {
+  return sameModuleKey(item)
+}
+
+const moduleGroups = computed<ModuleDisplayGroup[]>(() => {
+  const groups = new Map<string, ModuleDisplayGroup>()
+  for (const item of modules.value) {
+    const key = sameModuleKey(item)
+    const group = groups.get(key)
+    if (group) group.modules.push(item)
+    else groups.set(key, { key, representative: item, modules: [item] })
+  }
+  return [...groups.values()]
+})
+
+const selectedModuleCounts = computed(() => {
+  const cartByLineId = new Map(store.cart.map(item => [item.id, item]))
+  const counts = new Map<string, number>()
+  for (const item of modules.value) {
+    const selection = item.productSelection
+    const cartItem = selection ? cartByLineId.get(selection.cartLineId) : undefined
+    if (!selection?.cartLineId || cartItem?.productId !== item.productId) continue
+    const key = moduleSpecificationKey(item)
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return counts
+})
+
+function groupSelectedCount(group: ModuleDisplayGroup): number {
+  return selectedModuleCounts.value.get(moduleSpecificationKey(group.representative)) || 0
+}
+
+function groupOptionValue(group: ModuleDisplayGroup): string {
+  return group.modules.some(item => item.id === module.value?.id) ? module.value!.id : group.representative.id
+}
+
 const sameModuleCount = computed(() => result.value?.sameModuleCount || 0)
 const allConfirmed = computed(() => modules.value.length > 0 && modules.value.every(item => item.layoutConfirmed))
 const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.designZoneId, store.canvasRevision, allConfirmed.value]))
@@ -141,7 +200,7 @@ async function choose(candidate: ModuleProductCandidate) {
       <label class="block text-[11px] text-muted">当前家具
         <select aria-label="匹配单位模块" :value="module?.id || ''" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="selectedId = ($event.target as HTMLSelectElement).value || null">
           <option value="" disabled>选择家具</option>
-          <option v-for="(item, index) in modules" :key="item.id" :value="item.id">{{ index + 1 }}. {{ item.label || '单位模块' }} · {{ number(item.w) }} × {{ number(item.h) }} mm</option>
+          <option v-for="(group, index) in moduleGroups" :key="group.key" :value="groupOptionValue(group)">{{ index + 1 }}. {{ group.representative.label || '单位模块' }} · {{ number(group.representative.w) }} × {{ number(group.representative.h) }} mm · 数量：{{ group.modules.length }}<template v-if="groupSelectedCount(group) > 0"> · 已选 {{ groupSelectedCount(group) }}/{{ group.modules.length }}</template></option>
         </select>
       </label>
       <div class="flex items-center gap-2">
@@ -222,4 +281,3 @@ async function choose(candidate: ModuleProductCandidate) {
   border-radius: 999px !important;
 }
 </style>
-
