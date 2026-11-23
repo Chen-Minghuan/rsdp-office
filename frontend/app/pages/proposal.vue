@@ -44,6 +44,7 @@ type Detail =
   | { kind: 'comment'; space: ProposalSpace }
 
 const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const route = useRoute()
 const router = useRouter()
 const selectedDetail = ref<Detail | null>(null)
@@ -61,6 +62,7 @@ const loadedRenderZones = new Set<string>()
 const renderApi = useRenderPreviewApi()
 
 const previewMode = computed(() => route.query.preview === '1')
+const overviewRoute = computed(() => ({ path: '/canvas', query: { floorId: workspace.currentFloorId } }))
 const products = computed(() => previewMode.value ? (store.products.length ? store.products : PRODUCTS) : store.products)
 const assetBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -111,9 +113,7 @@ function statusFor(zone: ZoneObject | null, preview = false): ProposalSpace['sta
 }
 
 function floorLabel() {
-  const source = store.drawingName || ''
-  const match = source.match(/(?:^|[\s_-])(\d{1,3})\s*(?:F|楼层|楼)(?:$|[\s_-])/i)
-  return match ? `${match[1]}楼` : '1楼'
+  return previewMode.value ? '1楼' : workspace.currentFloorName
 }
 
 function categoryFor(zone: ZoneObject | null, name: string) {
@@ -254,7 +254,7 @@ function onLocateFromProposal() {
   if (!detail || detail.kind !== 'render' || !detail.space.zone) return
   const zoneId = detail.space.zoneId
   closeDetail()
-  router.push({ path: '/canvas', query: { mode: 'design', zoneId } })
+  router.push({ path: '/canvas', query: { mode: 'design', zoneId, floorId: workspace.currentFloorId } })
 }
 
 function openRenderDetail(space: ProposalSpace, tab: 'model' | 'ai' = 'ai') {
@@ -330,17 +330,17 @@ function detailTitle(detail: Detail | null) {
 
 <template>
   <div class="proposal-page">
-    <header class="proposal-heading"><div><div class="proposal-eyebrow">项目工作台 / 方案确认 · 深圳 XX 项目清单</div><div class="proposal-title-line"><h1>整体方案与清单</h1><span class="proposal-file">{{ store.drawingName }}</span></div><p>按楼层、空间类别和具体空间逐级核对方案，确认后进入正式交付。</p></div><span class="heading-status"><span></span>待最终确认</span></header>
-    <div v-if="previewMode" class="preview-banner"><AppIcon name="info" size="3.5" /><span>界面预览数据：同一张户型图自动归入 {{ floorLabel() }}，下面按空间类别分组，不会写入项目草稿。</span></div>
+    <header class="proposal-heading"><div><div class="proposal-eyebrow">{{ previewMode ? '方案演示' : `${workspace.currentProjectName} / ${workspace.currentFloorName}` }}</div><div class="proposal-title-line"><h1>整体方案与清单</h1><span class="proposal-file">{{ store.drawingName }}</span></div><p>按楼层、空间类别和具体空间逐级核对方案，确认后进入正式交付。</p></div><span class="heading-status"><span></span>待最终确认</span></header>
+    <div v-if="previewMode" class="preview-banner"><AppIcon name="info" size="3.5" /><span>界面预览数据：同一张演示户型图归入 {{ floorLabel() }}，下面按空间类别分组，不会写入项目草稿。</span></div>
 
-    <div v-if="!spaces.length" class="proposal-empty"><div class="proposal-empty-icon"><AppIcon name="table" size="7" /></div><h2>还没有可确认的空间方案</h2><p>请先完成空间确认、家具排版和商品选择，再进入方案确认页。</p><NuxtLink to="/canvas" class="proposal-primary">返回空间总览 <AppIcon name="arrowRight" size="3.5" /></NuxtLink></div>
+    <div v-if="!spaces.length" class="proposal-empty"><div class="proposal-empty-icon"><AppIcon name="table" size="7" /></div><h2>还没有可确认的空间方案</h2><p>请先完成空间确认、家具排版和商品选择，再进入方案确认页。</p><NuxtLink :to="overviewRoute" class="proposal-primary">返回空间总览 <AppIcon name="arrowRight" size="3.5" /></NuxtLink></div>
 
     <div v-else class="proposal-layout">
       <main class="proposal-main">
         <section class="group-list"><div class="group-list-heading"><div><span class="section-kicker">FLOOR &amp; SPACE GROUPS</span><h2>空间分组</h2></div><span>{{ floorLabel() }} · {{ groups.length }} 个类别</span></div>
           <article v-for="group in groups" :key="group.id" class="group-card" :class="{ collapsed: !isGroupOpen(group) }">
             <div class="group-header-row">
-              <button type="button" class="group-header" @click="toggleGroup(group)"><span class="floor-badge">{{ group.floorLabel.replace('楼', 'F') }}</span><span class="group-name">{{ group.name }}</span><span class="group-chevron">{{ isGroupOpen(group) ? '▼' : '▶' }}</span><span class="group-meta">面积：{{ groupArea(group) }} <i>|</i> 金额：{{ money(groupTotal(group)) }} <i>|</i> {{ groupModules(group) }} 件商品</span><span class="group-status" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'"><span></span>{{ group.spaces.every(space => space.status === '已确认') ? '已确认' : '待确认' }}</span></button>
+              <button type="button" class="group-header" @click="toggleGroup(group)"><span class="floor-badge" :title="group.floorLabel"><span class="w-full truncate px-0.5 text-center">{{ group.floorLabel }}</span></span><span class="group-name">{{ group.name }}</span><span class="group-chevron">{{ isGroupOpen(group) ? '▼' : '▶' }}</span><span class="group-meta">面积：{{ groupArea(group) }} <i>|</i> 金额：{{ money(groupTotal(group)) }} <i>|</i> {{ groupModules(group) }} 件商品</span><span class="group-status" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'"><span></span>{{ group.spaces.every(space => space.status === '已确认') ? '已确认' : '待确认' }}</span></button>
               <button type="button" class="group-confirm-button" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'" :disabled="group.spaces.every(space => space.status === '已确认')" @click="confirmGroup(group)"><AppIcon name="check" size="3" />{{ group.spaces.every(space => space.status === '已确认') ? '区域已确认' : '确认区域' }}</button>
             </div>
             <div v-if="isGroupOpen(group)" class="group-body">
@@ -393,7 +393,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </main>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项查看空间分组和具体空间。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink to="/canvas?mode=design" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink to="/canvas" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />同一张户型图的空间会自动归入同一楼层，正式报价仍需锁定真实 Variant、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项查看空间分组和具体空间。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>

@@ -156,9 +156,12 @@ export function useOfficeApi() {
     designZoneId: string | null
     revision: number
     blank: boolean
-  }, workspaceId = requireProjectId()): Promise<CanvasDto | null> {
-    return await request<CanvasDto>('PUT', `/api/v1/office/projects/${workspaceId}/canvas`, {
-      projectId: workspaceId,
+  }, workspaceId?: string): Promise<CanvasDto | null> {
+    // 调用方可能传入空字符串（尚未选择项目/楼层），此时回退到当前楼层；
+    // 仍然为空则抛出明确提示，避免拼出 /projects//canvas 这类 404 地址。
+    const targetProjectId = workspaceId || requireProjectId()
+    return await request<CanvasDto>('PUT', `/api/v1/office/projects/${encodeURIComponent(targetProjectId)}/canvas`, {
+      projectId: targetProjectId,
       revision: payload.revision,
       mode: payload.mode,
       designZoneId: payload.designZoneId,
@@ -169,18 +172,20 @@ export function useOfficeApi() {
   }
 
   /** 设计复核确认（SPACE_REVIEW）：服务端基于当前画布签发凭据，baseCanvasRevision 必须等于服务端当前修订。 */
-  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId = requireProjectId()): Promise<SpaceReviewConfirmItem> {
-    return await request('POST', `/api/v1/office/floors/${workspaceId}/spaces/${zoneId}/review-confirm`, { baseCanvasRevision })
+  async function confirmSpaceReview(zoneId: string, baseCanvasRevision: number, workspaceId?: string): Promise<SpaceReviewConfirmItem> {
+    const targetFloorId = workspaceId || requireProjectId()
+    return await request('POST', `/api/v1/office/floors/${encodeURIComponent(targetFloorId)}/spaces/${encodeURIComponent(zoneId)}/review-confirm`, { baseCanvasRevision })
   }
 
   /** 一键复核：服务端对当前楼层全部空间逐签确认凭据，无法确认的空间逐个返回原因。 */
-  async function confirmAllSpaceReviews(baseCanvasRevision: number, workspaceId = requireProjectId()): Promise<{
+  async function confirmAllSpaceReviews(baseCanvasRevision: number, workspaceId?: string): Promise<{
     canvasRevision: number
     confirmed: SpaceReviewConfirmItem[]
     alreadyConfirmed: SpaceReviewConfirmItem[]
     failed: Array<{ spaceId: string; spaceName: string; reason: string }>
   }> {
-    return await request('POST', `/api/v1/office/floors/${workspaceId}/spaces/review-confirm-all`, { baseCanvasRevision })
+    const targetFloorId = workspaceId || requireProjectId()
+    return await request('POST', `/api/v1/office/floors/${encodeURIComponent(targetFloorId)}/spaces/review-confirm-all`, { baseCanvasRevision })
   }
 
   async function loadCart(): Promise<CartItem[]> {

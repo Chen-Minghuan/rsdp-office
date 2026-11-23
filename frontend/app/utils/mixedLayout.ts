@@ -9,9 +9,11 @@ import { allowedPlacementAreas, ringWithinPlacementAreas } from './spatial/layou
 import { facilityLayoutHints } from './spatial/facilities'
 import type { PlacementArea } from './spatial/layoutRegions'
 import { rotatedFurnitureFootprint as officeFurnitureFootprint, rectOverlapsBlocker } from './layoutConstraints'
+import { furnitureFootprintRects, rectsOverlap } from './furnitureFootprint'
 import { channelRects } from './layoutChannels'
 import { ringArea } from './spatial/geometry'
 import { layoutCandidateScoreDetail, layoutFailureAdvice, layoutObjectiveGoal } from './layoutScoring'
+import { meetingReferenceLayout } from './meetingReferenceLayout'
 
 type BundleItem = { templateId: string; role: 'primary' | 'seat'; x: number; y: number; w: number; h: number; rotation?: number }
 type Bundle = { categoryId: string; label: string; width: number; height: number; items: BundleItem[] }
@@ -23,7 +25,7 @@ type Strategy = { id: StrategyId; order: string[] }
 export const MIXED_LAYOUT_CATEGORIES: BundleDefinition[] = [
   { label: '办公桌椅', primary: 'desk-straight', accessories: [{ id: 'chair-office', role: 'seat' }] },
   { label: '沙发茶几', primary: 'sofa-double', accessories: [{ id: 'coffee-round' }] },
-  { label: '小型会议', primary: 'table-conference-rect', accessories: [{ id: 'chair-meeting', role: 'seat', count: 4 }] },
+  { label: '会议桌椅', primary: 'table-conference-rect' },
   { label: '茶桌茶椅', primary: 'table-tea-rect', accessories: [{ id: 'chair-visitor', role: 'seat', count: 2 }] },
   { label: '餐厅桌椅', primary: 'table-dining-rect', accessories: [{ id: 'chair-visitor', role: 'seat', count: 4 }] },
   { label: '玄关模块', primary: 'cabinet-entry' },
@@ -60,6 +62,23 @@ function createTableSceneBundle(categoryId: string, definition: BundleDefinition
   return { categoryId, label: definition.label, width, height, items }
 }
 
+function createMeetingBundle(categoryId: string, definition: BundleDefinition, primary: NonNullable<ReturnType<typeof furnitureById.get>>): Bundle | null {
+  const layout = meetingReferenceLayout(primary, primary.widthMm, primary.depthMm,
+    { strategy: 'template', targetSeats: 0, includeChairs: true, resizeMeetingTable: false, seatClearanceMm: 300, channels: [] }, 0, 0, 900)
+  if (!layout) return null
+  const items = layout.pieces.map(piece => ({
+    templateId: piece.template.id, role: piece.role, x: piece.x - piece.width / 2, y: piece.y - piece.depth / 2,
+    w: piece.width, h: piece.depth, rotation: piece.rotation,
+  }))
+  const bounds = items.map(officeFurnitureFootprint)
+  const minX = Math.min(...bounds.map(rect => rect.x)), minY = Math.min(...bounds.map(rect => rect.y))
+  return {
+    categoryId, label: definition.label, width: Math.max(...bounds.map(rect => rect.x + rect.w)) - minX,
+    height: Math.max(...bounds.map(rect => rect.y + rect.h)) - minY,
+    items: items.map(item => ({ ...item, x: item.x - minX, y: item.y - minY })),
+  }
+}
+
 function createLoungeSceneBundle(categoryId: string, definition: BundleDefinition, primary: NonNullable<ReturnType<typeof furnitureById.get>>): Bundle | null {
   const gap = 300
   const accessories = (definition.accessories || []).flatMap(item => Array.from({ length: item.count || 1 }, () => ({ ...item, template: furnitureById.get(item.id) }))).filter(item => item.template)
@@ -89,9 +108,9 @@ function createBundle(categoryId: string, zone: ZoneObject, strategy: StrategyId
   const executive = categoryId === 'workstation' && zone.zoneType === 'EXECUTIVE_OFFICE'
   const primary = furnitureById.get(executive ? strategy === 'social' ? 'desk-executive' : 'desk-manager' : definition.primary)
   if (!primary) return null
-  if (['meeting', 'tea', 'dining'].includes(categoryId)) {
-    const chairId = categoryId === 'meeting' ? 'chair-meeting' : 'chair-visitor'
-    const chair = furnitureById.get(chairId)
+  if (categoryId === 'meeting') return createMeetingBundle(categoryId, definition, primary)
+  if (['tea', 'dining'].includes(categoryId)) {
+    const chair = furnitureById.get('chair-visitor')
     if (chair) return createTableSceneBundle(categoryId, definition, primary, chair)
   }
   if (['sofa', 'lounge'].includes(categoryId)) return createLoungeSceneBundle(categoryId, definition, primary)
@@ -146,13 +165,13 @@ function mixedGuestSeats(items: FurnitureObject[]) {
 export function mixedPlacementProblem(zone: ZoneObject, items: FurnitureObject[], spacing: OfficeLayoutSpacing, geometry = roomGeometry(zone)) {
   if (![spacing.wallMm, spacing.aisleMm, spacing.gapMm].every(value => Number.isFinite(value) && value >= 0)) return '间距必须为非负数'
   const footprints = items.map(officeFurnitureFootprint)
+  const blocks = items.map(furnitureFootprintRects)
   for (const [i, item] of items.entries()) {
     if (!item.mixedBundleId) continue
-    const footprint = footprints[i]!
-    if (!canPlace(geometry, footprint, spacing.wallMm)) return '组合家具越界、离墙不足或占用建筑约束或通道'
+    if (!canPlace(geometry, footprints[i]!, spacing.wallMm)) return '组合家具越界、离墙不足或占用建筑约束或通道'
     for (const [j, other] of items.entries()) {
       if (j === i || (other.mixedBundleId === item.mixedBundleId)) continue
-      if (rectOverlapsBlocker(footprint, footprints[j]!, other.mixedBundleId ? spacing.aisleMm : spacing.gapMm)) return '组合家具的净距不足'
+      if (rectsOverlap(blocks[i]!, blocks[j]!, other.mixedBundleId ? spacing.aisleMm : spacing.gapMm)) return '组合家具的净距不足'
     }
   }
   return null
@@ -417,7 +436,7 @@ export const REFERENCE_TEMPLATES: Record<string, string[]> = {
   entry: ['cabinet-entry', 'cabinet-low', 'cabinet-high', 'cabinet-short'],
   sofa: ['sofa-double', 'coffee-round', 'coffee-rect', 'chair-lounge'],
   lounge: ['sofa-triple', 'chair-lounge', 'coffee-round', 'coffee-rect'],
-  meeting: ['table-conference-rect', 'chair-meeting'],
+  meeting: ['table-conference-rect', 'chair-meeting', 'chair-meeting-mid-back'],
   tea: ['table-tea-rect', 'chair-visitor'],
   dining: ['table-dining-rect', 'chair-visitor'],
   bar: ['counter-bar', 'chair-bar'],

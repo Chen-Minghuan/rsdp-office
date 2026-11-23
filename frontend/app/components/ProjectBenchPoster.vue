@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
+
 const workspace = useWorkspaceStore()
 
 const projectName = computed(() => workspace.currentProject?.projectName || '当前项目')
@@ -6,10 +8,6 @@ const projectMeta = computed(() => {
   const floorCount = workspace.currentProject?.floors.length ?? 0
   return floorCount ? `${floorCount} 个楼层 · 办公空间设计` : '尚未规划楼层'
 })
-
-function handleContinueDesign() {
-  // 暂不跳转，保留按钮交互入口。
-}
 </script>
 
 <template>
@@ -32,13 +30,12 @@ function handleContinueDesign() {
         <span class="inline-flex items-center gap-1.5"><AppIcon name="checkCircle" size="3.5" class="text-[#76a789]" />当前项目</span>
         <span class="inline-flex items-center gap-1.5"><AppIcon name="building" size="3.5" class="text-[#9a988f]" />楼层规划</span>
       </div>
-      <button
-        type="button"
+      <NuxtLink
+        :to="projectDrawingRoute(workspace.currentFloorId)"
         class="mt-auto inline-flex w-full items-center justify-center gap-2 bg-[#171817] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#30312e] active:scale-[0.99]"
-        @click="handleContinueDesign"
       >
-        继续设计 <AppIcon name="arrowRight" size="4" />
-      </button>
+        {{ workspace.currentFloorName }} · 上传识别图纸 <AppIcon name="arrowRight" size="4" />
+      </NuxtLink>
     </div>
   </section>
 </template>

@@ -39,6 +39,7 @@ public class ProductDetailDto {
         private String sizeCode;
         private String sizeText;
         private String dimensions;
+        private String dimensionsText;
         private Integer packageCount;
         private BigDecimal packageVolumeCbm;
         private BigDecimal grossWeight;

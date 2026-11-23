@@ -31,10 +31,11 @@ export function officeFurnitureTemplateId(item: FurnitureObject, product?: Produ
   return product ? legacy[product.kind] : undefined
 }
 
-/** Reference chairs are seat illustrations attached to each workstation module. */
+/** Reference seating and standing guides are illustrations attached to the primary module. */
 export function officeFurnitureShowsSeat(item: FurnitureObject): boolean {
   if (item.layoutReference) return false
   const template = furnitureById.get(officeFurnitureTemplateId(item) || '')
+  if (template?.reference?.code === 'T15') return item.layoutRole === 'primary' && item.layoutSettings?.layoutContext === 'meeting'
   return furnitureTemplateShowsSeat(template)
 }
 

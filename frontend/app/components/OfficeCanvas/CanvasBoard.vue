@@ -5,7 +5,7 @@ import { TONES } from '~/utils/sample'
 import type { OfficeObject, ZoneObject, FurnitureObject, NoteObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
-import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint } from '~/utils/officeManualPlacement'
+import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint, OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
 import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
@@ -37,7 +37,7 @@ const showSubmit = defineModel<boolean>('showSubmit')
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
 const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
-const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
+const underlayOpacity = ref(0.15)
 const showOutline = ref(true)
 const showOriginal = ref(false)
 
@@ -506,7 +506,7 @@ function fitZone(z: ZoneObject, padding = 80) {
   placeBoard()
 }
 
-function point(e: PointerEvent) {
+function point(e: MouseEvent) {
   const rect = canvasWindow.value!.getBoundingClientRect()
   const world = canvasPointerWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }, { width: rect.width, height: rect.height }, worldBounds.value, store, viewRotation.value)
   return { x: Math.round(world.x), y: Math.round(world.y) }
@@ -1093,6 +1093,27 @@ function placeReferenceAt(p: { x: number; y: number }) {
   placementPointer.value = null
 }
 
+function placeCurrentFurniture(p: { x: number; y: number }) {
+  placementPointer.value = p
+  const placed = placementSnap.value.item
+  const problem = store.placeFurnitureAt(placed ? placed.x + placed.w / 2 : p.x, placed ? placed.y + placed.h / 2 : p.y)
+  placementMessage.value = problem || `已添加 ${store.furniturePlacement?.template.name || '家具'}，可继续放置`
+}
+
+function onModuleDragOver(e: DragEvent) {
+  if (!placing.value || !canvasWindow.value || !e.dataTransfer?.types.includes(OFFICE_MODULE_DRAG_TYPE)) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+  placementPointer.value = point(e)
+  placementMessage.value = ''
+}
+
+function onModuleDrop(e: DragEvent) {
+  if (!placing.value || !canvasWindow.value || !e.dataTransfer?.types.includes(OFFICE_MODULE_DRAG_TYPE)) return
+  e.preventDefault()
+  placeCurrentFurniture(point(e))
+}
+
 function onCanvasPointerDownCapture(event: PointerEvent) {
   const viewport = canvasWindow.value
   if (!viewport || drag.value || (event.button !== 0 && event.button !== 1)) return
@@ -1134,10 +1155,7 @@ function onPointerDown(e: PointerEvent) {
 
   if (placing.value) {
     e.preventDefault()
-    placementPointer.value = p
-    const placed = placementSnap.value.item
-    const problem = store.placeFurnitureAt(placed ? placed.x + placed.w / 2 : p.x, placed ? placed.y + placed.h / 2 : p.y)
-    placementMessage.value = problem || `已添加 ${store.furniturePlacement?.template.name || '家具'}，可继续放置`
+    placeCurrentFurniture(p)
     return
   }
 
@@ -1667,6 +1685,8 @@ function onWindowBlur() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 弹层打开时画布不处理按键，避免监听器注册顺序影响 Esc 行为。
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
   const active = document.activeElement as HTMLElement
   const typing = active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)
   if (activeReference.value && e.key === 'Escape') {
@@ -1691,7 +1711,7 @@ function onKeydown(e: KeyboardEvent) {
     showSubmit.value = false
     return
   }
-  if (typing || showSubmit.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+  if (typing || showSubmit.value) return
   if (activeReference.value && (drag.value || e.ctrlKey || e.metaKey || e.altKey)) return
   const placementActive = placing.value || !!activeReference.value?.placement
   if ((e.code === 'Space' || e.key === ' ') && active !== canvasWindow.value && !e.defaultPrevented
@@ -1840,6 +1860,8 @@ function furnitureProduct(o: FurnitureObject) {
     @pointerdown.capture="onCanvasPointerDownCapture"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
+    @dragover="onModuleDragOver"
+    @drop="onModuleDrop"
     @pointerup="onPointerUp"
     @pointercancel="onPointerCancel"
     @lostpointercapture="finishViewportPan($event.pointerId)"

@@ -3,7 +3,6 @@ import type { WorkspaceProject } from '~/types/workspace'
 
 // 项目列表与侧栏项目树同源：useWorkspaceStore 由 app.vue 挂载时 init() 拉取，组件不重复请求。
 const workspace = useWorkspaceStore()
-const router = useRouter()
 
 const search = ref('')
 const sortKey = ref<'name' | 'floors'>('name')
@@ -20,10 +19,6 @@ function leaderName(project: WorkspaceProject) {
 async function openProject(project: WorkspaceProject) {
   const firstFloor = [...project.floors].sort((a, b) => a.sortOrder - b.sortOrder)[0]
   if (!firstFloor || workspace.switching) return
-  if (firstFloor.floorId === workspace.currentFloorId) {
-    await router.replace({ path: '/', query: { floorId: firstFloor.floorId } })
-    return
-  }
   await workspace.activateFloor(firstFloor.floorId, true)
 }
 
