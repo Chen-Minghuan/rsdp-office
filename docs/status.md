@@ -1,5 +1,9 @@
 # 开发进度与下一步
 
+2026-11-23 [LAYOUT-045](tasks/LAYOUT-045-delete-module-cart-sync.md#2026-11-23-复核遗留问题修复) 复核后修复三处遗留：回退 `proposal.vue` 商品清单弹窗误改（`productszhang`）；`addToCart`/`addComboToCart`/`changeQty` 购物车写调用固定楼层 ID；`e2e:delete-modules` 补齐共享行扣减（PUT qty）、跨楼层删除固定原楼层、清空排版同步清理关联行三个场景断言。纯函数 6 例、扩展后删除模块 UI mock 回归、前端构建与差异检查通过；未执行真实服务验收，未部署、未提交。
+
+2026-11-23 [LAYOUT-045](tasks/LAYOUT-045-delete-module-cart-sync.md#2026-11-23-购物车删除清空计数修复) 修复用户复核发现的四处购物车同步缺陷：删除/清空入队时固定楼层 ID 避免跨楼层串请求；共享购物车行按引用数扣减而非整行删除；清空排版同步清理家具有效关联行；选品计数键与分组键统一（含高度），不同规格分组不再串用计数。新增 6 个纯函数用例、前端构建、删除模块与工作流 UI mock 回归及差异检查通过；`e2e:module-recommendations` 为改动前后同样存在的脚本既有缺陷；未执行真实服务验收，未部署、未提交。
+
 2026-11-20 [FLOW-006](tasks/FLOW-006-server-proposal-cart-validation.md) 方案确认的 Java 目录核验新增逐空间购物车复核：服务端读取最新画布和 `office_cart`，要求家具数与购物车 `qty` 完全一致，并逐件验证 `cartLineId`、空间和商品 ID，防止在 `/proposal` 商品详情里加量后仍确认。商品当前状态、尺寸和价格核验保持不变。新增专项测试覆盖超量、匹配和无效关联；本机仅有 JDK 17，而项目要求 JDK 21 且使用虚拟线程，Java 测试在编译阶段受工具链阻塞，尚未执行断言或真实业务验收。未部署。
 
 2026-11-20 [LAYOUT-045](tasks/LAYOUT-045-delete-module-cart-sync.md) 删除画布家具时按 `productSelection.cartLineId` 同步删除购物车对应行；画布删除和侧栏删除统一走 store 路径，同商品其他购物车项保留。撤销恢复服务端购物车行并回写新行 ID，连续购物车请求串行化。前端构建、删除专项 API mock UI 回归及差异检查通过；未进行真实服务验收，未部署。

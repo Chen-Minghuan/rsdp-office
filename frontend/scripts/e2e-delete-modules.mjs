@@ -13,7 +13,7 @@ const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const baseUrl = 'http://127.0.0.1:' + port
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
-const outDir = process.env.OUT_DIR || '/tmp/rsdp-delete-modules'
+const outDir = process.env.OUT_DIR || './.tmp/rsdp-delete-modules'
 let browser, debugPage
 try {
   for (let attempt = 0; ; attempt++) {
@@ -29,15 +29,27 @@ try {
   page.on('pageerror', error => errors.push(error.message))
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const deletedCartLineIds = []
+  const cartMutations = []
   await context.route('**/api/v1/**', route => {
-    const path = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    const path = url.pathname
+    const floorId = path.match(/^\/api\/v1\/office\/projects\/([^/]+)\/cart/)?.[1] || null
+    if (floorId && ['PUT', 'DELETE'].includes(route.request().method())) {
+      cartMutations.push({ floorId, method: route.request().method(), lineId: path.split('/').pop(), qty: url.searchParams.get('qty') })
+    }
     if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
       const project = {
         projectId: 'OFFICE-PROJECT-001', name: '删除测试项目', customerRequirements: '', requirementsRevision: 1,
         leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
-        floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+        floors: [
+          { projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 },
+          { projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-FLOOR-002', name: '二层', sortOrder: 2 },
+        ],
       }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
+    }
+    if (path.includes('/cart/') && route.request().method() === 'PUT') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { lineId: path.split('/').pop(), projectId: 'OFFICE-PROJECT-001', zoneId: 'DELETE-ROOM', zoneName: '删除测试空间', productId: 'SHARED-PRODUCT', qty: Number(url.searchParams.get('qty')) } }) })
     }
     if (path.endsWith('/cart') && route.request().method() === 'POST') {
       const body = JSON.parse(route.request().postData() || '{}')
@@ -138,8 +150,73 @@ try {
   assert.deepEqual((await state()).cart.map(item => item.id), ['RESTORED-RESTORED-CART-DELETE-A', 'CART-DELETE-B', 'CART-EXTRA'], '未关联商品的模块删除不改购物车')
   assert.equal(deletedCartLineIds.includes('CART-DELETE-B'), false)
   assert.equal((await furniture()).find(item => item.id === 'KEEP-OTHER').layoutConfirmed, true)
+  // 共享购物车行（qty=2 被两件家具引用）：删除其中一件只扣减数量，不整行删除
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.objects.push(
+      { id: 'SHARED-A', kind: 'furniture', zoneId: 'DELETE-ROOM', furnitureTemplateId: 'desk-straight', productId: 'SHARED-PRODUCT', label: 'SHARED-A', x: -9400, y: -1500, w: 1200, h: 600, rotation: 0, layoutConfirmed: true, productSelection: { product: { id: 'SHARED-PRODUCT' }, cartLineId: 'CART-SHARED', sourceCanvasRevision: 1 } },
+      { id: 'SHARED-B', kind: 'furniture', zoneId: 'DELETE-ROOM', furnitureTemplateId: 'desk-straight', productId: 'SHARED-PRODUCT', label: 'SHARED-B', x: -6900, y: -1500, w: 1200, h: 600, rotation: 0, layoutConfirmed: true, productSelection: { product: { id: 'SHARED-PRODUCT' }, cartLineId: 'CART-SHARED', sourceCanvasRevision: 1 } },
+    )
+    store.cart.push({ id: 'CART-SHARED', projectId: 'OFFICE-PROJECT-001', productId: 'SHARED-PRODUCT', zoneId: 'DELETE-ROOM', zoneName: '删除测试空间', qty: 2 })
+  })
+  const sharedUpdateResponse = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/cart/CART-SHARED'), { timeout: 90000 })
+  await choose('SHARED-A')
+  await page.getByRole('button', { name: '删除选中模块', exact: true }).click()
+  await sharedUpdateResponse
+  assert.equal((await furniture()).some(item => item.id === 'SHARED-A'), false)
+  const sharedCart = (await state()).cart.find(item => item.id === 'CART-SHARED')
+  assert.equal(sharedCart.qty, 1, '共享行删除一件家具只扣减到 1，不整行删除')
+  assert.equal(deletedCartLineIds.includes('CART-SHARED'), false)
+  // 跨楼层删除：入队后切到二层，请求仍发往原楼层
+  const floorTwoKey = 'rsdp-office-v01:MOCK-USER:OFFICE-FLOOR-002'
+  await page.evaluate(key => {
+    localStorage.setItem(key, JSON.stringify({ objects: [], cart: [], canvasMode: 'overview', blank: true }))
+  }, floorTwoKey)
+  const crossFloorDelete = page.waitForResponse(response =>
+    response.request().method() === 'DELETE' &&
+    new URL(response.url()).pathname === '/api/v1/office/projects/OFFICE-PROJECT-001/cart/CART-SHARED', { timeout: 90000 })
+  await choose('SHARED-B')
+  await page.getByRole('button', { name: '删除选中模块', exact: true }).click()
+  await page.evaluate(() =>
+    document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('workspace').activateFloor('OFFICE-FLOOR-002'))
+  await crossFloorDelete
+  const crossFloorMutation = cartMutations.filter(item => item.lineId === 'CART-SHARED')
+  assert.ok(crossFloorMutation.every(item => item.floorId === 'OFFICE-PROJECT-001'), '切楼层后删除请求仍发往原楼层')
+  try {
+    await page.waitForFunction(() => {
+      const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+      return store.workspaceId === 'OFFICE-FLOOR-002' && store.cart.length === 0
+    }, null, { timeout: 8000 })
+  } catch (e) {
+    console.log('DEBUG floor', JSON.stringify(await page.evaluate(() => {
+      const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+      return { workspaceId: store.workspaceId, initialized: store.initialized, loading: store.loading, cartLen: store.cart.length, lsKeys: Object.keys(localStorage) }
+    })))
+    throw e
+  }
+  // 清空排版：同步清理家具有效关联行，未关联行保留
+  await page.evaluate(() =>
+    document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('workspace').activateFloor('OFFICE-PROJECT-001'))
+  await page.getByTestId('office-design-canvas').waitFor()
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.objects.push(
+      { id: 'CLEAR-A', kind: 'furniture', zoneId: 'OTHER-ROOM', furnitureTemplateId: 'desk-straight', productId: 'CLEAR-PRODUCT', label: 'CLEAR-A', x: 11000, y: 500, w: 1200, h: 600, rotation: 0, layoutConfirmed: true, productSelection: { product: { id: 'CLEAR-PRODUCT' }, cartLineId: 'CART-CLEAR', sourceCanvasRevision: 1 } },
+    )
+    store.cart.push({ id: 'CART-CLEAR', projectId: 'OFFICE-PROJECT-001', productId: 'CLEAR-PRODUCT', zoneId: 'OTHER-ROOM', zoneName: '其他空间', qty: 1 })
+  })
+  const clearDeleteResponse = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname.endsWith('/cart/CART-CLEAR'), { timeout: 90000 })
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.clearFurniture('OTHER-ROOM')
+  })
+  await clearDeleteResponse
+  const afterClear = await state()
+  assert.equal(afterClear.objects.some(item => item.id === 'CLEAR-A'), false)
+  assert.equal(afterClear.cart.some(item => item.id === 'CART-CLEAR'), false, '清空排版同步删除关联购物车行')
+  assert.deepEqual(afterClear.cart.map(item => item.id), ['RESTORED-RESTORED-CART-DELETE-A', 'CART-DELETE-B', 'CART-EXTRA'], '清空排版只移除关联行，其余保留')
   assert.deepEqual(errors, [])
-  console.log('删除模块 UI 通过：画布按钮与 Delete 快捷键按 cartLineId 删除对应行，保留同商品额外行；撤销恢复服务端行并更新关联 ID；无选品关联模块、其他空间数据保留。全部 API 模拟。')
+  console.log('删除模块 UI 通过：按 cartLineId 删除对应行并保留额外行；共享行按引用数扣减（PUT qty）；切楼层后请求仍发往原楼层；清空排版同步清理关联行；撤销恢复服务端行并更新关联 ID。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

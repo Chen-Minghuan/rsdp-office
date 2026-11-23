@@ -39,8 +39,9 @@ function sameModuleKey(item: FurnitureObject): string {
   return [savedField('furnitureTemplateId'), savedField('moduleSnapshot'), savedField('heightMm'), stableJson(item.w), stableJson(item.h)].join('\u001f')
 }
 
+/** 选品计数与分组共用同一份键（含高度/模板），与服务端 sameModule 对齐，避免不同规格串用计数。 */
 function moduleSpecificationKey(item: FurnitureObject): string {
-  return [stableJson(item.label), stableJson(item.w), stableJson(item.h)].join('\u001f')
+  return sameModuleKey(item)
 }
 
 const moduleGroups = computed<ModuleDisplayGroup[]>(() => {
