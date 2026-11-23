@@ -301,3 +301,38 @@ create table if not exists office_quotation_line (
     issue varchar(255),
     primary key (quotation_id, line_no)
 );
+
+-- 个人商品收藏：默认收藏夹 + 用户自建分组；RSDP 商品仅存 rspu_id 弱关联。
+create table if not exists office_favorite_folder (
+    folder_id varchar(64) primary key,
+    user_id varchar(64) not null references office_user(user_id) on delete cascade,
+    name varchar(50) not null,
+    is_default boolean not null default false,
+    created_at timestamp not null default now(),
+    updated_at timestamp not null default now(),
+    constraint ck_office_favorite_folder_name check (char_length(btrim(name)) > 0)
+);
+create unique index if not exists uk_office_favorite_folder_user_name
+    on office_favorite_folder(user_id, name);
+create unique index if not exists uk_office_favorite_folder_user_default
+    on office_favorite_folder(user_id) where is_default;
+
+create table if not exists office_favorite_item (
+    folder_id varchar(64) not null references office_favorite_folder(folder_id) on delete cascade,
+    rspu_id varchar(128) not null,
+    created_at timestamp not null default now(),
+    primary key (folder_id, rspu_id),
+    constraint ck_office_favorite_item_rspu check (char_length(btrim(rspu_id)) > 0)
+);
+create index if not exists idx_office_favorite_item_rspu on office_favorite_item(rspu_id);
+
+-- 项目商品收藏：每个成员在每个项目下各自收藏；RSDP 商品仅存 rspu_id 弱关联。
+create table if not exists office_project_favorite_item (
+    project_id varchar(64) not null references office_design_project(project_id) on delete cascade,
+    user_id varchar(64) not null references office_user(user_id) on delete cascade,
+    rspu_id varchar(128) not null,
+    created_at timestamp not null default now(),
+    primary key (project_id, user_id, rspu_id),
+    constraint ck_office_project_favorite_rspu check (char_length(btrim(rspu_id)) > 0)
+);
+create index if not exists idx_office_project_favorite_rspu on office_project_favorite_item(rspu_id);

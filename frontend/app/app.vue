@@ -11,7 +11,10 @@ const route = router.currentRoute
 const isLoginPage = computed(() => route.value.name === 'login')
 const isSpatialWorkbench = computed(() => route.value.path === '/spatial-canvas')
 const isProjectPage = computed(() => isProjectBench.value || isProjectWorkflow.value)
-const floorPending = computed(() => workspace.switching || (isProjectPage.value && !!workspace.currentFloorId && !floorReady.value))
+const isProductsPage = computed(() => route.value.path === '/products')
+const isFavoritesPage = computed(() => route.value.path === '/favorites')
+const pageKey = computed(() => isProductsPage.value ? 'products' : isFavoritesPage.value ? 'favorites' : workspace.currentFloorId)
+const floorPending = computed(() => !isProductsPage.value && !isFavoritesPage.value && (workspace.switching || (isProjectPage.value && !!workspace.currentFloorId && !floorReady.value)))
 async function initializeWorkspace() {
   if (isLoginPage.value || (workspace.initialized && store.initialized)) return
   await workspace.init()
@@ -48,7 +51,7 @@ watch(() => route.value.path, () => {
       <div :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-h-0 overflow-y-auto'">
         <div v-if="floorPending" class="grid flex-1 place-items-center text-sm text-muted">正在加载当前楼层…</div>
         <ProjectEmptyState v-else-if="isDesignWorkflow && !workspace.currentFloorId" />
-        <NuxtPage v-else :key="workspace.currentFloorId" />
+        <NuxtPage v-else :key="pageKey" />
       </div>
     </main>
     <ProposalFurnitureGateDialog v-if="proposalFurnitureGateDialog.mismatches.value.length" :mismatches="proposalFurnitureGateDialog.mismatches.value" @close="proposalFurnitureGateDialog.close" />

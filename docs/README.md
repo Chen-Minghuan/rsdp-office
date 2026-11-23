@@ -29,10 +29,14 @@
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
 | [项目需求 AI 总结](tasks/WORKSPACE-004-project-requirements-ai-summary.md) | 原文/总结双面翻转、事实抽取、版本复核、持久化缓存与真实模型验证 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
+| [工作区账号中心](tasks/TENANT-003-workspace-account-center.md) | 账号行悬停菜单、报价/账号直达与经销商角色隔离；收藏入口由 CAT-010 扩展为全角色 |
 | [项目报价](tasks/QUOTE-001-project-quotation.md) | 主号专属报价入口、系数与毛利率、多项费用、Excel 预览/下载与确认落库 |
 | [商品主档统一](tasks/INTEG-001-product-master-integration.md) | 商品主档归 rsdp、工厂可见性（放行/黑名单）、office 只读投影（跨仓库方案） |
 | [伟豪商品接入](tasks/INTEG-002-weihao-catalog.md) | 主库写入、录入来源、权限、Excel 批次与试点验收 |
 | [新商品确认后直接上架](tasks/CAT-007-publish-on-entry.md) | 手工录入、批量导入、旧审核入口清理及在售状态 |
+| [个人商品收藏](tasks/CAT-008-personal-favorites.md) | 个人默认/自建分组、多选与双表持久化；交互后续由 CAT-009 扩展 |
+| [项目商品收藏](tasks/CAT-009-project-favorites.md) | 悬停双按钮、统一项目/个人页签、成员与项目双重隔离及项目切换回归 |
+| [收藏中心页面](tasks/CAT-010-favorites-center-page.md) | 全角色收藏入口、个人/项目收藏列表接口、收藏夹栏与项目选择器 |
 | [历史项目归属与账号隔离](tasks/TENANT-002-project-ownership-session-isolation.md) | 旧项目补录、无项目空状态、登录切换与浏览器缓存按账号隔离 |
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |
 | [本轮文档任务](tasks/DOC-001-project-baseline.md) | 本次需求与规范整理的过程及验证 |
