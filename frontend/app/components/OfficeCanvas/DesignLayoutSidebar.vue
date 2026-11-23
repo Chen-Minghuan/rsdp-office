@@ -12,6 +12,8 @@ import type { OfficeArrangementPresetId, OfficeProductStyleId } from '~/types/of
 import { moduleGlyphId } from '~/utils/officeModules'
 import { formatDimensionMm, officeLayoutClearances } from '~/utils/officeDimensionAnnotations'
 import { defaultPresetForProductStyle, officeArrangementPreset, presetsForProductStyle, productStyleForTemplate } from '~/utils/officeArrangementPresets'
+import { meetingReferenceName, TRAINING_ARRANGEMENTS } from '~/utils/meetingReferenceLayout'
+import { meetingRingDescription } from '~/utils/meetingRingTable'
 
 const props = withDefaults(defineProps<{ embedded?: boolean; moduleId?: string; currentPreview?: LayoutPreview | null }>(), { embedded: false, moduleId: '', currentPreview: null })
 const emit = defineEmits<{
@@ -62,7 +64,10 @@ const productStyle = ref<OfficeProductStyleId>(productStyleForTemplate(builtInMo
 const presetId = ref<OfficeArrangementPresetId>(defaultPresetForProductStyle(productStyle.value).id)
 const spacing = reactive<OfficeLayoutSpacing>({ ...OFFICE_LAYOUT_SPACING })
 const isMeetingSpace = computed(() => zone.value?.zoneType === 'MEETING_ROOM')
-const isMeetingLayout = computed(() => selectedModule.value.category === '会议与洽谈')
+const isMeetingLayout = computed(() => productStyleForTemplate(selectedModule.value) === 'meeting-table')
+const meetingReferenceCode = computed(() => selectedModule.value.reference?.code)
+const isTrainingLayout = computed(() => meetingReferenceCode.value === 'T17' || meetingReferenceCode.value === 'T18')
+const referenceLayoutName = computed(() => meetingReferenceName(meetingReferenceCode.value, preferences.meetingTrainingArrangement))
 const isWorkstation = computed(() => selectedModule.value.category === '职员桌')
 const isGeneral = computed(() => productStyle.value === 'general')
 const catalogCategories = computed(() => isMeetingSpace.value ? ['会议与洽谈', ...furnitureCategories.filter(category => category !== '会议与洽谈')] : furnitureCategories)
@@ -72,6 +77,7 @@ const areaSeatSuggestion = computed(() => zone.value ? Math.max(0, Math.floor(zo
 // LAYOUT-036：当前求解目标对应的目标值（目标人数/固定件数；最大容量无目标）
 const goalCount = computed(() => (preferences.objective || 'target-seats') === 'fixed-quantity' ? preferences.fixedQuantity || 0 : (preferences.objective || 'target-seats') === 'target-seats' ? preferences.targetSeats : 0)
 watch(() => zone.value?.id, () => {
+  preferences.meetingTrainingArrangement = undefined
   Object.assign(preferences, defaultLayoutPreferences(), JSON.parse(JSON.stringify(zone.value?.layoutPreferences || {})))
   activeStep.value = props.embedded ? 'settings' : 'module'
 }, { immediate: true })
@@ -160,7 +166,7 @@ const effectivePresetId = computed<OfficeArrangementPresetId>(() => {
 const selectedPreset = computed(() => availablePresets.value.find(preset => preset.id === effectivePresetId.value) || availablePresets.value[0])
 /** 当前家具的默认排布（与初始选中一致），在排布列表中标记「推荐」。 */
 const recommendedPresetId = computed(() => defaultPresetForProductStyle(isMeetingLayout.value ? 'meeting-table' : productStyle.value).id)
-const selectedStyleLabel = computed(() => selectedPreset.value?.label || '')
+const selectedStyleLabel = computed(() => referenceLayoutName.value || selectedPreset.value?.label || '')
 const activeStepIndex = computed(() => layoutPanelSteps.value.findIndex(step => step.id === activeStep.value) + 1)
 
 const selectedSize = computed(() => selectedModule.value.sizeOptions?.some(([w, d]) => w === unitW.value && d === unitD.value)
@@ -216,6 +222,12 @@ const differenceText = computed(() => difference.value === '与当前布局一�
 const plan = computed(() => proposal.value ? { slots: proposal.value.furniture, rows: proposal.value.rows || new Set(proposal.value.furniture.filter(f => f.layoutRole === 'primary').map(f => Math.round(f.y))).size, columns: proposal.value.columns || 0, rotated: proposal.value.rotated || false, problem: proposal.value.problem } : null)
 const autoPlan = plan
 const capacity = computed(() => proposal.value?.furniture.length || 0)
+const observerSeats = computed(() => proposal.value?.furniture.filter(item => item.furnitureTemplateId === 'chair-meeting-observer').length || 0)
+const generatedSeats = computed(() => (proposal.value?.furniture.filter(item => item.layoutRole === 'seat').length || 0) - observerSeats.value)
+const ringParts = computed(() => {
+  const preview = proposal.value?.furniture.find(item => item.furnitureTemplateId === selectedModule.value.id)
+  return meetingRingDescription(selectedModule.value.id, preview?.w ?? unitW.value, preview?.h ?? unitD.value)
+})
 watch([proposal, showPreview, draftApplied], () => {
   applicationMessage.value = ''
   emit('preview', zone.value && showPreview.value ? { zoneId: zone.value.id, furniture: draftApplied.value ? [] : proposal.value?.furniture || [], replaceIds: proposal.value?.replaceIds || [], seatClearanceMm: preferences.seatClearanceMm } : null)
@@ -227,9 +239,10 @@ onUnmounted(() => emit('preview', null))
 // so the canvas shows only what is actually placed, instead of immediately
 // re-drawing the removed modules as dimmed ghosts. Re-enable via the checkbox.
 watch(() => store.lastManualFurnitureEdit, mark => { if (mark && mark.zoneId === zone.value?.id) showPreview.value = false })
-function selectModule(template: OfficeModuleTemplate) {
+function selectModule(template: OfficeModuleTemplate, size?: [number, number]) {
   store.cancelFurniturePlacement()
   selectedModule.value = template
+  if (size) [unitW.value, unitD.value] = size
   showPreview.value = true
 }
 watch(() => props.moduleId, id => {
@@ -413,7 +426,7 @@ defineExpose({ selectModule })
 
         <div class="px-3 py-2 border-b border-line text-[11px] space-y-2">
           <div class="font-semibold">方案需求</div>
-          <div v-if="isMeetingLayout" class="flex gap-1.5"><button type="button" :aria-pressed="preferences.strategy === 'template'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'template'">{{ isMeetingLayout ? '单桌居中' : '按场地排布' }}</button><button v-if="isMeetingLayout" type="button" :aria-pressed="preferences.strategy === 'recommended'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'recommended'">自动推荐</button></div>
+          <div v-if="isMeetingLayout" class="flex gap-1.5"><button type="button" :aria-pressed="preferences.strategy === 'template'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'template'">{{ referenceLayoutName ? '按线稿布置' : '单桌居中' }}</button><button type="button" :aria-pressed="preferences.strategy === 'recommended'" class="flex-1 rounded-none border border-line py-2" @click="preferences.strategy = 'recommended'">自动推荐</button></div>
           <!-- LAYOUT-036 求解目标三选（缺省目标人数，旧行为不变；与布局拓扑正交） -->
           <div class="flex items-center justify-between gap-1.5">
             <span class="text-muted">求解目标</span>
@@ -432,7 +445,7 @@ defineExpose({ selectModule })
           <button v-if="!isGeneral && nameSeatSuggestion && nameSeatSuggestion <= 500 && !preferences.targetSeats" class="text-bronze underline" @click="preferences.targetSeats = nameSeatSuggestion">采用房名建议 {{ nameSeatSuggestion }} 人</button>
           <template v-if="isMeetingLayout">
             <label class="block"><input v-model="preferences.includeChairs" type="checkbox" aria-label="生成会议椅"> 同时生成会议椅</label>
-            <label class="block"><input v-model="preferences.resizeMeetingTable" type="checkbox" aria-label="按人数调整桌长"> 按目标人数调整桌长（预览实际尺寸）</label>
+            <label v-if="!isTrainingLayout && !meetingReferenceCode?.startsWith('S')" class="block"><input v-model="preferences.resizeMeetingTable" type="checkbox" aria-label="按人数调整桌长"> 按目标人数调整桌长（预览实际尺寸）</label>
 
           </template>
           <p v-if="isMeetingSpace" class="text-muted">建议会议桌椅，也可按实际需求选择任意家具。</p>
@@ -461,7 +474,13 @@ defineExpose({ selectModule })
               <input v-model.number="unitD" aria-label="模块进深（毫米）" type="number" min="10" class="w-full h-8 px-2 border border-line rounded-none text-xs outline-none focus:border-bronze">
             </label>
           </div>
-          <p class="text-[9px] text-muted mt-1.5">图例来自共享家具模板目录，按实际毫米尺寸排版</p>
+          <p v-if="selectedModule.reference" class="text-[10px] text-muted mt-1.5">{{ selectedModule.reference.code }} · {{ selectedModule.reference.sizeSource }}尺寸</p>
+          <label v-if="isTrainingLayout" class="mt-2 block text-[10px] text-muted">培训排布
+            <select v-model="preferences.meetingTrainingArrangement" aria-label="培训排布" class="mt-1 block w-full border border-line bg-white p-1.5 text-xs">
+              <option :value="undefined">{{ TRAINING_ARRANGEMENTS[0].name }}</option>
+              <option v-for="training in TRAINING_ARRANGEMENTS.slice(1)" :key="training.id" :value="training.id">{{ training.name }}</option>
+            </select>
+          </label>
           <details data-testid="advanced-spacing" class="mt-2 border-t border-[#eee7df] pt-2">
             <summary class="cursor-pointer text-[10px] text-muted">高级间距参数（有默认值，可跳过）</summary>
             <div class="mb-1.5 mt-2 flex items-center justify-between">
@@ -510,12 +529,12 @@ defineExpose({ selectModule })
               :aria-pressed="presetId === preset.id"
               @click="selectPreset(preset.id)"
             >
-              <span class="font-semibold">{{ preset.label }}</span>
+              <span class="font-semibold">{{ referenceLayoutName || preset.label }}</span>
               <span v-if="preset.id === recommendedPresetId" class="ml-1 rounded-none bg-[#e6f5ee] px-1 py-0.5 text-[9px] text-green">推荐</span>
-              <span class="block mt-0.5 opacity-75 leading-tight">{{ preset.description }}</span>
+              <span v-if="!referenceLayoutName" class="block mt-0.5 opacity-75 leading-tight">{{ preset.description }}</span>
             </button>
           </div>
-          <p class="mt-2 text-[10px] text-muted">{{ selectedPreset?.sourceLabel || selectedPreset?.description }}</p>
+          <p v-if="!referenceLayoutName" class="mt-2 text-[10px] text-muted">{{ selectedPreset?.sourceLabel || selectedPreset?.description }}</p>
         </div>
 
         </div>
@@ -531,6 +550,8 @@ defineExpose({ selectModule })
               <strong data-testid="module-capacity" class="mt-0.5 block text-sm text-bronze">{{ capacity }} <span class="text-[10px] font-normal">件</span></strong>
             </div>
           </div>
+          <p v-if="ringParts" class="mt-1 px-2 text-[10px] text-muted" data-testid="meeting-ring-parts">桌面拼接建议 · {{ ringParts }}</p>
+          <p v-if="observerSeats" class="mt-1 px-2 text-[10px] text-muted">主桌 {{ generatedSeats }} 席 · 旁听 {{ observerSeats }} 席</p>
           <div v-if="capacity && plan?.rows" data-testid="layout-row-summary" class="mt-1 text-[10px] text-muted">{{ isMeetingLayout ? '桌椅组合' : `${plan.rows} 排 · 最多 ${plan.columns} 列 · ${plan.rotated ? '纵向' : '横向'}` }} · {{ proposal?.furniture.filter(item => item.layoutRole === 'primary').length }} 件主体家具</div>
           <!-- 候选卡落在画布右下角浮层（CanvasBoard 的 #layout-candidate-dock），随选随预览 -->
           <Teleport to="#layout-candidate-dock" defer>

@@ -107,8 +107,10 @@ try {
     await layout()
     const placed = await furniture()
     assert.equal(placed.length, capacity, `${module.name} 应按当前空间类型应用当前预估`)
-    const primary = placed.filter(item => item.layoutRole !== 'seat')
+    const primary = placed.filter(item => item.furnitureTemplateId === module.id && item.layoutRole !== 'seat')
     assert.ok(primary.length && primary.every(item => item.furnitureTemplateId === module.id && item.productId === '' && item.w === w && item.h === d && item.zoneId === 'MODULE-ROOM' && item.spaceTemplateId && item.templateSpaceId === 'MODULE-ROOM'))
+    if (module.id === 'table-conference-long') assert.equal(placed.filter(item => item.furnitureTemplateId === 'table-meeting-observer').length, 2)
+    if (['sofa-meeting-single', 'sofa-meeting-double'].includes(module.id)) assert.equal(placed.filter(item => item.furnitureTemplateId === 'coffee-meeting-side').length, 3)
     assert.equal(await canvas().locator('[data-furniture-template="' + module.id + '"] .manual-furniture-glyph').count(), primary.length)
   }
   await choose('desk-screen-l')

@@ -13,7 +13,7 @@ const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEd
 const props = defineProps<{ currentPreview?: LayoutPreview | null }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
-type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate) => void }
+type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void }
 const activePage = ref<WorkflowPage>('auto')
 watch(activePage, () => store.cancelFurniturePlacement())
 function openFurniture(id: string, fromGroup: boolean) {
@@ -65,11 +65,11 @@ function selectCategory(id: string) {
     if (selectedCategories.value.length === 1) nextTick(() => autoLayout.value?.selectModule(module))
   }
 }
-function selectModule(module: OfficeModuleTemplate) {
+function selectModule(module: OfficeModuleTemplate, size?: [number, number]) {
   selectedCatalogId.value = module.id
   selectedCategories.value = [module.category === '会议与洽谈' ? 'meeting' : module.category === '接待休闲' ? 'sofa' : module.category === '前台' ? 'bar' : module.category === '收纳' ? 'entry' : 'workstation']
   activePage.value = 'auto'
-  nextTick(() => autoLayout.value?.selectModule(module))
+  nextTick(() => autoLayout.value?.selectModule(module, size))
 }
 function confirmAndRecommend() {
   if (!zone.value) return

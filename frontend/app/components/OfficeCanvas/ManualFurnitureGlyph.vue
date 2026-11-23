@@ -179,6 +179,9 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <line v-else-if="template.kind === 'wall'" :x1="w * 0.08" :y1="d / 2" :x2="w * 0.92" :y2="d / 2" />
       <rect v-else-if="template.kind === 'table'" :x="w * 0.43" :y="d * 0.43" :width="w * 0.14" :height="d * 0.14" rx="8" />
     </template>
+    <g v-if="showSeat && referenceCode === 'T15'" class="reference-guide" pointer-events="none">
+      <circle v-for="(point, index) in [[w / 4, -300], [w * 3 / 4, -300], [w / 4, d + 300], [w * 3 / 4, d + 300], [-300, d / 2], [w + 300, d / 2]]" :key="index" :cx="point[0]" :cy="point[1]" :r="Math.min(230, w / 5, d / 3)" />
+    </g>
   </g>
 </template>
 

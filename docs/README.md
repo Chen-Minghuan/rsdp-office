@@ -55,6 +55,7 @@
 | [推荐列表内部滚动](tasks/LAYOUT-041-recommendation-list-scroll.md) | 推荐侧栏 flex 高度约束、多候选滚轮回归与真实页面验证 |
 | [应用手动调整后的排版预览](tasks/LAYOUT-042-apply-edited-preview.md) | 单模块/组合预览快照直接应用、硬约束校验、确认失效与拖动回归 |
 | [原图参考与组合布局](tasks/LAYOUT-043-reference-and-mixed-layout.md) | 原图家具识别与手动标记、组合搜索、通路比较及净距校验 |
+| [会议家具线稿与尺寸联动](tasks/LAYOUT-045-meeting-furniture-reference.md) | 目录图块、会议组合、桌段规格和椅数、按尺寸重新预览 |
 | [按标注修正开放分区](tasks/GEOM-008-annotated-open-zones.md) | 当前方案五处分区、比例保留、修正包及真实 API 保存记录 |
 | [空间轮廓自由变换](tasks/GEOM-007-free-contour-transform.md) | 八点缩放、内部平移、等比拉角、整边推拉及视图缩放 |
 | [沿墙轮廓修正](tasks/GEOM-006-wall-contour-correction.md) | 入口/退台完整边界、补转折点、沿墙重描与撤销恢复 |
