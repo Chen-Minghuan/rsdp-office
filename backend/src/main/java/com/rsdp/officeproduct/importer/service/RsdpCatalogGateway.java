@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -134,7 +135,7 @@ public class RsdpCatalogGateway {
             dto.setKind("other");
             dto.setUses(List.of("OTHER"));
             dto.setImageUrl(product.getPrimaryImageUrl());
-            applyDimensions(dto, textOrNull(v, "dimensions"));
+            applyDimensions(dto, v.path("dimensions"));
             rows.add(dto);
         });
         // The main list carries categoryPath; sixDimTags normally arrive in product detail.
@@ -206,13 +207,9 @@ public class RsdpCatalogGateway {
     }
 
     /** 主项目尺寸 JSON → 毫米 + 厘米上取整；支持当前 w/d/h 短键和既有 widthMm/widthCm 长键。 */
-    private void applyDimensions(OfficeProductDto dto, String dimensions) {
-        if (dimensions == null || dimensions.isBlank()) {
-            return;
-        }
+    private void applyDimensions(OfficeProductDto dto, JsonNode dimensions) {
         try {
-            JsonNode source = objectMapper.readTree(dimensions);
-            BigDecimal[] exact = OfficeProductMatching.dimensions(normalizeMainDimensions(source));
+            BigDecimal[] exact = readMainDimensions(dimensions);
             dto.setWidthMm(exact[0]);
             dto.setDepthMm(exact[1]);
             dto.setHeightMm(exact[2]);
@@ -223,6 +220,24 @@ public class RsdpCatalogGateway {
         } catch (Exception ignored) {
             // 尺寸未知保持为空，不臆造
         }
+    }
+
+    private BigDecimal[] readMainDimensions(JsonNode dimensions) {
+        return OfficeProductMatching.dimensions(normalizeMainDimensions(embeddedJson(dimensions)));
+    }
+
+    private String formatMainDimensions(JsonNode dimensions) {
+        BigDecimal[] sizeMm = readMainDimensions(dimensions);
+        String[] axes = {"宽", "深", "高"};
+        boolean labelAxes = sizeMm[0] == null || sizeMm[1] == null;
+        StringJoiner label = new StringJoiner(" × ", "", " mm").setEmptyValue("");
+        for (int axis = 0; axis < sizeMm.length; axis++) {
+            if (sizeMm[axis] != null) {
+                String prefix = labelAxes ? axes[axis] + " " : "";
+                label.add(prefix + sizeMm[axis].stripTrailingZeros().toPlainString());
+            }
+        }
+        return label.length() == 0 ? null : label.toString();
     }
 
     /** 主项目短键按毫米契约解释（含缺省 unit 的旧记录）；unit=cm 时改走厘米长键，其他单位仍由匹配器拒绝。 */
@@ -342,6 +357,7 @@ public class RsdpCatalogGateway {
                 variant.setSizeCode(textOrNull(v, "sizeCode"));
                 variant.setSizeText(textOrNull(v, "sizeText"));
                 variant.setDimensions(textOrNull(v, "dimensions"));
+                variant.setDimensionsText(formatMainDimensions(v.path("dimensions")));
                 variant.setColorCode(textOrNull(v, "colorCode"));
                 variant.setColorText(textOrNull(v, "colorText"));
                 variant.setMaterialCode(textOrNull(v, "materialCode"));

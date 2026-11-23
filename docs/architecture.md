@@ -150,6 +150,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 公有库商品通过 RSDP 工厂管理员个人账号建档，单条录入与 Excel 新建均由 RSDP 保存。Office 通过目录读取角色获得授权商品，保留旧录入页面跳转和历史批次查询。旧商品下架后退出新推荐，现有方案保留选择快照，方案确认时再校验可用性。
 Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `widthCm/depthCm` 数据继续兼容。画布旧候选的厘米字段由毫米向上取整，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
+商品详情的 `variants[].dimensionsText` 复用同一尺寸转换，提供可空的毫米显示文本。页面优先显示供应商尺寸原文，再读取结构化尺寸及旧尺寸编码。见 [CAT-009](tasks/CAT-009-structured-variant-dimensions.md)。
 本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订以及商品和变体的在售状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
 
 品类匹配从已保存家具图例或旧实例名称推导需求。网关保留主库 `categoryPath` 及规格名，目录同步时为分类和名称都模糊的商品补读详情中的 `sixDimTags`。尺寸适配后按品类证据和宽深贴合度计算 `relevanceScore`，`matchReason` 返回依据，旧 `fitRatio` 和 `tier` 继续表示尺寸。推荐和应用共用匹配逻辑，无品类相关性或有明显冲突的商品不会进入候选。
