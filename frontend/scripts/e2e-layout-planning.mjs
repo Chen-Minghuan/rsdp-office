@@ -32,6 +32,8 @@ try {
     analysisId: 'MEETING-TEST', analysisRevision: 1, status: 'awaiting_confirm', sourceName: '会议室测试.dxf',
     inputMode: 'cad', geometrySource: 'cad_geometry', evidenceKind: 'REAL_SERVICE',
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
+    previewBounds: { minX: 0, minY: 0, maxX: 12000, maxY: 8000 },
+    previewUrl: 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="white"/><path d="M20 20 H1180 V780 H20 Z" fill="none" stroke="black"/></svg>').toString('base64'),
     rooms: [{ roomId: 'MEETING-ROOM', label: '测试会议室', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[0, 0], [12000, 0], [12000, 8000], [0, 8000]] }, { roomId: 'OPEN-ROOM', label: '测试办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[20000, 0], [32000, 0], [32000, 8000], [20000, 8000]] }, { roomId: 'NARROW-ROOM', label: '窄工作间', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[40000, 0], [47524, 0], [47524, 2805], [40000, 2805]] }],
   }
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
@@ -52,6 +54,20 @@ try {
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  const underlay = page.getByTestId('design-underlay')
+  const opacitySlider = page.getByTestId('design-underlay-opacity')
+  await underlay.waitFor()
+  assert.equal(await opacitySlider.inputValue(), '15')
+  assert.equal(await underlay.evaluate(element => getComputedStyle(element).opacity), '0.15')
+  await opacitySlider.press('ArrowRight')
+  assert.equal(await opacitySlider.inputValue(), '20')
+  assert.equal(await underlay.evaluate(element => getComputedStyle(element).opacity), '0.2')
+  await page.getByRole('button', { name: '返回空间总览', exact: true }).click()
+  await underlay.waitFor({ state: 'detached' })
+  await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await underlay.waitFor()
+  assert.equal(await opacitySlider.inputValue(), '15')
+  assert.equal(await underlay.evaluate(element => getComputedStyle(element).opacity), '0.15')
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   assert.equal(await page.getByTestId('layout-candidates').count(), 0, '未排版时不显示单模块方案选择')

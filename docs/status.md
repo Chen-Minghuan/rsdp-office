@@ -1,6 +1,6 @@
 # 开发进度与下一步
 
-2026-11-23 [LAYOUT-045 图例细节](tasks/LAYOUT-045-meeting-furniture-reference.md#目录线稿细节) 为 12 款相似桌型补充俯视特征。前端构建及家具目录 UI 模拟回归通过。
+2026-11-23 [LAYOUT-045 图例细节](tasks/LAYOUT-045-meeting-furniture-reference.md#目录线稿细节与底图默认值) 为 12 款相似桌型补充俯视特征，布局选品底图默认 15%。前端构建、家具目录和布局规划 UI 模拟回归通过。
 
 2026-11-23 [LAYOUT-045](tasks/LAYOUT-045-meeting-furniture-reference.md) 接入 37 个会议家具图块和 21 套组合，环桌桌段与会议椅随尺寸联动。前端构建、三组算法、五项 UI 模拟回归及 Java（282 通过、3 跳过）通过。真实项目业务验收待执行。
 
