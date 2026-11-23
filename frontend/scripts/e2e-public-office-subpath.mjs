@@ -35,8 +35,8 @@ try {
   await page.locator('#username').fill(username)
   await page.locator('#password').fill(password)
   await page.getByRole('button', { name: '登录', exact: true }).click()
-  await page.waitForURL(url => url.pathname === '/office/' || url.pathname === '/office', { timeout: 15000 })
-  const me = await page.evaluate(async () => (await fetch('api/auth/me', { credentials: 'same-origin' }).catch(() => fetch('/office/api/auth/me'))).status)
+  await page.waitForURL(url => url.pathname.replace(/\/$/, '') === '/office/workspace/project-bench', { timeout: 15000 })
+  const me = await page.evaluate(async () => (await fetch('/office/api/auth/me', { credentials: 'same-origin' })).status)
   assert.equal(me, 200, '登录后 /office/api/auth/me 应为 200')
 
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')

@@ -37,7 +37,7 @@ const showSubmit = defineModel<boolean>('showSubmit')
 const mode = defineModel<'overview' | 'design'>('mode', { default: 'overview' })
 const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 const showUnderlay = defineModel<boolean>('showUnderlay', { default: true })
-const underlayOpacity = defineModel<number>('underlayOpacity', { default: 0.75 })
+const underlayOpacity = ref(0.15)
 const showOutline = ref(true)
 const showOriginal = ref(false)
 
@@ -1685,6 +1685,8 @@ function onWindowBlur() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 弹层打开时画布不处理按键，避免监听器注册顺序影响 Esc 行为。
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
   const active = document.activeElement as HTMLElement
   const typing = active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)
   if (activeReference.value && e.key === 'Escape') {
@@ -1709,7 +1711,7 @@ function onKeydown(e: KeyboardEvent) {
     showSubmit.value = false
     return
   }
-  if (typing || showSubmit.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+  if (typing || showSubmit.value) return
   if (activeReference.value && (drag.value || e.ctrlKey || e.metaKey || e.altKey)) return
   const placementActive = placing.value || !!activeReference.value?.placement
   if ((e.code === 'Space' || e.key === ' ') && active !== canvasWindow.value && !e.defaultPrevented

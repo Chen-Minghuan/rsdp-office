@@ -92,6 +92,14 @@ class OfficeProjectServiceTest {
         when(currentUserService.authEnabled()).thenReturn(false);
         when(projectMapper.insert(any(OfficeDesignProject.class))).thenAnswer(call -> { projects.put(call.getArgument(0, OfficeDesignProject.class).getProjectId(), call.getArgument(0)); return 1; });
         when(projectMapper.updateById(any(OfficeDesignProject.class))).thenAnswer(call -> { projects.put(call.getArgument(0, OfficeDesignProject.class).getProjectId(), call.getArgument(0)); return 1; });
+        when(projectMapper.updateRequirements(anyString(), anyString(), any())).thenAnswer(call -> {
+            OfficeDesignProject project = projects.get(call.getArgument(0));
+            if (project == null) return 0;
+            project.setCustomerRequirements(call.getArgument(1));
+            project.setRequirementsRevision(project.getRequirementsRevision() + 1);
+            project.setUpdatedAt(call.getArgument(2));
+            return 1;
+        });
         when(projectMapper.selectById(anyString())).thenAnswer(call -> projects.get(call.getArgument(0)));
         when(projectMapper.selectList(any())).thenAnswer(call -> new ArrayList<>(projects.values()));
         when(floorMapper.insert(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });

@@ -32,6 +32,7 @@ export interface LayoutChannel {
   endMm?: number
 }
 export interface LayoutPreferences {
+  meetingTrainingArrangement?: import('~/utils/meetingReferenceLayout').TrainingArrangement
   strategy: 'template' | 'recommended'
   targetSeats: number
   includeChairs: boolean

@@ -65,7 +65,7 @@ export function officeArrangementPreset(id?: string): OfficeArrangementPreset | 
 }
 
 export function productStyleForTemplate(template: Pick<FurnitureTemplate, 'kind' | 'name'> & Partial<Pick<FurnitureTemplate, 'id' | 'category' | 'seatlessOf'>> & { glyphTemplateId?: string }): OfficeProductStyleId {
-  if ('category' in template && template.category === '会议与洽谈') return 'meeting-table'
+  if (template.category === '会议与洽谈' || template.id === 'sofa-meeting-single' || template.id === 'sofa-meeting-double') return 'meeting-table'
   const sourceId = template.seatlessOf || template.glyphTemplateId || template.id
   if (sourceId === 'desk-screen-l') return 'l-screen'
   if (sourceId === 'desk-screen-straight') return 'straight-screen'

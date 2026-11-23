@@ -309,14 +309,12 @@ public class OfficeProjectService {
     @Transactional
     public OfficeProjectDto updateRequirements(String projectId, UpdateOfficeRequirementsRequest request) {
         accessService.requireMember(projectId);
-        OfficeDesignProject project = requireProject(projectId);
+        requireProject(projectId);
         if (request == null || request.getCustomerRequirements() == null) {
             throw new BusinessException("客户需求不能为空");
         }
-        project.setCustomerRequirements(request.getCustomerRequirements());
-        project.setRequirementsRevision(project.getRequirementsRevision() + 1);
-        project.setUpdatedAt(LocalDateTime.now());
-        projectMapper.updateById(project);
+        projectMapper.updateRequirements(projectId, request.getCustomerRequirements(), LocalDateTime.now());
+        OfficeDesignProject project = requireProject(projectId);
         return toProjectDto(project, floors(projectId), members(projectId), usersById(members(projectId)));
     }
 

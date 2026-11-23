@@ -65,6 +65,7 @@ export interface ProductVariant {
   sizeCode: string | null
   sizeText: string | null
   dimensions: string | null
+  dimensionsText?: string | null
   packageCount: number | null
   packageVolumeCbm: number | null
   grossWeight: number | null

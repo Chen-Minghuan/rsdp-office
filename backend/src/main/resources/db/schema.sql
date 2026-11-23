@@ -78,6 +78,11 @@ create table if not exists office_design_project (
     name varchar(200) not null,
     customer_requirements text not null default '',
     requirements_revision integer not null default 1,
+    requirements_summary jsonb,
+    requirements_summary_revision integer,
+    requirements_summary_model varchar(100),
+    requirements_summary_prompt_version varchar(64),
+    requirements_summary_generated_at timestamp,
     created_at timestamp not null default now(),
     updated_at timestamp not null default now()
 );

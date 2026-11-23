@@ -27,10 +27,18 @@ try {
   assert.ok(ready, '测试预览服务没有就绪')
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext()
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
+  const draftKey = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
+  const taskKey = 'rsdp-office-recognition-task-v1:MOCK-USER:OFFICE-PROJECT-001'
+  const project = {
+    projectId: 'OFFICE-PROJECT-001', name: '识别进度测试项目',
+    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' },
+    floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+  }
 
   let stage = 'PREPARING'
   let status = 'analyzing'
@@ -45,6 +53,7 @@ try {
     const request = route.request()
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 200, message: '成功', data }) })
+    if (path === '/api/v1/office/projects') return respond([project])
     if (path === '/api/v1/floor-plan/analyze') {
       posts++
       const body = request.postDataBuffer().toString()
@@ -89,19 +98,19 @@ try {
   await page.getByText('已复用相同图纸、页码和处理参数的标准底图', { exact: true }).waitFor()
   await page.screenshot({ path: '/tmp/rsdp-recognition-running.png' })
   // 兼容更新前只在 sessionStorage 存任务、文件尚未存分析绑定的页面。
-  await page.evaluate(() => {
-    const task = JSON.parse(sessionStorage.getItem('rsdp-office-recognition-task-v1'))
+  await page.evaluate(({ taskKey, draftKey }) => {
+    const task = JSON.parse(sessionStorage.getItem(taskKey))
     delete task.drawingId
-    sessionStorage.setItem('rsdp-office-recognition-task-v1', JSON.stringify(task))
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    sessionStorage.setItem(taskKey, JSON.stringify(task))
+    const draft = JSON.parse(localStorage.getItem(draftKey))
     delete draft.files[0].analysisId
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
-  })
+    localStorage.setItem(draftKey, JSON.stringify(draft))
+  }, { taskKey, draftKey })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByText('正在识别空间', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('progress.pdf 识别页码').inputValue(), '2')
   assert.equal(posts, 1, '刷新只恢复查询，不能重复调用模型')
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).files[0].analysisId), 'PROGRESS-1')
+  assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).files[0].analysisId, draftKey), 'PROGRESS-1')
   offline = true
   await page.getByRole('button', { name: '继续查询识别进度', exact: true }).waitFor()
   assert.ok(await page.getByAltText('图纸预览').isVisible())
@@ -119,7 +128,7 @@ try {
   await page.getByText('识别完成', { exact: true }).waitFor()
   await page.getByText('最终会议室', { exact: true }).waitFor()
   await page.getByText('校正轮廓 ✓ 0.2 秒', { exact: true }).waitFor()
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('rsdp-office-recognition-task-v1')), null)
+  assert.equal(await page.evaluate(key => sessionStorage.getItem(key), taskKey), null)
   const settledGets = gets
   await page.waitForTimeout(1300)
   assert.equal(gets, settledGets, '完成后停止轮询')
@@ -150,11 +159,13 @@ try {
   const deadline = Date.now() + 5000
   while (!lateRelease.resolve && Date.now() < deadline) await page.waitForTimeout(50)
   assert.ok(lateRelease.resolve)
-  // 离开页面后释放旧查询，检查卸载保护与任务续查。
-  await page.goto(baseUrl + '/products', { waitUntil: 'domcontentloaded' })
+  // 退回同一工作台的列表后释放旧查询，检查卸载保护与任务续查。
+  await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
+  const projectList = page.getByRole('region', { name: '项目列表', exact: true })
+  await projectList.waitFor()
   lateRelease.resolve()
   lateRelease = null
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+  await projectList.getByRole('button', { name: '进入项目 识别进度测试项目', exact: true }).first().click()
   await page.getByText('正在识别空间', { exact: true }).waitFor()
   status = 'awaiting_confirm'
   stage = 'DONE'

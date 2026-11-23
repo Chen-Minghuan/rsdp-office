@@ -73,7 +73,7 @@ public final class OfficeFurnitureRelevance {
             case "desk-straight", "desk-l", "desk-l-rounded", "desk-u" -> Type.OFFICE_DESK;
             case "desk-screen-l", "desk-screen-straight" -> Type.WORKSTATION;
             case "desk-manager", "desk-manager-double", "desk-manager-l", "desk-executive", "desk-executive-l" -> Type.EXECUTIVE_DESK;
-            case "coffee-rect", "coffee-round" -> Type.COFFEE_TABLE;
+            case "coffee-rect", "coffee-round", "coffee-meeting-side" -> Type.COFFEE_TABLE;
             case "table-conference-rect", "table-conference-oval", "table-meeting-round", "table-meeting-square" -> Type.MEETING_TABLE;
             case "table-tea-rect" -> Type.TEA_TABLE;
             case "table-dining-rect" -> Type.DINING_TABLE;
@@ -81,10 +81,10 @@ public final class OfficeFurnitureRelevance {
             case "chair-office" -> Type.OFFICE_CHAIR;
             case "chair-executive" -> Type.EXECUTIVE_CHAIR;
             case "chair-meeting" -> Type.MEETING_CHAIR;
-            case "chair-visitor" -> Type.VISITOR_CHAIR;
-            case "chair-lounge" -> Type.LOUNGE_CHAIR;
-            case "chair-bar" -> Type.BAR_CHAIR;
-            case "sofa-double", "sofa-triple" -> Type.SOFA;
+            case "chair-visitor", "chair-meeting-visitor" -> Type.VISITOR_CHAIR;
+            case "chair-lounge", "chair-meeting-lounge" -> Type.LOUNGE_CHAIR;
+            case "chair-bar", "chair-meeting-stool" -> Type.BAR_CHAIR;
+            case "sofa-double", "sofa-triple", "sofa-meeting-single", "sofa-meeting-double", "chair-meeting-booth" -> Type.SOFA;
             case "counter-straight", "counter-l" -> Type.COUNTER;
             case "counter-bar" -> Type.BAR_COUNTER;
             case "cabinet-low", "cabinet-mobile" -> Type.PEDESTAL;
@@ -92,7 +92,8 @@ public final class OfficeFurnitureRelevance {
             case "cabinet-entry" -> Type.ENTRY_CABINET;
             case "plant" -> Type.PLANT;
             case "whiteboard" -> Type.BOARD;
-            default -> null;
+            default -> base.startsWith("table-conference-") || base.startsWith("table-meeting-") ? Type.MEETING_TABLE
+                : base.startsWith("chair-meeting-") ? Type.MEETING_CHAIR : null;
         };
     }
 
