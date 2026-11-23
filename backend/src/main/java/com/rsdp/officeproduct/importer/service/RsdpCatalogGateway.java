@@ -66,13 +66,11 @@ public class RsdpCatalogGateway {
 
     public OfficeProductDto currentVariant(String viewMode, String rspuId, String variantId) {
         if ("none".equals(viewMode) || rspuId == null) return null;
-        String id = java.net.URLEncoder.encode(rspuId, java.nio.charset.StandardCharsets.UTF_8);
-        JsonNode rows = rsdpClient.get("/api/v1/products?size=1&rspuId=" + id + "&viewMode=" + viewMode
-            + "&status=active").path("rows");
-        if (!rows.isArray() || rows.isEmpty() || !rspuId.equals(rows.get(0).path("rspuId").asText())) {
+        List<ProductListItemDto> matches = readProducts(viewMode, true, rspuId);
+        if (matches.isEmpty()) {
             return null;
         }
-        return toOfficeProductDtos(toListItem(rows.get(0))).stream()
+        return toOfficeProductDtos(matches.getFirst()).stream()
             .filter(item -> variantId.equals(item.getId())).findFirst().orElse(null);
     }
 
@@ -269,17 +267,30 @@ public class RsdpCatalogGateway {
      * @param viewMode own=仅本厂已报价产品；full=全库只读（主项目按服务账号身份控制）
      */
     public List<ProductListItemDto> listProducts(String viewMode) {
+        return readProducts(viewMode, "full".equals(viewMode), null);
+    }
+
+    /** 使用主库返回的可见列表。旧版主库会忽略列表请求中的 rspuId 参数。 */
+    private List<ProductListItemDto> readProducts(String viewMode, boolean activeOnly, String targetId) {
         List<ProductListItemDto> all = new ArrayList<>();
+        long rowsRead = 0;
         int page = 1;
         while (true) {
             JsonNode data = rsdpClient.get("/api/v1/products?page=" + page + "&size=" + PAGE_SIZE
-                + "&viewMode=" + viewMode + ("full".equals(viewMode) ? "&status=active" : ""));
+                + "&viewMode=" + viewMode + (activeOnly ? "&status=active" : ""));
             JsonNode rows = data.path("rows");
             if (!rows.isArray() || rows.isEmpty()) {
                 break;
             }
-            rows.forEach(row -> all.add(toListItem(row)));
-            if (all.size() >= data.path("total").asInt(0) || rows.size() < PAGE_SIZE) {
+            for (JsonNode row : rows) {
+                if (targetId == null) {
+                    all.add(toListItem(row));
+                } else if (targetId.equals(row.path("rspuId").asText())) {
+                    return List.of(toListItem(row));
+                }
+            }
+            rowsRead += rows.size();
+            if (rowsRead >= data.path("total").asLong(rowsRead)) {
                 break;
             }
             page++;
@@ -289,10 +300,7 @@ public class RsdpCatalogGateway {
 
     /** 读取指定商品在当前视图中的记录，详情与列表复用主库范围。 */
     public boolean inView(String rspuId, String viewMode) {
-        String id = java.net.URLEncoder.encode(rspuId, java.nio.charset.StandardCharsets.UTF_8);
-        JsonNode rows = rsdpClient.get("/api/v1/products?size=1&rspuId=" + id + "&viewMode=" + viewMode
-            + ("full".equals(viewMode) ? "&status=active" : "")).path("rows");
-        return rows.isArray() && !rows.isEmpty() && rspuId.equals(rows.get(0).path("rspuId").asText());
+        return rspuId != null && !readProducts(viewMode, "full".equals(viewMode), rspuId).isEmpty();
     }
 
     /** 拉取商品资料供已核验的设计流程使用。 */

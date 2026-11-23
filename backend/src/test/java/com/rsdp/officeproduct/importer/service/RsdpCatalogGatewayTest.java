@@ -54,6 +54,34 @@ class RsdpCatalogGatewayTest {
     }
 
     @Test
+    void detailAndCurrentVariantFindExactIdAcrossVisibleCatalogPages() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=full&status=active"))
+            .thenReturn(json.readTree("""
+                {"total":2,"rows":[{"rspuId":"RSPU-FIRST","status":"active"}]}
+                """));
+        when(client.get("/api/v1/products?page=2&size=500&viewMode=full&status=active"))
+            .thenReturn(json.readTree("""
+                {"total":2,"rows":[{"rspuId":"RSPU-TARGET","status":"active","productName":"茶几"}]}
+                """));
+        when(client.get("/api/v1/products/RSPU-TARGET/variants")).thenReturn(json.readTree("""
+            [{"variantId":"V1","status":"active"}]
+            """));
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=managed"))
+            .thenReturn(json.readTree("""
+                {"total":1,"rows":[{"rspuId":"RSPU-FIRST","status":"active"}]}
+                """));
+
+        assertTrue(gateway.inView("RSPU-TARGET", "full"));
+        assertFalse(gateway.inView("RSPU-TARGET", "managed"));
+        assertFalse(gateway.inView("RSPU-MISSING", "full"));
+        assertEquals("RSPU-TARGET", gateway.currentVariant("full", "RSPU-TARGET", "V1").getRspuId());
+        assertNull(gateway.currentVariant("full", "RSPU-MISSING", "V1"));
+        verify(client, never()).get("/api/v1/products/RSPU-MISSING/variants");
+    }
+
+    @Test
     void factoryPriceLookupKeepsLowestAuthorizedPricePerVariant() throws Exception {
         RsdpClient client = mock(RsdpClient.class);
         RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
