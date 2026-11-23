@@ -98,6 +98,23 @@ try {
   assert.ok(modules.every(module => module.name && module.geometry.includes('<')), '每个目录项都有名称与参数化线稿')
   assert.equal(modules.some(module => module.id === 'desk-u' || module.id === 'desk-l-rounded'), false, '不暴露隐藏目录项')
 
+  for (const [sheet, ids] of [
+    ['meeting-tables', ['table-meeting-wall-high', 'table-meeting-bar-high', 'table-meeting-standing', 'table-meeting-observer', 'table-meeting-training', 'table-meeting-training-flip', 'table-conference-racetrack-straight']],
+    ['reception-tables', ['coffee-rect', 'coffee-round', 'table-tea-rect', 'table-dining-rect', 'table-game']],
+  ]) {
+    const details = []
+    for (const id of ids) {
+      const card = catalog().locator(`[data-product-module-id="${id}"]`)
+      details.push(await card.locator('.table-feature').getAttribute('d'))
+    }
+    assert.ok(details.every(Boolean) && new Set(details).size === ids.length, `${sheet} 的相似桌型各有独立特征线`)
+    const firstCard = catalog().locator(`[data-product-module-id="${ids[0]}"]`)
+    const section = firstCard.locator('xpath=ancestor::details')
+    if (await section.getAttribute('open') === null) await section.locator('summary').click()
+    await firstCard.scrollIntoViewIfNeeded()
+    await page.getByTestId('design-workflow-sidebar').screenshot({ path: outDir + `/${sheet}.png` })
+  }
+
   for (const module of modules) {
     await choose(module.id)
     await page.getByRole('tab', { name: '调整参数', exact: true }).click()

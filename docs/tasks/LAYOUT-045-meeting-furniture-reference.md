@@ -23,3 +23,9 @@
 - UI 模拟 API 的 `pnpm e2e:meeting-layout`、`pnpm e2e:furniture-modules`、`pnpm e2e:module-recommendations`、`pnpm e2e:workflows` 和 `MOCK_API=1 pnpm e2e:smoke` 通过。核对了跑道环桌画布截图、已排主桌重算预览和应用撤销。
 - Java `mvn -f backend/pom.xml test` 共 285 项，282 通过、3 跳过。包含曲线桌与斜向座椅的相交拦截及主桌与旁听席计数。文档相对链接与 `git diff --check` 通过。
 - 真实项目的商品规格、拼接实施和业务验收待执行。本轮变更留在工作区。
+
+## 目录线稿细节
+
+为 T13–T18、T20 和五款接待休闲桌添加可在缩略图辨认的俯视特征。保留 PDF 桌面轮廓，用靠墙边、脚踏杆、底座、挡板、双席线、翻板轴、脚轮和拼接边区分会议桌类。茶几、茶桌、餐桌和娱乐桌使用各自的台面或支撑示意。新增线条沿用家具实例的毫米尺寸与朝向，在目录与画布共用。
+
+前端构建、家具目录 UI 模拟回归通过，实际查看了两类桌型的目录截图。

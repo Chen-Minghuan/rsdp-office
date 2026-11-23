@@ -5,6 +5,7 @@ import { furnitureById } from '~/utils/manualFurniture'
 import { workstationSeatGeometry } from '~/utils/furniture3d/workstationSeating'
 import { meetingFurnitureLinework } from '~/utils/meetingFurnitureLinework'
 import { meetingRingLinework } from '~/utils/meetingRingTable'
+import { tableFurnitureLinework } from '~/utils/tableFurnitureLinework'
 
 const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number; showSeat?: boolean }>()
 const template = computed(() => furnitureById.get(props.item.templateId))
@@ -13,6 +14,7 @@ const w = computed(() => props.item.widthMm)
 const d = computed(() => props.item.depthMm)
 const referenceCode = computed(() => template.value?.reference?.code || '')
 const referencePaths = computed(() => meetingFurnitureLinework[referenceCode.value])
+const tableLinework = computed(() => tableFurnitureLinework[referenceCode.value || props.item.templateId])
 const ring = computed(() => meetingRingLinework(props.item.templateId, w.value, d.value))
 const wing = computed(() => Math.min(props.item.wingWidthMm ?? 550, w.value / 2, d.value / 2))
 const transform = computed(() => `translate(${props.item.xMm} ${props.item.yMm}) rotate(${props.item.rotationDeg}) translate(${-w.value / 2} ${-d.value / 2})`)
@@ -49,6 +51,11 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <path :d="ring.body" fill-rule="evenodd" />
       <path :d="ring.seams" fill="none" />
     </template>
+    <g v-else-if="tableLinework" :data-table-detail="referenceCode || item.templateId" :transform="`scale(${w / 100} ${d / 100})`">
+      <path :d="tableLinework.outline || referencePaths?.[0]" />
+      <path v-if="tableLinework.support" class="table-support" :d="tableLinework.support" />
+      <path class="table-feature" :d="tableLinework.feature" />
+    </g>
     <g v-else-if="referencePaths" :data-reference-furniture="referenceCode" :transform="`scale(${w / 100} ${d / 100})`">
       <rect width="100" height="100" fill="transparent" stroke="none" />
       <path v-for="(path, index) in referencePaths" :key="index" :d="path" fill="none" />
@@ -189,6 +196,8 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
 .manual-furniture-glyph { fill: #fff; stroke: #78736d; stroke-width: 1.3; stroke-linejoin: round; vector-effect: non-scaling-stroke; cursor: move; }
 .manual-furniture-glyph :is(rect, path, ellipse, line, circle) { vector-effect: non-scaling-stroke; }
 .manual-furniture-glyph .reference-guide { fill: none; stroke-dasharray: 4 3; }
+.manual-furniture-glyph .table-feature { fill: none; stroke-opacity: 0.85; stroke-linecap: round; }
+.manual-furniture-glyph .table-support { fill: none; stroke-opacity: 0.6; stroke-dasharray: 3 2; }
 .manual-furniture-glyph.selected { stroke: #306fcb; stroke-width: 2; }
 .manual-furniture-glyph.invalid { stroke: #c45c4c; }
 </style>
