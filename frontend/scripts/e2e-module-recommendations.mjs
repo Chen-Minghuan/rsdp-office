@@ -80,7 +80,11 @@ try {
         if (unavailable) return respond(null, 400, '商品已下架，请重新选择')
         const match = candidates.find(item => item.product.id === body.productId)
         assert.ok(match)
-        const targets = saved.objects.filter(item => item.kind === 'furniture' && item.zoneId === body.zoneId && (item.id === body.moduleId || body.applyToSameModules && item.w === current.w && item.h === current.h && item.furnitureTemplateId === current.furnitureTemplateId))
+        const sameModules = saved.objects.filter(item => item.kind === 'furniture' && item.zoneId === body.zoneId
+          && item.w === current.w && item.h === current.h
+          && item.furnitureTemplateId === current.furnitureTemplateId
+          && (item.heightMm ?? null) === (current.heightMm ?? null))
+        const targets = body.applyToSameModules ? sameModules : [current]
         const cartItems = targets.map(item => {
           const lineId = 'module-' + item.id
           item.productId = body.productId
@@ -91,7 +95,11 @@ try {
         return respond({ canvas: saved, cartItems, match })
       }
       queries.push(body)
-      const response = { zoneId: body.zoneId, moduleId: body.moduleId, canvasRevision: body.canvasRevision, widthMm: current.w, depthMm: current.h, targetCategory: '办公桌', sameModuleCount: current.id === 'C' ? 1 : 2, missingDimensions: noCatalog ? 0 : 1, eligibleVariantCount: noCatalog ? 0 : products.length + 1, candidates: empty || noCatalog ? [] : candidates }
+      const sameModuleCount = saved.objects.filter(item => item.kind === 'furniture' && item.zoneId === body.zoneId
+        && item.w === current.w && item.h === current.h
+        && item.furnitureTemplateId === current.furnitureTemplateId
+        && (item.heightMm ?? null) === (current.heightMm ?? null)).length
+      const response = { zoneId: body.zoneId, moduleId: body.moduleId, canvasRevision: body.canvasRevision, widthMm: current.w, depthMm: current.h, targetCategory: '办公桌', sameModuleCount, missingDimensions: noCatalog ? 0 : 1, eligibleVariantCount: noCatalog ? 0 : products.length + 1, candidates: empty || noCatalog ? [] : candidates }
       if (delayA && body.moduleId === 'A' && !body.allowRotation) await new Promise(resolve => setTimeout(resolve, 900))
       if (fail) return respond(null, 503, '推荐服务暂不可用')
       return respond(response)
@@ -211,6 +219,25 @@ try {
   const selectedOptions = await matchingModule.locator('option').allTextContents()
   assert.ok(selectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选 1/2') && !text.includes('已选择')), '同规格模块只选一件时，下拉项显示已选数量')
   assert.ok(selectedOptions.some(text => text.includes('小桌 C') && !text.includes('已选择')), '不同名称或尺寸的下拉项不应标记为已选择')
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.objects.push(
+      { id: 'HEIGHT-750', kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-height-check', label: '同名高度差办公桌', x: 3300, y: 2300, w: 1200, h: 600, heightMm: 750, rotation: 0, productId: '', layoutConfirmed: true },
+      { id: 'HEIGHT-900', kind: 'furniture', zoneId: 'Z', furnitureTemplateId: 'desk-height-check', label: '同名高度差办公桌', x: 4700, y: 2300, w: 1200, h: 600, heightMm: 900, rotation: 0, productId: '', layoutConfirmed: true },
+    )
+    store.saveLocal()
+  })
+  await matchingModule.selectOption('HEIGHT-750')
+  await card('EXACT').waitFor()
+  await card('EXACT').getByRole('button', { name: '应用到当前家具' }).click()
+  await page.waitForFunction(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    return store.objects.find(item => item.id === 'HEIGHT-750')?.productId === 'EXACT'
+  })
+  const selectedHeightOption = await matchingModule.locator('option[value="HEIGHT-750"]').textContent()
+  const unselectedHeightOption = await matchingModule.locator('option[value="HEIGHT-900"]').textContent()
+  assert.match(selectedHeightOption || '', /同名高度差办公桌.*数量：1.*已选 1\/1/, '选中 750mm 高度组后，仅该组显示已选 1/1')
+  assert.doesNotMatch(unselectedHeightOption || '', /已选/, '同名同宽深但 900mm 高度组不能串用 750mm 高度组的选品计数')
   const legacyBefore = await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     const item = store.objects.find(item => item.id === 'A')
@@ -374,12 +401,14 @@ try {
     for (const key of ['w','h','x','y','rotation','layoutConfirmed']) assert.deepEqual(item[key], old[key])
     assert.equal(item.productId, 'EXACT')
   }
-  assert.equal(state.cart.length, 2)
+  assert.equal(state.cart.filter(item => ['module-A', 'module-B'].includes(item.id)).length, 2, '同步同规格后仅为 A/B 新增两条目标购物车行')
+  assert.equal(state.cart.find(item => item.id === 'module-HEIGHT-750')?.productId, 'EXACT', '高度回归场景的已选商品保持独立存在')
+  assert.equal(state.cart.length, 3, '购物车包含高度回归场景的一条既有选品及 A/B 两条同步选品')
   assert.equal(state.cart.every(item => item.qty === 1), true)
   const fullySelectedOptions = await matchingModule.locator('option').allTextContents()
   assert.ok(fullySelectedOptions.some(text => text.includes('共享职员桌') && text.includes('1,200 × 600 mm') && text.includes('已选 2/2')), '同规格模块全部选中时，下拉项显示完整已选数量')
   assert.deepEqual(state.objects.find(item => item.id === 'OTHER'), before.find(item => item.id === 'OTHER'))
-  assert.equal(selections[1].applyToSameModules, true)
+  assert.equal(selections.at(-1)?.applyToSameModules, true)
   unavailable = true
   await card('MEDIUM').getByRole('button', { name: '应用到 2 个模块' }).click()
   await panel.getByRole('alert').filter({ hasText: '商品已下架' }).waitFor()
