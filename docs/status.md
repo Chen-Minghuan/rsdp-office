@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-11-23 [CAT-009](tasks/CAT-009-structured-variant-dimensions.md) 商品详情在尺寸原文缺失时显示主库的结构化规格。本地 Edge 实测 `OF-TBD-0221` 显示 `1200 × 600 × 450 mm`。Java 298 项，0 失败、0 错误、3 跳过，前端构建及模拟工作流通过。模拟冒烟与修改前构建同在选择职员桌步骤超时。
+
 2026-11-23 [LAYOUT-047 主分支同步](tasks/LAYOUT-047-meeting-furniture-reference.md#同步主分支) 合入分楼层导航、点击及拖拽摆放和 L 型桌分块判定。会议预设从「自动布局」的家具模块选择。合并后前端构建、算法、UI 模拟回归与 Java 通过。
 
 2026-11-23 [LAYOUT-047 图例细节](tasks/LAYOUT-047-meeting-furniture-reference.md#目录线稿细节与底图默认值) 为 12 款相似桌型补充俯视特征，布局选品底图默认 15%。前端构建、家具目录和布局规划 UI 模拟回归通过。
