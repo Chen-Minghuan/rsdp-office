@@ -46,6 +46,8 @@ public final class OfficeLayoutValidationPolicy {
             boolean hasLayoutRegions = hasEnabledLayoutRegions(zone);
             Area placementArea = hasLayoutRegions ? allowedPlacementArea(zone, room) : room;
             List<List<Rectangle2D.Double>> bounds = furniture.stream().map(OfficeLayoutValidationPolicy::footprints).toList();
+            var meetingShapes = java.util.stream.IntStream.range(0, furniture.size()).mapToObj(i -> OfficeMeetingFootprint.parts(furniture.get(i), bounds.get(i))).toList();
+            var meetingGeometry = furniture.stream().map(OfficeMeetingFootprint::usesMeetingGeometry).toList();
             List<Area> exclusions = new ArrayList<>();
             JsonNode preferences = zone.path("layoutPreferences");
             for (JsonNode area : preferences.path("exclusions")) exclusions.add(new Area(rectangle(area)));
@@ -64,13 +66,21 @@ public final class OfficeLayoutValidationPolicy {
             for (int i = 0; i < furniture.size(); i++) {
                 JsonNode item = furniture.get(i);
                 if (!item.path("layoutConfirmed").asBoolean()) continue;
+                if ("table-conference-racetrack".equals(OfficeMeetingFootprint.glyphId(item)) && item.path("w").asDouble() <= item.path("h").asDouble()) {
+                    throw new BusinessException("跑道形环桌的宽度必须大于进深");
+                }
                 // L 型桌按主台面 + 侧翼分块判定：内角不属于家具占地，可放椅子。
                 List<Rectangle2D.Double> blocks = bounds.get(i);
                 if (outsidePlacement(blocks, placementArea)) throw new BusinessException(hasLayoutRegions ? "已确认家具超出已启用的家具布置区" : "已确认家具超出空间轮廓");
                 // 座椅侧净空与椅子活动区仅作前端复核提示，不阻止确认保存。
                 for (Area area : exclusions) if (blocksIntersectArea(blocks, area)) throw new BusinessException("已确认家具占用了入口或禁放区");
                 for (Rectangle2D.Double band : channelBands) if (blocksIntersect(blocks, band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
-                for (int j = 0; j < furniture.size(); j++) if (i != j && blocksOverlap(blocks, bounds.get(j))) throw new BusinessException("已确认家具存在重叠");
+                for (int j = 0; j < furniture.size(); j++) {
+                    if (i != j && blocksOverlap(blocks, bounds.get(j))
+                        && (!(meetingGeometry.get(i) || meetingGeometry.get(j)) || OfficeMeetingFootprint.intersects(meetingShapes.get(i), meetingShapes.get(j)))) {
+                        throw new BusinessException("已确认家具存在重叠");
+                    }
+                }
                 String bundle = item.path("mixedBundleId").asText();
                 if (mixedSpacing.isObject() && !bundle.isBlank()) {
                     for (Rectangle2D.Double block : blocks) {
@@ -104,10 +114,22 @@ public final class OfficeLayoutValidationPolicy {
                 JsonNode primary = furniture.stream().filter(item -> "primary".equals(item.path("layoutRole").asText())).findFirst().orElse(furniture.get(0));
                 String context = primary.path("layoutSettings").path("layoutContext").asText();
                 boolean meeting = "meeting".equals(context) || primary.path("furnitureTemplateId").asText().startsWith("table-conference-") || primary.path("furnitureTemplateId").asText().startsWith("table-meeting-");
-                long seats = furniture.stream().filter(item -> "other".equals(context) ? primary.path("furnitureTemplateId").asText().equals(item.path("furnitureTemplateId").asText()) : meeting ? item.path("furnitureTemplateId").asText().startsWith("chair-") || "chair".equals(item.path("moduleSnapshot").path("kind").asText()) : item.path("furnitureTemplateId").asText().startsWith("desk-") || "职员桌".equals(item.path("moduleSnapshot").path("category").asText())).count();
+                long seats = meeting && !"other".equals(context) ? furniture.stream().mapToInt(OfficeLayoutValidationPolicy::meetingSeats).sum()
+                    : furniture.stream().filter(item -> "other".equals(context) ? primary.path("furnitureTemplateId").asText().equals(item.path("furnitureTemplateId").asText())
+                        : item.path("furnitureTemplateId").asText().startsWith("desk-") || "职员桌".equals(item.path("moduleSnapshot").path("category").asText())).count();
                 if (seats < target) throw new BusinessException("当前排版座位不足，请调整方案或目标人数");
             }
         }
+    }
+
+    private static int meetingSeats(JsonNode item) {
+        String id = item.path("furnitureTemplateId").asText();
+        return switch (id) {
+            case "sofa-meeting-double" -> 2;
+            case "sofa-meeting-single" -> 1;
+            case "chair-meeting-observer" -> 0;
+            default -> id.startsWith("chair-") || "chair".equals(item.path("moduleSnapshot").path("kind").asText()) ? 1 : 0;
+        };
     }
 
     private static boolean blocksWithinGap(List<Rectangle2D.Double> first, List<Rectangle2D.Double> second, double gap) {

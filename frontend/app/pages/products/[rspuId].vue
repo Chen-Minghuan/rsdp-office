@@ -164,7 +164,7 @@ onMounted(async () => {
                   <tr v-if="!form.variants?.length"><td colspan="8" class="px-4 py-8 text-center text-sm text-muted">暂无规格信息</td></tr>
                   <tr v-for="variant in form.variants" :key="variant.variantId" class="border-t border-line">
                     <td class="px-4 py-3">{{ variant.displayName || '—' }}</td>
-                    <td class="px-4 py-3 text-xs text-muted">{{ variant.sizeText || variant.sizeCode || '—' }}</td>
+                    <td class="px-4 py-3 text-xs text-muted">{{ variant.sizeText?.trim() || variant.dimensionsText || variant.sizeCode || '—' }}</td>
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.colorText || variant.colorCode || '—' }}</td>
                     <td class="px-4 py-3 text-xs text-muted">{{ variant.materialText || variant.materialCode || '—' }}</td>
                     <td class="px-4 py-3 text-right tabular-nums">{{ variant.packageCount ?? '—' }}</td>

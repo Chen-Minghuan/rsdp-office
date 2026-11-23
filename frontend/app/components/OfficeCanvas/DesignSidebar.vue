@@ -127,7 +127,7 @@ function backToOverview() {
           <span>参考金额</span>
           <strong class="text-lg text-[#9c7047]">{{ money(store.totalPrice) }}</strong>
         </div>
-        <NuxtLink to="/proposal" class="inline-flex items-center justify-center gap-1 w-full text-center px-4 py-2.5 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark">
+        <NuxtLink :to="{ path: '/proposal', query: { floorId: store.workspaceId } }" class="inline-flex items-center justify-center gap-1 w-full text-center px-4 py-2.5 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark">
           <span>生成整体方案</span>
           <AppIcon name="arrowRight" size="3.5" />
         </NuxtLink>

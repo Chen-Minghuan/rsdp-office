@@ -34,7 +34,12 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
-
+  const draftKey = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
+  const project = {
+    projectId: 'OFFICE-PROJECT-001', name: '图纸交接测试项目',
+    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' },
+    floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+  }
 
   let complete = false
   let fail = false
@@ -51,6 +56,7 @@ try {
   await context.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
+    if (path === '/api/v1/office/projects') return respond([project])
     if (path === '/api/v1/floor-plan/analyze') {
       posts++
       return respond({ analysisId: 'DRAWING-7-' + posts, taskId: 'TASK-' + posts })
@@ -85,7 +91,7 @@ try {
     await page.waitForFunction(() => !document.querySelector('input[type="file"]').disabled)
   }
   await replace()
-  const firstUploadId = await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).files[0].drawingId)
+  const firstUploadId = await page.evaluate(key => JSON.parse(localStorage.getItem(key)).files[0].drawingId, draftKey)
   assert.ok(firstUploadId)
   assert.ok(await page.getByRole('button', { name: '进入空间总览', exact: true }).isDisabled())
   // 顶部步骤/侧栏或直接地址不能绕过当前图纸的绑定，旧数据仍保留但不能冒充新图。
@@ -94,7 +100,7 @@ try {
   await page.getByRole('heading', { name: '当前图纸：7.png', exact: true }).waitFor()
   assert.equal(await page.locator('.space-review [data-review-space-id]').count(), 0)
   assert.equal(await page.locator('[data-layer="underlay"]').count(), 0)
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).floorPlan.analysisId), 'DRAWING-5')
+  assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).floorPlan.analysisId, draftKey), 'DRAWING-5')
   await page.getByRole('link', { name: '返回图纸识别', exact: true }).click()
   await page.getByRole('button', { name: '识别图纸', exact: true }).click()
   await page.getByText('正在识别空间', { exact: true }).waitFor()
@@ -139,7 +145,7 @@ try {
   // 同文件名、同大小再次上传仍是新上传，不能误用上一次空间。
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   await replace()
-  assert.notEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).files[0].drawingId), firstUploadId)
+  assert.notEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).files[0].drawingId, draftKey), firstUploadId)
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.getByTestId('drawing-entry').waitFor()
   assert.equal(await page.locator('.review-rooms').getByRole('button', { name: '选择空间 7图已编辑空间', exact: true }).count(), 0)
@@ -198,7 +204,7 @@ try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   page.once('dialog', dialog => dialog.dismiss())
   await page.getByTestId('start-hand-drawing').click()
-  await page.waitForSelector('h1:has-text("上传办公图纸")')
+  await page.getByRole('heading', { name: /上传办公图纸$/ }).waitFor()
   assert.ok((await current()).plan, '取消手动画图保留原设计与图纸')
   page.once('dialog', dialog => dialog.accept())
   await page.getByTestId('start-hand-drawing').click()
@@ -217,7 +223,7 @@ try {
   await page.getByRole('button', { name: '画新空间', exact: true }).waitFor()
   // 手动画布常驻返回按钮：随时可回上传页改为上传图纸识别。
   await page.getByTestId('back-to-upload').click()
-  await page.waitForSelector('h1:has-text("上传办公图纸")')
+  await page.getByRole('heading', { name: /上传办公图纸$/ }).waitFor()
   await page.getByTestId('start-hand-drawing').click()
   await page.waitForURL(/\/canvas\?mode=overview/)
   await page.getByRole('button', { name: '画新空间', exact: true }).waitFor()

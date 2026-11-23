@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
+import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
@@ -16,6 +17,7 @@ import { doorClearanceObstacle, moveObstacle, obstacleLabel, rectangleObstacle, 
 import type { SpatialObstacle, SpatialObstacleKind } from '~/types/spatial'
 
 const store = useOfficeStore(), router = useRouter(), route = useRoute()
+const workspace = useWorkspaceStore()
 const selectedId = ref<string | null>(store.activeZoneId)
 const focusedZoneId = ref<string | null>(null), selectedObstacleId = ref<string | null>(null)
 const obstacleDraft = ref<{ spaceId: string; kind: SpatialObstacleKind; start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
@@ -759,7 +761,7 @@ function advance() {
   if (tracing.value || sketching.value || obstacleDraft.value || obstacleManipulation.value) return
   if (!store.canEnterLayout || store.floorPlanLoading || store.floorPlanError) return
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
-  if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id } })
+  if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id, floorId: workspace.currentFloorId } })
 }
 onMounted(() => { window.addEventListener('keydown', traceKey); window.addEventListener('keyup', keyUp); window.addEventListener('blur', cancelInteraction) })
 onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHintTimer) clearTimeout(zoomHintTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
@@ -771,7 +773,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
     <div class="review-columns">
       <section class="review-canvas-panel review-panel">
         <div class="review-toolbar">
-          <NuxtLink to="/" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
+          <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)" class="review-back" data-testid="back-to-upload" title="返回上传页，可改为上传图纸识别；当前手绘空间会保留"><AppIcon name="arrowLeft" size="3.5" /> 返回上传图纸</NuxtLink><i></i>
           <div class="review-tools" :inert="!!tracing || !!sketching">
             <button :class="{ active: tool === 'select' && !temporaryPanning }" aria-labelledby="review-select-label" aria-describedby="review-select-shortcut" @click="tool = 'select'">
               <AppIcon name="cursor" size="3.5" />
@@ -888,10 +890,10 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
               <strong>空白手动画布</strong>
               <p>无需图纸：点击「画新空间」逐点描出房间轮廓，单位为毫米；也可以返回上传图纸识别。</p>
               <button type="button" data-testid="sketch-start-overlay" @click="startSketch">开始画空间</button>
-              <NuxtLink to="/">返回图纸识别 →</NuxtLink>
+              <NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)">返回图纸识别 →</NuxtLink>
             </template>
             <template v-else>
-              <strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink to="/">返回图纸识别 →</NuxtLink>
+              <strong>{{ imageUrl ? '底图定位信息待补充' : '当前草稿未关联可对照底图' }}</strong><p>请重新应用带原图与轮廓的识别结果；原草稿保留，可撤销编辑。</p><NuxtLink :to="projectDrawingRoute(workspace.currentFloorId)">返回图纸识别 →</NuxtLink>
             </template>
           </div>
           <template v-if="calibrating">
@@ -957,7 +959,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
         </div>
       </aside>
     </div>
-    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId } })" />
+    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId, floorId: workspace.currentFloorId } })" />
   </div>
 </template>
 

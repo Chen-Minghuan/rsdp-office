@@ -223,7 +223,7 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
     } else if (workspaceId === LEGACY_WORKSPACE_ID && !authEnabled) {
       localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
-    const { undoStack, redoStack, ...rest } = parsed
+    const { undoStack, redoStack, workspaceId: storedWorkspaceId, initialized, loading, apiReady, ...rest } = parsed
     return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null }
   } catch {
     return {}
@@ -365,14 +365,14 @@ export const useOfficeStore = defineStore('office', {
       if (templateId?.startsWith('STPL-') && this.zones.every(zone => zone.spaceTemplateId === templateId) && !this.spaceTemplateCurrent) {
         try {
           const saved = await useSpaceTemplateApi().get(templateId)
-          if (storageScope === useAuth().storageScope.value && saved?.scene && templateMatches(saved, this.zones, this.floorPlan)) this.spaceTemplate = { ...saved, storage: 'SAVED' }
+          if (this.workspaceId === workspaceId && storageScope === useAuth().storageScope.value && saved?.scene && templateMatches(saved, this.zones, this.floorPlan)) this.spaceTemplate = { ...saved, storage: 'SAVED' }
         } catch { /* Keep the editable canvas even if its saved template cannot currently be fetched. */ }
       }
+      if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
       if (this.layoutEntryBlocker) {
         this.canvasMode = 'overview'
         this.designZoneId = null
       }
-      if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
       this.loading = false
       this.initialized = true
     },
@@ -385,7 +385,7 @@ export const useOfficeStore = defineStore('office', {
           await useOfficeApi().saveCanvas({ objects: this.objects, files: this.files, mode: this.canvasMode, designZoneId: this.designZoneId, revision: this.canvasRevision, blank: this.blank }, this.workspaceId)
         } catch { /* The floor-scoped local draft remains available when the remote save is unavailable. */ }
       }
-      this.$patch({ ...defaultState(), ...loadLocalState(workspaceId), workspaceId })
+      this.$patch({ ...defaultState(), workspaceId })
       await this.init()
     },
 

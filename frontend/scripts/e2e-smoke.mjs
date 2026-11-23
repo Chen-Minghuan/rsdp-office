@@ -42,7 +42,7 @@ async function shot(name) {
 // 1. 上传页
 console.log('Step 1: upload page')
 await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' })
-await page.waitForSelector('h1:has-text("上传办公图纸")', { timeout: 10000 })
+await page.getByRole('heading', { name: /上传办公图纸$/ }).waitFor({ timeout: 10000 })
 await shot('01-upload')
 
 // 2. 空间总览
@@ -181,8 +181,7 @@ await shot('03-design')
 
 // 4. 选择单位模块、一键排版、确认排版并加入方案
 console.log('Step 4: select module, layout and add to cart')
-await page.getByTestId('tab-product-selection').click()
-await page.locator('[data-auto-module-id="desk-straight"]').click()
+await page.getByLabel('自动布局家具模块').selectOption('desk-straight')
 await page.waitForTimeout(200)
 await page.getByTestId('apply-layout').click()
 await page.waitForTimeout(500)
@@ -200,7 +199,7 @@ await shot('04-design-with-cart')
 // 5. 整体方案
 console.log('Step 5: proposal')
 await page.click('text=生成整体方案')
-await page.waitForURL('**/proposal', { timeout: 10000 })
+await page.waitForURL(url => url.pathname === '/proposal', { timeout: 10000 })
 await page.waitForSelector('h1:has-text("整体方案与清单")', { timeout: 10000 })
 await shot('05-proposal')
 

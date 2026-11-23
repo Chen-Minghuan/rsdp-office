@@ -20,6 +20,7 @@
     "test:design-corrections": "node scripts/test-design-corrections.mjs",
     "test:uuid": "node scripts/test-uuid.mjs",
     "test:furniture-snap": "node scripts/test-furniture-snap.mjs",
+    "test:product-image-preview": "node scripts/test-product-image-preview.mjs",
     "test:furniture-footprint": "node scripts/test-furniture-footprint.mjs",
     "test:cart-line-reduction": "node scripts/test-cart-line-reduction.mjs",
     "e2e:auto-layout": "node scripts/e2e-auto-layout.mjs",

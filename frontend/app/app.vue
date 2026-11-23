@@ -1,19 +1,29 @@
 <script setup lang="ts">
+import { projectBenchPath } from '~/utils/projectBenchRoutes'
+
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const proposalFurnitureGateDialog = useProposalFurnitureGateDialog()
-const { isProjectWorkflow } = useWorkspaceNavigation()
+const { isProjectBench, isProjectWorkflow, isDesignWorkflow, floorReady } = useWorkspaceNavigation()
 // 应用外壳先决定挂载哪个页面，不能等 NuxtPage 渲染完成后才读取路由。
-const route = useRouter().currentRoute
+const router = useRouter()
+const route = router.currentRoute
 const isLoginPage = computed(() => route.value.name === 'login')
 const isSpatialWorkbench = computed(() => route.value.path === '/spatial-canvas')
+const isProjectPage = computed(() => isProjectBench.value || isProjectWorkflow.value)
+const floorPending = computed(() => workspace.switching || (isProjectPage.value && !!workspace.currentFloorId && !floorReady.value))
 async function initializeWorkspace() {
   if (isLoginPage.value || (workspace.initialized && store.initialized)) return
   await workspace.init()
   if (!store.initialized) await store.init()
 }
-watch(() => route.value.query.floorId, floorId => {
-  if (workspace.initialized && typeof floorId === 'string' && floorId !== workspace.currentFloorId) void workspace.activateFloor(floorId)
+watch([() => route.value.query.floorId, () => workspace.initialized, () => workspace.switching], ([floorId, initialized, switching]) => {
+  if (!initialized || switching || typeof floorId !== 'string' || floorId === workspace.currentFloorId) return
+  if (workspace.projects.some(project => project.floors.some(floor => floor.floorId === floorId))) {
+    void workspace.activateFloor(floorId)
+  } else if (isProjectPage.value) {
+    void router.replace(projectBenchPath)
+  }
 })
 onMounted(() => { void initializeWorkspace() })
 watch(isLoginPage, (loginPage, wasLoginPage) => {
@@ -31,10 +41,9 @@ watch(() => route.value.path, () => {
     <AppSidebar v-if="!isSpatialWorkbench" />
     <main :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-w-0 min-h-0'">
       <AppTopbar v-if="!isSpatialWorkbench" />
-      <AppProjectSteps v-if="!isSpatialWorkbench && isProjectWorkflow && workspace.currentFloorId" />
       <div :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-h-0 overflow-y-auto'">
-        <div v-if="workspace.switching" class="grid flex-1 place-items-center text-sm text-muted">正在切换楼层并加载独立工作区…</div>
-        <ProjectEmptyState v-else-if="isProjectWorkflow && !workspace.currentFloorId" />
+        <div v-if="floorPending" class="grid flex-1 place-items-center text-sm text-muted">正在加载当前楼层…</div>
+        <ProjectEmptyState v-else-if="isDesignWorkflow && !workspace.currentFloorId" />
         <NuxtPage v-else :key="workspace.currentFloorId" />
       </div>
     </main>

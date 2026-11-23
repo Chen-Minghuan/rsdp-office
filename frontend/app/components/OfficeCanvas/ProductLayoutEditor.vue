@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { FurnitureObject } from '~/types/office'
 import type { CustomOfficeModule, OfficeModuleTemplate } from '~/types/officeModule'
-import { furnitureCatalogTemplates, furnitureCategories, furnitureCategoryForItem, preferredFurnitureCategory } from '~/utils/manualFurniture'
+import { furnitureById, furnitureCatalogTemplates, furnitureCategories, furnitureCategoryForItem, preferredFurnitureCategory } from '~/utils/manualFurniture'
+import { meetingRingDescription } from '~/utils/meetingRingTable'
 import { moduleGlyphId } from '~/utils/officeModules'
 import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
 
 const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
-const emit = defineEmits<{ confirmed: [] }>()
+const emit = defineEmits<{ confirmed: []; 'select-module': [module: OfficeModuleTemplate, size?: [number, number]] }>()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const items = computed(() => zone.value ? store.furnitureForZone(zone.value.id) : [])
 type FurnitureDisplayGroup = { representative: FurnitureObject; items: FurnitureObject[] }
@@ -39,6 +40,7 @@ watch(itemEditor, editor => editor?.scrollIntoView({ block: 'nearest' }), { flus
 const confirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
 const confirmProblem = computed(() => zone.value && items.value.length && !confirmed.value ? store.layoutConfirmProblem(zone.value.id) : null)
 const editWidth = ref(0), editDepth = ref(0), message = ref('')
+const selectedRingParts = computed(() => selectedItem.value ? meetingRingDescription(glyph(selectedItem.value), selectedItem.value.w, selectedItem.value.h) : '')
 const showModuleDialog = ref(false), editingModule = ref<CustomOfficeModule | null>(null)
 const lastDeletedModule = ref<CustomOfficeModule | null>(null)
 const selectedCatalogId = defineModel<string>('selectedCatalogId', { default: '' })
@@ -59,6 +61,15 @@ function resizeSelected() {
   if (!selectedItem.value) return
   const result = store.resizeFurniture(selectedItem.value.id, editWidth.value, editDepth.value)
   message.value = result || '尺寸已更新，可撤销'
+}
+const editableMeetingGroup = computed(() => {
+  const item = selectedItem.value
+  if (!item || item.layoutRole !== 'primary' || item.layoutGroupId !== `auto:${item.zoneId}` || item.layoutSettings?.layoutContext !== 'meeting') return null
+  const template = furnitureById.get(item.furnitureTemplateId || '')
+  return template?.reference && !['T16', 'S15'].includes(template.reference.code) ? template : null
+})
+function resizeMeetingGroup() {
+  if (editableMeetingGroup.value) emit('select-module', editableMeetingGroup.value, [editWidth.value, editDepth.value])
 }
 function rotateSelected() {
   if (!selectedItem.value || !zone.value) return
@@ -202,8 +213,9 @@ function confirmLayout() {
               <label class="text-[10px] text-muted">宽度 mm<input v-model.number="editWidth" data-testid="product-item-width" type="number" min="10" step="50" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-1.5 text-[11px]"></label>
               <label class="text-[10px] text-muted">深度 mm<input v-model.number="editDepth" data-testid="product-item-depth" type="number" min="10" step="50" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-1.5 text-[11px]"></label>
             </div>
+            <p v-if="selectedRingParts" class="mt-1 text-[10px] text-muted">桌面拼接建议 · {{ selectedRingParts }}</p>
             <div class="mt-2 grid grid-cols-4 gap-1.5">
-              <button data-testid="product-item-resize" class="rounded-none bg-[#83d94f] px-1 py-1.5 text-[10px] font-semibold text-[#214326]" @click="resizeSelected">应用尺寸</button>
+              <button data-testid="product-item-resize" class="rounded-none bg-[#83d94f] px-1 py-1.5 text-[10px] font-semibold text-[#214326]" @click="editableMeetingGroup ? resizeMeetingGroup() : resizeSelected()">{{ editableMeetingGroup ? '预览新组合' : '应用尺寸' }}</button>
               <button class="rounded-none border border-line bg-white px-1 py-1.5 text-[10px] text-[#596252]" @click="rotateSelected">旋转 90°</button>
               <button data-testid="product-copy-furniture" class="rounded-none border border-line bg-white px-1 py-1.5 text-[10px] text-[#596252]" @click="copySelected">复制</button>
               <button class="rounded-none border border-[#ead7d2] bg-white px-1 py-1.5 text-[10px] text-[#a65e4c]" @click="removeSelected">删除</button>
@@ -265,7 +277,7 @@ function confirmLayout() {
               >
                 <span class="block h-9 pointer-events-none"><OfficeCanvasFurniturePreview :template-id="module.id" thumbnail /></span>
                 <span class="block truncate text-[10px] font-medium" :title="module.name">{{ module.name }}</span>
-                <span class="block mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}</span>
+                <span class="block mt-0.5 text-[8px] text-muted">{{ module.widthMm }}×{{ module.depthMm }}<span v-if="module.reference"> · {{ module.reference.code }}</span></span>
               </button>
             </div>
           </div>

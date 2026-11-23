@@ -144,7 +144,44 @@ assert.equal(round.seats, 4)
 assert.equal(confirmedLayoutProblem({ ...zone, layoutPreferences: defaults() }, round.furniture), null)
 const roundTable = round.furniture[0]
 const rightSeat = round.furniture.find(item => item.layoutRole === 'seat' && item.x > roundTable.x + roundTable.w)
-assert.equal(rightSeat.rotation, 270, 'round-table chairs face inward')
+assert.equal(rightSeat.rotation, 90, 'reference chair back is on top, so a right seat faces inward at 90°')
+const { meetingRingTable } = await import(await load(new URL('../app/utils/meetingRingTable.ts', import.meta.url)))
+const wideMeetingZone = { ...zone, w: 26000, h: 20000, polygon: [[-12000,-20000],[14000,-20000],[14000,0],[-12000,0]] }
+const referencePlan = (id, width, depth, morePreferences = {}) => {
+  const module = furnitureById.get(id)
+  return plan(wideMeetingZone, [], { ...request, module, widthMm: width ?? module.widthMm, depthMm: depth ?? module.depthMm, preferences: { ...defaults(), ...morePreferences } })
+}
+for (const [id, seats, pieces] of [
+  ['table-meeting-round-two', 2, 3], ['table-meeting-round', 4, 5], ['sofa-meeting-single', 6, 9], ['sofa-meeting-double', 10, 9],
+  ['table-conference-four', 4, 5], ['table-conference-rect', 8, 9], ['table-conference-long', 14, 21],
+  ['table-conference-ring', 16, 17], ['table-conference-racetrack', 24, 25],
+  ['table-meeting-video-pair', 2, 3], ['table-meeting-boat-small', 4, 5], ['table-meeting-boat', 8, 9],
+  ['table-meeting-video-v', 10, 11], ['table-meeting-wall-high', 2, 3], ['table-meeting-bar-high', 4, 5],
+  ['table-meeting-standing', 0, 1],
+]) {
+  const preview = referencePlan(id)
+  assert.equal(preview.problem, null, id)
+  assert.equal(preview.seats, seats, id)
+  assert.equal(preview.furniture.length, pieces, id)
+  assert.equal(confirmedLayoutProblem(wideMeetingZone, preview.furniture), null, id)
+}
+for (const arrangement of ['classroom', 'islands', 'u', 'o', 'fan']) {
+  const preview = referencePlan('table-meeting-training', undefined, undefined, { meetingTrainingArrangement: arrangement })
+  assert.equal(preview.problem, null, arrangement)
+  assert.equal(preview.seats, 16, arrangement)
+  assert.equal(preview.furniture.filter(item => item.layoutRole === 'primary').length, 8, arrangement)
+  assert.equal(confirmedLayoutProblem(wideMeetingZone, preview.furniture), null, arrangement)
+}
+const racetrack = 'table-conference-racetrack'
+const baseRing = meetingRingTable(racetrack, 7200, 3000)
+assert.equal(baseRing.straightCount * 2, 6)
+assert.equal(baseRing.arcCount, 4)
+assert.equal(baseRing.straightRun / baseRing.straightCount, 1400)
+assert.equal(meetingRingTable(racetrack, 8600, 3000).straightCount * 2, 8)
+assert.equal(referencePlan(racetrack, 8600, 3000).seats, 28)
+assert.equal(referencePlan(racetrack, undefined, undefined, { targetSeats: 24, resizeMeetingTable: true }).furniture[0].w, 7200)
+assert.match(referencePlan(racetrack, 2600, 3000).problem, /宽度必须大于进深/)
+assert.equal(referencePlan(racetrack, undefined, undefined, { includeChairs: false }).furniture.length, 1)
 const inMeeting = plan(zone, [], deskRequest)
 assert.equal(inMeeting.problem, null, 'meeting rooms allow desks')
 assert.equal(inMeeting.seats, 12)

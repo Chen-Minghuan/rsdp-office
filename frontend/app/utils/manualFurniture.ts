@@ -1,6 +1,7 @@
 import type { ManualFurnitureItem, ManualLayoutRect, ManualLayoutRoom, FurnitureCategory, FurnitureKind, FurnitureTemplate } from '~/types/manualCanvas'
 import type { FurnitureObject, ZoneObject } from '~/types/office'
 import { manualRectContainedByUnion } from '~/utils/manualLayoutGeometry'
+import { meetingFurnitureTemplates } from './meetingFurnitureCatalog'
 
 const builtInFurniture: FurnitureTemplate[] = [
   { id: 'desk-straight', name: '职员直线桌', category: '职员桌', kind: 'desk', widthMm: 1200, depthMm: 600,
@@ -32,9 +33,9 @@ const builtInFurniture: FurnitureTemplate[] = [
   { id: 'chair-meeting', name: '会议椅', category: '座椅', kind: 'chair', widthMm: 550, depthMm: 580 },
   { id: 'chair-visitor', name: '访客椅', category: '座椅', kind: 'chair', widthMm: 620, depthMm: 620 },
   { id: 'chair-lounge', name: '休闲单椅', category: '座椅', kind: 'chair', widthMm: 850, depthMm: 850 },
-  { id: 'table-conference-rect', name: '长方形会议桌', category: '会议与洽谈', kind: 'table', widthMm: 2800, depthMm: 1200 },
-  { id: 'table-conference-oval', name: '椭圆形会议桌', category: '会议与洽谈', kind: 'oval-table', widthMm: 2800, depthMm: 1200 },
-  { id: 'table-meeting-round', name: '圆形洽谈桌', category: '会议与洽谈', kind: 'round-table', widthMm: 1000, depthMm: 1000 },
+  ...meetingFurnitureTemplates.filter(template => template.id === 'table-conference-rect'),
+  ...meetingFurnitureTemplates.filter(template => template.id !== 'table-conference-rect'),
+  { id: 'table-conference-oval', name: '椭圆形会议桌', category: '会议与洽谈', kind: 'oval-table', widthMm: 2800, depthMm: 1200, catalogHidden: true },
   { id: 'table-meeting-square', name: '方形洽谈桌', category: '会议与洽谈', kind: 'table', widthMm: 900, depthMm: 900 },
   { id: 'cabinet-low', name: '底抽柜', category: '收纳', kind: 'cabinet', widthMm: 1200, depthMm: 450,
     heightMm: 400, heightMinMm: 100, heightMaxMm: 400 },

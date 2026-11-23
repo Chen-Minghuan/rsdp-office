@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,13 +66,11 @@ public class RsdpCatalogGateway {
 
     public OfficeProductDto currentVariant(String viewMode, String rspuId, String variantId) {
         if ("none".equals(viewMode) || rspuId == null) return null;
-        String id = java.net.URLEncoder.encode(rspuId, java.nio.charset.StandardCharsets.UTF_8);
-        JsonNode rows = rsdpClient.get("/api/v1/products?size=1&rspuId=" + id + "&viewMode=" + viewMode
-            + "&status=active").path("rows");
-        if (!rows.isArray() || rows.isEmpty() || !rspuId.equals(rows.get(0).path("rspuId").asText())) {
+        List<ProductListItemDto> matches = readProducts(viewMode, true, rspuId);
+        if (matches.isEmpty()) {
             return null;
         }
-        return toOfficeProductDtos(toListItem(rows.get(0))).stream()
+        return toOfficeProductDtos(matches.getFirst()).stream()
             .filter(item -> variantId.equals(item.getId())).findFirst().orElse(null);
     }
 
@@ -136,7 +135,7 @@ public class RsdpCatalogGateway {
             dto.setKind("other");
             dto.setUses(List.of("OTHER"));
             dto.setImageUrl(product.getPrimaryImageUrl());
-            applyDimensions(dto, textOrNull(v, "dimensions"));
+            applyDimensions(dto, v.path("dimensions"));
             rows.add(dto);
         });
         // The main list carries categoryPath; sixDimTags normally arrive in product detail.
@@ -208,13 +207,9 @@ public class RsdpCatalogGateway {
     }
 
     /** 主项目尺寸 JSON → 毫米 + 厘米上取整；支持当前 w/d/h 短键和既有 widthMm/widthCm 长键。 */
-    private void applyDimensions(OfficeProductDto dto, String dimensions) {
-        if (dimensions == null || dimensions.isBlank()) {
-            return;
-        }
+    private void applyDimensions(OfficeProductDto dto, JsonNode dimensions) {
         try {
-            JsonNode source = objectMapper.readTree(dimensions);
-            BigDecimal[] exact = OfficeProductMatching.dimensions(normalizeMainDimensions(source));
+            BigDecimal[] exact = readMainDimensions(dimensions);
             dto.setWidthMm(exact[0]);
             dto.setDepthMm(exact[1]);
             dto.setHeightMm(exact[2]);
@@ -225,6 +220,24 @@ public class RsdpCatalogGateway {
         } catch (Exception ignored) {
             // 尺寸未知保持为空，不臆造
         }
+    }
+
+    private BigDecimal[] readMainDimensions(JsonNode dimensions) {
+        return OfficeProductMatching.dimensions(normalizeMainDimensions(embeddedJson(dimensions)));
+    }
+
+    private String formatMainDimensions(JsonNode dimensions) {
+        BigDecimal[] sizeMm = readMainDimensions(dimensions);
+        String[] axes = {"宽", "深", "高"};
+        boolean labelAxes = sizeMm[0] == null || sizeMm[1] == null;
+        StringJoiner label = new StringJoiner(" × ", "", " mm").setEmptyValue("");
+        for (int axis = 0; axis < sizeMm.length; axis++) {
+            if (sizeMm[axis] != null) {
+                String prefix = labelAxes ? axes[axis] + " " : "";
+                label.add(prefix + sizeMm[axis].stripTrailingZeros().toPlainString());
+            }
+        }
+        return label.length() == 0 ? null : label.toString();
     }
 
     /** 主项目短键按毫米契约解释（含缺省 unit 的旧记录）；unit=cm 时改走厘米长键，其他单位仍由匹配器拒绝。 */
@@ -254,17 +267,30 @@ public class RsdpCatalogGateway {
      * @param viewMode own=仅本厂已报价产品；full=全库只读（主项目按服务账号身份控制）
      */
     public List<ProductListItemDto> listProducts(String viewMode) {
+        return readProducts(viewMode, "full".equals(viewMode), null);
+    }
+
+    /** 使用主库返回的可见列表。旧版主库会忽略列表请求中的 rspuId 参数。 */
+    private List<ProductListItemDto> readProducts(String viewMode, boolean activeOnly, String targetId) {
         List<ProductListItemDto> all = new ArrayList<>();
+        long rowsRead = 0;
         int page = 1;
         while (true) {
             JsonNode data = rsdpClient.get("/api/v1/products?page=" + page + "&size=" + PAGE_SIZE
-                + "&viewMode=" + viewMode + ("full".equals(viewMode) ? "&status=active" : ""));
+                + "&viewMode=" + viewMode + (activeOnly ? "&status=active" : ""));
             JsonNode rows = data.path("rows");
             if (!rows.isArray() || rows.isEmpty()) {
                 break;
             }
-            rows.forEach(row -> all.add(toListItem(row)));
-            if (all.size() >= data.path("total").asInt(0) || rows.size() < PAGE_SIZE) {
+            for (JsonNode row : rows) {
+                if (targetId == null) {
+                    all.add(toListItem(row));
+                } else if (targetId.equals(row.path("rspuId").asText())) {
+                    return List.of(toListItem(row));
+                }
+            }
+            rowsRead += rows.size();
+            if (rowsRead >= data.path("total").asLong(rowsRead)) {
                 break;
             }
             page++;
@@ -274,10 +300,7 @@ public class RsdpCatalogGateway {
 
     /** 读取指定商品在当前视图中的记录，详情与列表复用主库范围。 */
     public boolean inView(String rspuId, String viewMode) {
-        String id = java.net.URLEncoder.encode(rspuId, java.nio.charset.StandardCharsets.UTF_8);
-        JsonNode rows = rsdpClient.get("/api/v1/products?size=1&rspuId=" + id + "&viewMode=" + viewMode
-            + ("full".equals(viewMode) ? "&status=active" : "")).path("rows");
-        return rows.isArray() && !rows.isEmpty() && rspuId.equals(rows.get(0).path("rspuId").asText());
+        return rspuId != null && !readProducts(viewMode, "full".equals(viewMode), rspuId).isEmpty();
     }
 
     /** 拉取商品资料供已核验的设计流程使用。 */
@@ -334,6 +357,7 @@ public class RsdpCatalogGateway {
                 variant.setSizeCode(textOrNull(v, "sizeCode"));
                 variant.setSizeText(textOrNull(v, "sizeText"));
                 variant.setDimensions(textOrNull(v, "dimensions"));
+                variant.setDimensionsText(formatMainDimensions(v.path("dimensions")));
                 variant.setColorCode(textOrNull(v, "colorCode"));
                 variant.setColorText(textOrNull(v, "colorText"));
                 variant.setMaterialCode(textOrNull(v, "materialCode"));

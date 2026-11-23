@@ -3,12 +3,19 @@ import { computed } from 'vue'
 import type { ManualFurnitureItem } from '~/types/manualCanvas'
 import { furnitureById } from '~/utils/manualFurniture'
 import { workstationSeatGeometry } from '~/utils/furniture3d/workstationSeating'
+import { meetingFurnitureLinework } from '~/utils/meetingFurnitureLinework'
+import { meetingRingLinework } from '~/utils/meetingRingTable'
+import { tableFurnitureLinework } from '~/utils/tableFurnitureLinework'
 
 const props = defineProps<{ item: ManualFurnitureItem; selected?: boolean; invalid?: boolean; strokeScale?: number; showSeat?: boolean }>()
 const template = computed(() => furnitureById.get(props.item.templateId))
 const deskTemplateId = computed(() => template.value?.seatlessOf || props.item.templateId)
 const w = computed(() => props.item.widthMm)
 const d = computed(() => props.item.depthMm)
+const referenceCode = computed(() => template.value?.reference?.code || '')
+const referencePaths = computed(() => meetingFurnitureLinework[referenceCode.value])
+const tableLinework = computed(() => tableFurnitureLinework[referenceCode.value || props.item.templateId])
+const ring = computed(() => meetingRingLinework(props.item.templateId, w.value, d.value))
 const wing = computed(() => Math.min(props.item.wingWidthMm ?? 550, w.value / 2, d.value / 2))
 const transform = computed(() => `translate(${props.item.xMm} ${props.item.yMm}) rotate(${props.item.rotationDeg}) translate(${-w.value / 2} ${-d.value / 2})`)
 const sofaSeats = computed(() => props.item.templateId === 'sofa-triple' ? 3 : props.item.templateId === 'sofa-double' ? 2 : 1)
@@ -40,7 +47,20 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
 
 <template>
   <g v-if="template" :transform="transform" class="manual-furniture-glyph" :class="{ selected, invalid }" :style="{ strokeWidth: (selected ? 2 : 1.3) * (strokeScale ?? 1) }">
-    <template v-if="isReferenceStraightDesk">
+    <template v-if="ring">
+      <path :d="ring.body" fill-rule="evenodd" />
+      <path :d="ring.seams" fill="none" />
+    </template>
+    <g v-else-if="tableLinework" :data-table-detail="referenceCode || item.templateId" :transform="`scale(${w / 100} ${d / 100})`">
+      <path :d="tableLinework.outline || referencePaths?.[0]" />
+      <path v-if="tableLinework.support" class="table-support" :d="tableLinework.support" />
+      <path class="table-feature" :d="tableLinework.feature" />
+    </g>
+    <g v-else-if="referencePaths" :data-reference-furniture="referenceCode" :transform="`scale(${w / 100} ${d / 100})`">
+      <rect width="100" height="100" fill="transparent" stroke="none" />
+      <path v-for="(path, index) in referencePaths" :key="index" :d="path" fill="none" />
+    </g>
+    <template v-else-if="isReferenceStraightDesk">
       <rect x="0" y="0" :width="w" :height="d" />
       <rect v-if="rightPanel" class="reference-guide" :x="w - panelWidth" y="0" :width="panelWidth" :height="d" />
       <rect v-if="leftPanel" class="reference-guide" x="0" y="0" :width="panelWidth" :height="d" />
@@ -166,6 +186,9 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
       <line v-else-if="template.kind === 'wall'" :x1="w * 0.08" :y1="d / 2" :x2="w * 0.92" :y2="d / 2" />
       <rect v-else-if="template.kind === 'table'" :x="w * 0.43" :y="d * 0.43" :width="w * 0.14" :height="d * 0.14" rx="8" />
     </template>
+    <g v-if="showSeat && referenceCode === 'T15'" class="reference-guide" pointer-events="none">
+      <circle v-for="(point, index) in [[w / 4, -300], [w * 3 / 4, -300], [w / 4, d + 300], [w * 3 / 4, d + 300], [-300, d / 2], [w + 300, d / 2]]" :key="index" :cx="point[0]" :cy="point[1]" :r="Math.min(230, w / 5, d / 3)" />
+    </g>
   </g>
 </template>
 
@@ -173,6 +196,8 @@ const cabinetModuleCount = computed(() => Math.max(1, Math.round(w.value / 400))
 .manual-furniture-glyph { fill: #fff; stroke: #78736d; stroke-width: 1.3; stroke-linejoin: round; vector-effect: non-scaling-stroke; cursor: move; }
 .manual-furniture-glyph :is(rect, path, ellipse, line, circle) { vector-effect: non-scaling-stroke; }
 .manual-furniture-glyph .reference-guide { fill: none; stroke-dasharray: 4 3; }
+.manual-furniture-glyph .table-feature { fill: none; stroke-opacity: 0.85; stroke-linecap: round; }
+.manual-furniture-glyph .table-support { fill: none; stroke-opacity: 0.6; stroke-dasharray: 3 2; }
 .manual-furniture-glyph.selected { stroke: #306fcb; stroke-width: 2; }
 .manual-furniture-glyph.invalid { stroke: #c45c4c; }
 </style>

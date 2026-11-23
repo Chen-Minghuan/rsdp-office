@@ -69,6 +69,7 @@ export function useWorkspaceApi() {
     updateProject: async (projectId: string, projectName: string) => projectFromDto(await request<ProjectDto>('PATCH', `/api/v1/office/projects/${projectId}`, { name: projectName })),
     updateFloor: async (projectId: string, floorId: string, floorName: string) => floorFromDto(await request<FloorDto>('PATCH', `/api/v1/office/projects/${projectId}/floors/${floorId}`, { name: floorName })),
     updateRequirements: async (projectId: string, customerRequirements: string) => projectFromDto(await request<ProjectDto>('PATCH', `/api/v1/office/projects/${projectId}/requirements`, { customerRequirements })),
+    summarizeRequirements: (projectId: string, requirementsRevision: number) => request<WorkspaceRequirementsSummary>('POST', `/api/v1/office/projects/${projectId}/requirements/summary`, { requirementsRevision }),
     listAssignableUsers: async (keyword?: string) => request<AssignableUser[]>('GET', `/api/v1/office/users/assignable${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`),
     replaceMembers: async (projectId: string, leaderUserId: string, collaboratorUserIds: string[]) =>
       projectFromDto(await request<ProjectDto>('PUT', `/api/v1/office/projects/${projectId}/members`, { leaderUserId, collaboratorUserIds })),

@@ -32,6 +32,8 @@ try {
     analysisId: 'MEETING-TEST', analysisRevision: 1, status: 'awaiting_confirm', sourceName: '会议室测试.dxf',
     inputMode: 'cad', geometrySource: 'cad_geometry', evidenceKind: 'REAL_SERVICE',
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
+    previewBounds: { minX: 0, minY: 0, maxX: 12000, maxY: 8000 },
+    previewUrl: 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="white"/><path d="M20 20 H1180 V780 H20 Z" fill="none" stroke="black"/></svg>').toString('base64'),
     rooms: [{ roomId: 'MEETING-ROOM', label: '测试会议室', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[0, 0], [12000, 0], [12000, 8000], [0, 8000]] }, { roomId: 'OPEN-ROOM', label: '测试办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[20000, 0], [32000, 0], [32000, 8000], [20000, 8000]] }, { roomId: 'NARROW-ROOM', label: '窄工作间', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[40000, 0], [47524, 0], [47524, 2805], [40000, 2805]] }],
   }
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
@@ -48,10 +50,31 @@ try {
   })
   const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const catalog = page.getByTestId('unit-module-catalog')
+  async function chooseAutomaticModule(id) {
+    await page.getByTestId('tab-auto-layout').click()
+    const category = page.getByTestId('functional-category-meeting')
+    if (await category.getAttribute('aria-pressed') !== 'true') await category.click()
+    await page.getByRole('tab', { name: '调整参数', exact: true }).click()
+    await page.getByLabel('自动布局家具模块').selectOption(id)
+  }
   await page.goto(`${baseUrl}/canvas?analysisId=MEETING-TEST`, { waitUntil: 'networkidle' })
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 测试会议室', exact: true }).waitFor()
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  const underlay = page.getByTestId('design-underlay')
+  const opacitySlider = page.getByTestId('design-underlay-opacity')
+  await underlay.waitFor()
+  assert.equal(await opacitySlider.inputValue(), '15')
+  assert.equal(await underlay.evaluate(element => getComputedStyle(element).opacity), '0.15')
+  await opacitySlider.press('ArrowRight')
+  assert.equal(await opacitySlider.inputValue(), '20')
+  assert.equal(await underlay.evaluate(element => getComputedStyle(element).opacity), '0.2')
+  await page.getByRole('button', { name: '返回空间总览', exact: true }).click()
+  await underlay.waitFor({ state: 'detached' })
+  await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await underlay.waitFor()
+  assert.equal(await opacitySlider.inputValue(), '15')
+  assert.equal(await underlay.evaluate(element => getComputedStyle(element).opacity), '0.15')
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   assert.equal(await page.getByTestId('layout-candidates').count(), 0, '未排版时不显示单模块方案选择')
@@ -62,7 +85,27 @@ try {
   await catalog.waitFor()
   assert.equal(await catalog.locator('[data-module-id="table-conference-rect"]').getAttribute('aria-pressed'), 'false', '进入排版不再默认选中模块')
   const snapshot = await state()
-  await catalog.locator('[data-auto-module-id="table-conference-rect"]').click() // preview appears after an explicit module choice
+  await chooseAutomaticModule('table-conference-racetrack')
+  await page.getByTestId('meeting-ring-parts').getByText(/直段 × 6.*1400 × 750 mm.*端弧段 × 4/).waitFor()
+  await page.getByTestId('layout-seat-summary').getByText(/已排座位 24/).waitFor()
+  await page.getByRole('spinbutton', { name: '模块宽度（毫米）' }).fill('5800')
+  await page.getByTestId('meeting-ring-parts').getByText(/直段 × 4/).waitFor()
+  await page.getByTestId('layout-seat-summary').getByText(/已排座位 20/).waitFor()
+  await page.screenshot({ path: (process.env.OUT_DIR || 'C:/Users/cmh/AppData/Local/Temp') + '/rsdp-meeting-racetrack.png' })
+  assert.deepEqual((await state()).objects, snapshot.objects, 'ring preview does not change the saved layout')
+  await page.getByTestId('apply-layout').click()
+  const appliedRing = (await state()).objects.filter(item => item.kind === 'furniture')
+  assert.equal(appliedRing.filter(item => item.furnitureTemplateId === 'chair-meeting-upholstered').length, 20)
+  const appliedTable = appliedRing.find(item => item.furnitureTemplateId === 'table-conference-racetrack')
+  assert.equal(appliedTable.w, 5800)
+  await page.getByTestId('tab-product-selection').click()
+  await page.locator(`[data-furniture-id="${appliedTable.id}"]`).click()
+  await page.getByTestId('product-item-width').fill('7200')
+  await page.getByTestId('product-item-resize').click()
+  await page.getByTestId('layout-seat-summary').getByText(/已排座位 24/).waitFor()
+  assert.equal((await state()).objects.find(item => item.id === appliedTable.id).w, 5800, 'resizing a saved meeting table opens a preview for the entire group')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await chooseAutomaticModule('table-conference-rect') // preview appears after an explicit module choice
   assert.ok(await page.locator('[data-preview-id]').count() > 1)
   assert.deepEqual((await state()).objects, snapshot.objects, 'preview never writes objects')
   await page.getByRole('spinbutton', { name: '目标人数', exact: true }).fill('8')
@@ -163,13 +206,10 @@ try {
   assert.deepEqual(placedCandidate, candidatePreview, '选中候选的预览与应用几何一致')
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual((await state()).objects, beforeReplan, 'undo after candidate apply restores prior layout')
-  await page.getByTestId('tab-product-selection').click()
-  await catalog.locator('summary').filter({ hasText: '职员桌' }).click()
-  await catalog.locator('[data-auto-module-id="desk-l"]').click()
+  await chooseAutomaticModule('desk-l')
   assert.ok(await page.getByTestId('apply-layout').isEnabled(), 'meeting room allows staff desks')
   assert.ok(await page.getByTestId('auto-manual-layout').isEnabled(), 'automatic layout can enter the manual editor')
-  await page.getByTestId('tab-product-selection').click()
-  await catalog.locator('[data-auto-module-id="table-conference-rect"]').click()
+  await chooseAutomaticModule('table-conference-rect')
   // GEOM-013：面板只读；空间核对标注的禁放区（建筑约束）常显并阻止应用，移除后恢复。
   await page.evaluate(() => {
     const draft = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))

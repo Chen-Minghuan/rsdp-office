@@ -67,7 +67,10 @@ await context.route('**/api/v1/**', async route => {
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
     const product = products.find(item => item.rspuId === rspuId)
-    return respond({ ...product, images: [], variants: [] })
+    return respond({ ...product, images: [], variants: [
+      { variantId: 'STRUCTURED', displayName: '默认规格', dimensionsText: '1200 × 600 × 450 mm', status: 'active' },
+      { variantId: 'SUPPLIER', displayName: '供应商规格', sizeText: '供应商尺寸原文', dimensionsText: '1400 × 600 mm', status: 'active' },
+    ] })
   }
   if (url.pathname === '/api/v1/office/workspace/shared-catalog') {
     if (request.method() === 'PUT') {
@@ -127,6 +130,9 @@ try {
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
   await page.getByText('在售状态', { exact: true }).waitFor()
+  await page.getByRole('cell', { name: '1200 × 600 × 450 mm', exact: true }).waitFor()
+  await page.getByRole('cell', { name: '供应商尺寸原文', exact: true }).waitFor()
+  assert.equal(await page.getByRole('cell', { name: '1400 × 600 mm', exact: true }).count(), 0)
   assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
@@ -136,22 +142,61 @@ try {
   assert.equal(await page.locator('tbody tr').count(), 15)
   await page.getByLabel('筛选商品状态').selectOption('')
 
-  await page.getByRole('link', { name: '空间设计', exact: true }).click()
+  const workspaceNavigation = page.getByRole('navigation', { name: '工作区导航' })
+  const sidebarWorkbench = workspaceNavigation.getByRole('link', { name: '项目工作台', exact: true })
+  await sidebarWorkbench.click()
+  await heading('项目工作台')
+  await page.getByRole('region', { name: '项目列表', exact: true }).getByRole('button', { name: '进入项目 默认办公项目', exact: true }).first().click()
   await heading('默认楼层 · 上传办公图纸')
+  assert.equal(await sidebarWorkbench.getAttribute('aria-current'), 'page')
   const projectFlow = page.getByRole('region', { name: '项目设计流程' })
   await projectFlow.getByText('空间设计', { exact: true }).waitFor()
   await projectFlow.getByText(/当前图纸：/).waitFor()
   const projectNav = page.getByRole('navigation', { name: '项目设计步骤' })
-  assert.equal(await projectNav.getByRole('link').count(), 4)
-  assert.equal(await projectNav.getByRole('button', { name: '1 项目创建', exact: true }).count(), 1)
-  await projectNav.getByRole('link', { name: '3 空间总览' }).click()
+  assert.deepEqual(await projectNav.getByRole('link').evaluateAll(links => links.map(link => link.lastElementChild.textContent)), ['项目工作台', '空间总览', '布局选品', '预算清单'])
+  const workbenchStep = projectNav.getByRole('link', { name: '1 项目工作台', exact: true })
+  assert.equal(await workbenchStep.getAttribute('href'), await sidebarWorkbench.getAttribute('href'))
+  assert.equal(await workbenchStep.getAttribute('aria-current'), 'step')
+  const overviewStep = projectNav.getByRole('link', { name: '2 空间总览', exact: true })
+  await overviewStep.click()
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
+  assert.equal(await overviewStep.getAttribute('aria-current'), 'step')
+  const topbar = page.getByTestId('workspace-topbar')
+  assert.equal(await topbar.getByRole('navigation', { name: '项目设计步骤' }).count(), 1)
+  for (const width of [1440, 1280, 390]) {
+    await page.setViewportSize({ width, height: 960 })
+    const bar = await topbar.boundingBox()
+    const links = await projectNav.getByRole('link').evaluateAll(elements => elements.map(element => {
+      const { left, right } = element.getBoundingClientRect()
+      return { left, right }
+    }))
+    assert.equal(links.length, 4)
+    assert.ok(links.every(link => link.left >= bar.x && link.right <= bar.x + bar.width), `steps fit in topbar at ${width}px`)
+    if (width >= 1280) {
+      const canvas = await page.locator('.review-canvas-panel').boundingBox()
+      const roomPanel = await page.locator('.review-rooms').boundingBox()
+      assert.ok(bar.height <= 65, `project steps share a single top row at ${width}px`)
+      assert.equal(Math.round(canvas.y), Math.round(bar.y + bar.height))
+      assert.equal(Math.round(roomPanel.y), Math.round(bar.y + bar.height))
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await workbenchStep.click()
+  await heading('项目工作台')
+  assert.equal(await workbenchStep.getAttribute('aria-current'), 'step')
+  await page.getByRole('link', { name: '默认楼层 · 上传识别图纸', exact: true }).click()
+  await heading('默认楼层 · 上传办公图纸')
+  await overviewStep.click()
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   const enterLayout = page.getByRole('button', { name: '进入家具排版 →', exact: true })
   await confirmAllReviews(page)
   assert.equal(await enterLayout.isEnabled(), true)
   await enterLayout.click()
   await page.waitForURL(/mode=design/)
+  const designSidebar = page.getByTestId('design-workflow-sidebar')
+  await designSidebar.waitFor()
+  const designBar = await topbar.boundingBox()
+  assert.equal(Math.round((await designSidebar.boundingBox()).y), Math.round(designBar.y + designBar.height))
   await projectFlow.getByRole('button', { name: /查看当前空间模板/ }).click()
   await page.getByRole('dialog', { name: '空间模板', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭空间模板', exact: true }).click()
