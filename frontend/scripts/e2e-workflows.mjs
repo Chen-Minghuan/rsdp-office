@@ -67,7 +67,10 @@ await context.route('**/api/v1/**', async route => {
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
     const product = products.find(item => item.rspuId === rspuId)
-    return respond({ ...product, images: [], variants: [] })
+    return respond({ ...product, images: [], variants: [
+      { variantId: 'STRUCTURED', displayName: '默认规格', dimensionsText: '1200 × 600 × 450 mm', status: 'active' },
+      { variantId: 'SUPPLIER', displayName: '供应商规格', sizeText: '供应商尺寸原文', dimensionsText: '1400 × 600 mm', status: 'active' },
+    ] })
   }
   if (url.pathname === '/api/v1/office/workspace/shared-catalog') {
     if (request.method() === 'PUT') {
@@ -127,6 +130,9 @@ try {
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
   await page.getByText('在售状态', { exact: true }).waitFor()
+  await page.getByRole('cell', { name: '1200 × 600 × 450 mm', exact: true }).waitFor()
+  await page.getByRole('cell', { name: '供应商尺寸原文', exact: true }).waitFor()
+  assert.equal(await page.getByRole('cell', { name: '1400 × 600 mm', exact: true }).count(), 0)
   assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
