@@ -76,7 +76,8 @@ public class OfficeModuleRecommendationService {
         result.setModuleId(request.getModuleId()); result.setZoneId(request.getZoneId());
         result.setCanvasRevision(context.canvas().getRevision()); result.setWidthMm(width); result.setDepthMm(depth);
         result.setTargetCategory(target == null ? null : target.label);
-        result.setSameModuleCount(context.sameModules().size()); result.setCandidates(matches); result.setMissingDimensions(missing); result.setEligibleVariantCount(catalog.size());
+        result.setSameModuleCount(context.sameModules().size());
+        result.setCandidates(matches); result.setMissingDimensions(missing); result.setEligibleVariantCount(catalog.size());
         return result;
     }
 
@@ -96,15 +97,15 @@ public class OfficeModuleRecommendationService {
         if (current == null) {
             throw new BusinessException("商品已不可用，请刷新推荐并重新选择");
         }
-        var currentMatch = OfficeProductMatching.match(current, result.getWidthMm(), result.getDepthMm(), request.isAllowRotation());
+        var representativeMatch = OfficeProductMatching.match(current, result.getWidthMm(), result.getDepthMm(), request.isAllowRotation());
         var relevanceTarget = OfficeFurnitureRelevance.target(context.module());
         var relevance = relevanceTarget == null ? null : OfficeFurnitureRelevance.match(relevanceTarget, current);
-        if (currentMatch == null || relevance == null) {
+        if (representativeMatch == null || relevance == null) {
             throw new BusinessException("商品规格或品类已变化，请刷新推荐并重新选择");
         }
-        currentMatch.setMatchReason(relevance.reason());
-        currentMatch.setRelevanceScore(BigDecimal.valueOf(relevance.points()).add(currentMatch.getFitRatio().multiply(BigDecimal.valueOf(15))));
-        match = currentMatch;
+        representativeMatch.setMatchReason(relevance.reason());
+        representativeMatch.setRelevanceScore(BigDecimal.valueOf(relevance.points()).add(representativeMatch.getFitRatio().multiply(BigDecimal.valueOf(15))));
+        match = representativeMatch;
         if (match.getProduct().getPrice() == null || match.getProduct().getPrice().signum() <= 0) throw new BusinessException("商品尚未报价，请补齐报价后加入方案");
         List<JsonNode> targets = request.isApplyToSameModules() ? context.sameModules() : List.of(context.module());
         List<CartItemDto> lines = new ArrayList<>();

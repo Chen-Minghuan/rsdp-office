@@ -24,7 +24,7 @@ import { useCanvasSpacePan } from '~/composables/useCanvasSpacePan'
 
 
 const store = useOfficeStore()
-const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean] }>()
+const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean]; editSize: [id: string] }>()
 const layoutPreview = defineModel<LayoutPreview | null>('layoutPreview', { default: null })
 const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { default: null })
@@ -543,7 +543,7 @@ interface DragState {
 
 const drag = ref<DragState | null>(null)
 const selectedFurniture = computed(() => furniture.value.find(item => item.id === selectedId.value) || null)
-const selectedFurnitureIds = ref<string[]>([])
+const selectedFurnitureIds = defineModel<string[]>('selectedFurnitureIds', { default: () => [] })
 const selectedChannelId = ref<string | null>(null)
 const selectedFurnitureItems = computed(() => furniture.value.filter(item => selectedFurnitureIds.value.includes(item.id)))
 const moveProblem = ref('')
@@ -574,7 +574,9 @@ function dragFurnitureItem(item: FurnitureObject) {
 }
 const dragSnapGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
 watch(selectedId, id => {
-  if (id && furniture.value.some(item => item.id === id)) selectedFurnitureIds.value = [id]
+  if (id && furniture.value.some(item => item.id === id) && !selectedFurnitureIds.value.includes(id)) {
+    selectedFurnitureIds.value = [id]
+  }
 })
 const lastDeletedFurnitureId = ref<string | null>(null)
 const deleteFeedback = computed(() => lastDeletedFurnitureId.value && !store.objects.some(item => item.id === lastDeletedFurnitureId.value) ? '已删除模块，可点击工具栏撤销恢复' : '')
@@ -1076,6 +1078,13 @@ function finishViewportPan(pointerId?: number) {
   drag.value = null
   const viewport = canvasWindow.value
   if (current.pointerId !== undefined && viewport?.hasPointerCapture(current.pointerId)) viewport.releasePointerCapture(current.pointerId)
+}
+
+function onFurnitureContextMenu(f: FurnitureObject) {
+  if (mode.value !== 'design') return
+  selectedId.value = f.id
+  selectedFurnitureIds.value = [f.id]
+  emit('editSize', f.id)
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -2261,6 +2270,7 @@ function furnitureProduct(o: FurnitureObject) {
           ]"
           :style="{ ...furnitureStyle(dragFurnitureItem(f)), outline: drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined }"
           @pointerdown.stop="onPointerDown"
+          @contextmenu.prevent="onFurnitureContextMenu(f)"
         >
           <OfficeCanvasFurniturePreview v-if="officeFurnitureTemplateId(f, furnitureProduct(f))"
             :template-id="officeFurnitureTemplateId(f, furnitureProduct(f))!" :width-mm="f.w" :depth-mm="f.h"
