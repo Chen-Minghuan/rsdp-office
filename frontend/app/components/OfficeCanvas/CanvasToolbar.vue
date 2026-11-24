@@ -16,7 +16,6 @@ const overviewTools = [
   { key: 'select', icon: 'pencil', label: '选择' },
   { key: 'pan', icon: 'hand', label: '拖动' },
   { key: 'zone', icon: 'zone', label: '区域' },
-  { key: 'note', icon: 'note', label: '便签' },
   { key: 'arrow', icon: 'arrow', label: '箭头' },
   { key: 'reference', icon: 'reference', label: '参考图' },
 ]
@@ -24,7 +23,6 @@ const overviewTools = [
 const designTools = [
   { key: 'select', icon: 'pencil', label: '选择' },
   { key: 'pan', icon: 'hand', label: '拖动' },
-  { key: 'note', icon: 'note', label: '便签' },
   { key: 'white-model', icon: 'cube', label: '3D 白模' },
   { key: 'render', icon: 'reference', label: 'AI 效果图' },
   { key: 'constraints', icon: 'door', label: '建筑标注' },
