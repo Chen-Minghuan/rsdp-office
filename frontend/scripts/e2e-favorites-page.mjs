@@ -112,6 +112,7 @@ async function openAs(user) {
     }
     const saveProductMatch = path.match(/^\/api\/v1\/office\/favorites\/products\/([^/]+)$/)
     if (saveProductMatch && request.method() === 'PUT') {
+      if (state.holdPersonalSave) await state.holdPersonalSave;
       const folderIds = request.postDataJSON().folderIds || []
       state.personalSaves.push({ rspuId: saveProductMatch[1], folderIds })
       state.membership[saveProductMatch[1]] = new Set(folderIds)
@@ -147,6 +148,52 @@ async function openAs(user) {
 }
 
 try {
+  // 清理其他商品、移除当前商品和删除文件夹时，分别保留当前商品的未提交勾选。
+  const draft = await openAs(dealerUser)
+  await draft.page.goto(`${baseUrl}/favorites`, { waitUntil: 'networkidle' })
+  const draftDialog = draft.page.getByRole('dialog', { name: '收藏商品', exact: true })
+  await draft.page.getByRole('button', { name: `调整收藏夹${products.P1.productName}`, exact: true }).click()
+  await draftDialog.getByRole('checkbox', { name: /^会议室方案，/ }).check()
+  await draftDialog.getByRole('button', { name: '展开收藏夹默认收藏夹', exact: true }).click()
+  let releaseRemoval
+  draft.state.holdPersonalSave = new Promise(resolve => { releaseRemoval = resolve })
+  const removingOther = draft.page.waitForRequest(request => request.method() === 'PUT'
+    && new URL(request.url()).pathname.endsWith('/favorites/products/P2'))
+  await draftDialog.getByRole('button', { name: `取消收藏${products.P2.productName}`, exact: true }).click()
+  await removingOther
+  assert.equal(await draftDialog.getByRole('button', { name: /^确定收藏/ }).isDisabled(), true, '取消其他收藏进行中不能同时提交旧勾选')
+  draft.state.holdPersonalSave = null
+  releaseRemoval()
+  await draftDialog.getByRole('button', { name: /^确定收藏/ }).waitFor({ state: 'visible' })
+  await draft.page.waitForFunction(() => !document.querySelector('dialog[open] button[aria-label="取消收藏人体工学网布办公椅"]'))
+  assert.equal(await draftDialog.getByRole('checkbox', { name: /^会议室方案，/ }).isChecked(), true, '清理其他商品不得覆盖未保存的勾选')
+  await draftDialog.getByRole('button', { name: /^确定收藏/ }).click()
+  await draftDialog.waitFor({ state: 'hidden' })
+  assert.deepEqual([...draft.state.membership.P1].sort(), ['F0', 'F1'])
+
+  await draft.page.getByRole('button', { name: `调整收藏夹${products.P1.productName}`, exact: true }).click()
+  await draftDialog.getByRole('checkbox', { name: /^会议室方案，/ }).uncheck()
+  await draftDialog.getByRole('button', { name: '展开收藏夹默认收藏夹', exact: true }).click()
+  await draftDialog.getByRole('button', { name: `取消收藏${products.P1.productName}`, exact: true }).click()
+  await draft.page.waitForFunction(() => !document.querySelector('dialog[open] button[aria-label="取消收藏职员桌四人位简约款"]'))
+  assert.equal(await draftDialog.getByRole('checkbox', { name: /^默认收藏夹，/ }).isChecked(), false, '直接取消当前商品应更新该文件夹勾选')
+  assert.equal(await draftDialog.getByRole('checkbox', { name: /^会议室方案，/ }).isChecked(), false, '当前商品的其他草稿修改应保留')
+  await draftDialog.getByRole('button', { name: '取消', exact: true }).click()
+  assert.deepEqual([...draft.state.membership.P1], ['F1'], '取消弹窗不应提交其他草稿')
+
+  await draft.page.getByRole('button', { name: `调整收藏夹${products.P3.productName}`, exact: true }).click()
+  await draftDialog.getByRole('checkbox', { name: /^默认收藏夹，/ }).check()
+  await draftDialog.getByRole('button', { name: '删除收藏夹会议室方案', exact: true }).click()
+  const draftDelete = draft.page.getByRole('dialog', { name: '删除收藏夹', exact: true })
+  await draftDelete.getByRole('button', { name: '确认删除', exact: true }).click()
+  await draftDelete.waitFor({ state: 'hidden' })
+  await draft.page.waitForFunction(() => !document.querySelector('dialog[open] input[aria-label^="会议室方案，"]'))
+  assert.equal(await draftDialog.getByRole('checkbox', { name: /^默认收藏夹，/ }).isChecked(), true, '删除文件夹只清理被删除的 ID，其余草稿保留')
+  await draftDialog.getByRole('button', { name: /^确定收藏/ }).click()
+  await draftDialog.waitFor({ state: 'hidden' })
+  assert.deepEqual([...draft.state.membership.P3], ['F0'])
+  await draft.context.close()
+
   const dealer = await openAs(dealerUser)
   const { page, state } = dealer
   await page.goto(`${baseUrl}/favorites`, { waitUntil: 'networkidle' })

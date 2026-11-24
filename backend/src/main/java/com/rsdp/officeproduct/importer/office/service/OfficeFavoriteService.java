@@ -208,7 +208,7 @@ public class OfficeFavoriteService {
     private String requireUserId() {
         // 认证关闭的本地开发模式没有会话用户，使用固定本地用户保证收藏读写一致。
         if (!currentUserService.authEnabled()) {
-            return "LOCAL-DEV";
+            return currentUserService.ensureLocalFavoriteUser();
         }
         OfficeUser user = currentUserService.currentUser();
         if (user == null || !StringUtils.hasText(user.getUserId())) {

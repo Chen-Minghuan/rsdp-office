@@ -168,10 +168,12 @@ class OfficeProjectFavoriteServiceTest {
     @Test
     void localDevModeUsesStableLocalUserForProjectFavorites() {
         when(currentUserService.authEnabled()).thenReturn(false);
+        when(currentUserService.ensureLocalFavoriteUser()).thenReturn("LOCAL-DEV");
         when(itemMapper.findProductIds("P-A", "LOCAL-DEV")).thenReturn(List.of("C"));
 
         assertEquals(List.of("C"), service.listProjectFavoriteProductIds("P-A"));
         verify(currentUserService, never()).currentUser();
+        verify(currentUserService).ensureLocalFavoriteUser();
         verify(accessService).requireMember("P-A");
     }
 

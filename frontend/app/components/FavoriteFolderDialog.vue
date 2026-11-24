@@ -31,6 +31,7 @@ const expandedFolderIds = ref<Set<string>>(new Set())
 const folderItems = ref<Record<string, ImportedProduct[]>>({})
 const folderItemsLoading = ref<Set<string>>(new Set())
 const removingItemKey = ref('')
+const busy = computed(() => saving.value || creating.value || deleting.value || !!removingItemKey.value)
 const selectedCount = computed(() => selectedFolderIds.value.size)
 const currentProject = computed(() => workspace.currentProject)
 const selectedProject = computed(() => workspace.projects.find(project => project.projectId === selectedProjectId.value) || null)
@@ -40,7 +41,7 @@ const projectOptions = computed(() => [...workspace.projects].sort((a, b) => {
   return 0
 }))
 const canSave = computed(() => {
-  if (!product.value || saving.value || creating.value) return false
+  if (!product.value || busy.value) return false
   if (activeSection.value === 'project') {
     return !!selectedProject.value && !projectLoading.value
       && projectLoadedKey.value === `${selectedProject.value.projectId}:${product.value.rspuId}`
@@ -88,11 +89,11 @@ async function open(value: ImportedProduct, section: FavoriteSection = 'personal
 }
 
 function switchSection(section: FavoriteSection) {
-  if (saving.value || creating.value) return
+  if (busy.value) return
   activeSection.value = section
 }
 
-async function loadFolders() {
+async function loadFolders(preserveSelection = false) {
   if (!product.value) return
   const currentSession = session
   const rspuId = product.value.rspuId
@@ -102,7 +103,10 @@ async function loadFolders() {
     const result = await api.loadFavoriteFolders(rspuId)
     if (currentSession !== session || product.value?.rspuId !== rspuId) return
     folders.value = result
-    selectedFolderIds.value = new Set(result.filter(folder => folder.selected).map(folder => folder.folderId))
+    const availableIds = new Set(result.map(folder => folder.folderId))
+    selectedFolderIds.value = preserveSelection
+      ? new Set([...selectedFolderIds.value].filter(id => availableIds.has(id)))
+      : new Set(result.filter(folder => folder.selected).map(folder => folder.folderId))
     loadedRspuId.value = rspuId
   } catch (error) {
     if (currentSession === session) errorMessage.value = error instanceof Error ? error.message : '收藏夹加载失败'
@@ -131,7 +135,7 @@ async function loadProjectFavorite(projectId = selectedProjectId.value) {
 }
 
 function selectProject(projectId: string) {
-  if (saving.value || projectId === selectedProjectId.value) return
+  if (busy.value || projectId === selectedProjectId.value) return
   selectedProjectId.value = projectId
   projectSelected.value = false
   projectLoadedKey.value = ''
@@ -139,7 +143,7 @@ function selectProject(projectId: string) {
 }
 
 function close() {
-  if (saving.value || creating.value) return
+  if (busy.value) return
   session++
   projectRequest++
   loadedRspuId.value = null
@@ -148,7 +152,7 @@ function close() {
 }
 
 function cancelDialog(event: Event) {
-  if (saving.value || creating.value) {
+  if (busy.value) {
     event.preventDefault()
     return
   }
@@ -159,6 +163,7 @@ function cancelDialog(event: Event) {
 }
 
 function toggleFolder(folderId: string, event: Event) {
+  if (busy.value) return
   const checked = (event.target as HTMLInputElement).checked
   const next = new Set(selectedFolderIds.value)
   if (checked) next.add(folderId)
@@ -167,6 +172,7 @@ function toggleFolder(folderId: string, event: Event) {
 }
 
 async function createFolder() {
+  if (busy.value) return
   const name = newFolderName.value.trim()
   if (!name) {
     errorMessage.value = '收藏夹名称不能为空'
@@ -190,7 +196,7 @@ async function createFolder() {
 }
 
 function askDeleteFolder(folder: FavoriteFolder) {
-  if (saving.value || creating.value || deleting.value) return
+  if (busy.value) return
   deleteError.value = null
   deletingFolder.value = folder
   nextTick(() => deleteDialog.value?.showModal())
@@ -213,9 +219,9 @@ async function confirmDeleteFolder() {
     if (currentSession !== session) return
     deleteDialog.value?.close()
     deletingFolder.value = null
-    await loadFolders()
+    await loadFolders(true)
     if (currentSession === session && product.value) {
-      emit('saved', { rspuId: product.value.rspuId, folderIds: [...selectedFolderIds.value] })
+      emit('saved', { rspuId: product.value.rspuId, folderIds: folders.value.filter(folder => folder.selected).map(folder => folder.folderId) })
     }
   } catch (error) {
     if (currentSession === session) deleteError.value = error instanceof Error ? error.message : '删除收藏夹失败'
@@ -259,7 +265,7 @@ async function loadFolderItems(folderId: string) {
 }
 
 async function removeItemFromFolder(folder: FavoriteFolder, item: ImportedProduct) {
-  if (removingItemKey.value || saving.value) return
+  if (busy.value) return
   removingItemKey.value = `${folder.folderId}:${item.rspuId}`
   errorMessage.value = null
   const currentSession = session
@@ -269,9 +275,12 @@ async function removeItemFromFolder(folder: FavoriteFolder, item: ImportedProduc
       .map(entry => entry.folderId)
     await api.saveProductFavoriteFolders(item.rspuId, selected)
     if (currentSession !== session) return
-    await Promise.all([loadFolders(), loadFolderItems(folder.folderId)])
+    if (item.rspuId === product.value?.rspuId) {
+      selectedFolderIds.value = new Set([...selectedFolderIds.value].filter(id => id !== folder.folderId))
+    }
+    await Promise.all([loadFolders(true), loadFolderItems(folder.folderId)])
     if (currentSession === session && product.value) {
-      emit('saved', { rspuId: product.value.rspuId, folderIds: [...selectedFolderIds.value] })
+      emit('saved', { rspuId: product.value.rspuId, folderIds: folders.value.filter(folder => folder.selected).map(folder => folder.folderId) })
     }
   } catch (error) {
     if (currentSession === session) errorMessage.value = error instanceof Error ? error.message : '取消收藏失败'
@@ -329,7 +338,7 @@ defineExpose({ open })
     <div class="p-6">
       <div class="mb-5 flex items-start justify-between gap-4">
         <h2 id="favorite-dialog-title" class="text-lg font-bold">收藏商品</h2>
-        <button type="button" class="rounded-lg p-1.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="关闭收藏夹弹窗" :disabled="saving || creating" @click="close"><AppIcon name="close" size="5" /></button>
+        <button type="button" class="rounded-lg p-1.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="关闭收藏夹弹窗" :disabled="busy" @click="close"><AppIcon name="close" size="5" /></button>
       </div>
 
       <div v-if="product" class="mb-5 flex items-center gap-4 rounded-xl border border-line bg-[#faf9f7] p-3">
@@ -338,8 +347,8 @@ defineExpose({ open })
       </div>
 
       <div class="mb-5 flex border-b border-line" role="tablist" aria-label="收藏类型">
-        <button id="project-favorite-tab" type="button" role="tab" aria-controls="project-favorite-panel" :aria-selected="activeSection === 'project'" class="flex-1 border-b-2 px-4 py-3 text-sm transition" :class="activeSection === 'project' ? 'border-bronze font-semibold text-bronze-dark' : 'border-transparent text-muted hover:text-ink'" :disabled="saving || creating" @click="switchSection('project')">项目收藏</button>
-        <button id="personal-favorite-tab" type="button" role="tab" aria-controls="personal-favorite-panel" :aria-selected="activeSection === 'personal'" class="flex-1 border-b-2 px-4 py-3 text-sm transition" :class="activeSection === 'personal' ? 'border-bronze font-semibold text-bronze-dark' : 'border-transparent text-muted hover:text-ink'" :disabled="saving || creating" @click="switchSection('personal')">个人收藏</button>
+        <button id="project-favorite-tab" type="button" role="tab" aria-controls="project-favorite-panel" :aria-selected="activeSection === 'project'" class="flex-1 border-b-2 px-4 py-3 text-sm transition" :class="activeSection === 'project' ? 'border-bronze font-semibold text-bronze-dark' : 'border-transparent text-muted hover:text-ink'" :disabled="busy" @click="switchSection('project')">项目收藏</button>
+        <button id="personal-favorite-tab" type="button" role="tab" aria-controls="personal-favorite-panel" :aria-selected="activeSection === 'personal'" class="flex-1 border-b-2 px-4 py-3 text-sm transition" :class="activeSection === 'personal' ? 'border-bronze font-semibold text-bronze-dark' : 'border-transparent text-muted hover:text-ink'" :disabled="busy" @click="switchSection('personal')">个人收藏</button>
       </div>
 
       <section v-if="activeSection === 'project'" id="project-favorite-panel" role="tabpanel" aria-labelledby="project-favorite-tab">
@@ -347,7 +356,7 @@ defineExpose({ open })
         <div v-if="projectError" class="mb-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">{{ projectError }}</div>
         <div v-if="projectOptions.length" class="max-h-64 scroll-smooth overflow-y-auto rounded-xl border border-line">
           <label v-for="project in projectOptions" :key="project.projectId" class="relative flex min-h-[54px] cursor-pointer items-center gap-3 border-b border-line px-4 py-3 text-sm transition last:border-b-0" :class="selectedProjectId === project.projectId ? 'bg-cream font-semibold text-bronze-dark shadow-[inset_3px_0_0_#9a7645]' : 'bg-white hover:bg-bg'" :aria-busy="selectedProjectId === project.projectId && projectLoading">
-            <input type="radio" name="project-favorite-folder" class="h-4 w-4 flex-none accent-[#9a7645]" :aria-label="project.projectName" :checked="selectedProjectId === project.projectId" :disabled="saving" @change="selectProject(project.projectId)">
+            <input type="radio" name="project-favorite-folder" class="h-4 w-4 flex-none accent-[#9a7645]" :aria-label="project.projectName" :checked="selectedProjectId === project.projectId" :disabled="busy" @change="selectProject(project.projectId)">
             <span class="min-w-0 flex-1 truncate">{{ project.projectName }}</span>
             <span v-if="project.projectId === currentProject?.projectId" class="shrink-0 rounded bg-[#eee2d2] px-2 py-1 text-[10px] font-normal text-bronze-dark">当前项目 · 默认</span>
             <span v-else-if="selectedProjectId === project.projectId && projectLoading" class="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-bronze/25 border-t-bronze" aria-hidden="true"></span>
@@ -370,7 +379,7 @@ defineExpose({ open })
           <div class="max-h-64 space-y-2 overflow-y-auto">
             <div v-for="folder in folders" :key="folder.folderId" class="group relative overflow-hidden rounded-lg border transition" :class="selectedFolderIds.has(folder.folderId) ? 'border-bronze bg-cream' : 'border-line bg-white hover:bg-bg'">
               <label class="flex cursor-pointer items-center gap-3 px-4 py-3" :class="folder.defaultFolder ? 'pr-12' : 'pr-[76px]'">
-                <input type="checkbox" class="h-4 w-4 accent-[#9a7645]" :aria-label="`${folder.name}，${folder.itemCount}件`" :checked="selectedFolderIds.has(folder.folderId)" :disabled="saving" @change="toggleFolder(folder.folderId, $event)">
+                <input type="checkbox" class="h-4 w-4 accent-[#9a7645]" :aria-label="`${folder.name}，${folder.itemCount}件`" :checked="selectedFolderIds.has(folder.folderId)" :disabled="busy" @change="toggleFolder(folder.folderId, $event)">
                 <span class="min-w-0 flex-1 truncate text-sm" :class="selectedFolderIds.has(folder.folderId) ? 'font-semibold' : ''">{{ folder.name }}</span>
                 <span class="text-xs text-muted">{{ folder.itemCount }}</span>
               </label>
@@ -378,7 +387,7 @@ defineExpose({ open })
                 <button type="button" class="grid h-7 w-7 place-items-center rounded-md border border-line bg-white text-muted transition hover:text-ink" :aria-label="`${isExpanded(folder.folderId) ? '收起' : '展开'}收藏夹${folder.name}`" :aria-expanded="isExpanded(folder.folderId)" title="查看收藏夹内容" @click="toggleExpand(folder.folderId)">
                   <AppIcon name="chevronDown" size="3.5" :class="isExpanded(folder.folderId) ? '' : '-rotate-90'" />
                 </button>
-                <button v-if="!folder.defaultFolder" type="button" class="grid h-7 w-7 place-items-center rounded-md text-[#b3402f] opacity-0 transition hover:bg-red-50 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-30" :aria-label="`删除收藏夹${folder.name}`" title="删除收藏夹" :disabled="saving || creating || deleting" @click="askDeleteFolder(folder)">
+                <button v-if="!folder.defaultFolder" type="button" class="grid h-7 w-7 place-items-center rounded-md text-[#b3402f] opacity-0 transition hover:bg-red-50 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-30" :aria-label="`删除收藏夹${folder.name}`" title="删除收藏夹" :disabled="busy" @click="askDeleteFolder(folder)">
                   <AppIcon name="trash" size="4" />
                 </button>
               </div>
@@ -400,7 +409,7 @@ defineExpose({ open })
             </div>
           </div>
 
-          <button v-if="!showCreate" type="button" class="mt-3 flex w-full items-center gap-2 rounded-lg border border-line px-4 py-3 text-left text-sm text-bronze-dark transition hover:bg-cream" :disabled="saving" @click="showCreate = true"><AppIcon name="plus" size="4" />新建收藏夹</button>
+          <button v-if="!showCreate" type="button" class="mt-3 flex w-full items-center gap-2 rounded-lg border border-line px-4 py-3 text-left text-sm text-bronze-dark transition hover:bg-cream" :disabled="busy" @click="showCreate = true"><AppIcon name="plus" size="4" />新建收藏夹</button>
           <div v-else class="mt-3 flex gap-2">
             <input v-model="newFolderName" type="text" maxlength="50" aria-label="新建收藏夹名称" placeholder="输入收藏夹名称" class="min-w-0 flex-1 rounded-lg border border-bronze bg-white px-3 py-2.5 text-sm outline-bronze" :disabled="creating || saving" @keyup.enter="createFolder">
             <button type="button" class="shrink-0 rounded-lg bg-cream px-4 text-sm font-semibold text-bronze-dark disabled:opacity-50" :disabled="creating || saving" @click="createFolder">{{ creating ? '创建中…' : '创建收藏夹' }}</button>
@@ -412,10 +421,10 @@ defineExpose({ open })
         <div class="mb-4 flex items-center justify-between gap-3 text-xs">
           <span class="text-green">{{ activeSection === 'project' ? '项目与个人收藏互不影响' : `已选 ${selectedCount} 个收藏夹` }}</span>
           <button v-if="activeSection === 'project' && projectError && !projectLoading" type="button" class="font-semibold text-bronze-dark" @click="loadProjectFavorite()">重新加载</button>
-          <button v-else-if="activeSection === 'personal' && errorMessage && !loading && folders.length === 0" type="button" class="font-semibold text-bronze-dark" @click="loadFolders">重新加载</button>
+          <button v-else-if="activeSection === 'personal' && errorMessage && !loading && folders.length === 0" type="button" class="font-semibold text-bronze-dark" @click="loadFolders()">重新加载</button>
         </div>
         <div class="flex justify-end gap-3">
-          <button type="button" class="rounded-lg border border-line px-5 py-2.5 text-sm disabled:opacity-50" :disabled="saving || creating" @click="close">取消</button>
+          <button type="button" class="rounded-lg border border-line px-5 py-2.5 text-sm disabled:opacity-50" :disabled="busy" @click="close">取消</button>
           <button type="button" class="rounded-lg bg-bronze px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-bronze-dark disabled:opacity-50" :disabled="!canSave" @click="save">{{ saving ? '保存中…' : activeSection === 'project' ? (projectLoading ? '读取中…' : projectSelected ? '取消收藏' : '确定收藏') : `确定收藏（${selectedCount}）` }}</button>
         </div>
       </div>
