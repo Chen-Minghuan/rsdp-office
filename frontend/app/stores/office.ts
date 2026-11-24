@@ -254,7 +254,6 @@ export const useOfficeStore = defineStore('office', {
       return list.find((z) => z.id === state.activeZoneId) || list[0] || null
     },
     zoneCount: (state) => state.objects.filter((o) => o.kind === 'zone').length,
-    noteCount: (state) => state.objects.filter((o) => o.kind === 'note').length,
     refCount: (state) => state.objects.filter((o) => o.kind === 'reference').length,
     furnitureForZone: (state) => (zoneId: string) =>
       state.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId),
@@ -1525,9 +1524,7 @@ export const useOfficeStore = defineStore('office', {
         canvasRevisionId: `CANVAS-REV-${this.canvasRevision}`,
         sceneRevisionId: null,
         zones,
-        annotations: this.objects
-          .filter((o) => o.kind === 'note')
-          .map((o) => ({ id: o.id, zoneId: null, content: (o as any).text })),
+        annotations: [],
         references: this.objects
           .filter((o) => o.kind === 'reference')
           .map((o) => ({
