@@ -1,0 +1,191 @@
+import assert from 'node:assert/strict'
+import { chromium } from 'playwright'
+
+const baseUrl = process.env.BASE_URL || 'http://localhost:3001'
+const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
+
+const products = Object.fromEntries(Array.from({ length: 6 }, (_, index) => {
+  const id = `P${index + 1}`
+  return [id, {
+    rspuId: id,
+    rspuCode: `RSPU-${index + 1}`,
+    productName: `测试商品${index + 1}号`,
+    primaryImageUrl: null,
+    retailPrice: 100 * (index + 1),
+    status: 'active',
+    updatedAt: '2026-11-20T10:00:00',
+  }]
+}))
+const dealerUser = { userId: 'DEALER-1', username: 'dealer', displayName: '开发经销商主号', role: 'DEALER', workspaceType: 'DEALER' }
+
+function comboDto(combo) {
+  return {
+    comboId: combo.comboId,
+    name: combo.name,
+    items: combo.rspuIds.map(rspuId => ({
+      rspuId,
+      productName: products[rspuId]?.productName ?? null,
+      primaryImageUrl: null,
+      retailPrice: products[rspuId]?.retailPrice ?? null,
+      available: Boolean(products[rspuId]),
+    })),
+  }
+}
+
+async function openPage(initialCombos = []) {
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const state = { combos: initialCombos, saves: [], renames: [], deleted: [] }
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: dealerUser } }))
+  await context.route('**/api/v1/**', async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname
+    const respond = data => route.fulfill({ json: { code: 200, message: '成功', data } })
+    const reject = message => route.fulfill({ json: { code: 400, message, data: null } })
+    if (path === '/api/v1/office/combos' && request.method() === 'GET') {
+      return respond(state.combos.map(combo => comboDto(combo)))
+    }
+    if (path === '/api/v1/office/combos' && request.method() === 'POST') {
+      const name = (request.postDataJSON().name || '').trim()
+      if (!name) return reject('组合名称不能为空')
+      if (state.combos.length >= 10) return reject('最多创建10个组合')
+      if (state.combos.some(combo => combo.name === name)) return reject('组合名称已存在')
+      const combo = { comboId: `CB-${state.combos.length + 1}`, name, rspuIds: [] }
+      state.combos.push(combo)
+      return respond(comboDto(combo))
+    }
+    const comboMatch = path.match(/^\/api\/v1\/office\/combos\/([^/]+)(\/items)?$/)
+    if (comboMatch) {
+      const combo = state.combos.find(item => item.comboId === comboMatch[1])
+      if (!combo) return reject('组合不存在')
+      if (comboMatch[2] && request.method() === 'PUT') {
+        const rspuIds = request.postDataJSON().rspuIds || []
+        if (rspuIds.length > 5) return reject('每个组合最多5个商品')
+        state.saves.push({ comboId: combo.comboId, rspuIds })
+        combo.rspuIds = rspuIds
+        return respond(null)
+      }
+      if (!comboMatch[2] && request.method() === 'PATCH') {
+        const name = (request.postDataJSON().name || '').trim()
+        if (!name) return reject('组合名称不能为空')
+        state.renames.push({ comboId: combo.comboId, name })
+        combo.name = name
+        return respond(null)
+      }
+      if (!comboMatch[2] && request.method() === 'DELETE') {
+        state.deleted.push(combo.comboId)
+        state.combos = state.combos.filter(item => item.comboId !== combo.comboId)
+        return respond(null)
+      }
+    }
+    if (path === '/api/v1/products') return respond(Object.values(products))
+    if (path === '/api/v1/products/capabilities') return respond({ managed: false })
+    if (path === '/api/v1/office/workspace/shared-catalog') return respond({ workspaceEnabled: true, dealer: true, effectiveVisible: true })
+    if (path === '/api/v1/office/projects') return respond([])
+    return respond(path.endsWith('/workspace/me') ? null : [])
+  })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto(`${baseUrl}/products`, { waitUntil: 'networkidle' })
+  return { context, page, errors, state }
+}
+
+try {
+  const { context, page, errors, state } = await openPage()
+
+  const panel = page.getByTestId('combo-panel')
+  await panel.waitFor({ state: 'visible' })
+  assert.equal(await panel.getByTestId('combo-card').count(), 0, '初始没有组合卡')
+
+  // 创建：命名弹窗确认后才出现组合卡
+  await panel.getByRole('button', { name: '创建新的组合' }).click()
+  const nameDialog = page.getByRole('dialog', { name: '命名组合' })
+  await nameDialog.getByRole('textbox', { name: '组合名称' }).fill('会议洽谈组合')
+  await nameDialog.getByRole('button', { name: '确认', exact: true }).click()
+  await nameDialog.waitFor({ state: 'hidden' })
+  const card = panel.getByTestId('combo-card').first()
+  await card.waitFor({ state: 'visible' })
+  assert.match(await card.innerText(), /会议洽谈组合/)
+  assert.match(await card.innerText(), /0\/5/)
+
+  // 空位＋ → 选品弹窗勾选 3 个商品
+  await card.getByRole('button', { name: '添加商品', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: '选择商品' })
+  await picker.getByRole('searchbox', { name: '搜索商品' }).fill('测试商品')
+  for (const id of ['P1', 'P2', 'P3']) {
+    await picker.getByRole('checkbox', { name: products[id].productName, exact: true }).check()
+  }
+  await picker.getByRole('button', { name: '确认加入', exact: true }).click()
+  await picker.waitFor({ state: 'hidden' })
+  assert.match(await card.innerText(), /3\/5/)
+  assert.deepEqual(state.saves.at(-1), { comboId: 'CB-1', rspuIds: ['P1', 'P2', 'P3'] })
+
+  // 展开 / 收起明细
+  await card.getByRole('button', { name: '展开商品' }).click()
+  const itemList = card.getByTestId('combo-item-list')
+  await itemList.waitFor({ state: 'visible' })
+  for (const id of ['P1', 'P2', 'P3']) {
+    assert.match(await itemList.innerText(), new RegExp(products[id].productName))
+  }
+  await card.getByRole('button', { name: '收起商品' }).click()
+  await itemList.waitFor({ state: 'hidden' })
+
+  // 拖拽商品卡到组合卡
+  await page.getByTestId(`product-card-${'P4'}`).dragTo(card)
+  await page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('4/5'))
+  assert.deepEqual(state.saves.at(-1), { comboId: 'CB-1', rspuIds: ['P1', 'P2', 'P3', 'P4'] })
+
+  // 刷新后组合仍在（后端持久化）
+  await page.reload({ waitUntil: 'networkidle' })
+  const reloadedCard = page.getByTestId('combo-card').first()
+  await reloadedCard.waitFor({ state: 'visible' })
+  assert.match(await reloadedCard.innerText(), /4\/5/)
+
+  // 超过 5 个：后端拒绝并提示
+  await reloadedCard.getByRole('button', { name: '添加商品', exact: true }).click()
+  const picker2 = page.getByRole('dialog', { name: '选择商品' })
+  await picker2.getByRole('checkbox', { name: products.P5.productName, exact: true }).check()
+  await picker2.getByRole('checkbox', { name: products.P6.productName, exact: true }).check()
+  await picker2.getByRole('button', { name: '确认加入', exact: true }).click()
+  await page.getByText('每个组合最多5个商品', { exact: false }).first().waitFor({ state: 'visible' })
+  assert.match(await reloadedCard.innerText(), /4\/5/, '超限后组合内容不变')
+  await picker2.getByRole('button', { name: '取消', exact: true }).click()
+  await picker2.waitFor({ state: 'hidden' })
+
+  // 改名
+  await reloadedCard.getByRole('button', { name: '重命名', exact: true }).click()
+  const renameDialog = page.getByRole('dialog', { name: '命名组合' })
+  const renameInput = renameDialog.getByRole('textbox', { name: '组合名称' })
+  assert.equal(await renameInput.inputValue(), '会议洽谈组合', '改名弹窗预填当前名称')
+  await renameInput.fill('洽谈区组合')
+  await renameDialog.getByRole('button', { name: '确认', exact: true }).click()
+  await renameDialog.waitFor({ state: 'hidden' })
+  assert.match(await reloadedCard.innerText(), /洽谈区组合/)
+  assert.deepEqual(state.renames, [{ comboId: 'CB-1', name: '洽谈区组合' }])
+
+  // 删除需确认
+  await reloadedCard.getByRole('button', { name: '删除', exact: true }).click()
+  const deleteDialog = page.getByRole('dialog', { name: '删除组合' })
+  await deleteDialog.getByRole('button', { name: '确认删除', exact: true }).click()
+  await page.getByTestId('combo-card').waitFor({ state: 'detached' })
+  assert.deepEqual(state.deleted, ['CB-1'])
+
+  assert.deepEqual(errors, [], '页面不能有未捕获异常')
+  await context.close()
+
+  // 每账号最多 10 个组合：达到上限后创建入口禁用
+  const full = await openPage(Array.from({ length: 10 }, (_, index) => ({
+    comboId: `CB-${index + 1}`, name: `组合${index + 1}`, rspuIds: [],
+  })))
+  const fullPanel = full.page.getByTestId('combo-panel')
+  await fullPanel.getByTestId('combo-card').first().waitFor({ state: 'visible' })
+  assert.equal(await fullPanel.getByTestId('combo-card').count(), 10)
+  assert.equal(await fullPanel.getByRole('button', { name: '创建新的组合' }).isDisabled(), true, '10 个组合后创建按钮禁用')
+  assert.deepEqual(full.errors, [])
+  await full.context.close()
+
+  console.log('E2E product combos passed')
+} finally {
+  await browser.close()
+}

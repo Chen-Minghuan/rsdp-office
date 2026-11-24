@@ -152,6 +152,11 @@ function goToPage(value = pageInput.value) {
   pageInput.value = target
 }
 
+function onProductDragStart(product: ImportedProduct, event: DragEvent) {
+  event.dataTransfer?.setData('text/plain', product.rspuId)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
+
 async function showDetails(product: ImportedProduct) {
   selectedProduct.value = product
   await nextTick()
@@ -271,7 +276,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col overflow-y-auto">
+  <div class="flex h-full min-h-0">
+    <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
     <div class="flex-none">
       <div class="mb-3 text-xs text-muted">商品资源 / 商品库</div>
       <div class="flex flex-wrap items-start justify-between gap-4">
@@ -353,7 +359,9 @@ onMounted(() => {
 
       <div v-else class="p-4 sm:p-5">
         <ul aria-label="商品卡片列表" class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-8">
-          <li v-for="product in pageProducts" :key="product.rspuId" class="group flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-white transition duration-200 hover:-translate-y-0.5 hover:border-bronze/60 hover:shadow-panel">
+          <li v-for="product in pageProducts" :key="product.rspuId" :data-testid="`product-card-${product.rspuId}`"
+            draggable="true" @dragstart="onProductDragStart(product, $event)"
+            class="group flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-white transition duration-200 hover:-translate-y-0.5 hover:border-bronze/60 hover:shadow-panel">
             <div class="relative shrink-0">
               <NuxtLink :to="`/products/${product.rspuId}`" class="relative block aspect-[4/3] overflow-hidden border-b border-line bg-white outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bronze" :aria-label="`查看${product.productName || '商品'}详情`">
                 <ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" />
@@ -446,6 +454,8 @@ onMounted(() => {
         <dl class="grid grid-cols-[90px_minmax(0,1fr)] gap-x-3 gap-y-4 text-sm"><dt class="text-muted">商品编码</dt><dd class="break-all">{{ selectedProduct.rspuCode || selectedProduct.rspuId }}</dd><dt class="text-muted">外部编码</dt><dd class="break-all">{{ selectedProduct.externalCode || '—' }}</dd><dt class="text-muted">零售价</dt><dd class="font-semibold text-bronze-dark">{{ formatPrice(selectedProduct.retailPrice) }}</dd><dt class="text-muted">更新日期</dt><dd>{{ formatDate(selectedProduct.updatedAt) }}</dd></dl>
       </template>
     </dialog>
+    </div>
+    <ProductComboPanel :products="products" class="hidden md:flex" />
   </div>
 </template>
 

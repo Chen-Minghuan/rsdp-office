@@ -3,6 +3,7 @@ import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
 import type { CatalogCapabilities, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
+import type { ProductCombo } from '~/types/combos'
 import type { WorkspaceType } from '~/utils/workspaceType'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
@@ -341,6 +342,26 @@ export function useOfficeApi() {
     return await request<string[]>('GET', '/api/v1/office/favorites/product-ids')
   }
 
+  async function loadCombos(): Promise<ProductCombo[]> {
+    return await request<ProductCombo[]>('GET', '/api/v1/office/combos')
+  }
+
+  async function createCombo(name: string): Promise<ProductCombo> {
+    return await request<ProductCombo>('POST', '/api/v1/office/combos', { name })
+  }
+
+  async function renameCombo(comboId: string, name: string): Promise<void> {
+    await request<void>('PATCH', `/api/v1/office/combos/${encodeURIComponent(comboId)}`, { name })
+  }
+
+  async function saveComboItems(comboId: string, rspuIds: string[]): Promise<void> {
+    await request<void>('PUT', `/api/v1/office/combos/${encodeURIComponent(comboId)}/items`, { rspuIds })
+  }
+
+  async function deleteCombo(comboId: string): Promise<void> {
+    await request<void>('DELETE', `/api/v1/office/combos/${encodeURIComponent(comboId)}`)
+  }
+
   async function loadFavoriteItems(folderId?: string): Promise<ImportedProduct[]> {
     const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : ''
     return await request<ImportedProduct[]>('GET', `/api/v1/office/favorites/items${query}`)
@@ -489,6 +510,11 @@ export function useOfficeApi() {
     saveProductFavoriteFolders,
     deleteFavoriteFolder,
     loadFavoriteProductIds,
+    loadCombos,
+    createCombo,
+    renameCombo,
+    saveComboItems,
+    deleteCombo,
     loadFavoriteItems,
     loadProjectFavoriteProductIds,
     loadProjectFavoriteItems,
