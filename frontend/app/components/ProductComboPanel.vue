@@ -9,6 +9,7 @@ const combos = ref<ProductCombo[]>([])
 const panelError = ref<string | null>(null)
 const loading = ref(true)
 const expandedIds = ref<Set<string>>(new Set())
+let combosRequest = 0
 
 const panelWidth = ref(320)
 const minPanelWidth = 280
@@ -35,13 +36,18 @@ function stopResize() {
 onBeforeUnmount(stopResize)
 
 async function loadCombos() {
+  // 连续保存会触发多次回拉，只有最后发出的请求可以写入界面，防止迟到的旧列表覆盖新列表。
+  const request = ++combosRequest
   try {
-    combos.value = await api.loadCombos()
+    const result = await api.loadCombos()
+    if (request !== combosRequest) return
+    combos.value = result
     panelError.value = null
   } catch (error) {
+    if (request !== combosRequest) return
     panelError.value = error instanceof Error ? error.message : '组合加载失败'
   } finally {
-    loading.value = false
+    if (request === combosRequest) loading.value = false
   }
 }
 

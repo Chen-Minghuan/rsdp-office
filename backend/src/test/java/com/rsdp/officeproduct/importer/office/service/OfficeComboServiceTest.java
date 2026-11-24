@@ -110,15 +110,18 @@ class OfficeComboServiceTest {
     }
 
     @Test
-    void renameComboUpdatesOwnedCombo() {
+    void renameComboUpdatesOnlyNameUnderComboLock() {
         authenticate("U1");
-        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "旧名称"));
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "旧名称", "P1"));
 
         service.renameCombo("C1", "新名称");
 
-        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
-        verify(comboMapper).updateById(captor.capture());
-        assertEquals("新名称", captor.getValue().getName());
+        org.mockito.InOrder order = inOrder(comboMapper);
+        order.verify(comboMapper).lockCombo("U1", "C1");
+        order.verify(comboMapper).selectById("C1");
+        order.verify(comboMapper).updateName(eq("C1"), eq("新名称"), any());
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
+        verify(comboMapper, never()).updateRspuIds(anyString(), anyList(), any());
     }
 
     @Test
@@ -149,10 +152,8 @@ class OfficeComboServiceTest {
         org.mockito.InOrder order = inOrder(comboMapper);
         order.verify(comboMapper).lockCombo("U1", "C1");
         order.verify(comboMapper).selectById("C1");
-        order.verify(comboMapper).updateById(any(OfficeCombo.class));
-        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
-        verify(comboMapper).updateById(captor.capture());
-        assertEquals(List.of("P1", "P2", "P3"), captor.getValue().getRspuIds());
+        order.verify(comboMapper).updateRspuIds(eq("C1"), eq(List.of("P1", "P2", "P3")), any());
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
         // 已在组内的 P1 不属于本次新增，不重复校验也不重复保存
         verify(productQueryService).getProduct("P2");
         verify(productQueryService).getProduct("P3");
@@ -167,9 +168,7 @@ class OfficeComboServiceTest {
 
         service.addComboItems("C1", List.of("P2"));
 
-        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
-        verify(comboMapper).updateById(captor.capture());
-        assertEquals(List.of("P-GONE", "P2"), captor.getValue().getRspuIds());
+        verify(comboMapper).updateRspuIds(eq("C1"), eq(List.of("P-GONE", "P2")), any());
         verify(productQueryService, never()).getProduct("P-GONE");
     }
 
@@ -184,7 +183,7 @@ class OfficeComboServiceTest {
         service.addComboItems("C1", List.of("P3"));
 
         assertEquals(List.of("P1", "P2", "P3"), stored.getRspuIds());
-        verify(comboMapper, times(2)).updateById(stored);
+        verify(comboMapper, times(2)).updateRspuIds(eq("C1"), anyList(), any());
     }
 
     @Test
@@ -237,9 +236,7 @@ class OfficeComboServiceTest {
 
         service.removeComboItem("C1", "P2");
 
-        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
-        verify(comboMapper).updateById(captor.capture());
-        assertEquals(List.of("P1", "P-GONE"), captor.getValue().getRspuIds());
+        verify(comboMapper).updateRspuIds(eq("C1"), eq(List.of("P1", "P-GONE")), any());
         verify(productQueryService, never()).getProduct(anyString());
     }
 

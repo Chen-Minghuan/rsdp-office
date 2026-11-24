@@ -74,11 +74,11 @@ public class OfficeComboService {
     @Transactional
     public void renameCombo(String comboId, String name) {
         String userId = requireUserId();
-        OfficeCombo combo = requireOwnedCombo(userId, comboId);
-        combo.setName(normalizeName(name));
-        combo.setUpdatedAt(LocalDateTime.now());
+        // 与商品增删共用同一把组合锁，且只写 name 字段，避免互相覆盖。
+        comboMapper.lockCombo(userId, comboId);
+        requireOwnedCombo(userId, comboId);
         try {
-            comboMapper.updateById(combo);
+            comboMapper.updateName(comboId, normalizeName(name), LocalDateTime.now());
         } catch (DuplicateKeyException exception) {
             throw new BusinessException("组合名称已存在", exception);
         }
@@ -115,8 +115,7 @@ public class OfficeComboService {
         List<String> updated = new ArrayList<>(current);
         updated.addAll(additions);
         combo.setRspuIds(updated);
-        combo.setUpdatedAt(LocalDateTime.now());
-        comboMapper.updateById(combo);
+        comboMapper.updateRspuIds(comboId, updated, LocalDateTime.now());
     }
 
     @Transactional
@@ -130,8 +129,7 @@ public class OfficeComboService {
         List<String> updated = comboRspuIds(combo).stream()
             .filter(item -> !item.equals(rspuId.trim())).collect(Collectors.toList());
         combo.setRspuIds(updated);
-        combo.setUpdatedAt(LocalDateTime.now());
-        comboMapper.updateById(combo);
+        comboMapper.updateRspuIds(comboId, updated, LocalDateTime.now());
     }
 
     @Transactional

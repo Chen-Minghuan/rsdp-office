@@ -43,7 +43,10 @@ async function openPage(initialCombos = []) {
     const respond = data => route.fulfill({ json: { code: 200, message: '成功', data } })
     const reject = message => route.fulfill({ json: { code: 400, message, data: null } })
     if (path === '/api/v1/office/combos' && request.method() === 'GET') {
-      return respond(state.combos.map(combo => comboDto(combo)))
+      const snapshot = state.combos.map(combo => comboDto(combo))
+      const delay = state.comboGetDelays?.length ? state.comboGetDelays.shift() : 0
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay))
+      return respond(snapshot)
     }
     if (path === '/api/v1/office/combos' && request.method() === 'POST') {
       const name = (request.postDataJSON().name || '').trim()
@@ -200,6 +203,19 @@ try {
   assert.deepEqual(invalid.state.removes, [{ comboId: 'CB-1', rspuId: 'P-GONE' }])
   assert.deepEqual(invalid.errors, [])
   await invalid.context.close()
+
+  // 连续拖入时先发出的回拉最后返回：界面不能被旧列表覆盖
+  const race = await openPage([{ comboId: 'CB-1', name: '连续组合', rspuIds: ['P1', 'P2', 'P3'] }])
+  const raceCard = race.page.getByTestId('combo-card').first()
+  await raceCard.waitFor({ state: 'visible' })
+  race.state.comboGetDelays = [700, 0]
+  await race.page.getByTestId('product-card-P4').dragTo(raceCard)
+  await race.page.getByTestId('product-card-P5').dragTo(raceCard)
+  await race.page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('5/5'))
+  await race.page.waitForTimeout(900)
+  assert.match(await raceCard.innerText(), /5\/5/, '迟到的旧回拉不得把界面写回 4 件')
+  assert.deepEqual(race.errors, [])
+  await race.context.close()
 
   // 每账号最多 10 个组合：达到上限后创建入口禁用
   const full = await openPage(Array.from({ length: 10 }, (_, index) => ({

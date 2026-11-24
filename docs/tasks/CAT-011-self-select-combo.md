@@ -11,6 +11,7 @@
 - **单表结构**：`office_combo(combo_id,user_id,name,rspu_ids varchar(128)[],created_at,updated_at)`；`rspu_ids` 默认空数组、顺序即展示顺序，数据库 `cardinality<=5` 约束，`(user_id,name)` 唯一。评审前的 `office_combo_item` 明细表已移除；旧迁移未在共享环境执行，直接修改本 PR 迁移与 `schema.sql`。数组与 `List<String>` 互转使用自定义 `VarcharArrayTypeHandler`。
 - **增量保存**：`POST /api/v1/office/combos/{id}/items`（本次新增 ID 集合）在组合锁内重读最新数组后追加、去重、总数>5 拒绝；`DELETE /{id}/items/{rspuId}` 单件移除。废弃整组覆盖 PUT，连续拖入两件商品都保留。
 - **失效商品可编辑**：只对本次新加入的商品调用商品可见性校验；已在组内的失效旧条目保留，列表以 `available=false` 标注“已失效”，不影响添加/移除其他商品。
+- **二轮评审修复**：改名与商品增删共用组合锁，且改名只 `updateName`、增删只 `updateRspuIds`（不再整实体 `updateById` 写回），消除改名覆盖新商品；前端 `loadCombos` 增加请求序号守卫，只有最后发出的回拉能写入界面，连续拖入不会被迟到的旧列表覆盖。
 - 其余接口：GET 列表、POST 创建（用户锁内校验每账号≤10）、PATCH 重命名、DELETE 删除组合。
 - 前端：`ProductComboPanel.vue`（调宽 280–480px、组合卡、命名/删除/选品弹窗），拖拽/弹窗/移除均走增量接口；`products/index.vue` 左右两栏；`useOfficeApi` 增量方法；`types/combos.ts`。
 - 经验：选品弹窗 `<dialog>` 不可挂 `flex` 类（会覆盖未打开时的 display:none）。
