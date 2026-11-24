@@ -22,7 +22,7 @@
 
 ## 2. 核心数据关系（目标模型）
 
-项目阶段使用 `office_design_project.status`（`DESIGNING / DELIVERING / COMPLETED`），默认设计中，数据库非空和枚举约束由启动迁移保证。列表返回 `status`、`canManageStatus`，`PATCH /api/v1/office/projects/{projectId}/status` 仅更新阶段与更新时间并记录审计；权限限所属工作区主号和有项目查看权的实际负责人，不继承协作者的成员管理权限。普通改名/参考资料更新不回写阶段，避免并发覆盖。管理阶段独立于设计确认快照。详见 [WORKSPACE-005](tasks/WORKSPACE-006-project-status.md)。
+项目阶段由方案确认数据读时派生：项目全部楼层在 `office_proposal_confirmation` 存在未失效（`retired=false`）记录 → `DELIVERING`，否则 → `DESIGNING`（无楼层项目为设计中）。列表接口用一次 `confirmedFloorIds` 批量查询完成派生，前端只读展示，不提供人工修改入口。`office_design_project.status` 列保留但不再读取，新建项目仍写默认值。详见 [WORKSPACE-006](tasks/WORKSPACE-006-project-status.md)。
 
 ```text
 DesignProject（项目资料与客户需求备注）

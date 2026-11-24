@@ -23,6 +23,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +36,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -45,6 +47,7 @@ class OfficeProjectServiceTest {
     private final List<OfficeProjectMember> members = new ArrayList<>();
     private final List<OfficeAuditLog> auditLogs = new ArrayList<>();
     private final List<OfficeCart> cartLines = new ArrayList<>();
+    private final java.util.Set<String> confirmedFloorIds = new java.util.HashSet<>();
     private OfficeDesignProjectMapper projectMapper;
     private OfficeDesignFloorMapper floorMapper;
     private OfficeProjectMemberMapper memberMapper;
@@ -54,6 +57,7 @@ class OfficeProjectServiceTest {
     private OfficeCartMapper cartMapper;
     private RsdpCatalogGateway catalogGateway;
     private SharedCatalogService sharedCatalogService;
+    private OfficeProposalConfirmationMapper confirmationMapper;
     private OfficeProjectService service;
 
     @BeforeEach void setup() {
@@ -63,6 +67,7 @@ class OfficeProjectServiceTest {
         members.clear();
         auditLogs.clear();
         cartLines.clear();
+        confirmedFloorIds.clear();
         projectMapper = mock(OfficeDesignProjectMapper.class);
         floorMapper = mock(OfficeDesignFloorMapper.class);
         memberMapper = mock(OfficeProjectMemberMapper.class);
@@ -88,13 +93,6 @@ class OfficeProjectServiceTest {
             return 1;
         });
         when(projectMapper.selectById(anyString())).thenAnswer(call -> projects.get(call.getArgument(0)));
-        when(projectMapper.updateStatus(anyString(), anyString(), any())).thenAnswer(call -> {
-            OfficeDesignProject project = projects.get(call.getArgument(0));
-            if (project == null) return 0;
-            project.setStatus(call.getArgument(1));
-            project.setUpdatedAt(call.getArgument(2));
-            return 1;
-        });
         when(projectMapper.selectList(any())).thenAnswer(call -> new ArrayList<>(projects.values()));
         when(floorMapper.insert(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });
         when(floorMapper.selectById(anyString())).thenAnswer(call -> floors.get(call.getArgument(0)));
@@ -123,8 +121,11 @@ class OfficeProjectServiceTest {
                 .toList();
         });
         auditService = new OfficeAuditService(auditLogMapper, currentUserService);
+        confirmationMapper = mock(OfficeProposalConfirmationMapper.class);
+        when(confirmationMapper.confirmedFloorIds(anyList())).thenAnswer(call ->
+            ((List<String>) call.getArgument(0)).stream().filter(confirmedFloorIds::contains).toList());
         service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
-            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService);
+            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService, confirmationMapper);
     }
 
     private OfficeUser activeUser(String userId, String username) {
@@ -161,26 +162,22 @@ class OfficeProjectServiceTest {
         assertEquals(List.of(0, 1), tree.get(0).getFloors().stream().map(floor -> floor.getSortOrder()).toList());
     }
 
-    @Test void projectStatusDefaultsToDesigningAndPersistsEverySupportedStage() {
-        var created = service.createProject(request("阶段项目", List.of("一层")));
+    @Test void projectStatusDerivesFromProposalConfirmations() {
+        var created = service.createProject(request("阶段项目", List.of("一层", "二层")));
         assertEquals("DESIGNING", created.getStatus());
-        for (String stage : List.of("DELIVERING", "COMPLETED", "DESIGNING")) {
-            assertEquals(stage, service.updateStatus(created.getProjectId(), stage));
-            assertEquals(stage, service.listProjects(false).getFirst().getStatus());
-        }
-        verify(access, times(3)).requireStatusManager(created.getProjectId());
-    }
+        assertEquals("DESIGNING", service.listProjects(false).getFirst().getStatus());
 
-    @Test void invalidOrUnauthorizedProjectStatusCannotChangeSavedState() {
-        var created = service.createProject(request("阶段项目", List.of("一层")));
-        assertThrows(BusinessException.class, () -> service.updateStatus(created.getProjectId(), null));
-        assertThrows(BusinessException.class, () -> service.updateStatus(created.getProjectId(), "UNKNOWN"));
-        doThrow(new com.rsdp.officeproduct.importer.common.AccessDeniedException("无权修改"))
-            .when(access).requireStatusManager(created.getProjectId());
-        assertThrows(com.rsdp.officeproduct.importer.common.AccessDeniedException.class,
-            () -> service.updateStatus(created.getProjectId(), "COMPLETED"));
-        verify(projectMapper, never()).updateStatus(anyString(), anyString(), any());
-        assertEquals("DESIGNING", projects.get(created.getProjectId()).getStatus());
+        String firstFloorId = created.getFloors().get(0).getFloorId();
+        String secondFloorId = created.getFloors().get(1).getFloorId();
+        confirmedFloorIds.add(firstFloorId);
+        assertEquals("DESIGNING", service.listProjects(false).getFirst().getStatus());
+
+        confirmedFloorIds.add(secondFloorId);
+        assertEquals("DELIVERING", service.listProjects(false).getFirst().getStatus());
+
+        // 确认失效（retired=true 后不再出现于已确认集合）回退为设计中
+        confirmedFloorIds.remove(firstFloorId);
+        assertEquals("DESIGNING", service.listProjects(false).getFirst().getStatus());
     }
 
     @Test void listsProjectsWithoutReadingCartOrCatalogWhenBudgetIsExcluded() {
@@ -550,9 +547,10 @@ class OfficeProjectServiceTest {
             return OfficeProjectService.class.getConstructor(
                 OfficeDesignProjectMapper.class, OfficeDesignFloorMapper.class, OfficeProjectMemberMapper.class,
                 OfficeUserMapper.class, OfficeProjectAccessService.class, OfficeAuditService.class, ObjectMapper.class,
-                OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class
+                OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class,
+                OfficeProposalConfirmationMapper.class
             ).newInstance(projectMapper, floorMapper, memberMapper, userMapper, access, auditService, new ObjectMapper(),
-                cartMapper, catalogGateway, sharedCatalogService);
+                cartMapper, catalogGateway, sharedCatalogService, confirmationMapper);
         } catch (NoSuchMethodException missingBudgetDependencies) {
             throw new AssertionError("项目服务尚未提供购物车预算聚合依赖", missingBudgetDependencies);
         } catch (ReflectiveOperationException failed) {

@@ -33,7 +33,6 @@ function projectFromDto(dto: ProjectDto): WorkspaceProject {
     ...dto,
     projectName: dto.name,
     status: dto.status ?? 'DESIGNING',
-    canManageStatus: dto.canManageStatus ?? false,
     leader: dto.leader ?? null,
     collaborators: dto.collaborators ?? [],
     referenceImages: dto.referenceImages ?? [],
@@ -56,7 +55,6 @@ export function useWorkspaceApi() {
   return {
     listProjects: async () => (await request<ProjectDto[]>('GET', '/api/v1/office/projects?includeBudget=false')).map(projectFromDto),
     listProjectBudgets: () => request<Record<string, ProjectBudget>>('GET', '/api/v1/office/projects/budgets'),
-    updateProjectStatus: (projectId: string, status: import('~/types/workspace').ProjectStatus) => request<{ status: import('~/types/workspace').ProjectStatus }>('PATCH', `/api/v1/office/projects/${encodeURIComponent(projectId)}/status`, { status }),
     createProject: async (payload: CreateProjectRequest) => projectFromDto(await request<ProjectDto>('POST', '/api/v1/office/projects', {
       name: payload.projectName,
       customerRequirements: payload.customerRequirements,

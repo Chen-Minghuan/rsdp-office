@@ -28,6 +28,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -70,6 +71,7 @@ public class OfficeProjectService {
     private final OfficeCartMapper cartMapper;
     private final RsdpCatalogGateway catalogGateway;
     private final SharedCatalogService sharedCatalogService;
+    private final OfficeProposalConfirmationMapper confirmationMapper;
 
     public List<OfficeProjectDto> listProjects() {
         return listProjects(true);
@@ -86,11 +88,12 @@ public class OfficeProjectService {
         Map<String, List<OfficeProjectMember>> membersByProject = membersByProject(projectIds);
         Map<String, OfficeUser> usersById = usersById(membersByProject);
         Map<String, ProjectBudget> budgets = includeBudget ? budgetsByProject(projectIds, floors) : Map.of();
+        Set<String> confirmedFloorIds = confirmedFloorIds(floors);
         return projects.stream()
             .map(project -> {
                 OfficeProjectDto dto = toProjectDto(project,
                     floorsByProject.getOrDefault(project.getProjectId(), List.of()),
-                    membersByProject.getOrDefault(project.getProjectId(), List.of()), usersById);
+                    membersByProject.getOrDefault(project.getProjectId(), List.of()), usersById, confirmedFloorIds);
                 ProjectBudget budget = budgets.get(project.getProjectId());
                 if (budget != null) {
                     dto.setBudgetTotal(budget.total());
@@ -223,7 +226,7 @@ public class OfficeProjectService {
         if (leaderUserId != null) {
             members = insertMembers(project.getProjectId(), leaderUserId, collaboratorIds, now, Map.of());
         }
-        return toProjectDto(project, floors, members, usersById(members));
+        return toProjectDto(project, floors, members, usersById(members), Set.of());
     }
 
     @Transactional
@@ -255,21 +258,9 @@ public class OfficeProjectService {
         project.setName(requiredName(request.getName(), "项目名称"));
         project.setUpdatedAt(LocalDateTime.now());
         projectMapper.updateById(project);
-        return toProjectDto(project, floors(projectId), members(projectId), usersById(members(projectId)));
-    }
-
-    @Transactional
-    public String updateStatus(String projectId, String status) {
-        accessService.requireStatusManager(projectId);
-        requireProject(projectId);
-        if (status == null || !Set.of("DESIGNING", "DELIVERING", "COMPLETED").contains(status)) {
-            throw new BusinessException("项目阶段必须为设计中、交付中或已完成");
-        }
-        if (projectMapper.updateStatus(projectId, status, LocalDateTime.now()) != 1) {
-            throw new BusinessException("项目不存在，请刷新项目列表");
-        }
-        auditService.record("PROJECT_STATUS_CHANGED", "PROJECT", projectId, "status=" + status);
-        return status;
+        List<OfficeDesignFloor> floors = floors(projectId);
+        List<OfficeProjectMember> members = members(projectId);
+        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
     }
 
     @Transactional
@@ -304,7 +295,9 @@ public class OfficeProjectService {
         }
         projectMapper.updateRequirements(projectId, request.getCustomerRequirements(), LocalDateTime.now());
         OfficeDesignProject project = requireProject(projectId);
-        return toProjectDto(project, floors(projectId), members(projectId), usersById(members(projectId)));
+        List<OfficeDesignFloor> floors = floors(projectId);
+        List<OfficeProjectMember> members = members(projectId);
+        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
     }
 
     public List<ProjectMemberDto> listMembers(String projectId) {
@@ -352,7 +345,8 @@ public class OfficeProjectService {
         List<String> after = members.stream().map(this::memberAuditText).toList();
         auditService.record("MEMBERS_REPLACED", "PROJECT", projectId,
             "before=" + before + "; after=" + after);
-        return toProjectDto(project, floors(projectId), members, usersById(members));
+        List<OfficeDesignFloor> floors = floors(projectId);
+        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
     }
 
     private String memberAuditText(OfficeProjectMember member) {
@@ -370,7 +364,9 @@ public class OfficeProjectService {
         project.setReferenceImages(writeReferenceImages(images));
         project.setUpdatedAt(LocalDateTime.now());
         projectMapper.updateById(project);
-        return toProjectDto(project, floors(projectId), members(projectId), usersById(members(projectId)));
+        List<OfficeDesignFloor> floors = floors(projectId);
+        List<OfficeProjectMember> members = members(projectId);
+        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
     }
 
     /** 搜索可作为项目成员的有效用户；认证开启时只返回当前账号同工作区的在用用户。 */
@@ -579,6 +575,23 @@ public class OfficeProjectService {
             .orderByAsc("sort_order").orderByAsc("created_at").orderByAsc("floor_id"));
     }
 
+    /**
+     * 项目阶段由方案确认数据派生：项目全部楼层在 office_proposal_confirmation
+     * 存在未失效(retired=false)记录 → DELIVERING，否则 DESIGNING；无楼层项目为设计中。
+     */
+    private String derivedStatus(List<OfficeDesignFloor> floors, Set<String> confirmedFloorIds) {
+        if (floors.isEmpty()) {
+            return "DESIGNING";
+        }
+        return floors.stream().allMatch(floor -> confirmedFloorIds.contains(floor.getFloorId()))
+            ? "DELIVERING" : "DESIGNING";
+    }
+
+    private Set<String> confirmedFloorIds(List<OfficeDesignFloor> floors) {
+        List<String> floorIds = floors.stream().map(OfficeDesignFloor::getFloorId).toList();
+        return floorIds.isEmpty() ? Set.of() : new HashSet<>(confirmationMapper.confirmedFloorIds(floorIds));
+    }
+
     private OfficeDesignFloor newFloor(String projectId, String name, int sortOrder, LocalDateTime now) {
         OfficeDesignFloor floor = new OfficeDesignFloor();
         floor.setFloorId(IdGenerator.spatialId("OFLR"));
@@ -606,12 +619,12 @@ public class OfficeProjectService {
     }
 
     private OfficeProjectDto toProjectDto(OfficeDesignProject project, List<OfficeDesignFloor> floors,
-                                          List<OfficeProjectMember> members, Map<String, OfficeUser> usersById) {
+                                          List<OfficeProjectMember> members, Map<String, OfficeUser> usersById,
+                                          Set<String> confirmedFloorIds) {
         OfficeProjectDto dto = new OfficeProjectDto();
         dto.setProjectId(project.getProjectId());
         dto.setName(project.getName());
-        dto.setStatus(project.getStatus() == null ? "DESIGNING" : project.getStatus());
-        dto.setCanManageStatus(accessService.canManageStatus(project, members));
+        dto.setStatus(derivedStatus(floors, confirmedFloorIds));
         dto.setCustomerRequirements(project.getCustomerRequirements());
         dto.setRequirementsRevision(project.getRequirementsRevision());
         dto.setReferenceImages(readReferenceImages(project.getReferenceImages()));
