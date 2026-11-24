@@ -86,7 +86,7 @@ watch([previewMode, () => store.initialized, () => store.workspaceId, () => stor
     if (read === confirmationRead) savedConfirmation.value = result
   } catch { /* Confirmation remains unknown and can be requested again. */ }
 }, { immediate: true })
-// 加载项目最新已确认报价；无确认记录或读取失败时保持空值，最终报价显示占位
+// 加载项目最新已确认报价；无确认记录或读取失败时保持空值，页面不显示最终报价行
 let quotationRead = 0
 watch([previewMode, () => store.initialized, () => store.workspaceId, () => workspace.currentProjectId], async ([preview, ready, floorId, projectId]) => {
   const read = ++quotationRead
@@ -287,14 +287,17 @@ const groups = computed<ProposalGroup[]>(() => {
 const totalModules = computed(() => spaces.value.reduce((sum, space) => sum + space.modules.reduce((subtotal, module) => subtotal + module.qty, 0), 0))
 const totalPrice = computed(() => spaces.value.reduce((sum, space) => sum + space.total, 0))
 // 最终报价：已确认报价快照中当前楼层行的商品小计合计（项目级费用不摊入楼层）
+// 仅使用 status 为 CONFIRMED 的报价记录；无确认报价或当前楼层无报价行时返回 null，页面不显示最终报价
 const floorQuoteTotal = computed(() => {
   const record = latestQuotation.value
   const floorId = store.workspaceId
-  if (!record || !floorId) return null
+  if (!record || record.status !== 'CONFIRMED' || !floorId) return null
   const lines = record.lines.filter(line => line.floorId === floorId)
   if (!lines.length) return null
   return roundMoney(lines.reduce((sum, line) => sum + (line.subtotal || 0), 0))
 })
+// 有确认报价（或演示模式）才显示最终报价行；此时参考金额加删除线作对比
+const showFinalQuote = computed(() => previewMode.value || floorQuoteTotal.value !== null)
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
 const pendingSpaces = computed(() => spaces.value.length - confirmedSpaces.value)
 const confirmedGroups = computed(() => groups.value.filter(group => group.spaces.every(space => space.status === '已确认')).length)
@@ -531,7 +534,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price price-strike">{{ money(totalPrice) }}</strong></div><div class="aside-summary"><span>最终报价</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal) }}</strong></div><div v-if="!previewMode && latestQuotation" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price" :class="{ 'price-strike': showFinalQuote }">{{ money(totalPrice) }}</strong></div><div v-if="showFinalQuote" class="aside-summary"><span>最终报价</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal) }}</strong></div><div v-if="!previewMode && floorQuoteTotal !== null" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>

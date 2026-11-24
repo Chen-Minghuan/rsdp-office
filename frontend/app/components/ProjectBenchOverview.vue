@@ -220,7 +220,7 @@ function roomRoute(zoneId: string) {
             <NuxtLink :to="projectDrawingRoute(floorId)" class="inline-block font-semibold text-accent-ink hover:underline">上传或识别图纸</NuxtLink>
           </div>
           <div class="text-sm">
-            <ProjectReferenceImagesEditor :images="floorReferences" heading="楼层参考图" hint="仅用于当前楼层，随楼层保存。"
+            <ProjectReferenceImagesEditor :images="floorReferences" heading="楼层参考图" list-mode="names"
               data-testid="floor-reference-editor" @update:images="saveFloorReferences" />
             <p v-if="referenceSaveError" role="alert" class="mt-1 text-xs text-red-700">{{ referenceSaveError }}</p>
           </div>
