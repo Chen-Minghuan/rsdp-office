@@ -34,6 +34,7 @@ try {
   const saves = []
   const scopedCarts = new Map()
   const pendingCartReads = new Map()
+  const renderPreviews = new Map()
   const summaryRequests = []
   const summaryPlans = []
   function planSummary(fail = false) {
@@ -50,9 +51,16 @@ try {
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
     const cartFloorId = path.match(/^\/api\/v1\/office\/projects\/([^/]+)\/cart$/)?.[1]
+    const renderFloorId = path.match(/^\/api\/v1\/office\/projects\/([^/]+)\/render-previews$/)?.[1]
     if (request.method() === 'GET' && cartFloorId && scopedCarts.has(cartFloorId)) {
       await pendingCartReads.get(cartFloorId)
       return respond(scopedCarts.get(cartFloorId))
+    }
+    if (request.method() === 'GET' && renderFloorId) {
+      const zoneId = new URL(request.url()).searchParams.get('zoneId')
+      const preview = renderPreviews.get(zoneId)
+      assert.ok(!preview || preview.floorId === renderFloorId, '效果图必须从空间所属楼层查询')
+      return respond(preview ? [preview.item] : [])
     }
     if (path === '/api/v1/office/projects' && request.method() === 'GET') {
       assert.equal(new URL(request.url()).searchParams.get('includeBudget'), 'false')
@@ -121,7 +129,7 @@ try {
   await page.goto(baseUrl + workbenchPath, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '项目工作台', exact: true }).waitFor()
   const appSidebar = page.getByTestId('app-sidebar')
-  assert.equal(await appSidebar.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '侧栏应隐藏原生纵向滚动条，但保留滚动能力')
+  assert.equal(await appSidebar.locator('.sidebar-content').evaluate(element => getComputedStyle(element).scrollbarWidth), 'none', '侧栏应隐藏原生纵向滚动条，但保留滚动能力')
   const sidebarResizeHandle = page.getByTestId('sidebar-resize-handle')
   assert.equal(await sidebarResizeHandle.count(), 1, '桌面端应提供侧栏宽度拖拽把手')
   assert.equal(Math.round(await appSidebar.evaluate(element => element.getBoundingClientRect().width)), 240, '侧栏默认宽度应为 240px')
@@ -167,8 +175,8 @@ try {
   const userSession = appSidebar.getByTestId('user-session')
   await userSession.waitFor()
   const sessionBox = await userSession.boundingBox()
-  const footerBox = await appSidebar.getByText('办公空间智能设计平台', { exact: true }).last().boundingBox()
-  assert.ok(sessionBox && footerBox && sessionBox.y + sessionBox.height <= footerBox.y, '用户信息与退出登录应位于侧栏底部平台标识上方')
+  const sidebarBox = await appSidebar.boundingBox()
+  assert.ok(sessionBox && sidebarBox && sidebarBox.y + sidebarBox.height - sessionBox.y - sessionBox.height <= 24, '用户信息与退出登录应位于侧栏底部')
   assert.equal(await page.locator('header').getByRole('button', { name: '退出登录', exact: true }).count(), 0, '顶栏不再显示退出登录')
   assert.equal(await appSidebar.getByRole('button', { name: '退出登录', exact: true }).count(), 1, '退出登录应移到侧栏底部')
   const rawRequirements = requirementsPanel.getByRole('textbox', { name: '项目需求原文', exact: true })
@@ -213,10 +221,10 @@ try {
   assert.deepEqual(summaryRequests, [{ requirementsRevision: 1 }], '总结请求必须携带当前原文版本')
   assert.match(await summaryTextarea.inputValue(), /^1\. 总裁办公室采用现代简约风格，整体偏深色系。[\s\S]*4\. 会议室配置长桌、会议椅及饮水设备。$/, 'AI关键点应在文本框内按编号换行')
   await page.waitForTimeout(1000)
-  assert.match(await flipCard.evaluate(element => getComputedStyle(element).transform), /^matrix3d\(/, '白色原文面与灰色总结面应作为正反两面一起3D翻转')
+  assert.match(await flipCard.evaluate(element => getComputedStyle(element).transform), /^matrix3d\(/, '原文面与总结面应作为正反两面一起3D翻转')
   assert.equal(await flipCard.evaluate(element => element.querySelectorAll(':scope > .requirements-face').length), 2, '两个文本框必须同属一张翻转卡片')
-  assert.equal(await rawFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 254, 251)', '正面应为白色原文')
-  assert.equal(await summaryFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(241, 239, 235)', '背面应为灰色AI总结')
+  assert.equal(await rawFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)', '正面应为白色原文')
+  assert.equal(await summaryFace.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(243, 237, 248)', '总结背面采用统一浅紫')
   assert.ok(await summaryTextarea.evaluate(element => element.scrollHeight <= element.clientHeight + 1), '总结文本框应随内容撑高，滚动只发生在卡片层')
   assert.equal(await summarizeButton.getAttribute('aria-checked'), 'true', '总结面应打开滑动开关')
   const summaryThumbX = (await summaryThumb.boundingBox())?.x
@@ -243,14 +251,16 @@ try {
   assert.equal(await requirementsPanel.getByTestId('requirements-summary-face').getAttribute('aria-hidden'), 'true', '刷新后仍应默认显示原文')
 
   const navigation = page.getByRole('navigation', { name: '工作区导航' })
-  await navigation.getByRole('link', { name: '商品库', exact: true }).click()
+  const mainNav = page.getByRole('navigation', { name: '主导航' })
+  const productLibrary = mainNav.getByRole('link', { name: '产品库', exact: true })
+  await productLibrary.click()
   await page.waitForURL(url => url.pathname === '/products')
   await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^1F/ }).click()
   await page.getByRole('heading', { name: '1F · 上传办公图纸', exact: true }).waitFor()
   assert.equal(new URL(page.url()).pathname, workbenchPath)
   assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFLR-1')
 
-  await navigation.getByRole('link', { name: '商品库', exact: true }).click()
+  await productLibrary.click()
   await page.waitForURL(url => url.pathname === '/products')
   await page.getByRole('button', { name: '2F', exact: true }).click()
   await page.getByRole('heading', { name: '2F · 上传办公图纸', exact: true }).waitFor()
@@ -431,12 +441,13 @@ try {
     releaseBudget()
     budgetGate = null
   }
-  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-1')
-  await page.getByText('first.png', { exact: true }).last().waitFor()
+  await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-1' && url.searchParams.get('view') === 'overview')
+  await page.getByTestId('project-overview-drawing').filter({ hasText: 'first.png' }).waitFor()
   await page.getByRole('button', { name: '新建项目', exact: true }).click()
   await page.getByRole('heading', { name: '创建办公项目', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭创建项目', exact: true }).click()
   // 项目切换用例已回到 1F；导航回归的空间数据必须写入后续点击的 3F。
+  await page.getByRole('link', { name: '上传或识别图纸', exact: true }).click()
   await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^3F/ }).click()
   await page.getByRole('heading', { name: '3F · 上传办公图纸', exact: true }).waitFor()
   await page.evaluate(() => {
@@ -446,7 +457,7 @@ try {
       x: 0, y: 0, w: 4000, h: 3000, polygon: [[0, 0], [4000, 0], [4000, 3000], [0, 3000]],
     }] })
   })
-  await navigation.getByRole('link', { name: '商品库', exact: true }).click()
+  await productLibrary.click()
   await page.waitForURL(url => url.pathname === '/products')
   await page.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^3F/ }).click()
   await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === 'OFLR-3')
@@ -466,12 +477,20 @@ try {
   for (const { floorId, zoneId, name, qty } of [first, floorTreeTarget, second]) {
     scopedCarts.set(floorId, [{ lineId: `cart-${floorId}`, projectId: floorId, zoneId, zoneName: name, productId: 'SAMPLE-OF-03', qty }])
   }
+  renderPreviews.set(first.zoneId, { floorId: first.floorId, item: {
+    previewId: 'RENDER-A', zoneId: first.zoneId, zoneName: first.name, status: 'SUCCEEDED',
+    purpose: 'CONFIRMED_SCHEME', style: '暖木自然', stale: true, imageUrl: '/uploads/render-previews/workbench.png',
+  } })
+  await context.route('**/uploads/render-previews/workbench.png', route => route.fulfill({ contentType: 'image/png', body: png }))
   await page.evaluate(fixtures => {
     for (const { floorId, zoneId, name, qty } of fixtures) {
       const key = `rsdp-office-v01:MOCK-USER:${floorId}`
       const zone = {
         id: zoneId, kind: 'zone', name, zoneType: 'MEETING_ROOM', x: 0, y: 0, w: 4000, h: 3000,
-        polygon: [[0, 0], [4000, 0], [4000, 3000], [0, 3000]], reviewUnit: 'mm', evidenceKind: 'MANUAL',
+        polygon: floorId === 'OFLR-1'
+          ? [[0, 0], [4000, 0], [4000, 2000], [3000, 2000], [3000, 3000], [0, 3000]]
+          : [[0, 0], [4000, 0], [4000, 3000], [0, 3000]],
+        reviewUnit: 'mm', evidenceKind: 'MANUAL',
         geometrySource: 'manual_geometry', reviewConfirmation: { status: 'CONFIRMED' },
       }
       const furniture = Array.from({ length: qty }, (_, index) => ({
@@ -488,10 +507,10 @@ try {
     }
   }, [first, floorTreeTarget, second])
 
-  const steps = page.getByRole('navigation', { name: '项目设计步骤' })
-  const overviewStep = steps.getByRole('link', { name: '2 空间总览', exact: true })
-  const layoutStep = steps.getByRole('link', { name: '3 布局选品', exact: true })
-  const budgetStep = steps.getByRole('link', { name: '4 预算清单', exact: true })
+  const benchLink = mainNav.getByRole('link', { name: '项目工作台', exact: true })
+  const overviewStep = mainNav.getByRole('link', { name: '空间设计', exact: true })
+  const layoutStep = mainNav.getByRole('link', { name: '产品方案', exact: true })
+  const budgetStep = mainNav.getByRole('link', { name: '项目清单', exact: true })
   const budget = page.locator('.proposal-page')
   async function verifyProjectSteps(active, other) {
     for (const step of [overviewStep, layoutStep, budgetStep]) {
@@ -503,39 +522,58 @@ try {
     await layoutStep.click()
     await page.waitForURL(url => url.searchParams.get('mode') === 'design' && url.searchParams.get('zoneId') === active.zoneId && url.searchParams.get('floorId') === active.floorId)
     await page.getByTestId('office-design-canvas').waitFor()
+    assert.equal(new URL(page.url()).searchParams.get('view'), 'products')
+    await page.getByTestId('tab-style-recommendation').waitFor()
+    assert.equal(await page.getByTestId('tab-style-recommendation').getAttribute('aria-selected'), 'true')
     await budgetStep.click()
     await budget.getByText(`${active.project} / ${active.floor}`, { exact: true }).waitFor()
     await budget.getByRole('button', { name: new RegExp(active.name) }).first().waitFor()
     await budget.locator('.aside-summary').filter({ hasText: '商品总数' }).getByText(`${active.qty} 件`, { exact: true }).waitFor()
     assert.equal(await budget.getByText(other.name, { exact: true }).count(), 0)
   }
-  await page.goto(`${baseUrl}/canvas?floorId=${first.floorId}`, { waitUntil: 'networkidle' })
+  await page.goto(`${baseUrl}${workbenchPath}?view=overview&floorId=${first.floorId}`, { waitUntil: 'networkidle' })
+  const roomTable = page.getByRole('table', { name: '当前楼层房间进度' })
+  const roomRow = roomTable.getByRole('row').filter({ hasText: first.name })
+  await roomRow.getByRole('cell', { name: '11.0 m²', exact: true }).waitFor()
+  await roomRow.getByRole('cell', { name: '2 / 2 件', exact: true }).waitFor()
+  await page.getByText('方案效果图 · 暖木自然 · 历史版本', { exact: true }).waitFor()
+  await page.getByRole('navigation', { name: '项目总览楼层' }).getByRole('link', { name: '2F', exact: true }).click()
+  await roomTable.getByRole('link', { name: floorTreeTarget.name, exact: true }).waitFor()
+  assert.equal(await roomRow.count(), 0, '总览切层后不能显示上一层房间')
+  assert.equal(await page.getByText('方案效果图 · 暖木自然 · 历史版本', { exact: true }).count(), 0)
+  await roomTable.getByRole('link', { name: floorTreeTarget.name, exact: true }).click()
+  await page.waitForURL(url => url.searchParams.get('zoneId') === floorTreeTarget.zoneId && url.searchParams.get('view') === 'products')
+  await benchLink.click()
+  await roomTable.getByRole('link', { name: floorTreeTarget.name, exact: true }).waitFor()
+  await page.getByRole('navigation', { name: '项目总览楼层' }).getByRole('link', { name: '一层', exact: true }).click()
+  await roomRow.waitFor()
   await verifyProjectSteps(first, second)
 
-  // 楼层树在 proposal 内切换时，必须等目标楼层加载后再做门禁，不能放行旧楼层的匹配状态。
+  // 楼层树在清单内切换时，页面只显示目标楼层的选品核对结果。
   scopedCarts.set(floorTreeTarget.floorId, [{ lineId: `cart-${floorTreeTarget.floorId}`, projectId: floorTreeTarget.floorId, zoneId: floorTreeTarget.zoneId, zoneName: floorTreeTarget.name, productId: 'SAMPLE-OF-03', qty: floorTreeTarget.qty + 1 }])
   await projectTree.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^2F/ }).click()
-  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === floorTreeTarget.floorId && url.searchParams.get('mode') === 'design')
-  const proposalGateDialog = page.getByRole('dialog', { name: '请先选择家具' })
-  await proposalGateDialog.waitFor()
-  await proposalGateDialog.getByText(floorTreeTarget.name, { exact: true }).waitFor()
-  await proposalGateDialog.getByText('画布 1 件 · 购物车 2 件', { exact: true }).waitFor()
-  assert.equal(await proposalGateDialog.getByText(first.name, { exact: true }).count(), 0, '门禁不能显示来源楼层的核对结果')
-  await proposalGateDialog.getByRole('button', { name: '关闭缺失家具提示', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/proposal' && url.searchParams.get('floorId') === floorTreeTarget.floorId)
+  const selectionIssues = page.getByTestId('proposal-selection-issues')
+  await selectionIssues.locator('summary').click()
+  await selectionIssues.getByText(floorTreeTarget.name, { exact: true }).waitFor()
+  await selectionIssues.getByText('家具 1 件 · 清单 2 件', { exact: true }).waitFor()
+  assert.equal(await selectionIssues.getByText(first.name, { exact: true }).count(), 0, '不能显示来源楼层的核对结果')
+  assert.equal(await page.getByRole('button', { name: '确认方案', exact: true }).isDisabled(), true)
+  assert.equal(await page.getByRole('dialog').count(), 0)
   scopedCarts.set(floorTreeTarget.floorId, [{ lineId: `cart-${floorTreeTarget.floorId}`, projectId: floorTreeTarget.floorId, zoneId: floorTreeTarget.zoneId, zoneName: floorTreeTarget.name, productId: 'SAMPLE-OF-03', qty: floorTreeTarget.qty }])
 
-  // 已配齐来源楼层、目标楼层缺少一件选品时，直达 proposal 必须先切换并校验目标楼层。
+  // 已配齐来源楼层时，直达另一楼层仍应只展示目标的核对结果。
   await page.evaluate(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/canvas', query: { floorId } }), first.floorId)
   await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === first.floorId)
   await page.waitForFunction(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').workspaceId === floorId, first.floorId)
   scopedCarts.set(second.floorId, [{ lineId: `cart-${second.floorId}`, projectId: second.floorId, zoneId: second.zoneId, zoneName: second.name, productId: 'SAMPLE-OF-03', qty: second.qty + 1 }])
   await page.evaluate(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/proposal', query: { floorId } }), second.floorId)
-  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === second.floorId && url.searchParams.get('mode') === 'design')
-  await proposalGateDialog.waitFor()
-  await proposalGateDialog.getByText(second.name, { exact: true }).waitFor()
-  await proposalGateDialog.getByText('画布 7 件 · 购物车 8 件', { exact: true }).waitFor()
-  assert.equal(await proposalGateDialog.getByText(first.name, { exact: true }).count(), 0, '门禁不能显示旧楼层的核对结果')
-  await proposalGateDialog.getByRole('button', { name: '关闭缺失家具提示', exact: true }).click()
+  await page.waitForURL(url => url.pathname === '/proposal' && url.searchParams.get('floorId') === second.floorId)
+  await selectionIssues.locator('summary').click()
+  await selectionIssues.getByText(second.name, { exact: true }).waitFor()
+  await selectionIssues.getByText('家具 7 件 · 清单 8 件', { exact: true }).waitFor()
+  assert.equal(await selectionIssues.getByText(first.name, { exact: true }).count(), 0, '不能显示旧楼层的核对结果')
+  assert.equal(await page.getByRole('dialog').count(), 0)
 
   // 目标楼层补齐同一购物车行后，应当允许进入 proposal，不能被旧楼层状态误拦截。
   scopedCarts.set(second.floorId, [{ lineId: `cart-${second.floorId}`, projectId: second.floorId, zoneId: second.zoneId, zoneName: second.name, productId: 'SAMPLE-OF-03', qty: second.qty }])
@@ -545,7 +583,8 @@ try {
   await page.evaluate(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/proposal', query: { floorId } }), second.floorId)
   await page.waitForURL(url => url.pathname === '/proposal' && url.searchParams.get('floorId') === second.floorId)
   await budget.getByRole('button', { name: new RegExp(second.name) }).first().waitFor()
-  assert.equal(await page.getByRole('dialog', { name: '请先选择家具' }).count(), 0, '目标楼层数量一致时不应拦截 proposal')
+  assert.equal(await selectionIssues.count(), 0, '目标楼层数量一致时应移除核对提示')
+  assert.equal(await page.getByRole('button', { name: '确认方案', exact: true }).isEnabled(), true)
 
   // 后续跨项目加载遮罩场景从第一项目开始，确保点击项目列表确实触发目标楼层读取。
   await page.evaluate(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/canvas', query: { floorId } }), first.floorId)
@@ -561,7 +600,7 @@ try {
     await secondCartRequest
     await page.getByText('正在加载当前楼层…', { exact: true }).waitFor()
     assert.equal(await budget.count(), 0)
-    assert.equal(await steps.count(), 0)
+    assert.equal(await page.getByTestId('workspace-topbar-context').count(), 0)
     assert.equal(await projectTree.getByText(first.name, { exact: true }).count(), 0)
   } finally {
     pendingCartReads.delete(second.floorId)

@@ -290,9 +290,9 @@ onBeforeUnmount(() => {
       <g v-if="showOutline" data-layer="design">
         <g v-for="space in scene.spaces" :key="space.spaceId" :data-space-id="space.spaceId">
           <path :d="polygonPath(space)" fill-rule="evenodd"
-            :fill="selectedSpaceId === space.spaceId ? '#79b2de' : '#dcb567'"
+            :fill="selectedSpaceId === space.spaceId ? 'var(--color-accent)' : 'var(--color-accent-line)'"
             :fill-opacity="selectedSpaceId === space.spaceId ? 0.14 : 0.065"
-            :stroke="selectedSpaceId === space.spaceId ? '#4b8bc6' : '#cc9b4d'"
+            :stroke="selectedSpaceId === space.spaceId ? 'var(--color-accent)' : '#897799'"
             :stroke-width="selectedSpaceId === space.spaceId ? 2 : 1.25"
             :stroke-dasharray="selectedSpaceId === space.spaceId ? undefined : '5 4'"
             :class="drag?.pan || tool === 'pan' || spacePanHeld ? undefined : tool === 'select' ? 'cursor-move hover:fill-opacity-20' : 'cursor-pointer hover:fill-opacity-20'" />
@@ -312,13 +312,13 @@ onBeforeUnmount(() => {
             <template v-if="tool === 'edit'">
               <g v-for="(point, index) in space.designGeometry.outer" :key="'edge-' + index"
                 :transform="edgeTransform(space, index)">
-                <circle r="7" fill="#fff" stroke="#4b8bc6" :data-edge-index="index" class="cursor-crosshair"><title>添加转折点</title></circle>
-                <path d="M-3 0H3 M0-3V3" stroke="#4b8bc6" pointer-events="none" />
+                <circle r="7" fill="#fff" stroke="var(--color-accent)" :data-edge-index="index" class="cursor-crosshair"><title>添加转折点</title></circle>
+                <path d="M-3 0H3 M0-3V3" stroke="var(--color-accent)" pointer-events="none" />
               </g>
             </template>
             <rect v-for="(point, index) in space.designGeometry.outer" :key="space.designGeometry.outerVertexIds[index]"
               :x="pointToSvg({ x: point[0], y: point[1] }).x - 4" :y="pointToSvg({ x: point[0], y: point[1] }).y - 4" width="8" height="8"
-              :data-vertex-id="space.designGeometry.outerVertexIds[index]" fill="#fff" stroke="#4b8bc6" stroke-width="1.8" class="cursor-move" />
+              :data-vertex-id="space.designGeometry.outerVertexIds[index]" fill="#fff" stroke="var(--color-accent)" stroke-width="1.8" class="cursor-move" />
           </template>
         </g>
       </g>
@@ -338,24 +338,24 @@ onBeforeUnmount(() => {
           :data-obstacle-id="selectedObstacle.obstacleId" :data-obstacle-handle="handle.handle" fill="#fff" :stroke="obstacleColor(selectedObstacle.kind)" stroke-width="2" class="cursor-move"><title>{{ selectedObstacle.kind === 'DOOR_CLEARANCE' ? '拖动调整门洞半径' : '拖动调整障碍尺寸' }}</title></rect>
       </g>
       <g v-if="selectionFrame && selected" :data-space-id="selected.spaceId" data-layer="selection-frame">
-        <rect :x="selectionFrame.x" :y="selectionFrame.y" :width="selectionFrame.width" :height="selectionFrame.height" fill="none" stroke="#4b8bc6" stroke-width="1" stroke-dasharray="4 3" pointer-events="none" />
+        <rect :x="selectionFrame.x" :y="selectionFrame.y" :width="selectionFrame.width" :height="selectionFrame.height" fill="none" stroke="var(--color-accent)" stroke-width="1" stroke-dasharray="4 3" pointer-events="none" />
         <rect v-for="[name, x, y, cursor] in selectionFrame.handles" :key="name" :x="x - 5" :y="y - 5" width="10" height="10" rx="1"
-          :data-resize-handle="name" :style="{ cursor }" fill="white" stroke="#4b8bc6" stroke-width="1.8"><title>拖动缩放空间</title></rect>
+          :data-resize-handle="name" :style="{ cursor }" fill="white" stroke="var(--color-accent)" stroke-width="1.8"><title>拖动缩放空间</title></rect>
       </g>
       <g v-if="tracePoints?.length" data-layer="trace" pointer-events="none">
-        <path :d="tracePoints.map((p, i) => { const s = pointToSvg(p); return (i ? 'L' : 'M') + s.x + ',' + s.y }).join(' ') + (tracePoints.length > 2 ? 'Z' : '')" fill="#79b2de" fill-opacity="0.16" stroke="#4b8bc6" stroke-width="2" stroke-dasharray="6 3" />
-        <circle v-for="(point, index) in tracePoints" :key="index" :cx="pointToSvg(point).x" :cy="pointToSvg(point).y" r="4" fill="#fff" stroke="#4b8bc6" stroke-width="2" />
+        <path :d="tracePoints.map((p, i) => { const s = pointToSvg(p); return (i ? 'L' : 'M') + s.x + ',' + s.y }).join(' ') + (tracePoints.length > 2 ? 'Z' : '')" fill="var(--color-accent)" fill-opacity="0.16" stroke="var(--color-accent)" stroke-width="2" stroke-dasharray="6 3" />
+        <circle v-for="(point, index) in tracePoints" :key="index" :cx="pointToSvg(point).x" :cy="pointToSvg(point).y" r="4" fill="#fff" stroke="var(--color-accent)" stroke-width="2" />
       </g>
       <g v-if="originalGeometries?.length" data-layer="original" fill="none" stroke="#8d8a80" stroke-width="1.5" stroke-dasharray="3 4" pointer-events="none">
         <path v-for="(geometry, index) in originalGeometries" :key="index" :d="originalPath(geometry)" />
       </g>
-      <g v-if="showOutline && showDimensions" data-layer="dimensions" class="pointer-events-none" stroke="#8fb1d6" stroke-width="1">
+      <g v-if="showOutline && showDimensions" data-layer="dimensions" class="pointer-events-none" stroke="var(--color-accent-line)" stroke-width="1">
         <g v-for="(dimension, index) in dimensions" :key="index">
           <template v-if="dimension">
             <path :d="'M' + dimension.start.x + ',' + dimension.start.y + 'L' + dimension.a.x + ',' + dimension.a.y + 'L' + dimension.b.x + ',' + dimension.b.y + 'L' + dimension.end.x + ',' + dimension.end.y" fill="none" />
             <g :transform="'translate(' + dimension.label.x + ',' + dimension.label.y + ') ' + (dimension.vertical ? 'rotate(-90)' : '')">
-              <rect x="-29" y="-10" width="58" height="20" rx="3" fill="#f0f6fc" stroke="none" />
-              <text y="4" text-anchor="middle" fill="#6687af" stroke="none" font-size="11">{{ dimension.value }}</text>
+              <rect x="-29" y="-10" width="58" height="20" rx="3" fill="var(--color-accent-tint)" stroke="none" />
+              <text y="4" text-anchor="middle" fill="var(--color-accent-ink)" stroke="none" font-size="11">{{ dimension.value }}</text>
             </g>
           </template>
         </g>

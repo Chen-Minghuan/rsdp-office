@@ -8,9 +8,9 @@ import java.util.List;
 public interface RenderPreviewMapper {
     @Insert("""
         INSERT INTO office_render_preview
-        (preview_id, project_id, zone_id, zone_name, canvas_revision, purpose, model, style, view, instructions,
+        (preview_id, project_id, zone_id, zone_name, canvas_revision, purpose, confirmation_id, model, style, view, instructions,
          status, client_change_id, content_hash, snapshot_json, prompt, provider_base_url, reference_url, created_at, updated_at)
-        VALUES (#{previewId}, #{projectId}, #{zoneId}, #{zoneName}, #{canvasRevision}, #{purpose}, #{model}, #{style}, #{view}, #{instructions},
+        VALUES (#{previewId}, #{projectId}, #{zoneId}, #{zoneName}, #{canvasRevision}, #{purpose}, #{confirmationId}, #{model}, #{style}, #{view}, #{instructions},
          #{status}, #{clientChangeId}, #{contentHash}, CAST(#{snapshotJson} AS jsonb), #{prompt}, #{providerBaseUrl}, #{referenceUrl}, #{createdAt}, #{updatedAt})
         """)
     int insert(RenderPreview preview);

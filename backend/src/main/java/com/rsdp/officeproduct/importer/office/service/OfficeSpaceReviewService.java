@@ -200,6 +200,7 @@ public class OfficeSpaceReviewService {
         OfficeCanvas canvas = new OfficeCanvas();
         canvas.setProjectId(latest.getProjectId());
         canvas.setRevision(revision);
+        canvas.setSchemeToken(latest.getSchemeToken());
         canvas.setMode(latest.getMode());
         canvas.setDesignZoneId(latest.getDesignZoneId());
         canvas.setObjectsJson(writeJson(objects));

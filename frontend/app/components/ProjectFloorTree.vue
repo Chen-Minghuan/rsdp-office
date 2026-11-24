@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { projectPermissionsFor } from '~/utils/projectPermissions'
-import { projectBenchPath, projectDrawingRoute } from '~/utils/projectBenchRoutes'
+import { projectBenchPath, projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
 
 withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
@@ -8,7 +8,7 @@ const office = useOfficeStore()
 const { canCreateProject, user } = useAuth()
 const route = useRoute()
 const router = useRouter()
-const { isProjectWorkflow, floorReady } = useWorkspaceNavigation()
+const { isProjectWorkflow, isProjectOverview, floorReady } = useWorkspaceNavigation()
 const showCreate = ref(false)
 const showProjectList = ref(false)
 const showSettings = ref(false)
@@ -57,7 +57,8 @@ async function selectProject(projectId: string) {
     return
   }
   closeProjectList()
-  await workspace.activateFloor(floor.floorId, true)
+  if (isProjectOverview.value) await router.push(projectOverviewRoute(floor.floorId))
+  else await workspace.activateFloor(floor.floorId, true)
 }
 
 function focusNameInput(select = false) {
@@ -130,7 +131,7 @@ async function selectSpace(zoneId: string) {
 async function selectFloor(floorId: string) {
   if (workspace.switching) return
   await workspace.activateFloor(floorId)
-  if (workspace.currentFloorId !== floorId || workspace.error) return
+  if (workspace.currentFloorId !== floorId || workspace.error || isProjectOverview.value) return
   if (!office.zones.length || !isProjectWorkflow.value) {
     await router.push(office.zones.length ? { path: '/canvas', query: { floorId } } : projectDrawingRoute(floorId))
   }
@@ -148,14 +149,14 @@ async function selectFloor(floorId: string) {
       <span class="mb-1 block px-1 text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
       <span class="block border-y border-line px-2 py-3 text-[11px] leading-5 text-muted">当前账号暂无可访问项目</span>
     </NuxtLink>
-    <div v-else class="mb-1 flex items-center justify-between px-1">
+    <div v-else class="relative mb-1 flex flex-wrap items-center justify-between gap-1 px-1">
       <span class="text-[11px] font-medium tracking-wider text-muted">项目与楼层</span>
-      <div class="relative flex items-center gap-0.5">
-        <button v-if="canCreateProject" class="relative left-[12px] rounded-none px-1.5 py-0.5 text-[11px] font-semibold text-bronze-dark hover:bg-cream" @click="openCreateDialog">＋ 新建项目</button>
+      <div class="flex min-w-0 flex-wrap items-center gap-0.5">
+        <button v-if="canCreateProject" class="px-1.5 py-0.5 text-[11px] font-semibold text-accent-ink hover:bg-accent-tint" @click="openCreateDialog">＋ 新建项目</button>
         <button
           v-if="workspace.projects.length"
           type="button"
-          class="relative left-[12px] rounded-none px-1.5 py-0.5 text-[11px] font-semibold"
+          class="px-1.5 py-0.5 text-[11px] font-semibold"
           :class="showProjectList ? 'bg-cream text-bronze-dark' : 'text-bronze-dark hover:bg-cream'"
           :aria-expanded="showProjectList"
           :aria-pressed="showProjectList"
@@ -166,7 +167,7 @@ async function selectFloor(floorId: string) {
           v-if="showProjectList"
           :id="projectListId"
           data-testid="project-list-popover"
-          class="absolute right-[-14px] top-[calc(100%+4px)] z-50 max-h-[min(24rem,calc(100dvh-10rem))] w-59 overflow-y-auto border border-line bg-white py-1 shadow-panel"
+          class="absolute right-0 top-[calc(100%+4px)] z-50 max-h-[min(24rem,calc(100dvh-10rem))] w-48 max-w-full overflow-y-auto border border-line bg-white py-1"
         >
           <button
             v-for="project in workspace.projects"

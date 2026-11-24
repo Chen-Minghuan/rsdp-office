@@ -32,10 +32,13 @@ public class RenderPreviewService {
     private final RenderPreviewFiles files;
     private final RenderProperties properties;
     private final ObjectMapper json;
+    private final OfficeProposalConfirmationService confirmations;
+    private final OfficeProjectAccessService access;
 
     @Transactional
     public ObjectNode create(String projectId, RenderPreviewRequest request) {
         project(projectId);
+        access.requireFloorAccess(projectId);
         validateRequest(request);
         var options=RenderGenerationOptions.from(request.getPromptMode(),request.getReferenceMode(),request.getPromptExtend(),request.getSeed(),request.getSampleIndex());
         long requestStartedAt=System.currentTimeMillis();
@@ -43,6 +46,7 @@ public class RenderPreviewService {
         JsonNode expected=RenderPreviewScene.canonical(request.getExpectedSnapshot());
         Map<String,Object> content=new LinkedHashMap<>();content.put("snapshot",expected);content.put("style",request.getStyle());content.put("view",request.getView());content.put("instructions",request.getInstructions());content.put("model",properties.getModel());
         if(options.explicit())content.put("generation",options.manifest());
+        if(request.getConfirmationId()!=null)content.put("confirmationId",request.getConfirmationId());
         String hash=VisionImagePreparer.sha256(encode(RenderPreviewScene.canonical(json.valueToTree(content))).getBytes(StandardCharsets.UTF_8));
         RenderPreview previous=previews.byChange(projectId,request.getClientChangeId());
         if (previous!=null) {
@@ -53,6 +57,10 @@ public class RenderPreviewService {
         if (canvas==null || !Objects.equals(canvas.getRevision(),request.getCanvasRevision())) throw new BusinessException("排版版本已变化，请保存当前布局后重新生成");
         JsonNode scene=RenderPreviewScene.snapshot(json.valueToTree(canvas.getObjects()),request.getZoneId());
         if (!scene.equals(expected)) throw new BusinessException("当前保存的空间或家具已变化，请重新读取后生成");
+        if (request.getConfirmationId() != null) {
+            scene = confirmations.requireRenderScene(projectId, request.getZoneId(), request.getConfirmationId());
+            if (!scene.equals(expected)) throw new BusinessException("当前房间与已确认方案不一致，请重新确认");
+        }
         RenderPreviewScene.validate(scene);
         // Concept preview is deliberately allowed before product selection. It cannot confirm a final scheme.
         var physicalContext=layoutContext.prepare(projectId,scene);
@@ -62,6 +70,10 @@ public class RenderPreviewService {
         provider.requireConfigured();
         RenderPreview entry=new RenderPreview();
         entry.setPreviewId("RPRE-"+UUID.randomUUID()); entry.setProjectId(projectId); entry.setZoneId(request.getZoneId());
+        if (request.getConfirmationId() != null) {
+            entry.setPurpose("CONFIRMED_SCHEME");
+            entry.setConfirmationId(request.getConfirmationId());
+        }
         entry.setZoneName(scene.path("zone").path("name").asText("未命名空间")); entry.setCanvasRevision(canvas.getRevision());
         entry.setClientChangeId(request.getClientChangeId()); entry.setContentHash(hash); entry.setSnapshotJson(encode(scene));
         entry.setStyle(request.getStyle()); entry.setView("ISOMETRIC"); entry.setInstructions(request.getInstructions());
@@ -114,12 +126,16 @@ public class RenderPreviewService {
 
     public List<ObjectNode> list(String projectId,String zoneId) {
         project(projectId); id(zoneId,"空间 ID");
-        return previews.list(projectId,zoneId).stream().map(this::response).toList();
+        access.requireFloorAccess(projectId);
+        var entries = previews.list(projectId,zoneId);
+        String confirmed = entries.stream().anyMatch(entry -> entry.getConfirmationId() != null) ? currentConfirmation(projectId) : null;
+        return entries.stream().map(entry -> response(entry, confirmed)).toList();
     }
 
     @Transactional
     public ObjectNode get(String projectId,String previewId) {
         project(projectId); id(previewId,"预览 ID");
+        access.requireFloorAccess(projectId);
         RenderPreview entry=previews.lock(projectId,previewId);
         if (entry==null) throw new BusinessException("效果预览不存在或不属于当前项目");
         if (List.of("SUBMITTING","PENDING","RUNNING").contains(entry.getStatus())) {
@@ -161,7 +177,15 @@ public class RenderPreviewService {
         timing.put("totalMs",Math.max(0,end-start));long submitStart=timing.path("submitStartedAt").asLong(0),submitted=timing.path("submittedAt").asLong(0),providerComplete=timing.path("providerCompletedAt").asLong(0);
         if(submitStart>0)timing.put("preparationMs",Math.max(0,submitStart-start));if(submitted>0&&submitStart>0)timing.put("submitMs",Math.max(0,submitted-submitStart));
         if(submitted>0)timing.put("providerMs",Math.max(0,(providerComplete>0?providerComplete:end)-submitted));if(ready>0&&providerComplete>0)timing.put("downloadMs",Math.max(0,ready-providerComplete));return timing;
-    }    private ObjectNode response(RenderPreview entry) {
+    }
+    private ObjectNode response(RenderPreview entry) {
+        return response(entry,entry.getConfirmationId()==null?null:currentConfirmation(entry.getProjectId()));
+    }
+    private String currentConfirmation(String floorId) {
+        var confirmation=confirmations.latest(floorId);
+        return confirmation!=null&&confirmation.current()?confirmation.confirmationId():null;
+    }
+    private ObjectNode response(RenderPreview entry,String currentConfirmationId) {
         ObjectNode result=json.valueToTree(entry);
         ObjectNode snapshot=(ObjectNode)decode(entry.getSnapshotJson());
         JsonNode references=snapshot.remove("renderProductReferences");
@@ -178,7 +202,7 @@ public class RenderPreviewService {
             var canvas=office.getCanvas(entry.getProjectId());
             stale=canvas==null || !snapshot.equals(RenderPreviewScene.snapshot(json.valueToTree(canvas.getObjects()),entry.getZoneId()));
         } catch (BusinessException ignored) { /* A deleted/unavailable room makes this a historical result. */ }
-        result.put("stale",stale);
+        result.put("stale",stale || entry.getConfirmationId() != null && !entry.getConfirmationId().equals(currentConfirmationId));
         return result;
     }
 
@@ -204,6 +228,7 @@ public class RenderPreviewService {
     private void validateRequest(RenderPreviewRequest request) {
         if (request==null) throw new BusinessException("请提供当前空间和生成参数");
         id(request.getZoneId(),"空间 ID"); id(request.getClientChangeId(),"生成请求 ID");
+        if (request.getConfirmationId() != null) id(request.getConfirmationId(), "方案确认 ID");
         if (request.getCanvasRevision()==null || request.getCanvasRevision()<1 || request.getExpectedSnapshot()==null || !request.getExpectedSnapshot().isObject()
             || encode(request.getExpectedSnapshot()).length()>1_000_000) throw new BusinessException("排版快照或版本无效");
         if (request.getStyle()==null || request.getStyle().isBlank() || request.getStyle().length()>100) throw new BusinessException("请填写 1 至 100 字的效果图风格");

@@ -9,6 +9,7 @@ export interface RenderPreviewRequest {
   clientChangeId: string
   zoneId: string
   canvasRevision: number
+  confirmationId?: string
   expectedSnapshot: RenderPreviewSnapshot
   style: string
   view: 'ISOMETRIC' | 'INTERIOR'
@@ -100,7 +101,8 @@ export interface RenderPreview {
   zoneId: string
   zoneName: string
   canvasRevision: number
-  purpose: 'CONCEPT_PREVIEW'
+  purpose: 'CONCEPT_PREVIEW' | 'CONFIRMED_SCHEME'
+  confirmationId?: string
   model: string
   style: string
   view: 'ISOMETRIC' | 'INTERIOR'

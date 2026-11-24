@@ -10,6 +10,8 @@ export interface ImportedProduct {
   rspuCode: string | null
   externalCode: string | null
   productName: string | null
+  categoryPath?: string[] | null
+  colorPrimaryName?: string | null
   primaryImageUrl: string | null
   retailPrice: number | null
   status: string | null

@@ -26,14 +26,15 @@ create table if not exists office_user_session (
 );
 create index if not exists idx_office_user_session_user on office_user_session(user_id);
 
--- Independent concept previews. Snapshots never confirm or overwrite a design scheme.
+-- Concept previews and renders based on already confirmed proposal snapshots.
 create table if not exists office_render_preview (
     preview_id varchar(64) primary key,
     project_id varchar(128) not null,
     zone_id varchar(128) not null,
     zone_name text not null,
     canvas_revision integer not null,
-    purpose varchar(32) not null default 'CONCEPT_PREVIEW' check (purpose = 'CONCEPT_PREVIEW'),
+    purpose varchar(32) not null default 'CONCEPT_PREVIEW',
+    confirmation_id varchar(64),
     model varchar(64) not null,
     style varchar(100) not null,
     view varchar(32) not null,
@@ -51,7 +52,11 @@ create table if not exists office_render_preview (
     error_message text,
     created_at timestamp not null,
     updated_at timestamp not null,
-    unique(project_id, client_change_id)
+    unique(project_id, client_change_id),
+    constraint office_render_preview_purpose_check check (
+        (purpose = 'CONCEPT_PREVIEW' and confirmation_id is null)
+        or (purpose = 'CONFIRMED_SCHEME' and confirmation_id is not null)
+    )
 );
 create index if not exists idx_render_preview_history on office_render_preview(project_id, zone_id, created_at desc);
 
@@ -103,6 +108,7 @@ create table if not exists office_canvas (
     canvas_id bigserial primary key,
     project_id varchar(64) not null,
     revision int default 1,
+    scheme_token varchar(64),
     mode varchar(20) default 'overview',
     design_zone_id varchar(64),
     objects_json jsonb not null,
@@ -121,6 +127,36 @@ create table if not exists office_cart (
     created_at timestamp default now(),
     updated_at timestamp default now()
 );
+
+create table if not exists office_room_scheme (
+    floor_id varchar(64) not null references office_design_floor(floor_id),
+    zone_id varchar(64) not null,
+    active_slot varchar(1) not null check (active_slot in ('A', 'B')),
+    inactive_json jsonb not null,
+    primary key (floor_id, zone_id)
+);
+
+create table if not exists office_proposal_confirmation (
+    confirmation_id varchar(64) primary key,
+    floor_id varchar(64) not null references office_design_floor(floor_id),
+    canvas_revision integer not null,
+    fingerprint varchar(64) not null,
+    snapshot_json jsonb not null,
+    confirmed_by varchar(64),
+    confirmed_at timestamp not null,
+    retired boolean not null default false
+);
+create index if not exists idx_office_proposal_confirmation_floor on office_proposal_confirmation(floor_id, confirmed_at desc);
+
+create table if not exists office_product_bundle (
+    bundle_id varchar(64) primary key,
+    user_id varchar(64) not null references office_user(user_id),
+    name varchar(100) not null,
+    items_json jsonb not null,
+    revision integer not null,
+    updated_at timestamp not null
+);
+create index if not exists idx_office_product_bundle_user on office_product_bundle(user_id, updated_at desc);
 
 -- ==================== 户型图 / 无限画布场景（从 RSDP 抽取并简化） ====================
 -- 单位约定：所有坐标/尺寸字段为毫米（mm），面积为平方米（m²），除非另有注释。

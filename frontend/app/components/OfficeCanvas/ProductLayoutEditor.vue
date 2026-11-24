@@ -215,7 +215,7 @@ function confirmLayout() {
             </div>
             <p v-if="selectedRingParts" class="mt-1 text-[10px] text-muted">桌面拼接建议 · {{ selectedRingParts }}</p>
             <div class="mt-2 grid grid-cols-4 gap-1.5">
-              <button data-testid="product-item-resize" class="rounded-none bg-[#83d94f] px-1 py-1.5 text-[10px] font-semibold text-[#214326]" @click="editableMeetingGroup ? resizeMeetingGroup() : resizeSelected()">{{ editableMeetingGroup ? '预览新组合' : '应用尺寸' }}</button>
+              <button data-testid="product-item-resize" class="rounded-none bg-accent px-1 py-1.5 text-[10px] font-semibold text-white" @click="editableMeetingGroup ? resizeMeetingGroup() : resizeSelected()">{{ editableMeetingGroup ? '预览新组合' : '应用尺寸' }}</button>
               <button class="rounded-none border border-line bg-white px-1 py-1.5 text-[10px] text-[#596252]" @click="rotateSelected">旋转 90°</button>
               <button data-testid="product-copy-furniture" class="rounded-none border border-line bg-white px-1 py-1.5 text-[10px] text-[#596252]" @click="copySelected">复制</button>
               <button class="rounded-none border border-[#ead7d2] bg-white px-1 py-1.5 text-[10px] text-[#a65e4c]" @click="removeSelected">删除</button>
@@ -289,7 +289,7 @@ function confirmLayout() {
       <p v-if="message" role="status" class="mb-1.5 text-[10px] leading-relaxed text-[#66745e]">{{ message }}</p>
       <button v-if="store.furniturePlacement" class="mb-1.5 w-full rounded-none border border-line bg-white px-3 py-2 text-[11px] font-semibold text-[#4d713d]" @click="store.cancelFurniturePlacement()">结束摆放</button>
       <p v-if="confirmProblem" data-testid="confirm-problem" class="mb-1.5 text-[10px] leading-relaxed text-amber-600">暂不能确认：{{ confirmProblem }}</p>
-      <button v-if="items.length && !confirmed" class="w-full rounded-none bg-[#83d94f] px-3 py-2 text-[11px] font-semibold text-[#214326]" @click="confirmLayout">确认当前排版</button>
+      <button v-if="items.length && !confirmed" class="w-full rounded-none bg-accent px-3 py-2 text-[11px] font-semibold text-white" @click="confirmLayout">确认当前排版</button>
       <button v-else-if="confirmed" class="w-full rounded-none border border-line px-3 py-2 text-[11px] font-semibold text-[#596252]" @click="store.unconfirmLayout(zone!.id)">重新调整排版</button>
       <button v-if="items.length" class="mt-1.5 w-full rounded-none border border-line px-3 py-1.5 text-[10px] text-muted hover:text-[#a65e4c]" @click="clearLayout">清空排版</button>
     </div>
