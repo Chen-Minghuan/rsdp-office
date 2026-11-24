@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="root"
-    class="relative flex items-center gap-2 border-t border-line px-1 py-3 text-sm text-[#615b55]"
+    class="relative flex items-center gap-2 border-t border-line px-1 py-3 text-sm text-muted"
     data-testid="user-session"
     @pointerenter="handlePointerEnter"
     @pointerleave="handlePointerLeave"
@@ -248,7 +248,7 @@ onBeforeUnmount(() => {
       data-testid="workspace-center-trigger"
       @click="togglePanel"
     >
-      <span v-if="avatarChar" class="grid h-8 w-8 flex-none place-items-center rounded-full bg-[#e8ddd0] text-xs font-semibold text-[#886a4a]" aria-hidden="true">{{ avatarChar }}</span>
+      <span v-if="avatarChar" class="grid h-8 w-8 flex-none place-items-center rounded-full bg-accent-tint text-xs font-semibold text-accent-ink" aria-hidden="true">{{ avatarChar }}</span>
       <span class="min-w-0 flex-1">
         <span class="block truncate text-xs">{{ displayName }}</span>
         <span v-if="roleLabel" class="mt-0.5 block text-[10px] text-muted" data-testid="user-session-role">{{ roleLabel }}</span>
@@ -269,12 +269,12 @@ onBeforeUnmount(() => {
         @mouseenter="clearCloseTimer"
         @pointerleave="handlePointerLeave"
       >
-        <aside class="bg-[#fbfaf8] p-2.5">
+        <aside class="bg-bg p-2.5">
           <div class="px-2.5 pb-2 pt-1 text-[10px] tracking-[0.12em] text-muted">工作区中心</div>
           <NuxtLink
             to="/favorites"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
-            :class="route.path === '/favorites' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"
+            :class="route.path === '/favorites' ? 'bg-accent-tint font-semibold text-bronze-dark' : 'text-muted hover:bg-accent-tint'"
             @click="closePanel()"
           >
             <AppIcon name="heartSolid" size="4" />
@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
             v-if="showQuoteEntry"
             to="/workspace/quotes"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
-            :class="route.path === '/workspace/quotes' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"
+            :class="route.path === '/workspace/quotes' ? 'bg-accent-tint font-semibold text-bronze-dark' : 'text-muted hover:bg-accent-tint'"
             @click="closePanel()"
           >
             <AppIcon name="documentText" size="4" />
@@ -296,7 +296,7 @@ onBeforeUnmount(() => {
             v-if="showDealerEntries"
             to="/workspace/users"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
-            :class="route.path === '/workspace/users' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"
+            :class="route.path === '/workspace/users' ? 'bg-accent-tint font-semibold text-bronze-dark' : 'text-muted hover:bg-accent-tint'"
             @click="closePanel()"
           >
             <AppIcon name="user" size="4" />

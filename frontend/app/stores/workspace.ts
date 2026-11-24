@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import type { CreateProjectRequest, ProjectReferenceImage, WorkspaceProject } from '~/types/workspace'
 import { authEnabled, useAuth } from '~/composables/useAuth'
-import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
+import { projectBenchPath, projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
 
 const SELECTION_KEY = 'rsdp-office-workspace-v1'
 let activeFloorTransition: { floorId: string, completion: Promise<void> } | null = null
@@ -20,7 +20,6 @@ export const useWorkspaceStore = defineStore('workspace', {
     initialized: false,
     loading: false,
     switching: false,
-    routeFloorActivationId: '',
     error: '',
   }),
   getters: {
@@ -94,16 +93,17 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.currentProjectId = floor.projectId
       this.rememberSelection()
     },
-    async activateFloor(floorId: string, openDrawing = false, syncRoute = true) {
+    async activateFloor(floorId: string, openDrawing = false) {
       const floor = this.projects.flatMap(project => project.floors).find(item => item.floorId === floorId)
       if (!floor) return
       const router = useRouter()
+      const sourceRoute = router.currentRoute.value
       const office = useOfficeStore()
       if (floorId === this.currentFloorId && office.initialized && office.workspaceId === floorId) {
         if (openDrawing) await router.push(projectDrawingRoute(floorId))
         return
       }
-      // 地址 watcher 与 proposal 守卫可能同时请求同一楼层；后者必须等待前者完成，不能用旧楼层放行。
+      // 同一楼层的重复请求等待当前加载结束，避免同时切换画布和清单。
       if (this.switching) {
         if (activeFloorTransition?.floorId === floorId) await activeFloorTransition.completion
         if (openDrawing && floorId === this.currentFloorId && office.initialized && office.workspaceId === floorId) await router.push(projectDrawingRoute(floorId))
@@ -112,7 +112,6 @@ export const useWorkspaceStore = defineStore('workspace', {
       let finishTransition!: () => void
       const completion = new Promise<void>(resolve => { finishTransition = resolve })
       activeFloorTransition = { floorId, completion }
-      if (!syncRoute) this.routeFloorActivationId = floorId
       this.switching = true
       this.error = ''
       try {
@@ -121,22 +120,23 @@ export const useWorkspaceStore = defineStore('workspace', {
         this.rememberSelection()
         await office.activateFloor(floor.floorId)
         if (openDrawing) await router.push(projectDrawingRoute(floorId))
-        else if (syncRoute && router.currentRoute.value.query.floorId !== floorId) {
+        else if (router.currentRoute.value === sourceRoute && sourceRoute.query.floorId !== floorId) {
           const { path, query } = router.currentRoute.value
-          // 仅在目标楼层数据就绪后同步地址，避免 proposal 守卫读取旧楼层的画布和购物车。
-          await router.replace({ path, query: { floorId, ...(path === '/canvas' && query.mode === 'design' ? { mode: 'design' } : {}) } })
+          // 楼层数据就绪后同步地址。
+          const overview = path === projectBenchPath && query.view === 'overview'
+          const design = path === '/canvas' && query.mode === 'design'
+          await router.replace(overview ? projectOverviewRoute(floorId) : {
+            path,
+            query: { floorId, mode: design ? 'design' : undefined, view: design && query.view === 'products' ? 'products' : undefined },
+          })
         }
       } catch (error) {
         this.error = error instanceof Error ? error.message : '楼层切换失败'
-        if (!syncRoute) this.releaseRouteFloorActivation(floorId)
       } finally {
         this.switching = false
         finishTransition()
         if (activeFloorTransition?.completion === completion) activeFloorTransition = null
       }
-    },
-    releaseRouteFloorActivation(floorId: string) {
-      if (this.routeFloorActivationId === floorId) this.routeFloorActivationId = ''
     },
     toggleProject(projectId: string) {
       this.collapsedProjectIds = this.collapsedProjectIds.includes(projectId)
@@ -168,8 +168,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     },
     async updateProjectName(projectId: string, projectName: string) {
       const updated = await useWorkspaceApi().updateProject(projectId, projectName)
-      const index = this.projects.findIndex(project => project.projectId === projectId)
-      if (index >= 0) this.projects[index] = { ...updated, floors: this.projects[index]!.floors }
+      const project = this.projects.find(item => item.projectId === projectId)
+      if (project) project.projectName = updated.projectName
     },
     async updateFloorName(projectId: string, floorId: string, floorName: string) {
       const updated = await useWorkspaceApi().updateFloor(projectId, floorId, floorName)
@@ -187,24 +187,29 @@ export const useWorkspaceStore = defineStore('workspace', {
       }
     },
     async updateRequirements(customerRequirements: string, projectId = this.currentProjectId) {
-      const project = this.projects.find(item => item.projectId === projectId)
-      if (!project) throw new Error('请先选择项目')
+      if (!this.projects.some(item => item.projectId === projectId)) throw new Error('请先选择项目')
       const updated = await useWorkspaceApi().updateRequirements(projectId, customerRequirements)
-      const index = this.projects.findIndex(item => item.projectId === updated.projectId)
-      if (index >= 0) this.projects[index] = { ...updated, floors: updated.floors?.length ? updated.floors : this.projects[index]!.floors }
+      const project = this.projects.find(item => item.projectId === updated.projectId)
+      if (project && updated.requirementsRevision >= project.requirementsRevision) {
+        project.customerRequirements = updated.customerRequirements
+        project.requirementsRevision = updated.requirementsRevision
+      }
       return updated
     },
     async updateMembers(projectId: string, leaderUserId: string, collaboratorUserIds: string[],
       permissions?: Record<string, import('~/types/workspace').ProjectPermission[]>) {
       const updated = await useWorkspaceApi().replaceMembers(projectId, leaderUserId, collaboratorUserIds, permissions)
-      const index = this.projects.findIndex(item => item.projectId === projectId)
-      if (index >= 0) this.projects[index] = { ...updated, floors: this.projects[index]!.floors }
+      const project = this.projects.find(item => item.projectId === projectId)
+      if (project) {
+        project.leader = updated.leader
+        project.collaborators = updated.collaborators
+      }
       return updated
     },
     async updateReferenceImages(projectId: string, referenceImages: ProjectReferenceImage[]) {
       const updated = await useWorkspaceApi().updateReferences(projectId, referenceImages)
-      const index = this.projects.findIndex(item => item.projectId === projectId)
-      if (index >= 0) this.projects[index] = { ...updated, floors: this.projects[index]!.floors }
+      const project = this.projects.find(item => item.projectId === projectId)
+      if (project) project.referenceImages = updated.referenceImages
       return updated
     },
   },

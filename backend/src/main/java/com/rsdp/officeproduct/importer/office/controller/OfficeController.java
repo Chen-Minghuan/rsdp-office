@@ -66,25 +66,29 @@ public class OfficeController {
     }
 
     @PostMapping("/projects/{projectId}/cart")
-    public Result<CartItemDto> addCartItem(@PathVariable String projectId, @RequestBody CartItemDto dto) {
-        return Result.ok(officeService.addCartItem(projectId, dto));
+    public Result<CartItemDto> addCartItem(@PathVariable String projectId, @RequestBody CartItemDto dto,
+                                          @RequestHeader(value = "X-Office-Scheme", required = false) String schemeToken) {
+        return Result.ok(officeService.addCartItem(projectId, dto, schemeToken));
     }
 
     @PutMapping("/projects/{projectId}/cart/{lineId}")
     public Result<CartItemDto> updateCartItem(@PathVariable String projectId, @PathVariable String lineId,
-                                              @RequestParam Integer qty) {
-        return Result.ok(officeService.updateCartItemQty(projectId, lineId, qty));
+                                              @RequestParam Integer qty,
+                                              @RequestHeader(value = "X-Office-Scheme", required = false) String schemeToken) {
+        return Result.ok(officeService.updateCartItemQty(projectId, lineId, qty, schemeToken));
     }
 
     @DeleteMapping("/projects/{projectId}/cart/{lineId}")
-    public Result<Void> deleteCartItem(@PathVariable String projectId, @PathVariable String lineId) {
-        officeService.deleteCartItem(projectId, lineId);
+    public Result<Void> deleteCartItem(@PathVariable String projectId, @PathVariable String lineId,
+                                      @RequestHeader(value = "X-Office-Scheme", required = false) String schemeToken) {
+        officeService.deleteCartItem(projectId, lineId, schemeToken);
         return Result.ok(null);
     }
 
     @DeleteMapping("/projects/{projectId}/cart")
-    public Result<Void> clearCart(@PathVariable String projectId) {
-        officeService.clearCart(projectId);
+    public Result<Void> clearCart(@PathVariable String projectId,
+                                  @RequestHeader(value = "X-Office-Scheme", required = false) String schemeToken) {
+        officeService.clearCart(projectId, schemeToken);
         return Result.ok(null);
     }
 

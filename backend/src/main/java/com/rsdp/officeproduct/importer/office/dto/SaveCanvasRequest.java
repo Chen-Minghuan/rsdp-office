@@ -9,6 +9,7 @@ public class SaveCanvasRequest {
 
     private String projectId;
     private Integer revision;
+    private String schemeToken;
     private String mode;
     private String designZoneId;
     private List<Object> objects;

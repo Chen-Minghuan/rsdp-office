@@ -7,6 +7,7 @@ public class ModuleRecommendationRequest {
     private String zoneId;
     private String moduleId;
     private Integer canvasRevision;
+    private String schemeToken;
     private boolean allowRotation = true;
     private String productId;
     private boolean applyToSameModules;

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import javax.imageio.ImageIO;
 import java.io.ByteArrayInputStream;
+import java.time.LocalDateTime;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -30,7 +31,8 @@ class RenderPreviewServiceTest {
     private final RenderPreviewFiles files=mock(RenderPreviewFiles.class);
     private final RenderProperties properties=new RenderProperties();
     private final Map<String,RenderPreview> records=new HashMap<>();
-    private final RenderPreviewService service=new RenderPreviewService(office,products,productAudit,geometryAudit,physicalContext,projects,mapper,provider,files,properties,json);
+    private final OfficeProposalConfirmationService confirmations=mock(OfficeProposalConfirmationService.class);
+    private final RenderPreviewService service=new RenderPreviewService(office,products,productAudit,geometryAudit,physicalContext,projects,mapper,provider,files,properties,json,confirmations,mock(OfficeProjectAccessService.class));
     private CanvasDto canvas;
     private ArrayNode objects;
 
@@ -72,6 +74,29 @@ class RenderPreviewServiceTest {
         assertEquals(6,first.path("snapshot").path("zone").path("polygon").size());
         verify(provider,times(1)).submit(anyList(),argThat(prompt->!prompt.contains("图3为带P编号")),any());
         var changed=request(); changed.setStyle("工业风"); assertThrows(BusinessException.class,()->service.create("PROJECT",changed));
+    }
+
+    @Test void formalRenderRequiresCurrentConfirmationAndKeepsExpiredResultsHistorical() {
+        var request = request();
+        request.setConfirmationId("PROP-A");
+        when(confirmations.requireRenderScene("PROJECT", "ROOM", "PROP-A")).thenThrow(new BusinessException("方案已过期"));
+        assertThrows(BusinessException.class, () -> service.create("PROJECT", request));
+        verifyNoInteractions(provider);
+
+        doReturn(request.getExpectedSnapshot()).when(confirmations).requireRenderScene("PROJECT", "ROOM", "PROP-A");
+        var now = LocalDateTime.now();
+        when(confirmations.latest("PROJECT")).thenReturn(new OfficeProposalConfirmationService.Status("PROP-A", 3, now, true));
+        var job = service.create("PROJECT", request);
+        assertEquals("CONFIRMED_SCHEME", job.path("purpose").asText());
+        assertEquals("PROP-A", job.path("confirmationId").asText());
+        assertFalse(job.path("stale").asBoolean());
+
+        when(confirmations.latest("PROJECT")).thenReturn(new OfficeProposalConfirmationService.Status("PROP-A", 3, now, false));
+        assertTrue(service.create("PROJECT", request).path("stale").asBoolean());
+        verify(provider, times(1)).submit(anyList(), anyString(), any());
+        request.setConfirmationId("PROP-B");
+        assertThrows(BusinessException.class, () -> service.create("PROJECT", request));
+        verify(provider, times(1)).submit(anyList(), anyString(), any());
     }
     @Test void sendsSelectedProductPhotosAndKeepsReferencesSeparateFromLayoutSnapshot() throws Exception {
         ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();

@@ -121,7 +121,6 @@ async function saveEdit() {
     v-if="workspace.currentProject"
     class="w-full text-left"
     data-testid="project-requirements-panel"
-    title="双击直接填写项目需求"
     @dblclick="viewMode === 'raw' && startEdit()"
   >
     <div class="flex items-center justify-between gap-2">
@@ -130,7 +129,7 @@ async function saveEdit() {
         <h2 class="text-sm font-bold text-ink">项目需求</h2>
       </div>
       <div class="flex gap-1.5">
-        <button type="button" class="requirements-edit-button h-[26px] w-[52px] rounded-full border border-bronze bg-[#f0e7db] text-[10px] leading-none text-bronze-dark transition hover:bg-cream" @click="openRequirements" @dblclick.stop>编辑</button>
+        <button type="button" class="requirements-edit-button h-[26px] w-[52px] rounded-full border border-accent-line bg-accent-tint text-[10px] leading-none text-accent-ink transition hover:border-accent" @click="openRequirements" @dblclick.stop>编辑</button>
         <button
           type="button"
           role="switch"
@@ -150,7 +149,7 @@ async function saveEdit() {
       </div>
     </div>
     <div class="relative mt-3 pb-2 [perspective:1600px]">
-      <div class="requirements-card-backing absolute bottom-0 left-2 right-0 top-3 rounded-[24px] border border-line bg-[#f1efeb]" aria-hidden="true" />
+      <div class="requirements-card-backing absolute bottom-0 left-2 right-0 top-3 rounded-[24px] border border-line bg-accent-tint" aria-hidden="true" />
       <div
         data-testid="requirements-flip-card"
         class="requirements-flip-card relative mr-3 h-[300px]"
@@ -159,7 +158,7 @@ async function saveEdit() {
       >
         <section
           data-testid="requirements-raw-face"
-          class="requirements-face rounded-[24px] border border-[#aaa7a1] bg-[#fffefb] px-4 py-4 shadow-sm"
+          class="requirements-face rounded-[24px] border border-accent-line bg-white px-4 py-4"
           :aria-hidden="viewMode !== 'raw'"
           :inert="viewMode !== 'raw'"
         >
@@ -171,7 +170,7 @@ async function saveEdit() {
         </section>
         <section
           data-testid="requirements-summary-face"
-          class="requirements-face requirements-summary-face rounded-[24px] border border-[#aaa7a1] bg-[#f1efeb] px-4 py-4 shadow-sm"
+          class="requirements-face requirements-summary-face rounded-[24px] border border-accent-line bg-accent-tint px-4 py-4"
           :aria-hidden="viewMode !== 'summary'"
           :inert="viewMode !== 'summary'"
         >
@@ -230,7 +229,7 @@ async function saveEdit() {
   height: 26px;
   padding: 0;
   border-radius: 999px !important;
-  color: var(--color-bronze-dark);
+  color: var(--color-accent-ink);
   font-size: 10px;
   line-height: 1;
 }
@@ -241,9 +240,9 @@ async function saveEdit() {
 .requirements-summary-track {
   position: absolute;
   inset: 0;
-  border: 1px solid var(--color-bronze);
+  border: 1px solid var(--color-accent-line);
   border-radius: 999px !important;
-  background: #f0e7db;
+  background: var(--color-accent-tint);
   transition: background 350ms ease;
 }
 .requirements-summary-thumb {
@@ -252,7 +251,7 @@ async function saveEdit() {
   left: 4px;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--color-bronze);
+  border: 1px solid var(--color-accent);
   border-radius: 50% !important;
   background: #fffefb;
   transform: translate(0, -50%);
@@ -269,7 +268,7 @@ async function saveEdit() {
   transition: color 300ms;
 }
 .requirements-summary-switch[aria-checked="true"] .requirements-summary-track {
-  background: linear-gradient(135deg, #c49a74, var(--color-bronze));
+  background: var(--color-accent);
 }
 .requirements-summary-switch[aria-checked="true"] .requirements-summary-thumb {
   transform: translate(40px, -50%);

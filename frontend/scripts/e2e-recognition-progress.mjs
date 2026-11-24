@@ -166,6 +166,7 @@ try {
   lateRelease.resolve()
   lateRelease = null
   await projectList.getByRole('button', { name: '进入项目 识别进度测试项目', exact: true }).first().click()
+  await page.getByRole('link', { name: '上传或识别图纸', exact: true }).click()
   await page.getByText('正在识别空间', { exact: true }).waitFor()
   status = 'awaiting_confirm'
   stage = 'DONE'

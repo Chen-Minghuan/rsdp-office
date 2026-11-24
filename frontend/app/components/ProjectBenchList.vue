@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ProjectBudget, ProjectStatus, WorkspaceProject } from '~/types/workspace'
+import { projectOverviewRoute } from '~/utils/projectBenchRoutes'
 import { projectStatusOptions, type ProjectStatusFilter } from '~/utils/projectStatus'
 
 const props = withDefaults(defineProps<{ statusFilter?: ProjectStatusFilter }>(), { statusFilter: 'ALL' })
@@ -46,7 +47,7 @@ function leaderName(project: WorkspaceProject) {
 async function openProject(project: WorkspaceProject) {
   const firstFloor = [...project.floors].sort((a, b) => a.sortOrder - b.sortOrder)[0]
   if (!firstFloor || workspace.switching) return
-  await workspace.activateFloor(firstFloor.floorId, true)
+  await navigateTo(projectOverviewRoute(firstFloor.floorId))
 }
 
 async function changeStatus(project: WorkspaceProject, event: Event) {
@@ -132,12 +133,11 @@ const visibleProjects = computed(() => {
           <tr
             v-for="project in visibleProjects"
             :key="project.projectId"
-            class="group cursor-pointer border-t border-line transition hover:bg-[#f8f3ef]"
-            @click="openProject(project)"
+            class="group border-t border-line transition hover:bg-neutral-50"
           >
             <td class="relative px-5 py-3.5 text-left">
               <span class="absolute left-0 top-0 h-full w-0.5 bg-bronze opacity-0 transition group-hover:opacity-100" aria-hidden="true" />
-              <button type="button" class="flex w-full min-w-0 items-center gap-2 text-left hover:text-bronze-dark" :aria-label="`进入项目 ${project.projectName}`">
+              <button type="button" class="flex w-full min-w-0 items-center gap-2 text-left hover:text-[#693299] disabled:opacity-50" :aria-label="`进入项目 ${project.projectName}`" :disabled="!project.floors.length || workspace.switching" @click="openProject(project)">
                 <span class="truncate text-sm font-semibold">{{ project.projectName }}</span>
                 <span v-if="project.projectId === workspace.currentProjectId" class="flex-none border border-bronze/40 px-1.5 py-px text-[11px] leading-4 text-bronze-dark">
                   当前
@@ -164,16 +164,6 @@ const visibleProjects = computed(() => {
                 <span v-if="budgetByProject[project.projectId]?.budgetStatus === 'PENDING_PRICING'" class="ml-1 text-xs text-bronze-dark">待补价</span>
               </template>
               <span v-else class="text-muted">—</span>
-            </td>
-            <td class="px-3 py-3.5">
-              <button
-                type="button"
-                class="inline-flex h-7 w-7 items-center justify-center text-lg leading-none text-muted transition hover:bg-cream hover:text-bronze-dark disabled:cursor-not-allowed disabled:opacity-40"
-                :aria-label="`进入项目 ${project.projectName}`"
-                :disabled="!project.floors.length || workspace.switching"
-              >
-                &gt;
-              </button>
             </td>
           </tr>
         </tbody>

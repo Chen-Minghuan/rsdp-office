@@ -208,34 +208,6 @@ export interface Product {
   imageUrl?: string
 }
 
-export interface ZoneBrief {
-  zoneId: string
-  name: string
-  type: ZoneType
-  targetSeats: number
-  geometry: {
-    kind: 'canvas_rect'
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-  geometryVerified: false
-  factSource: 'user_annotation'
-  note: string
-}
-
-export interface DesignBrief {
-  projectId: string
-  canvasRevisionId: string
-  sceneRevisionId: null
-  zones: ZoneBrief[]
-  annotations: { id: string; zoneId: null; content: string }[]
-  references: { id: string; caption: string; imageAssetId: string }[]
-  sourceAssets: { fileName: string; fileType: string; source: string }[]
-  pendingQuestions: string[]
-}
-
 /** 项目报价口径：系数或毛利率（毛利率以小数传输，0.35 表示 35%）。 */
 export type QuotationPricingMode = 'COEFFICIENT' | 'MARGIN'
 
