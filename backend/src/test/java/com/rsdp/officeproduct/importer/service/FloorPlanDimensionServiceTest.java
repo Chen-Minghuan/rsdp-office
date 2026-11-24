@@ -10,6 +10,7 @@ import com.rsdp.officeproduct.importer.entity.FloorPlanSceneRevision;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -56,6 +57,8 @@ class FloorPlanDimensionServiceTest {
 
     @Test void unauthorizedFloorCannotReadRecognizeOrConfirmDimensions() {
         doThrow(new AccessDeniedException("无权访问该项目")).when(projectAccess).requireFloorAccess("OFLR-1");
+        doThrow(new AccessDeniedException("无权执行该项目操作"))
+            .when(projectAccess).requireFloorPermission("OFLR-1", OfficeProjectPermission.EDIT);
         assertThrows(AccessDeniedException.class, () -> service.get("A", 1, "mm"));
         assertThrows(AccessDeniedException.class, () -> service.recognize("A", 1));
         assertThrows(AccessDeniedException.class, () -> service.confirm("A", 1, "R", "mm"));

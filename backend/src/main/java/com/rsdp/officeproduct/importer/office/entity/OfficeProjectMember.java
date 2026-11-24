@@ -21,5 +21,6 @@ public class OfficeProjectMember {
     private String projectId;
     private String userId;
     private String role;
+    private Integer permissionFlags;
     private LocalDateTime createdAt;
 }

@@ -11,6 +11,7 @@ public class AdminUserDto {
     private String username;
     private String displayName;
     private String role;
+    private String workspaceId;
     private String status;
     private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;

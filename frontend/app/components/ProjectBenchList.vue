@@ -1,8 +1,30 @@
 <script setup lang="ts">
-import type { WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, WorkspaceProject } from '~/types/workspace'
 
-// 项目列表与侧栏项目树同源：useWorkspaceStore 由 app.vue 挂载时 init() 拉取，组件不重复请求。
+// 项目树由应用外壳加载，只有本列表展示时才单独读取预算。
 const workspace = useWorkspaceStore()
+const { storageScope } = useAuth()
+const api = useWorkspaceApi()
+const budgetByProject = ref<Record<string, ProjectBudget>>({})
+const budgetsLoading = ref(false)
+const projectKeys = computed(() => workspace.projects.map(project => project.projectId).join(','))
+
+watch([projectKeys, storageScope], async ([projects, scope], _previous, onCleanup) => {
+  budgetByProject.value = {}
+  budgetsLoading.value = !!projects
+  if (!projects) return
+
+  let current = true
+  onCleanup(() => { current = false })
+  try {
+    const budgets = await api.listProjectBudgets()
+    if (current && scope === storageScope.value) budgetByProject.value = budgets ?? {}
+  } catch {
+    // An unavailable budget must not hide projects or prevent opening them.
+  } finally {
+    if (current && scope === storageScope.value) budgetsLoading.value = false
+  }
+}, { immediate: true })
 
 const search = ref('')
 const sortKey = ref<'name' | 'floors'>('name')
@@ -99,9 +121,10 @@ const visibleProjects = computed(() => {
             </td>
             <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
             <td class="px-5 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
-              <template v-if="project.budgetTotal !== null && project.budgetStatus !== 'UNAVAILABLE'">
-                <span>{{ money(project.budgetTotal) }}</span>
-                <span v-if="project.budgetStatus === 'PENDING_PRICING'" class="ml-1 text-xs text-bronze-dark">待补价</span>
+              <span v-if="budgetsLoading" class="text-xs text-muted">加载中…</span>
+              <template v-else-if="budgetByProject[project.projectId]?.budgetTotal != null && budgetByProject[project.projectId]?.budgetStatus !== 'UNAVAILABLE'">
+                <span>{{ money(budgetByProject[project.projectId].budgetTotal) }}</span>
+                <span v-if="budgetByProject[project.projectId]?.budgetStatus === 'PENDING_PRICING'" class="ml-1 text-xs text-bronze-dark">待补价</span>
               </template>
               <span v-else class="text-muted">—</span>
             </td>

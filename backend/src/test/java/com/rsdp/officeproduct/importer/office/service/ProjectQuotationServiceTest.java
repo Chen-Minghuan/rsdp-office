@@ -212,6 +212,7 @@ class ProjectQuotationServiceTest {
 
     @Test
     void confirmStoresMultipleFeesAndLatestRestoresThem() throws Exception {
+        when(accessService.can(PROJECT_ID, OfficeProjectPermission.MARGIN_READ)).thenReturn(true);
         stubScenario(true);
         when(quotationMapper.selectOne(any())).thenReturn(null);
         ConfirmProjectQuotationRequest request = request("COEFFICIENT", "1.25", "100", "50",
@@ -238,6 +239,16 @@ class ProjectQuotationServiceTest {
         when(quotationMapper.selectOne(any())).thenReturn(header.getValue());
         when(quotationLineMapper.findByQuotationId(stored.getQuotationId())).thenReturn(List.of(line.getValue()));
         assertEquals(stored, service.latest(PROJECT_ID));
+
+        when(accessService.can(PROJECT_ID, OfficeProjectPermission.MARGIN_READ)).thenReturn(false);
+        ProjectQuotationRecordDto restricted = service.latestForExport(PROJECT_ID);
+        assertNull(restricted.getPricingMode());
+        assertNull(restricted.getPricingValue());
+        assertNull(restricted.getMissingPriceLines());
+        assertNull(restricted.getLines().getFirst().getFactoryPrice());
+        assertAmount("300", restricted.getLines().getFirst().getUnitPrice());
+        assertAmount("800.13", restricted.getTotalAmount());
+        verify(accessService).requirePermission(PROJECT_ID, OfficeProjectPermission.EXPORT_QUOTE);
     }
 
     @Test
@@ -325,9 +336,9 @@ class ProjectQuotationServiceTest {
             """);
         when(canvasMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(canvas);
 
-        when(catalogGateway.listOfficeProducts(anyString())).thenReturn(List.of(
-            product("V-DESK", "RSPU-DESK", "办公桌", "标准款"),
-            product("V-CHAIR", "RSPU-CHAIR", "会议椅", "标准款")));
+        when(catalogGateway.quotationProducts(org.mockito.ArgumentMatchers.anySet())).thenReturn(Map.of(
+            "V-DESK", product("V-DESK", "RSPU-DESK", "办公桌", "标准款"),
+            "V-CHAIR", product("V-CHAIR", "RSPU-CHAIR", "会议椅", "标准款")));
         when(catalogGateway.getFactoryPrices("RSPU-DESK"))
             .thenReturn(withFactoryPrice ? Map.of("V-DESK", new BigDecimal("194")) : Map.of());
         when(catalogGateway.getFactoryPrices("RSPU-CHAIR"))

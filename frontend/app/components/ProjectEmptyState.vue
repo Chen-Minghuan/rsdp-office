@@ -3,6 +3,7 @@ import { authEnabled } from '~/composables/useAuth'
 
 const workspace = useWorkspaceStore()
 const auth = useAuth()
+const { isProjectWorkflow } = useWorkspaceNavigation()
 const { canCreateProject, user } = auth
 const showCreate = ref(false)
 const retrying = ref(false)
@@ -11,7 +12,7 @@ const isAdmin = computed(() => authEnabled && auth.user.value?.role === 'ADMIN')
 
 async function retry() {
   retrying.value = true
-  try { await workspace.refresh() } finally { retrying.value = false }
+  try { await workspace.refresh(isProjectWorkflow.value) } finally { retrying.value = false }
 }
 </script>
 

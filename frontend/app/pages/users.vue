@@ -7,6 +7,7 @@ interface AdminUserItem {
   username: string
   displayName: string
   role: string
+  workspaceId?: string | null
   status: string
   lastLoginAt: string | null
   createdAt: string | null
@@ -21,11 +22,6 @@ const workspaces = ref<Awaited<ReturnType<typeof api.listAdminWorkspaces>>>([])
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
-
-const newUsername = ref('')
-const newDisplayName = ref('')
-const newPassword = ref('')
-const creating = ref(false)
 
 const wsName = ref('')
 const wsType = ref<WorkspaceType>('DEALER')
@@ -130,28 +126,6 @@ async function saveWorkspaceType() {
   }
 }
 
-async function createUser() {
-  error.value = ''
-  notice.value = ''
-  creating.value = true
-  try {
-    await api.createAdminUser({
-      username: newUsername.value.trim(),
-      displayName: newDisplayName.value.trim(),
-      password: newPassword.value,
-    })
-    notice.value = `已创建设计师账号 ${newUsername.value.trim()}`
-    newUsername.value = ''
-    newDisplayName.value = ''
-    newPassword.value = ''
-    await loadUsers()
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '创建用户失败'
-  } finally {
-    creating.value = false
-  }
-}
-
 async function toggleStatus(user: AdminUserItem) {
   error.value = ''
   notice.value = ''
@@ -220,7 +194,7 @@ function formatTime(value: string | null) {
 function roleLabel(user: AdminUserItem) {
   if (user.role === 'ADMIN') return '系统管理员'
   if (user.role === 'DEALER') return workspaceOwnerLabel(workspaceTypeByOwnerId.value.get(user.userId))
-  return '普通账号'
+  return user.workspaceId ? '工作区成员' : '未分配工作区'
 }
 </script>
 
@@ -236,7 +210,7 @@ function roleLabel(user: AdminUserItem) {
 
     <template v-else>
       <form class="mb-5 border border-line bg-white p-4" @submit.prevent="createWorkspace">
-        <h2 class="mb-1 text-sm font-semibold">创建工作区</h2>
+        <h2 class="mb-1 text-sm font-semibold">创建工作区 <span class="ml-2 text-xs font-normal text-muted">{{ workspaces.length }} / 20</span></h2>
         <p class="mb-3 text-xs text-muted">主号在本工作区开通成员账号、管理项目并指定负责人。</p>
         <div class="grid gap-2 md:grid-cols-3">
           <input v-model="wsName" class="min-w-0 border border-line bg-white px-2 py-1.5 text-sm" placeholder="工作区名称" aria-label="工作区名称" maxlength="200">
@@ -247,7 +221,7 @@ function roleLabel(user: AdminUserItem) {
           <input v-model="wsOwnerUsername" class="min-w-0 border border-line bg-white px-2 py-1.5 text-sm" placeholder="主号用户名（登录用）" aria-label="主号用户名" maxlength="32">
           <input v-model="wsOwnerDisplayName" class="min-w-0 border border-line bg-white px-2 py-1.5 text-sm" placeholder="主号显示名称" aria-label="主号显示名称" maxlength="64">
           <input v-model="wsOwnerPassword" type="password" class="min-w-0 border border-line bg-white px-2 py-1.5 text-sm" placeholder="主号初始密码（至少 6 位）" aria-label="主号初始密码">
-          <button class="bg-bronze px-3 py-1.5 text-sm text-white disabled:opacity-50" :disabled="creatingWorkspace">{{ creatingWorkspace ? '创建中…' : '创建工作区' }}</button>
+          <button class="bg-bronze px-3 py-1.5 text-sm text-white disabled:opacity-50" :disabled="creatingWorkspace || workspaces.length >= 20">{{ creatingWorkspace ? '创建中…' : '创建工作区' }}</button>
         </div>
       </form>
 
@@ -289,17 +263,6 @@ function roleLabel(user: AdminUserItem) {
         </table>
       </div>
 
-      <form class="mb-5 border border-line bg-white p-4" @submit.prevent="createUser">
-        <h2 class="mb-1 text-sm font-semibold">创建设计师账号</h2>
-        <p class="mb-3 text-xs text-muted">新账号可以登录，工作区归属和项目角色按实际分配显示。</p>
-        <div class="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
-          <input v-model="newUsername" class="border border-line bg-white px-2 py-1.5 text-sm" placeholder="用户名（登录用）" aria-label="新用户名" maxlength="32">
-          <input v-model="newDisplayName" class="border border-line bg-white px-2 py-1.5 text-sm" placeholder="显示名称" aria-label="新用户显示名称" maxlength="64">
-          <input v-model="newPassword" type="password" class="border border-line bg-white px-2 py-1.5 text-sm" placeholder="初始密码（至少 6 位）" aria-label="新用户初始密码">
-          <button class="bg-bronze px-3 py-1.5 text-sm text-white disabled:opacity-50" :disabled="creating">{{ creating ? '创建中…' : '创建' }}</button>
-        </div>
-      </form>
-
       <p v-if="error" role="alert" class="mb-2 text-xs text-red-700">{{ error }}</p>
       <p v-if="notice" class="mb-2 text-xs text-green">{{ notice }}</p>
 
@@ -309,7 +272,7 @@ function roleLabel(user: AdminUserItem) {
             <tr class="border-b border-line text-left text-xs text-muted">
               <th class="px-3 py-2 font-medium">用户名</th>
               <th class="px-3 py-2 font-medium">显示名称</th>
-              <th class="px-3 py-2 font-medium">系统角色</th>
+              <th class="px-3 py-2 font-medium">账号身份</th>
               <th class="px-3 py-2 font-medium">状态</th>
               <th class="px-3 py-2 font-medium">最近登录</th>
               <th class="px-3 py-2 font-medium">操作</th>

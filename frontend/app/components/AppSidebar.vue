@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
-import { workspaceTypeLabel } from '~/utils/workspaceType'
 import { projectBenchPath } from '~/utils/projectBenchRoutes'
 
 const router = useRouter()
@@ -138,32 +137,6 @@ onBeforeUnmount(() => {
         <AppIcon :name="link.icon" />
         <span>{{ link.label }}</span>
       </NuxtLink>
-      </div>
-      <div v-if="isDealer" class="grid content-start gap-1">
-        <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">{{ workspaceTypeLabel(auth.user.value?.workspaceType) }}</div>
-
-        <NuxtLink
-          to="/workspace/quotes"
-          :aria-current="isActive('/workspace/quotes') ? 'page' : undefined"
-          :class="[
-            'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
-            isActive('/workspace/quotes') ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
-          ]"
-        >
-          <AppIcon name="documentText" />
-          <span>商品报价</span>
-        </NuxtLink>
-        <NuxtLink
-          to="/workspace/users"
-          :aria-current="isActive('/workspace/users') ? 'page' : undefined"
-          :class="[
-            'flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-sm transition',
-            isActive('/workspace/users') ? 'bg-cream text-bronze-dark font-semibold' : 'text-[#5f5b56] hover:bg-[#f8f3ef]',
-          ]"
-        >
-          <AppIcon name="user" />
-          <span>工作区账号</span>
-        </NuxtLink>
       </div>
       <div v-if="isAdmin" class="grid content-start gap-1">
         <div class="mb-1 px-2 text-[11px] font-medium tracking-wider text-muted">系统管理</div>

@@ -13,5 +13,6 @@ public class WorkspaceUserDto {
     private String role;
     private String source;
     private String status;
+    private boolean productEntryEnabled;
     private LocalDateTime createdAt;
 }

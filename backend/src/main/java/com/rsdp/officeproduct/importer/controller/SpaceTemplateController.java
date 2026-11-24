@@ -3,6 +3,8 @@ package com.rsdp.officeproduct.importer.controller;
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.dto.request.SpaceTemplateCreateRequest;
 import com.rsdp.officeproduct.importer.dto.response.SpaceTemplateResponse;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.service.SpaceTemplateService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,13 +16,17 @@ import java.util.List;
 @RequestMapping("/api/v1/office/projects/{projectId}/space-templates")
 public class SpaceTemplateController {
     private final SpaceTemplateService service;
+    private final OfficeProjectAccessService access;
     @PostMapping public Result<SpaceTemplateResponse> create(@PathVariable String projectId, @Valid @RequestBody SpaceTemplateCreateRequest request) {
+        access.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         return Result.ok(service.create(projectId, request));
     }
     @GetMapping public Result<List<SpaceTemplateResponse>> list(@PathVariable String projectId) {
+        access.requireFloorAccess(projectId);
         return Result.ok(service.list(projectId));
     }
     @GetMapping("/{templateId}") public Result<SpaceTemplateResponse> get(@PathVariable String projectId, @PathVariable String templateId) {
+        access.requireFloorAccess(projectId);
         return Result.ok(service.get(projectId, templateId));
     }
 }

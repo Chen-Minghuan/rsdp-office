@@ -22,6 +22,7 @@ import com.rsdp.officeproduct.importer.mapper.FloorPlanRoomMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
 import com.rsdp.officeproduct.importer.mapper.ImageAssetsMapper;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectService;
 import com.rsdp.officeproduct.importer.util.CurrentUserContext;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
@@ -370,6 +371,7 @@ public class FloorPlanService {
     @Transactional
     public FloorPlanAnalysisResponse confirmRooms(String analysisId, FloorPlanConfirmRequest request) {
         FloorPlanAnalysis analysis = requireAccessibleAnalysis(analysisId);
+        projectAccess.requireFloorPermission(analysis.getProjectId(), OfficeProjectPermission.EDIT);
 
         if (FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) throw new BusinessException("空间识别尚未完成，请稍后再编辑识别结果");
 
@@ -444,7 +446,7 @@ public class FloorPlanService {
             throw new BusinessException("设计工作区 ID 无效");
         }
         if (projectAccess.enforcementEnabled()) {
-            projectAccess.requireFloorAccess(floorId);
+            projectAccess.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         } else {
             officeProjectService.requireFloor(floorId);
         }

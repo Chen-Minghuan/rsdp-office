@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { sameOriginAssetUrl } from '~/utils/apiBase'
 import type { ModuleRecommendation, ModuleProductCandidate } from '~/types/moduleRecommendation'
+import type { FurnitureObject } from '~/types/office'
 import { applyModuleProductSelection } from '~/utils/moduleProductSelection'
 import { money } from '~/utils/helpers'
 import { colorToneLabel, matchesProductColorSearch, primaryColorName, productColorTone } from '~/utils/productColor'
@@ -17,6 +17,64 @@ const result = ref<ModuleRecommendation | null>(null)
 const loading = ref(false), applying = ref(false), error = ref(''), feedback = ref('')
 const modules = computed(() => store.furnitureForZone(store.designZoneId || ''))
 const module = computed(() => modules.value.find(item => item.id === selectedId.value))
+type ModuleDisplayGroup = { key: string; representative: FurnitureObject; modules: FurnitureObject[] }
+
+function stableJson(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return `[${value.map(item => stableJson(item)).join(',')}]`
+  if (typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined && typeof item !== 'function' && typeof item !== 'symbol')
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+function sameModuleKey(item: FurnitureObject): string {
+  const savedField = (key: 'furnitureTemplateId' | 'moduleSnapshot' | 'heightMm') =>
+    item[key] === undefined ? '__missing__' : stableJson(item[key])
+  return [savedField('furnitureTemplateId'), savedField('moduleSnapshot'), savedField('heightMm'), stableJson(item.w), stableJson(item.h)].join('\u001f')
+}
+
+/** 选品计数与分组共用同一份键（含高度/模板），与服务端 sameModule 对齐，避免不同规格串用计数。 */
+function moduleSpecificationKey(item: FurnitureObject): string {
+  return sameModuleKey(item)
+}
+
+const moduleGroups = computed<ModuleDisplayGroup[]>(() => {
+  const groups = new Map<string, ModuleDisplayGroup>()
+  for (const item of modules.value) {
+    const key = sameModuleKey(item)
+    const group = groups.get(key)
+    if (group) group.modules.push(item)
+    else groups.set(key, { key, representative: item, modules: [item] })
+  }
+  return [...groups.values()]
+})
+
+const selectedModuleCounts = computed(() => {
+  const cartByLineId = new Map(store.cart.map(item => [item.id, item]))
+  const counts = new Map<string, number>()
+  for (const item of modules.value) {
+    const selection = item.productSelection
+    const cartItem = selection ? cartByLineId.get(selection.cartLineId) : undefined
+    if (!selection?.cartLineId || cartItem?.productId !== item.productId) continue
+    const key = moduleSpecificationKey(item)
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return counts
+})
+
+function groupSelectedCount(group: ModuleDisplayGroup): number {
+  return selectedModuleCounts.value.get(moduleSpecificationKey(group.representative)) || 0
+}
+
+function groupOptionValue(group: ModuleDisplayGroup): string {
+  return group.modules.some(item => item.id === module.value?.id) ? module.value!.id : group.representative.id
+}
+
 const sameModuleCount = computed(() => result.value?.sameModuleCount || 0)
 const allConfirmed = computed(() => modules.value.length > 0 && modules.value.every(item => item.layoutConfirmed))
 const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.designZoneId, store.canvasRevision, allConfirmed.value]))
@@ -142,7 +200,7 @@ async function choose(candidate: ModuleProductCandidate) {
       <label class="block text-[11px] text-muted">当前家具
         <select aria-label="匹配单位模块" :value="module?.id || ''" class="mt-1 w-full rounded-none border border-line bg-white px-2 py-2 text-xs" @change="selectedId = ($event.target as HTMLSelectElement).value || null">
           <option value="" disabled>选择家具</option>
-          <option v-for="(item, index) in modules" :key="item.id" :value="item.id">{{ index + 1 }}. {{ item.label || '单位模块' }} · {{ number(item.w) }} × {{ number(item.h) }} mm</option>
+          <option v-for="(group, index) in moduleGroups" :key="group.key" :value="groupOptionValue(group)">{{ index + 1 }}. {{ group.representative.label || '单位模块' }} · {{ number(group.representative.w) }} × {{ number(group.representative.h) }} mm · 数量：{{ group.modules.length }}<template v-if="groupSelectedCount(group) > 0"> · 已选 {{ groupSelectedCount(group) }}/{{ group.modules.length }}</template></option>
         </select>
       </label>
       <div class="flex items-center gap-2">
@@ -178,7 +236,25 @@ async function choose(candidate: ModuleProductCandidate) {
           <div class="flex items-center justify-between pt-1 text-[11px] font-semibold text-muted" data-testid="color-group"><span>{{ group.label }}</span><span>{{ group.items.length }} 件</span></div>
         <article v-for="candidate in group.items" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-none p-2.5 space-y-1.5">
           <div class="flex gap-2">
-            <img v-if="candidate.product.imageUrl" :src="sameOriginAssetUrl(candidate.product.imageUrl)" alt="" class="w-14 h-14 object-contain rounded-none bg-[#f7f4f0]">
+            <div class="h-14 w-14 shrink-0 overflow-hidden bg-[#f7f4f0]">
+              <ProductImagePreview :src="candidate.product.imageUrl" :alt="candidate.product.name || '商品图片'" size="small" :left-gap="23" preview-boundary-selector="[data-testid='office-design-canvas']" click-fallback>
+                <template #preview-side>
+                  <div class="flex flex-col text-xs text-ink">
+                    <div class="text-[15px] font-bold leading-snug">{{ candidate.product.name }}</div>
+                    <div v-if="candidate.product.variant" class="mt-0.5 text-[11px] text-muted">{{ candidate.product.variant }}</div>
+                    <div class="my-3">
+                      <div class="text-[10px] text-muted">价格</div>
+                      <div data-testid="preview-price" class="text-[22px] font-bold leading-snug text-bronze">{{ candidate.product.price > 0 ? money(candidate.product.price) : '待报价' }}</div>
+                    </div>
+                    <div class="flex items-start justify-between gap-3 leading-7"><span class="shrink-0 text-muted">尺寸</span><strong class="min-w-0 break-words text-right font-semibold">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</strong></div>
+                    <div v-if="candidate.product.heightMm" class="flex items-start justify-between gap-3 leading-7"><span class="shrink-0 text-muted">高度</span><strong class="min-w-0 break-words text-right font-semibold">{{ number(candidate.product.heightMm) }} mm</strong></div>
+                    <div class="flex items-start justify-between gap-3 leading-7"><span class="shrink-0 text-muted">贴合度</span><strong class="min-w-0 break-words text-right font-semibold">{{ Math.floor(candidate.fitRatio * 100) }}% · {{ tiers.find(entry => entry.key === candidate.tier)?.name }}</strong></div>
+                    <div class="leading-7"><span class="text-muted">主色</span><strong class="block break-words font-semibold">{{ candidate.product.colorPrimaryName || '未分类' }}<span v-if="candidate.product.colorPrimaryName"> · {{ colorToneLabel(colorInfo(candidate).tone) }}</span></strong></div>
+                    <div v-if="candidate.relevanceScore != null" class="mt-3"><span class="rec-badge inline-block bg-bronze px-3 py-1 text-[11px] font-semibold text-white">适配度 {{ number(candidate.relevanceScore) }} / 100</span></div>
+                  </div>
+                </template>
+              </ProductImagePreview>
+            </div>
             <div class="min-w-0"><div class="text-xs font-bold">{{ candidate.product.name }}</div><div class="text-[10px] text-muted">{{ candidate.product.variant }}</div><div class="text-xs mt-1">{{ number(candidate.product.widthMm!) }} × {{ number(candidate.product.depthMm!) }} mm</div></div>
           </div>
           <div v-if="candidate.relevanceScore != null" data-testid="product-relevance" class="text-[11px] font-semibold text-bronze">适配度 {{ number(candidate.relevanceScore) }} / 100 · {{ candidate.matchReason }}</div>
@@ -199,3 +275,9 @@ async function choose(candidate: ModuleProductCandidate) {
     </div>
   </section>
 </template>
+<style scoped>
+/* main.css 全局强制直角，胶囊徽章例外 */
+.rec-badge {
+  border-radius: 999px !important;
+}
+</style>

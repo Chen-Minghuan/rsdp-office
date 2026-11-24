@@ -65,12 +65,17 @@ try {
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/office/projects') return route.fulfill({ json: { code: 200, data: [{
+      projectId: 'OFFICE-PROJECT-001', name: '空间核对测试',
+      leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '一层' }],
+    }] } })
     const data = path.includes('/floor-plan/CORRECTION-TEST') ? correctionSource(path.split('/').at(-1)) : path === '/api/v1/floor-plan/REVIEW-TEST' ? source : path === '/api/v1/floor-plan/CAD-TEST' ? cadSource : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
   const advance = () => page.getByRole('button', { name: '进入家具排版 →', exact: true })
   const choose = name => page.locator('.review-rooms').getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
-  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   // 右栏属性面板已移除：选中空间面积读左侧列表（1 位小数），数值尺寸改画布标签内联编辑
   const selectedArea = () => page.locator('.review-room-item.selected .review-room-area').innerText()
   const labelResize = async (width) => {
@@ -107,10 +112,10 @@ try {
   assert.equal(await page.locator('[data-review-space-id]').count(), 0, '新工作区不自动填充演示空间')
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))
     state.project = { name: '旧项目资料', area: 800, headcount: 60, budget: 300000, style: '旧风格', description: '旧说明' }
     state.submitted = { projectContext: state.project, zones: [] }
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
   // 复核门禁：未完成复核确认时直达排版地址会被拦回总览
   await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
@@ -443,18 +448,18 @@ try {
   assert.equal((await stored()).blank, true, '最后空间删除后保存空画布标记')
   assert.deepEqual(dialogs, [], '删除空间不再弹出确认框')
   await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))
     state.floorPlan = null
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await page.locator('[data-review-space-id]').count(), 0, '刷新不会自动恢复已删除空间')
   // 空白画布（无图纸）手动画区：形状模块拖出毫米空间
   await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'))
     state.floorPlan = null
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
@@ -547,7 +552,7 @@ try {
     const box = await page.locator('.space-review svg[aria-label="空间核对画布"]').first().boundingBox()
     for (const [fx, fy] of [[0.6, 0.1], [0.75, 0.1], [0.75, 0.25]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
   }
-  await page.getByText('Enter 保存', { exact: false }).waitFor()
+  await page.getByText(/已选 3 点（Enter 保存）/).waitFor()
   await page.keyboard.press('Enter')
   await page.waitForTimeout(200)
   drawn = (await stored()).objects.filter(object => object.kind === 'zone' && object.geometrySource === 'manual_geometry')
