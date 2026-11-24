@@ -17,6 +17,7 @@ public class OfficeCanvas {
 
     private String projectId;
     private Integer revision;
+    private String schemeToken;
     private String mode;
     private String designZoneId;
 

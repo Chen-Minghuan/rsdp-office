@@ -5,7 +5,6 @@ import type { ModuleProductSelection } from '~/types/moduleRecommendation'
 export interface ModuleProductSelectionStore {
   objects: OfficeObject[]
   canvasRevision: number
-  submitted: unknown
   products: Product[]
   cart: CartItem[]
   saveLocal: () => void
@@ -19,7 +18,6 @@ export interface ModuleProductSelectionStore {
 export function applyModuleProductSelection(store: ModuleProductSelectionStore, response: ModuleProductSelection) {
   store.objects = response.canvas.objects
   store.canvasRevision = response.canvas.revision
-  store.submitted = null
   const product = response.match.product
   store.products = [...store.products.filter(item => item.id !== product.id), product]
   for (const line of response.cartItems) {

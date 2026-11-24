@@ -37,6 +37,7 @@ const legacyDraft = {
 async function openProject(page, projectName, floorName) {
   const projects = page.getByRole('region', { name: '项目列表', exact: true })
   await projects.getByRole('button', { name: `进入项目 ${projectName}`, exact: true }).first().click()
+  await page.getByRole('link', { name: '上传或识别图纸', exact: true }).click()
   await page.getByRole('heading', { name: `${floorName} · 上传办公图纸`, exact: true }).waitFor()
 }
 
@@ -77,6 +78,7 @@ try {
   let failProjects = true
   const createdProjects = []
   const canvasReads = []
+  const projectFavoriteReads = []
   const errors = []
 
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: currentUser } }))
@@ -109,6 +111,13 @@ try {
       return respond(project)
     }
     if (path === '/api/v1/office/users/assignable') return respond([currentUser])
+    if (currentUser.userId === 'USER-UNASSIGNED') {
+      const rows = [{ rspuId: 'RSPU-AUTHORIZED', productName: '独立浏览商品', status: 'active', retailPrice: null }]
+      if (path === '/api/v1/products/page') return respond({ page: 1, size: 20, rows, total: 1, catalogTotal: 1, activeTotal: 1 })
+      if (path === '/api/v1/products' || path === '/api/v1/office/favorites/items') return respond(rows)
+    }
+    if (path === '/api/v1/office/favorites/product-ids' && currentUser.userId === 'USER-UNASSIGNED') return respond(['RSPU-AUTHORIZED'])
+    if (path.endsWith('/favorites/product-ids')) projectFavoriteReads.push(currentUser.userId)
     if (path.endsWith('/canvas') && request.method() === 'GET') { canvasReads.push({ userId: currentUser.userId, path }); return respond(null) }
     if (path.endsWith('/canvas') && request.method() === 'PUT') return respond(null)
     return respond([])
@@ -135,7 +144,12 @@ try {
   assert.equal(await page.getByRole('button', { name: /新建项目/ }).count(), 0)
   assert.equal(await page.getByText('默认办公项目', { exact: true }).count(), 0)
   assert.equal(canvasReads.length, 0, '空项目列表不得读取默认画布')
-  await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
+  await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '产品库', exact: true }).click()
+  const catalogCollection = page.getByRole('complementary', { name: '产品库收藏' })
+  await catalogCollection.getByRole('link', { name: '独立浏览商品', exact: true }).waitFor()
+  assert.equal(await catalogCollection.getByRole('button', { name: '个人收藏', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await page.getByRole('button', { name: '项目收藏独立浏览商品', exact: true }).isDisabled(), true)
+  assert.deepEqual(projectFavoriteReads, [], '无项目仍可浏览和读取个人收藏，无需请求项目收藏')
   await page.getByRole('link', { name: /项目与楼层/ }).click()
   await page.getByTestId('project-empty-state').getByText('请联系经销商创建项目并分配给你。', { exact: true }).waitFor()
 

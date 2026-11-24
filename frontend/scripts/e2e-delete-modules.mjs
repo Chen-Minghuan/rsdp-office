@@ -237,6 +237,9 @@ try {
   // 清空排版：同步清理家具有效关联行，未关联行保留
   await page.evaluate(() =>
     document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('workspace').activateFloor('OFFICE-PROJECT-001'))
+  await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({
+    path: '/canvas', query: { floorId: 'OFFICE-PROJECT-001', mode: 'design', zoneId: 'DELETE-ROOM' },
+  }))
   await page.getByTestId('office-design-canvas').waitFor()
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
@@ -272,7 +275,11 @@ try {
   for (let round = 0; round < 3; round++) {
     const restoredResponse = historyResponse('POST')
     await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').undo())
-    await restoredResponse
+    const { data: restoredLine } = await (await restoredResponse).json()
+    await page.waitForFunction(lineId => {
+      const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+      return store.objects.find(item => item.id === 'HISTORY-A')?.productSelection?.cartLineId === lineId
+    }, restoredLine.lineId)
     const restoredState = await state()
     const restoredId = restoredState.objects.find(item => item.id === 'HISTORY-A').productSelection.cartLineId
     assert.equal(restoredState.cart.find(item => item.id === restoredId)?.qty, 1)

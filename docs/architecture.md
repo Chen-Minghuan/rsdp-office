@@ -22,6 +22,8 @@
 
 ## 2. 核心数据关系（目标模型）
 
+项目阶段使用 `office_design_project.status`（`DESIGNING / DELIVERING / COMPLETED`），默认设计中，数据库非空和枚举约束由启动迁移保证。列表返回 `status`、`canManageStatus`，`PATCH /api/v1/office/projects/{projectId}/status` 仅更新阶段与更新时间并记录审计；权限限所属工作区主号和有项目查看权的实际负责人，不继承协作者的成员管理权限。普通改名/参考资料更新不回写阶段，避免并发覆盖。管理阶段独立于设计确认快照。详见 [WORKSPACE-005](tasks/WORKSPACE-006-project-status.md)。
+
 ```text
 DesignProject（项目资料与客户需求备注）
   └─ DesignFloor（floorId 作为既有 projectId 工作区隔离键）
@@ -140,7 +142,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 2026-10-15 新增用户明确要求的单空间二维**概念效果预览**，作为排版后的辅助入口，允许未确认排版/未选商品，不替代下述正式方案效果图契约。
 后端以保存画布中的空间和家具投影生成不可变 `CONCEPT_PREVIEW` 快照与 PNG 参考图，调用 Qwen-Image-3.0 原生异步接口；独立 `office_render_preview` 表和本地图片目录保存结果。
 前后端比较当前空间的轮廓、家具位置/尺寸/旋转、商品与目录快照，旧图标记历史，不写回当前画布；仅视图和其他空间变化不影响此预览。
-接口、配置、幂等、失败恢复与窗口轮询的时限见 [生图配置](render-configuration.md)；正式已确认方案的生成仍待后续 RENDER-001。
+接口、配置、幂等、失败恢复与窗口轮询的时限见 [生图配置](render-configuration.md)。楼层确认后的效果图继续使用此任务管线，详见 [FLOW-007](tasks/FLOW-007-product-scheme.md)。
 
 家具布局单元先保存 `placementId`、`spaceId`、类型、需求宽深/高度、位置、旋转和占地轮廓。
 推荐前允许 `productId/variantId` 为空；推荐后另建选择映射，不能把商品 ID 当作布局单元 ID。
@@ -200,6 +202,12 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 ### 5.2 项目报价存储（QUOTE-001）
 
 报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
+
+### 5.3 房间方案和楼层确认（FLOW-007）
+
+活动房间版本沿用楼层画布和清单。每个房间在 `office_room_scheme` 另存非活动版本的家具、清单与对应的空间快照。切换与清空选品持有同一个楼层事务锁并轮换 `schemeToken`，拒绝计划切换前发出的画布和清单写入。
+
+个人商品组合记录主库商品、变体和数量。应用时重新核验可见性、报价、品类与毫米尺寸，只填充已确认的空闲家具模块。正式确认在 `office_proposal_confirmation` 保存楼层修订、空间与选品快照。正式生图记录带 `confirmationId`，输入变化或确认失效后，任务记录保留为历史。
 
 ## 6. 几何约束与版本失效
 

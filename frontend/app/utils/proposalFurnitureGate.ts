@@ -19,15 +19,11 @@ export interface ProposalFurnitureCartMismatch {
   missing: ProposalMissingFurniture[]
 }
 
-export function shouldGateProposalRoute(path: string, preview: unknown): boolean {
-  return path.replace(/\/+$/, '') === '/proposal' && preview !== '1'
-}
-
-/** 缺失家具弹窗中的空间入口，始终进入当前楼层的布局选品模式。 */
-export function proposalFurnitureSelectionRoute(floorId: string, zoneId: string) {
+/** 从清单回到发现选品差异的房间，待复核的楼层先进入空间设计。 */
+export function proposalFurnitureSelectionRoute(floorId: string, zoneId: string, layoutReady: boolean) {
   return {
     path: '/canvas',
-    query: { floorId, mode: 'design', zoneId },
+    query: { floorId, zoneId, ...(layoutReady ? { mode: 'design', view: 'products' } : {}) },
   }
 }
 
@@ -67,7 +63,7 @@ function groupMissing(zone: ZoneObject, furniture: FurnitureObject[]): ProposalM
 }
 
 /**
- * 方案页门禁：每个空间的画布家具必须有对应购物车数量，且每件家具必须保留
+ * 方案确认校验：每个空间的画布家具必须有对应购物车数量，且每件家具必须保留
  * 一个有效的购物车选品关联。未分区购物车行不参与任何空间的校验。
  */
 export function proposalFurnitureCartMismatches(zones: ZoneObject[], objects: OfficeObject[], cart: CartItem[]): ProposalFurnitureCartMismatch[] {

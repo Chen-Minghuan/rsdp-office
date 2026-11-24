@@ -55,6 +55,8 @@
     "test:layout-references": "node scripts/test-layout-references.mjs",
     "e2e:layout-references": "node scripts/e2e-layout-references.mjs",
     "e2e:project-floors": "node scripts/e2e-project-floors.mjs",
+    "e2e:product-scheme": "node scripts/e2e-product-scheme.mjs",
+    "e2e:project-status": "node scripts/e2e-project-status.mjs",
     "e2e:workspace-isolation": "node scripts/e2e-workspace-isolation.mjs",
     "e2e:layout-regions": "node scripts/e2e-layout-regions.mjs",
     "test:white-model": "node scripts/test-white-model.mjs",

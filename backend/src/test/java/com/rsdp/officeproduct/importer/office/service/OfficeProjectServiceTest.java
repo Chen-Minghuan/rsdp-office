@@ -88,6 +88,13 @@ class OfficeProjectServiceTest {
             return 1;
         });
         when(projectMapper.selectById(anyString())).thenAnswer(call -> projects.get(call.getArgument(0)));
+        when(projectMapper.updateStatus(anyString(), anyString(), any())).thenAnswer(call -> {
+            OfficeDesignProject project = projects.get(call.getArgument(0));
+            if (project == null) return 0;
+            project.setStatus(call.getArgument(1));
+            project.setUpdatedAt(call.getArgument(2));
+            return 1;
+        });
         when(projectMapper.selectList(any())).thenAnswer(call -> new ArrayList<>(projects.values()));
         when(floorMapper.insert(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });
         when(floorMapper.selectById(anyString())).thenAnswer(call -> floors.get(call.getArgument(0)));
@@ -152,6 +159,28 @@ class OfficeProjectServiceTest {
         assertEquals(1, tree.size());
         assertEquals(created.getProjectId(), tree.get(0).getProjectId());
         assertEquals(List.of(0, 1), tree.get(0).getFloors().stream().map(floor -> floor.getSortOrder()).toList());
+    }
+
+    @Test void projectStatusDefaultsToDesigningAndPersistsEverySupportedStage() {
+        var created = service.createProject(request("阶段项目", List.of("一层")));
+        assertEquals("DESIGNING", created.getStatus());
+        for (String stage : List.of("DELIVERING", "COMPLETED", "DESIGNING")) {
+            assertEquals(stage, service.updateStatus(created.getProjectId(), stage));
+            assertEquals(stage, service.listProjects(false).getFirst().getStatus());
+        }
+        verify(access, times(3)).requireStatusManager(created.getProjectId());
+    }
+
+    @Test void invalidOrUnauthorizedProjectStatusCannotChangeSavedState() {
+        var created = service.createProject(request("阶段项目", List.of("一层")));
+        assertThrows(BusinessException.class, () -> service.updateStatus(created.getProjectId(), null));
+        assertThrows(BusinessException.class, () -> service.updateStatus(created.getProjectId(), "UNKNOWN"));
+        doThrow(new com.rsdp.officeproduct.importer.common.AccessDeniedException("无权修改"))
+            .when(access).requireStatusManager(created.getProjectId());
+        assertThrows(com.rsdp.officeproduct.importer.common.AccessDeniedException.class,
+            () -> service.updateStatus(created.getProjectId(), "COMPLETED"));
+        verify(projectMapper, never()).updateStatus(anyString(), anyString(), any());
+        assertEquals("DESIGNING", projects.get(created.getProjectId()).getStatus());
     }
 
     @Test void listsProjectsWithoutReadingCartOrCatalogWhenBudgetIsExcluded() {
