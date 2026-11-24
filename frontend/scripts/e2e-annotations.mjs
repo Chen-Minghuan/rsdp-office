@@ -47,6 +47,7 @@ try {
     if (path === '/api/v1/office/projects') {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [{
         projectId: 'OFFICE-PROJECT-001', name: '视图隔离测试项目',
+        leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
         floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
       }] }) })
     }
