@@ -1,14 +1,11 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #f8f7f5;
+  --color-bg: #f7f7f9;
   --color-panel: #ffffff;
-  --color-cream: #f4eee6;
-  --color-ink: #272725;
-  --color-muted: #8e8b86;
-  --color-line: #ece7e1;
-  --color-bronze: #a77b51;
-  --color-bronze-dark: #8a5e36;
+  --color-ink: #25212a;
+  --color-muted: #6d6574;
+  --color-line: #e5e1e9;
   --color-accent: #8146b7;
   --color-accent-ink: #642f92;
   --color-accent-tint: #f3edf8;
@@ -19,6 +16,19 @@
   --color-purple-soft: #b39de4;
   --color-yellow-soft: #e6c379;
   --shadow-panel: 0 16px 42px rgba(58, 43, 30, 0.052);
+}
+
+@theme inline {
+  --color-bronze: var(--color-accent);
+  --color-bronze-dark: var(--color-accent-ink);
+  --color-cream: var(--color-accent-tint);
+}
+
+:root {
+  --color-bronze: var(--color-accent);
+  --color-bronze-dark: var(--color-accent-ink);
+  --color-cream: var(--color-accent-tint);
+  --workspace-grid-dot: #dcd6e3;
 }
 
 body {
@@ -34,7 +44,7 @@ select:not(:disabled) {
 }
 
 :where(button, a, input, select, summary):focus-visible {
-  outline: 2px solid var(--color-bronze);
+  outline: 2px solid var(--color-accent);
   outline-offset: 3px;
 }
 

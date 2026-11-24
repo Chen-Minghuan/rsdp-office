@@ -100,7 +100,7 @@ const zoneTypeLabel = computed(() => ZONE_TYPES.find(([value]) => value === zone
         </div>
         <div class="flex justify-between text-xs text-[#78736d] my-1">
           <span>参考金额</span>
-          <strong class="text-lg text-bronze-dark">{{ money(store.totalPrice) }}</strong>
+          <strong class="text-lg text-accent-ink">{{ money(store.totalPrice) }}</strong>
         </div>
         <NuxtLink :to="{ path: '/proposal', query: { floorId: store.workspaceId } }" class="inline-flex items-center justify-center gap-1 w-full text-center px-4 py-2.5 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark">
           <span>生成整体方案</span>

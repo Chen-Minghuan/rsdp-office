@@ -30,7 +30,7 @@ function openTemplateLayout(zoneId: string) {
     <div v-if="showDesignContext" class="flex min-w-0 basis-full flex-wrap items-center gap-x-3 px-2 pt-1 text-xs text-neutral-600">
       <span data-testid="workspace-topbar-context">{{ workspace.currentProjectName }} / {{ workspace.currentFloorName }}</span>
       <span v-if="store.files[0]" class="hidden max-w-[24rem] truncate sm:inline" :title="store.files[0].name">{{ store.files[0].name }}</span>
-      <button v-if="store.spaceTemplate" type="button" class="text-bronze-dark hover:underline" @click="showTemplate = true">
+      <button v-if="store.spaceTemplate" type="button" class="text-accent-ink hover:underline" @click="showTemplate = true">
         查看空间模板<template v-if="!store.spaceTemplateCurrent">（需更新）</template>
       </button>
     </div>
@@ -44,6 +44,6 @@ function openTemplateLayout(zoneId: string) {
 
 <style scoped>
 .primary-link { border-radius: 0.65rem !important; }
-.primary-link:hover { background: #f4eee6; color: #8a5e36; }
-.primary-link[aria-current='page'] { background: #a77b51; color: white; }
+.primary-link:hover { background: var(--color-accent-tint); color: var(--color-accent-ink); }
+.primary-link[aria-current='page'] { background: var(--color-accent); color: white; }
 </style>

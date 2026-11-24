@@ -255,7 +255,7 @@ function channelStyle(entry: { channel: LayoutChannel; rect: LayoutBlocker }) {
     background: selected
       ? 'repeating-linear-gradient(45deg, rgba(48,111,203,0.22) 0 12px, rgba(48,111,203,0.06) 12px 24px)'
       : 'repeating-linear-gradient(45deg, rgba(48,111,203,0.10) 0 12px, rgba(48,111,203,0.02) 12px 24px)',
-    border: `${(selected ? 2.5 : 1.5) / store.zoom}px ${selected ? 'solid' : 'dashed'} #a77b51`,
+    border: `${(selected ? 2.5 : 1.5) / store.zoom}px ${selected ? 'solid' : 'dashed'} var(--color-accent)`,
   }
 }
 /** 条带光标：设了端点留断的有限通道两轴都可拖（位置 + 走向平移）用 move；贯通通道走向无可动空间，保持垂直走向的 resize 光标。 */
@@ -1854,7 +1854,7 @@ function furnitureProduct(o: FurnitureObject) {
     data-testid="office-design-canvas"
     class="relative flex-1 overflow-hidden bg-[#faf9f7] touch-none"
     :class="drag?.mode === 'pan' ? 'cursor-grabbing' : tool === 'pan' || spacePanHeld ? 'cursor-grab' : 'cursor-crosshair'"
-    style="background-image: radial-gradient(#dfdad4 1px, transparent 1px); background-size: 18px 18px;"
+    style="background-image: radial-gradient(var(--workspace-grid-dot) 1px, transparent 1px); background-size: 18px 18px;"
     @wheel.prevent="onWheel"
     @pointerdown.capture="onCanvasPointerDownCapture"
     @pointerdown="onPointerDown"
@@ -2149,7 +2149,7 @@ function furnitureProduct(o: FurnitureObject) {
             class="board-element pointer-events-auto w-[188px] h-[168px] shadow-xl bg-white border-[8px] border-white cursor-move transition-opacity"
             style="transform: rotate(3deg);"
             :class="[
-              selectedId === o.id ? 'outline outline-4 outline-bronze' : '',
+              selectedId === o.id ? 'outline outline-4 outline-accent' : '',
             ]"
             :style="objectStyle(o)"
             @pointerdown.stop="onPointerDown"
@@ -2316,7 +2316,7 @@ function furnitureProduct(o: FurnitureObject) {
             :style="channelStyle(entry)"
             @pointerdown.stop="onChannelPointerDown(entry.channel, $event)"
           >
-            <span v-if="entry.primary" class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-semibold pointer-events-none" :style="{ top: 4 / store.zoom + 'px', fontSize: 11 / store.zoom + 'px', color: '#a77b51' }">通道 {{ entry.channel.widthMm }}{{ entry.channel.clearanceMm ? `+2×${entry.channel.clearanceMm}` : '' }}{{ entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 二排起' : '' }}</span>
+            <span v-if="entry.primary" class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-semibold pointer-events-none" :style="{ top: 4 / store.zoom + 'px', fontSize: 11 / store.zoom + 'px', color: 'var(--color-accent)' }">通道 {{ entry.channel.widthMm }}{{ entry.channel.clearanceMm ? `+2×${entry.channel.clearanceMm}` : '' }}{{ entry.channel.fromSecondRow && entry.channel.orientation === 'vertical' ? ' · 二排起' : '' }}</span>
             <!-- 选中后显示宽度拖柄（恒定屏幕尺寸，挂在最大分段上） -->
             <template v-if="entry.primary && selectedChannelId === entry.channel.id">
               <div
@@ -2331,7 +2331,7 @@ function furnitureProduct(o: FurnitureObject) {
                 @pointerdown.stop="onChannelEdgePointerDown(entry.channel, edge, $event)"
               >
                 <div
-                  class="absolute rounded-full bg-bronze"
+                  class="absolute rounded-full bg-accent"
                   :style="entry.channel.orientation === 'vertical'
                     ? { left: '50%', top: '50%', width: 4 / store.zoom + 'px', height: 36 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }
                     : { top: '50%', left: '50%', height: 4 / store.zoom + 'px', width: 36 / store.zoom + 'px', transform: 'translate(-50%, -50%)' }"
@@ -2369,7 +2369,7 @@ function furnitureProduct(o: FurnitureObject) {
           class="board-element pointer-events-auto absolute cursor-move select-none"
           :title="`${f.label || furnitureProduct(f)?.name || '家具'} · ${Math.round(f.w)} × ${Math.round(f.h)} mm`"
           :class="[
-            selectedFurnitureIds.includes(f.id) ? 'ring-[3px] ring-bronze/30 z-10' : '',
+            selectedFurnitureIds.includes(f.id) ? 'ring-[3px] ring-accent/30 z-10' : '',
             mode === 'overview' ? 'opacity-50' : 'opacity-100',
           ]"
           :style="{ ...furnitureStyle(dragFurnitureItem(f)), outline: drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined }"
@@ -2385,11 +2385,11 @@ function furnitureProduct(o: FurnitureObject) {
 
       <div v-if="mode === 'design' && activePreview" class="absolute inset-0 pointer-events-none" data-testid="layout-plan-preview">
         <template v-for="item in activePreview.furniture" :key="'activity-' + item.id">
-          <div v-if="chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)" :style="{ position: 'absolute', left: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.x + 'px', top: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.y + 'px', width: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.w + 'px', height: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.h + 'px', border: `${1 / store.zoom}px dotted #a77b51`, opacity: 0.35 }" />
+          <div v-if="chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)" :style="{ position: 'absolute', left: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.x + 'px', top: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.y + 'px', width: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.w + 'px', height: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.h + 'px', border: `${1 / store.zoom}px dotted var(--color-accent)`, opacity: 0.35 }" />
         </template>
         <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id" class="absolute opacity-50"
           :class="tool === 'select' ? 'pointer-events-auto cursor-move' : 'pointer-events-none'"
-          :style="{ ...furnitureStyle(previewDragItem(item)), outline: `${1.5 / store.zoom}px dashed ${drag?.mode === 'preview-furniture' && drag.id === item.id && moveProblem ? '#c45c4c' : '#a77b51'}` }"
+          :style="{ ...furnitureStyle(previewDragItem(item)), outline: `${1.5 / store.zoom}px dashed ${drag?.mode === 'preview-furniture' && drag.id === item.id && moveProblem ? '#c45c4c' : 'var(--color-accent)'}` }"
           @pointerdown.stop="onPreviewPointerDown(item, $event)">
           <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(item)!" :width-mm="item.w" :depth-mm="item.h" :wing-width-mm="item.wingWidthMm" :stroke-scale="1 / store.zoom" :show-seat="officeFurnitureShowsSeat(item)" />
         </div>
@@ -2410,12 +2410,12 @@ function furnitureProduct(o: FurnitureObject) {
       <OfficeCanvasLayoutDimensions v-if="mode === 'design' && designZone && showDimensions !== false" :zone="designZone" :items="dimensionFurniture" :selected-ids="selectedFurnitureIds" :zoom="store.zoom" :view-rotation="viewRotation" :world="worldBounds" />
 
       <div v-if="visiblePlacement" :data-testid="referencePlacement ? 'reference-placement-preview' : 'furniture-placement-preview'" class="absolute pointer-events-none opacity-60"
-        :data-valid="!visiblePlacementInvalid" :style="{ ...furnitureStyle(visiblePlacement), outline: referencePlacement && !visiblePlacementInvalid ? undefined : `${2 / store.zoom}px dashed ${visiblePlacementInvalid ? '#c45c4c' : '#a77b51'}` }">
+        :data-valid="!visiblePlacementInvalid" :style="{ ...furnitureStyle(visiblePlacement), outline: referencePlacement && !visiblePlacementInvalid ? undefined : `${2 / store.zoom}px dashed ${visiblePlacementInvalid ? '#c45c4c' : 'var(--color-accent)'}` }">
         <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(visiblePlacement)!" :width-mm="visiblePlacement.w" :depth-mm="visiblePlacement.h" :stroke-scale="1 / store.zoom" :show-seat="referencePlacement ? false : undefined" />
       </div>
       <template v-if="mode === 'design'">
-        <div v-if="activeSnapGuides.x !== null" data-testid="snap-guide-x" class="absolute pointer-events-none" :style="{ left: activeSnapGuides.x + 'px', top: worldBounds.minY + 'px', height: (worldBounds.maxY - worldBounds.minY) + 'px', width: '0px', borderLeft: `${1.5 / store.zoom}px dashed #a77b51`, opacity: 0.7 }" />
-        <div v-if="activeSnapGuides.y !== null" data-testid="snap-guide-y" class="absolute pointer-events-none" :style="{ top: activeSnapGuides.y + 'px', left: worldBounds.minX + 'px', width: (worldBounds.maxX - worldBounds.minX) + 'px', height: '0px', borderTop: `${1.5 / store.zoom}px dashed #a77b51`, opacity: 0.7 }" />
+        <div v-if="activeSnapGuides.x !== null" data-testid="snap-guide-x" class="absolute pointer-events-none" :style="{ left: activeSnapGuides.x + 'px', top: worldBounds.minY + 'px', height: (worldBounds.maxY - worldBounds.minY) + 'px', width: '0px', borderLeft: `${1.5 / store.zoom}px dashed var(--color-accent)`, opacity: 0.7 }" />
+        <div v-if="activeSnapGuides.y !== null" data-testid="snap-guide-y" class="absolute pointer-events-none" :style="{ top: activeSnapGuides.y + 'px', left: worldBounds.minX + 'px', width: (worldBounds.maxX - worldBounds.minX) + 'px', height: '0px', borderTop: `${1.5 / store.zoom}px dashed var(--color-accent)`, opacity: 0.7 }" />
       </template>
       <!-- 逐点绘制预览（GEOM-016 多边形布置区 / GEOM-018 踢脚线） -->
       <svg v-if="sketchPoints.length" :width="worldBounds.width" :height="worldBounds.height" class="absolute inset-0 pointer-events-none overflow-visible" data-testid="sketch-preview">
@@ -2425,7 +2425,7 @@ function furnitureProduct(o: FurnitureObject) {
       <!-- Draw preview -->
       <div
         ref="drawPreview"
-        class="absolute border-2 border-dashed border-bronze bg-bronze/15 pointer-events-none hidden"
+        class="absolute border-2 border-dashed border-accent bg-accent/15 pointer-events-none hidden"
       />
       </div>
     </div>

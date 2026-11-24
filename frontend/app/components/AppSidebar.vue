@@ -76,7 +76,7 @@ onBeforeUnmount(() => {
     class="app-sidebar relative flex-none border-b border-line bg-white md:border-b-0 md:border-r"
     :style="{ '--sidebar-width': `${sidebarWidth}px` }"
   >
-    <button type="button" class="px-4 py-2 text-xs font-semibold text-bronze-dark md:hidden" :aria-controls="sidebarContentId" :aria-expanded="mobileOpen" @click="mobileOpen = !mobileOpen">
+    <button type="button" class="px-4 py-2 text-xs font-semibold text-accent-ink md:hidden" :aria-controls="sidebarContentId" :aria-expanded="mobileOpen" @click="mobileOpen = !mobileOpen">
       项目侧栏
     </button>
     <div :id="sidebarContentId" class="sidebar-content max-h-[45dvh] flex-col overflow-y-auto p-3 md:flex md:h-full md:max-h-none" :class="mobileOpen ? 'flex' : 'hidden'">
@@ -136,7 +136,7 @@ onBeforeUnmount(() => {
 
 .sidebar-resize-handle:hover::before,
 .sidebar-resize-handle.is-resizing::before {
-  background: #a77b51;
+  background: var(--color-accent);
 }
 
 @media (min-width: 768px) {
