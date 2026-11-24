@@ -8,7 +8,6 @@ import com.rsdp.officeproduct.importer.entity.OfficeUserSession;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserSessionMapper;
 import com.rsdp.officeproduct.importer.office.dto.AdminUserDto;
-import com.rsdp.officeproduct.importer.office.dto.CreateOfficeUserRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
 import com.rsdp.officeproduct.importer.office.entity.OfficeWorkspace;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
@@ -20,20 +19,12 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
-import java.util.regex.Pattern;
 
-/**
- * 系统管理员的用户管理：创建账号、启用/停用、重置密码、删除。
- * 系统管理员唯一：本接口只能创建设计师（普通 USER）账号，经销商主号经工作区创建；
- * 管理操作只能作用于设计师与经销商主号，不能操作任何系统管理员账号（含自己）。
- * 认证关闭（rsdp.auth.enabled=false，开发模式）时不校验管理员身份，目标角色规则仍生效。
- */
+/** 管理现有 Office 账号的状态、密码和删除。 */
 @Service
 @RequiredArgsConstructor
 public class OfficeUserAdminService {
 
-    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_.\\-]{2,32}$");
     private static final int MIN_PASSWORD_LENGTH = 6;
 
     private final OfficeUserMapper userMapper;
@@ -46,42 +37,6 @@ public class OfficeUserAdminService {
         currentUserService.requireAdmin();
         return userMapper.selectList(new QueryWrapper<OfficeUser>().orderByAsc("created_at"))
             .stream().map(this::toDto).toList();
-    }
-
-    @Transactional
-    public AdminUserDto createUser(CreateOfficeUserRequest request) {
-        currentUserService.requireAdmin();
-        if (request == null) {
-            throw new BusinessException("用户参数不能为空");
-        }
-        String username = request.getUsername() == null ? "" : request.getUsername().trim();
-        if (!USERNAME_PATTERN.matcher(username).matches()) {
-            throw new BusinessException("用户名需为 2-32 位字母、数字或 _ . -");
-        }
-        OfficeUser duplicate = userMapper.selectOne(new QueryWrapper<OfficeUser>().eq("username", username).last("limit 1"));
-        if (duplicate != null) {
-            throw new BusinessException("用户名已存在");
-        }
-        String displayName = request.getDisplayName() == null ? "" : request.getDisplayName().trim();
-        if (!StringUtils.hasText(displayName)) {
-            throw new BusinessException("显示名称不能为空");
-        }
-        String password = requirePassword(request.getPassword(), "初始密码至少 6 位");
-        String role = StringUtils.hasText(request.getRole()) ? request.getRole().trim().toUpperCase() : "USER";
-        if (!"USER".equals(role)) {
-            throw new BusinessException("只能创建设计师账号；经销商主号请通过经销商工作区创建");
-        }
-        OfficeUser user = new OfficeUser();
-        user.setUserId("USR-" + UUID.randomUUID().toString().replace("-", ""));
-        user.setUsername(username);
-        user.setPasswordHash(PasswordHasher.hash(password));
-        user.setDisplayName(displayName);
-        user.setRole(role);
-        user.setStatus("active");
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
-        userMapper.insert(user);
-        return toDto(user);
     }
 
     @Transactional
@@ -141,7 +96,7 @@ public class OfficeUserAdminService {
 
     /** 系统管理员唯一且不可被管理操作（停用/重置/删除）作用。 */
     private void requireManageable(OfficeUser user) {
-        if ("ADMIN".equalsIgnoreCase(user.getRole())) {
+        if (Boolean.TRUE.equals(user.getIsSystemAdmin())) {
             throw new BusinessException("不能操作系统管理员账号");
         }
     }
@@ -170,7 +125,8 @@ public class OfficeUserAdminService {
         dto.setUserId(user.getUserId());
         dto.setUsername(user.getUsername());
         dto.setDisplayName(user.getDisplayName());
-        dto.setRole(user.getRole());
+        dto.setRole(Boolean.TRUE.equals(user.getIsSystemAdmin()) ? "ADMIN" : "DEALER".equals(user.getRole()) ? "DEALER" : "USER");
+        dto.setWorkspaceId(user.getWorkspaceId());
         dto.setStatus(user.getStatus());
         dto.setLastLoginAt(user.getLastLoginAt());
         dto.setCreatedAt(user.getCreatedAt());

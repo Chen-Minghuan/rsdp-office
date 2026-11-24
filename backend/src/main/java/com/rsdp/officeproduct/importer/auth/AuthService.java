@@ -64,13 +64,14 @@ public class AuthService {
         if (!enabled || bootstrapUsername == null || bootstrapUsername.isBlank()
             || bootstrapPassword == null || bootstrapPassword.isBlank()) return;
         OfficeUser existing = findByUsername(bootstrapUsername.trim());
-        if (existing != null) return;
+        if (existing != null || users.selectCount(new QueryWrapper<OfficeUser>().eq("is_system_admin", true)) > 0) return;
         OfficeUser user = new OfficeUser();
         user.setUserId("USR-" + UUID.randomUUID().toString().replace("-", ""));
         user.setUsername(bootstrapUsername.trim());
         user.setPasswordHash(PasswordHasher.hash(bootstrapPassword));
         user.setDisplayName(bootstrapUsername.trim());
-        user.setRole("USER");
+        user.setRole("ADMIN");
+        user.setIsSystemAdmin(true);
         user.setStatus("active");
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());

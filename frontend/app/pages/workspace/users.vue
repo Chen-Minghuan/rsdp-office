@@ -9,6 +9,7 @@ interface WorkspaceUserItem {
   role: string
   source: string | null
   status: string
+  productEntryEnabled: boolean
   createdAt: string | null
 }
 
@@ -33,6 +34,7 @@ const creating = ref(false)
 /** 公共库（主项目全库商品）工作区级开关，主号控制，全工作区即时生效。 */
 const sharedCatalogEnabled = ref(true)
 const catalogSaving = ref(false)
+const entrySaving = ref('')
 
 onMounted(async () => {
   checking.value = true
@@ -111,6 +113,23 @@ async function createUser() {
   }
 }
 
+async function toggleProductEntry(user: WorkspaceUserItem) {
+  if (entrySaving.value) return
+  entrySaving.value = user.userId
+  error.value = ''
+  notice.value = ''
+  try {
+    const enabled = !user.productEntryEnabled
+    await api.setWorkspaceProductEntry(user.userId, enabled)
+    user.productEntryEnabled = enabled
+    notice.value = `已${enabled ? '授予' : '撤销'} ${user.displayName} 的商品录入权限`
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '修改商品录入权限失败'
+  } finally {
+    entrySaving.value = ''
+  }
+}
+
 function sourceLabel(source: string | null) {
   if (source === 'FACTORY_SALES') return '厂家业务员'
   if (source === 'DEALER_STAFF') return '经销商员工'
@@ -182,18 +201,28 @@ function formatTime(value: string | null) {
               <th class="px-3 py-2 font-medium">系统角色</th>
               <th class="px-3 py-2 font-medium">来源</th>
               <th class="px-3 py-2 font-medium">状态</th>
+              <th class="px-3 py-2 font-medium">商品录入</th>
               <th class="px-3 py-2 font-medium">创建时间</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6" class="px-3 py-4 text-center text-xs text-muted">加载中…</td></tr>
-            <tr v-else-if="!users.length"><td colspan="6" class="px-3 py-4 text-center text-xs text-muted">暂无账号</td></tr>
+            <tr v-if="loading"><td colspan="7" class="px-3 py-4 text-center text-xs text-muted">加载中…</td></tr>
+            <tr v-else-if="!users.length"><td colspan="7" class="px-3 py-4 text-center text-xs text-muted">暂无账号</td></tr>
             <tr v-for="user in users" :key="user.userId" class="border-b border-line last:border-b-0">
               <td class="px-3 py-2 font-medium">{{ user.username }}</td>
               <td class="px-3 py-2">{{ user.displayName }}</td>
-              <td class="px-3 py-2"><span class="text-xs" :class="user.role === 'DEALER' ? 'text-bronze-dark font-semibold' : 'text-muted'">{{ user.role === 'DEALER' ? workspaceOwnerLabel(workspaceType) : '普通账号' }}</span></td>
+              <td class="px-3 py-2"><span class="text-xs" :class="user.role === 'DEALER' ? 'text-bronze-dark font-semibold' : 'text-muted'">{{ user.role === 'DEALER' ? workspaceOwnerLabel(workspaceType) : '工作区成员' }}</span></td>
               <td class="px-3 py-2 text-xs text-muted">{{ sourceLabel(user.source) }}</td>
               <td class="px-3 py-2"><span class="text-xs" :class="user.status === 'active' ? 'text-green' : 'text-red-700'">{{ user.status === 'active' ? '在用' : '已停用' }}</span></td>
+              <td class="px-3 py-2">
+                <span v-if="user.role === 'DEALER'" class="text-xs text-muted">主号可录入</span>
+                <button v-else type="button" role="switch" :aria-label="`${user.displayName} 的商品录入权限`"
+                  :aria-checked="Boolean(user.productEntryEnabled)" :disabled="Boolean(entrySaving)"
+                  class="rounded border border-line px-2 py-1 text-xs disabled:opacity-50"
+                  @click="toggleProductEntry(user)">
+                  {{ entrySaving === user.userId ? '保存中' : user.productEntryEnabled ? '已授权' : '未授权' }}
+                </button>
+              </td>
               <td class="px-3 py-2 text-xs text-muted">{{ formatTime(user.createdAt) }}</td>
             </tr>
           </tbody>

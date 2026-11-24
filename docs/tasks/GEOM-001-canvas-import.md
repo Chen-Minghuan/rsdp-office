@@ -31,7 +31,7 @@
 - 后端确认重建房间尚未保存多边形，面积按宽×深计算；固定 SVG 映射和矩形对象坐标尚未统一，尺寸输入没有同步轮廓。
 - CAD 真实样本验证需要 `.NET cad-parser` 服务（端口 8091）启动。
 - 前端尚未实现基于 `drawingBounds` 的精确底图对齐比例尺校准交互。
-- `floor_plan_furniture` 表已创建但未在前端消费。
+- 历史实现曾保留 `floor_plan_furniture`。该表及相关旧字段已在 [清理任务](DB-001-retire-unused-floor-plan-storage.md) 中退役。
 - 未实现空间确认后的版本失效与下游排版确认流程（GEOM-002 / FLOW-001）。
 
 ## 代码入口

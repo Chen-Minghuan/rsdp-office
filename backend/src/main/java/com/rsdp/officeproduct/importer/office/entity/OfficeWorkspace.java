@@ -23,6 +23,7 @@ public class OfficeWorkspace {
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private String workspaceType;
     private String ownerUserId;
+    private Integer dealerSlotNo;
     /** 公共库开关（经销商主号控制）：关=工作区全员仅见本厂产品；开=成员可自行选择不看。 */
     private Boolean sharedCatalogEnabled;
     private LocalDateTime createdAt;

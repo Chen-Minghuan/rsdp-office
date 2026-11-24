@@ -94,6 +94,7 @@ class OfficeProjectAccessServiceTest {
         member.setProjectId(projectId);
         member.setUserId(userId);
         member.setRole(role);
+        member.setPermissionFlags(1 | 2 | 16 | (OfficeProjectMember.ROLE_LEADER.equals(role) ? 32 : 0));
         members.add(member);
     }
 
@@ -153,11 +154,17 @@ class OfficeProjectAccessServiceTest {
         addMember("P1", "USR-2", "COLLABORATOR");
         assertDoesNotThrow(() -> access.requireMember("P1"));
         assertDoesNotThrow(() -> access.requireLeader("P1"));
+        members.getFirst().setPermissionFlags(OfficeProjectPermission.encode(List.of(OfficeProjectPermission.READ)));
+        assertThrows(AccessDeniedException.class, () -> access.requireLeader("P1"));
 
         enforcementOn("USR-2");
         assertDoesNotThrow(() -> access.requireMember("P1"));
-        assertEquals("只有项目负责人或经销商主号可以管理成员", assertThrows(AccessDeniedException.class,
+        assertEquals("无权管理项目成员", assertThrows(AccessDeniedException.class,
             () -> access.requireLeader("P1")).getMessage());
+        members.get(1).setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.MANAGE_MEMBERS)));
+        assertDoesNotThrow(() -> access.requireLeader("P1"));
+        assertThrows(AccessDeniedException.class, () -> access.requirePermission("P1", OfficeProjectPermission.EDIT));
 
         enforcementOn("USR-9");
         assertEquals("无权访问该项目", assertThrows(AccessDeniedException.class,

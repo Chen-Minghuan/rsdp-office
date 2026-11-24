@@ -61,7 +61,7 @@ async function openAs(user) {
       reads.sharedCatalog += 1
       return respond({ workspaceEnabled: true, dealer: true, effectiveVisible: true })
     }
-    if (path === '/api/v1/products') return respond([])
+    if (path === '/api/v1/products/page') return respond({ rows: [], total: 0, catalogTotal: 0, activeTotal: 0 })
     if (path === '/api/v1/office/favorites/product-ids') {
       reads.favoriteProductIds += 1
       return respond([])

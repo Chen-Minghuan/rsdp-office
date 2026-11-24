@@ -1,6 +1,7 @@
 package com.rsdp.officeproduct.importer.office.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.rsdp.officeproduct.importer.auth.PasswordHasher;
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
@@ -82,6 +83,11 @@ public class OfficeWorkspaceService {
         String displayName = requireDisplayName(request.getOwnerDisplayName());
         String password = requirePassword(request.getOwnerPassword());
 
+        workspaceMapper.lockDealerSlots();
+        Integer slot = workspaceMapper.nextDealerSlot();
+        if (slot == null) {
+            throw new BusinessException(409, "已使用 20/20 个工作区主号名额");
+        }
         LocalDateTime now = LocalDateTime.now();
         OfficeUser owner = new OfficeUser();
         owner.setUserId("USR-" + UUID.randomUUID().toString().replace("-", ""));
@@ -104,6 +110,7 @@ public class OfficeWorkspaceService {
         workspace.setName(name);
         workspace.setWorkspaceType(workspaceType);
         workspace.setOwnerUserId(owner.getUserId());
+        workspace.setDealerSlotNo(slot);
         workspace.setCreatedAt(now);
         workspace.setUpdatedAt(now);
         workspaceMapper.insert(workspace);
@@ -153,6 +160,19 @@ public class OfficeWorkspaceService {
         return userMapper.selectList(new QueryWrapper<OfficeUser>()
                 .eq("workspace_id", workspace.getWorkspaceId()).orderByAsc("created_at"))
             .stream().map(this::toUserDto).toList();
+    }
+
+    @Transactional
+    public void setProductEntry(String userId, boolean enabled) {
+        OfficeWorkspace workspace = requireOwnedWorkspace();
+        int updated = userMapper.update(null, new UpdateWrapper<OfficeUser>()
+            .eq("user_id", userId).eq("workspace_id", workspace.getWorkspaceId()).eq("role", "USER")
+            .set("product_entry_enabled", enabled).set("updated_at", LocalDateTime.now()));
+        if (updated != 1) {
+            throw new AccessDeniedException("只能修改本工作区普通成员的商品录入权限");
+        }
+        auditService.record(enabled ? "PRODUCT_ENTRY_GRANTED" : "PRODUCT_ENTRY_REVOKED", "USER", userId,
+            "workspace=" + workspace.getWorkspaceId());
     }
 
     /** 在本工作区内开户：角色固定 USER，来源仅允许经销商员工/厂家业务员（一期不参与鉴权）。 */
@@ -262,6 +282,7 @@ public class OfficeWorkspaceService {
         dto.setName(workspace.getName());
         dto.setWorkspaceType(workspace.getWorkspaceType());
         dto.setOwnerUserId(workspace.getOwnerUserId());
+        dto.setDealerSlotNo(workspace.getDealerSlotNo());
         dto.setOwnerUsername(resolvedOwner != null ? resolvedOwner.getUsername() : "");
         dto.setOwnerDisplayName(resolvedOwner != null ? resolvedOwner.getDisplayName() : "");
         dto.setOwnerStatus(resolvedOwner != null ? resolvedOwner.getStatus() : "");
@@ -281,6 +302,7 @@ public class OfficeWorkspaceService {
         dto.setRole(user.getRole());
         dto.setSource(user.getSource());
         dto.setStatus(user.getStatus());
+        dto.setProductEntryEnabled("DEALER".equals(user.getRole()) || Boolean.TRUE.equals(user.getProductEntryEnabled()));
         dto.setCreatedAt(user.getCreatedAt());
         return dto;
     }

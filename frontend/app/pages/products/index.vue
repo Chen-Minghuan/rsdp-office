@@ -4,8 +4,10 @@ import { catalogSourceLabel } from '~/utils/catalogSource'
 
 const api = useOfficeApi()
 const workspace = useWorkspaceStore()
-const rsdpWeb = useRsdpWeb()
-const products = ref<ImportedProduct[]>([])
+const pageProducts = ref<ImportedProduct[]>([])
+const catalogTotal = ref(0)
+const activeCount = ref(0)
+const filteredTotal = ref(0)
 const capabilities = ref<CatalogCapabilities | null>(null)
 const managed = ref(false)
 let listRequest = 0
@@ -18,21 +20,17 @@ async function loadCapabilities() {
   }
 }
 
-function setManaged(next: boolean) {
-  if (managed.value === next) return
-  managed.value = next
-  currentPage.value = 1
-  void loadProducts()
-}
 const isLoading = ref(true)
 const listError = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 const actionMessage = ref<string | null>(null)
 const search = ref('')
+const submittedSearch = ref('')
 const status = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 const pageInput = ref(1)
+const reloadVersion = ref(0)
 const pageSizeOptions = [10, 20, 50, 100]
 const selectedProduct = ref<ImportedProduct | null>(null)
 const detailDialog = ref<HTMLDialogElement | null>(null)
@@ -52,20 +50,10 @@ let projectFavoriteStateVersion = 0
 /** 公共库工作区级开关状态（仅经销商主号可切换；成员无个人开关，完全跟随主号设置） */
 const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
 const savingCatalogStatus = ref(false)
-const activeCount = computed(() => products.value.filter(product => product.status === 'active').length)
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
-const filteredProducts = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  return products.value.filter(product => {
-    const matchesSearch = !query || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(query))
-    const matchesStatus = !status.value || (status.value === 'active' ? product.status === 'active' : product.status !== 'active')
-    return matchesSearch && matchesStatus
-  })
-})
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredProducts.value.length / pageSize.value)))
-const pageProducts = computed(() => filteredProducts.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
-const pageStart = computed(() => filteredProducts.value.length ? (currentPage.value - 1) * pageSize.value + 1 : 0)
-const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, filteredProducts.value.length))
+const pageCount = computed(() => Math.max(1, Math.ceil(filteredTotal.value / pageSize.value)))
+const pageStart = computed(() => filteredTotal.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
+const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, filteredTotal.value))
 const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   const total = pageCount.value
   const current = currentPage.value
@@ -79,22 +67,35 @@ const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   })
   return items
 })
-watch([search, status, pageSize], () => {
+watch(search, (value, _previous, onCleanup) => {
+  const timeout = setTimeout(() => {
+    const term = value.trim()
+    if (term === submittedSearch.value) return
+    currentPage.value = 1
+    submittedSearch.value = term
+  }, 180)
+  onCleanup(() => clearTimeout(timeout))
+})
+watch([status, pageSize, managed], () => {
   currentPage.value = 1
 })
-watch(pageCount, count => {
-  currentPage.value = Math.min(currentPage.value, count)
-  pageInput.value = currentPage.value
-})
 watch(currentPage, value => { pageInput.value = value })
+watch([submittedSearch, status, pageSize, managed, currentPage, reloadVersion], () => { void loadProducts() })
+onBeforeUnmount(() => { listRequest++ })
 
 async function loadProducts() {
   const request = ++listRequest
   isLoading.value = true
   listError.value = null
   try {
-    const result = await api.loadImportedProducts(managed.value)
-    if (request === listRequest) products.value = result
+    const result = await api.loadImportedProductPage({ page: currentPage.value, size: pageSize.value,
+      search: submittedSearch.value, status: status.value, managed: managed.value })
+    if (request !== listRequest) return
+    filteredTotal.value = result.total
+    catalogTotal.value = result.catalogTotal
+    activeCount.value = result.activeTotal
+    pageProducts.value = result.rows
+    if (currentPage.value > pageCount.value) currentPage.value = pageCount.value
   } catch (error) {
     if (request === listRequest) listError.value = error instanceof Error ? error.message : '商品列表请求失败'
   } finally {
@@ -124,7 +125,7 @@ async function toggleWorkspaceSharedCatalog() {
     managed.value = false
     currentPage.value = 1
     actionMessage.value = updated.workspaceEnabled ? '公共库已开启，对整个工作区生效' : '公共库已关闭，对整个工作区生效'
-    await loadProducts()
+    reloadVersion.value++
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : '公共库开关切换失败'
   } finally {
@@ -143,7 +144,9 @@ function formatDate(date: string) {
 
 function resetFilters() {
   search.value = ''
+  submittedSearch.value = ''
   status.value = ''
+  currentPage.value = 1
 }
 
 function goToPage(value = pageInput.value) {
@@ -286,6 +289,9 @@ onMounted(() => {
           <p class="text-xs text-muted">从 RSDP 读取商品，供空间设计、选品和报价使用。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <NuxtLink to="/products/local" class="inline-flex items-center rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
+            本地商品
+          </NuxtLink>
           <button v-if="catalogStatus?.dealer" type="button" role="switch" aria-label="公共库"
             :aria-checked="catalogStatus.workspaceEnabled" :disabled="savingCatalogStatus"
             class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream disabled:opacity-60"
@@ -295,19 +301,16 @@ onMounted(() => {
               {{ savingCatalogStatus ? '保存中' : catalogStatus.workspaceEnabled ? '已开启' : '已关闭' }}
             </span>
           </button>
-          <a :href="rsdpWeb('/products')" target="_blank" rel="noopener" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
-            去 RSDP 管理商品
-          </a>
         </div>
       </div>
     </div>
 
     <nav v-if="capabilities?.managed && catalogStatus?.workspaceEnabled" class="mb-3 flex gap-2" aria-label="商品库范围">
-      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': !managed }" :aria-pressed="!managed" @click="setManaged(false)">共享商品</button>
-      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': managed }" :aria-pressed="managed" @click="setManaged(true)">本厂录入</button>
+      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': !managed }" :aria-pressed="!managed" @click="managed = false">共享商品</button>
+      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': managed }" :aria-pressed="managed" @click="managed = true">本厂录入</button>
     </nav>
     <div class="flex flex-none flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted" aria-live="polite">
-      <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? products.length : '—' }}</strong></span>
+      <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? catalogTotal : '—' }}</strong></span>
       <span>在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
       <span v-if="catalogStatus && !catalogStatus.workspaceEnabled">公共库已被工作区主号关闭，当前仅显示本厂商品</span>
       <span v-if="favoriteStatusError" class="text-red-800">收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadFavoriteProductIds">重试</button></span>
@@ -318,9 +321,9 @@ onMounted(() => {
       <div class="flex flex-wrap items-center gap-3 border-b border-line p-4">
         <div class="relative min-w-0 flex-[1_1_240px]">
           <AppIcon name="search" size="4" class="absolute left-3 top-3 text-muted" />
-          <input v-model="search" type="search" aria-label="搜索商品名称或编码" placeholder="搜索商品名称、编码" class="w-full rounded-lg border border-line bg-bg py-2.5 pl-9 pr-3 text-sm outline-bronze" :disabled="!statsAvailable">
+          <input v-model="search" type="search" aria-label="搜索商品名称或编码" placeholder="搜索商品名称、编码" maxlength="120" class="w-full rounded-lg border border-line bg-bg py-2.5 pl-9 pr-3 text-sm outline-bronze" :disabled="!!listError">
         </div>
-        <select v-model="status" aria-label="筛选商品状态" class="min-w-0 rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" :disabled="!statsAvailable">
+        <select v-model="status" aria-label="筛选商品状态" class="min-w-0 rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" :disabled="!!listError">
           <option value="">全部状态</option><option value="active">在售</option><option value="other">非在售</option>
         </select>
         <button type="button" class="rounded-lg border border-line p-2.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="loadProducts"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
@@ -349,11 +352,11 @@ onMounted(() => {
         </div>
       </div>
 
-      <div v-else-if="products.length === 0" class="grid min-h-[320px] place-items-center p-6">
+      <div v-else-if="catalogTotal === 0" class="grid min-h-[320px] place-items-center p-6">
         <div class="text-center"><div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-cream text-bronze"><AppIcon name="cube" size="6" /></div><h2 class="mb-2 text-base font-bold">商品库还是空的</h2><p class="text-sm text-muted">当前范围没有可读取的商品。</p></div>
       </div>
 
-      <div v-else-if="filteredProducts.length === 0" class="grid min-h-[280px] place-items-center p-6">
+      <div v-else-if="filteredTotal === 0" class="grid min-h-[280px] place-items-center p-6">
         <div class="text-center"><h2 class="mb-2 text-base font-bold">没有找到匹配的商品</h2><p class="mb-4 text-sm text-muted">试试其他关键词，或调整筛选条件。</p><button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark" @click="resetFilters">清空筛选</button></div>
       </div>
 
@@ -388,10 +391,10 @@ onMounted(() => {
         </ul>
       </div>
 
-      <div v-if="statsAvailable && filteredProducts.length" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
+      <div v-if="statsAvailable && filteredTotal" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
         <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div class="text-xs text-muted" aria-live="polite">
-            正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ filteredProducts.length }}</strong> 件商品
+            正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ filteredTotal }}</strong> 件商品
           </div>
 
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -455,7 +458,7 @@ onMounted(() => {
       </template>
     </dialog>
     </div>
-    <ProductComboPanel :products="products" class="hidden md:flex" />
+    <ProductComboPanel class="hidden md:flex" />
   </div>
 </template>
 

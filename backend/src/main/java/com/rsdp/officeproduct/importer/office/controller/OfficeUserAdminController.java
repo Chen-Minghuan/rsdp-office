@@ -2,7 +2,6 @@ package com.rsdp.officeproduct.importer.office.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.office.dto.AdminUserDto;
-import com.rsdp.officeproduct.importer.office.dto.CreateOfficeUserRequest;
 import com.rsdp.officeproduct.importer.office.dto.ResetOfficeUserPasswordRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeUserStatusRequest;
 import com.rsdp.officeproduct.importer.office.service.OfficeUserAdminService;
@@ -29,11 +28,6 @@ public class OfficeUserAdminController {
     @GetMapping
     public Result<List<AdminUserDto>> listUsers() {
         return Result.ok(userAdminService.listUsers());
-    }
-
-    @PostMapping
-    public Result<AdminUserDto> createUser(@RequestBody CreateOfficeUserRequest request) {
-        return Result.ok(userAdminService.createUser(request));
     }
 
     @PatchMapping("/{userId}/status")

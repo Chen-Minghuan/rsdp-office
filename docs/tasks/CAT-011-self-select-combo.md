@@ -15,6 +15,7 @@
 - 其余接口：GET 列表、POST 创建（用户锁内校验每账号≤10）、PATCH 重命名、DELETE 删除组合。
 - 前端：`ProductComboPanel.vue`（调宽 280–480px、组合卡、命名/删除/选品弹窗），拖拽/弹窗/移除均走增量接口；`products/index.vue` 左右两栏；`useOfficeApi` 增量方法；`types/combos.ts`。
 - 经验：选品弹窗 `<dialog>` 不可挂 `flex` 类（会覆盖未打开时的 display:none）。
+- 上游合并适配：商品库改为服务端分页后，选品弹窗不再依赖页面商品数组，改为自行调用 `GET /api/v1/products/page`（搜索 200ms 防抖、请求序号守卫），面板无 props。
 
 ## 验证（2026-11-24）
 

@@ -2,8 +2,6 @@
 import type { ImportedProduct } from '~/types/imported-products'
 import type { ProductCombo } from '~/types/combos'
 
-const props = defineProps<{ products: ImportedProduct[] }>()
-
 const api = useOfficeApi()
 const combos = ref<ProductCombo[]>([])
 const panelError = ref<string | null>(null)
@@ -165,16 +163,34 @@ const pickerSelection = ref<Set<string>>(new Set())
 const pickerSearch = ref('')
 const pickerError = ref<string | null>(null)
 const pickerSaving = ref(false)
-
 const pickerExistingIds = computed(() => new Set(pickerCombo.value?.items.map(item => item.rspuId) ?? []))
+const pickerProducts = ref<ImportedProduct[]>([])
+const pickerLoading = ref(false)
+let pickerRequest = 0
+let pickerSearchTimer: ReturnType<typeof setTimeout> | undefined
 
-const pickerProducts = computed(() => {
-  const query = pickerSearch.value.trim().toLowerCase()
-  if (!query) return props.products
-  return props.products.filter(product =>
-    [product.productName, product.rspuCode, product.externalCode, product.rspuId]
-      .some(value => value?.toLowerCase().includes(query)))
+async function loadPickerProducts() {
+  const request = ++pickerRequest
+  pickerLoading.value = true
+  try {
+    const result = await api.loadImportedProductPage({
+      page: 1, size: 100, search: pickerSearch.value.trim(), status: '', managed: false,
+    })
+    if (request === pickerRequest) pickerProducts.value = result.rows
+  } catch {
+    if (request === pickerRequest) pickerProducts.value = []
+  } finally {
+    if (request === pickerRequest) pickerLoading.value = false
+  }
+}
+
+watch(pickerSearch, () => {
+  if (!pickerDialog.value?.open) return
+  clearTimeout(pickerSearchTimer)
+  pickerSearchTimer = setTimeout(() => void loadPickerProducts(), 200)
 })
+
+onBeforeUnmount(() => clearTimeout(pickerSearchTimer))
 
 function openPicker(combo: ProductCombo) {
   pickerCombo.value = combo
@@ -182,6 +198,7 @@ function openPicker(combo: ProductCombo) {
   pickerSearch.value = ''
   pickerError.value = null
   pickerDialog.value?.showModal()
+  void loadPickerProducts()
 }
 
 function togglePickerProduct(rspuId: string) {
@@ -324,7 +341,8 @@ async function confirmPicker() {
               </label>
             </li>
           </ul>
-          <p v-if="!pickerProducts.length" class="py-6 text-center text-xs text-muted">没有匹配的商品</p>
+          <p v-if="pickerLoading" class="py-6 text-center text-xs text-muted" role="status">商品加载中…</p>
+          <p v-else-if="!pickerProducts.length" class="py-6 text-center text-xs text-muted">没有匹配的商品</p>
         </div>
         <p v-if="pickerError" class="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">{{ pickerError }}</p>
         <div class="mt-5 flex justify-end gap-3">

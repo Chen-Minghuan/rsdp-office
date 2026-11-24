@@ -44,6 +44,7 @@ try {
     return plan
   }
   planSummary()
+  let budgetGate = null
   await context.route('**/api/v1/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -53,7 +54,15 @@ try {
       await pendingCartReads.get(cartFloorId)
       return respond(scopedCarts.get(cartFloorId))
     }
-    if (path === '/api/v1/office/projects' && request.method() === 'GET') return respond(projects)
+    if (path === '/api/v1/office/projects' && request.method() === 'GET') {
+      assert.equal(new URL(request.url()).searchParams.get('includeBudget'), 'false')
+      return respond(projects)
+    }
+    if (path === '/api/v1/office/projects/budgets') {
+      await budgetGate
+      return respond(Object.fromEntries(projects.map(project =>
+        [project.projectId, { budgetTotal: 4321, budgetStatus: 'PENDING_PRICING' }])))
+    }
     if (path === '/api/v1/floor-plan/analyze') return respond({ analysisId: 'ANALYSIS-2F', taskId: 'TASK-2F' })
     if (path === '/api/v1/floor-plan/ANALYSIS-2F') {
       return respond({ analysisId: 'ANALYSIS-2F', projectId: 'OFLR-2', status: 'awaiting_confirm', rooms: [] })
@@ -405,9 +414,23 @@ try {
   await projectTree.getByRole('button', { name: /总部项目双击/ }).waitFor()
   assert.equal(await projectTree.getByRole('button', { name: /滨江智能办公/ }).count(), 0, '切换后只保留新当前项目的树')
 
-  await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
-  const workbenchList = page.getByRole('region', { name: '项目列表', exact: true })
-  await workbenchList.getByRole('button', { name: '进入项目 总部项目双击', exact: true }).first().click()
+  let releaseBudget
+  budgetGate = new Promise(resolve => { releaseBudget = resolve })
+  try {
+    await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
+    const workbenchList = page.getByRole('region', { name: '项目列表', exact: true })
+    const openProject = workbenchList.getByRole('button', { name: '进入项目 总部项目双击', exact: true }).first()
+    await openProject.waitFor()
+    assert.equal(await openProject.isEnabled(), true, '预算仍在加载时可进入项目')
+    await workbenchList.getByText('加载中…', { exact: true }).first().waitFor()
+    releaseBudget()
+    await workbenchList.getByText('待补价', { exact: true }).first().waitFor()
+    await workbenchList.getByText(/4,321/).first().waitFor()
+    await openProject.click()
+  } finally {
+    releaseBudget()
+    budgetGate = null
+  }
   await page.waitForURL(url => url.pathname === workbenchPath && url.searchParams.get('floorId') === 'OFLR-1')
   await page.getByText('first.png', { exact: true }).last().waitFor()
   await page.getByRole('button', { name: '新建项目', exact: true }).click()

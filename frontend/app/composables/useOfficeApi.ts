@@ -1,10 +1,11 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
-import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogCapabilities, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { OfficeObject, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
+import type { CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { ProductCombo } from '~/types/combos'
 import type { WorkspaceType } from '~/utils/workspaceType'
+import type { LocalProductInput, LocalProductSummary, LocalProductVariant, LocalProductImage } from '~/types/local-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -39,6 +40,7 @@ interface AdminUserItem {
   username: string
   displayName: string
   role: string
+  workspaceId?: string | null
   status: string
   lastLoginAt: string | null
   createdAt: string | null
@@ -52,6 +54,7 @@ interface WorkspaceItem {
   ownerUsername: string
   ownerDisplayName: string
   ownerStatus: string
+  dealerSlotNo?: number
   userCount: number
   projectCount: number
   createdAt: string | null
@@ -64,6 +67,7 @@ interface WorkspaceUserItem {
   role: string
   source: string | null
   status: string
+  productEntryEnabled: boolean
   createdAt: string | null
 }
 
@@ -226,14 +230,6 @@ export function useOfficeApi() {
     await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`)
   }
 
-  async function loadMessages(): Promise<AgentMessage[]> {
-    return await request<AgentMessage[]>('GET', `/api/v1/office/projects/${requireProjectId()}/agent-messages`)
-  }
-
-  async function sendMessage(content: string): Promise<AgentMessage> {
-    return await request<AgentMessage>('POST', `/api/v1/office/projects/${requireProjectId()}/agent-messages`, { role: 'user', content })
-  }
-
   async function loadProducts(): Promise<Product[]> {
     const list = await request<ProductDto[]>('GET', '/api/v1/office/products')
     return list.filter(p => p.widthCm != null && p.widthCm > 0 && p.depthCm != null && p.depthCm > 0
@@ -267,7 +263,12 @@ export function useOfficeApi() {
     const res = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${requireProjectId()}/proposal/export`), {
       method: 'POST',
       credentials: 'include',
+      responseType: 'blob',
     })
+    if (res.type.includes('application/json')) {
+      const result = JSON.parse(await res.text()) as ApiResponse<unknown>
+      throw new Error(result.message || '方案导出失败')
+    }
     return res
   }
 
@@ -298,6 +299,17 @@ export function useOfficeApi() {
     return blob
   }
 
+  async function exportLatestProjectQuotation(projectId: string): Promise<Blob> {
+    const blob = await $fetch<Blob>(apiUrl(`/api/v1/office/projects/${encodeURIComponent(projectId)}/quotation/latest/export`), {
+      credentials: 'include', responseType: 'blob',
+    })
+    if (blob.type.includes('application/json')) {
+      const result = JSON.parse(await blob.text()) as ApiResponse<unknown>
+      throw new Error(result.message || '报价导出失败')
+    }
+    return blob
+  }
+
   /** 最近一次确认的报价单；没有确认记录时返回 null。 */
   async function latestProjectQuotation(projectId: string): Promise<ProjectQuotationRecord | null> {
     return await request<ProjectQuotationRecord | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest`)
@@ -311,8 +323,12 @@ export function useOfficeApi() {
     return await request<T>('GET', `/api/v1/products/import-batches/${encodeURIComponent(batchId)}/status`)
   }
 
-  async function loadImportedProducts(managed = false): Promise<ImportedProduct[]> {
-    return await request<ImportedProduct[]>('GET', managed ? '/api/v1/products?managed=true' : '/api/v1/products')
+  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean }): Promise<CatalogProductPage> {
+    const query = new URLSearchParams({ page: String(options.page), size: String(options.size) })
+    if (options.search) query.set('search', options.search)
+    if (options.status) query.set('status', options.status)
+    if (options.managed) query.set('managed', 'true')
+    return await request<CatalogProductPage>('GET', `/api/v1/products/page?${query}`)
   }
 
   async function loadCatalogCapabilities(): Promise<CatalogCapabilities> {
@@ -425,10 +441,6 @@ export function useOfficeApi() {
     return await request<AdminUserItem[]>('GET', '/api/v1/office/admin/users')
   }
 
-  async function createAdminUser(payload: { username: string; displayName: string; password: string; role?: string }): Promise<AdminUserItem> {
-    return await request<AdminUserItem>('POST', '/api/v1/office/admin/users', payload)
-  }
-
   async function updateAdminUserStatus(userId: string, status: 'active' | 'disabled'): Promise<AdminUserItem> {
     return await request<AdminUserItem>('PATCH', `/api/v1/office/admin/users/${userId}/status`, { status })
   }
@@ -464,6 +476,31 @@ export function useOfficeApi() {
     return await request<WorkspaceUserItem[]>('GET', '/api/v1/office/workspace/users')
   }
 
+  function setWorkspaceProductEntry(userId: string, enabled: boolean) {
+    return request<void>('PUT', `/api/v1/office/workspace/users/${encodeURIComponent(userId)}/product-entry`, { enabled })
+  }
+
+  const localProductsPath = '/api/v1/office/local-products'
+  const listLocalProducts = (page: number) => request<{ canWrite: boolean, products: LocalProductSummary[], hasMore: boolean }>(
+    'GET', `${localProductsPath}?page=${page}`)
+  const getLocalProduct = (id: string) => request<{
+    product: LocalProductSummary, variants: LocalProductVariant[], images: LocalProductImage[]
+  }>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
+  const saveLocalProducts = (batchId: string, products: LocalProductInput[]) => request<{ id: string, name: string, revision: number }[]>(
+    'POST', localProductsPath, { batchId, products })
+  const localProductImageUrl = (id: string) => apiUrl(`${localProductsPath}/images/${encodeURIComponent(id)}`)
+  const localProductTemplateUrl = () => apiUrl(`${localProductsPath}/excel-template`)
+  const listLocalProductCategories = () => request<{ dictCode: string, dictName: string }[]>('GET', '/api/v1/dicts/category')
+
+  async function previewLocalProductWorkbook(file: File) {
+    const form = new FormData()
+    form.set('file', file)
+    const response = await $fetch<ApiResponse<{ products: LocalProductInput[], errors: { row: number, message: string }[] }>>(
+      apiUrl(`${localProductsPath}/excel-preview`), { method: 'POST', body: form, credentials: 'include' })
+    if (response.code !== 200) throw new Error(response.message || 'Excel 预览失败')
+    return response.data
+  }
+
   async function createWorkspaceUser(payload: { username: string; displayName: string; password: string; source?: string }): Promise<WorkspaceUserItem> {
     return await request<WorkspaceUserItem>('POST', '/api/v1/office/workspace/users', payload)
   }
@@ -495,8 +532,6 @@ export function useOfficeApi() {
     updateCartItemQty,
     deleteCartItem,
     clearCart,
-    loadMessages,
-    sendMessage,
     loadProducts,
     recommendModule,
     selectModuleProduct,
@@ -505,9 +540,10 @@ export function useOfficeApi() {
     previewProjectQuotation,
     confirmProjectQuotation,
     exportProjectQuotation,
+    exportLatestProjectQuotation,
     latestProjectQuotation,
     resetProject,
-    loadImportedProducts,
+    loadImportedProductPage,
     loadCatalogCapabilities,
     loadFavoriteFolders,
     createFavoriteFolder,
@@ -530,7 +566,6 @@ export function useOfficeApi() {
     parseCad,
     uploadImages,
     listAdminUsers,
-    createAdminUser,
     updateAdminUserStatus,
     resetAdminUserPassword,
     deleteAdminUser,
@@ -539,6 +574,14 @@ export function useOfficeApi() {
     updateAdminWorkspaceType,
     getMyWorkspace,
     listWorkspaceUsers,
+    setWorkspaceProductEntry,
+    listLocalProducts,
+    getLocalProduct,
+    saveLocalProducts,
+    localProductImageUrl,
+    localProductTemplateUrl,
+    listLocalProductCategories,
+    previewLocalProductWorkbook,
     createWorkspaceUser,
     getSharedCatalogStatus,
     setWorkspaceSharedCatalog,

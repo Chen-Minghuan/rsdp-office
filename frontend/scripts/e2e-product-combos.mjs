@@ -92,7 +92,12 @@ async function openPage(initialCombos = []) {
         return respond(null)
       }
     }
-    if (path === '/api/v1/products') return respond(Object.values(products))
+    if (path === '/api/v1/products/page') {
+      const term = (url.searchParams.get('search') || '').toLowerCase()
+      const rows = Object.values(products).filter(product => !term
+        || [product.productName, product.rspuCode, product.rspuId].some(value => value?.toLowerCase().includes(term)))
+      return respond({ rows, total: rows.length, catalogTotal: rows.length, activeTotal: rows.length })
+    }
     if (path === '/api/v1/products/capabilities') return respond({ managed: false })
     if (path === '/api/v1/office/workspace/shared-catalog') return respond({ workspaceEnabled: true, dealer: true, effectiveVisible: true })
     if (path === '/api/v1/office/projects') return respond([])

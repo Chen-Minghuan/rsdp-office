@@ -7,7 +7,6 @@ import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
 import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
-import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
@@ -155,6 +154,39 @@ class OfficeProjectServiceTest {
         assertEquals(List.of(0, 1), tree.get(0).getFloors().stream().map(floor -> floor.getSortOrder()).toList());
     }
 
+    @Test void listsProjectsWithoutReadingCartOrCatalogWhenBudgetIsExcluded() {
+        var created = service.createProject(request("总部", List.of("一层")));
+        cartLines.add(cart(created.getFloors().getFirst().getFloorId(), "V-1", 1));
+
+        var projects = service.listProjects(false);
+
+        assertEquals(created.getProjectId(), projects.getFirst().getProjectId());
+        assertNull(projects.getFirst().getBudgetTotal());
+        assertNull(projects.getFirst().getBudgetStatus());
+        verifyNoInteractions(cartMapper, catalogGateway);
+    }
+
+    @Test void separateBudgetsUseOnlyProjectsTheCurrentAccountCanRead() {
+        var visible = service.createProject(request("有权限", List.of("一层")));
+        var hidden = service.createProject(request("无权限", List.of("一层")));
+        cartLines.add(cart(visible.getFloors().getFirst().getFloorId(), "V-1", 2));
+        cartLines.add(cart(hidden.getFloors().getFirst().getFloorId(), "V-1", 100));
+        when(access.accessibleProjectIds()).thenReturn(java.util.Set.of(visible.getProjectId()));
+        when(sharedCatalogService.resolveViewMode()).thenReturn("full");
+        when(catalogGateway.retailPrices("full", java.util.Set.of("V-1")))
+            .thenReturn(Map.of("V-1", new BigDecimal("100")));
+
+        var budgets = service.listProjectBudgets();
+
+        assertEquals(java.util.Set.of(visible.getProjectId()), budgets.keySet());
+        assertEquals(new BigDecimal("200"), budgets.get(visible.getProjectId()).budgetTotal());
+        assertEquals("COMPLETE", budgets.get(visible.getProjectId()).budgetStatus());
+
+        when(access.accessibleProjectIds()).thenReturn(java.util.Set.of());
+        assertTrue(service.listProjectBudgets().isEmpty());
+        verify(catalogGateway, times(1)).retailPrices("full", java.util.Set.of("V-1"));
+    }
+
     @Test void listsProjectBudgetAcrossFloorsAndMarksMissingPrices() {
         var first = service.createProject(request("总部", List.of("一层", "二层")));
         var second = service.createProject(request("分部", List.of("一层")));
@@ -162,8 +194,8 @@ class OfficeProjectServiceTest {
         cartLines.add(cart(first.getFloors().get(1).getFloorId(), "V-2", 3));
         cartLines.add(cart(first.getFloors().get(1).getFloorId(), "MISSING", 1));
         cartLines.add(cart(second.getFloors().get(0).getFloorId(), "V-3", 4));
-        when(catalogGateway.listOfficeProducts("full")).thenReturn(List.of(
-            product("V-1", "100"), product("V-2", "50"), product("V-3", "10")));
+        when(catalogGateway.retailPrices("full", java.util.Set.of("V-1", "V-2", "V-3", "MISSING")))
+            .thenReturn(Map.of("V-1", new BigDecimal("100"), "V-2", new BigDecimal("50"), "V-3", new BigDecimal("10")));
 
         var result = budgetService().listProjects();
 
@@ -188,7 +220,8 @@ class OfficeProjectServiceTest {
     @Test void keepsProjectListAvailableWhenCatalogPricingFails() {
         var created = service.createProject(request("待价项目", List.of("一层")));
         cartLines.add(cart(created.getFloors().get(0).getFloorId(), "V-1", 1));
-        when(catalogGateway.listOfficeProducts("full")).thenThrow(new BusinessException("商品目录不可用"));
+        when(catalogGateway.retailPrices("full", java.util.Set.of("V-1")))
+            .thenThrow(new BusinessException("批量查价不可用"));
 
         var project = project(budgetService().listProjects(), created.getProjectId());
 
@@ -359,6 +392,7 @@ class OfficeProjectServiceTest {
         var created = service.createProject(request);
 
         var update = new UpdateProjectMembersRequest();
+        when(access.ownsProject(created.getProjectId())).thenReturn(true);
         update.setLeaderUserId("USR-3");
         update.setCollaboratorUserIds(List.of("USR-1"));
         var updated = service.replaceMembers(created.getProjectId(), update);
@@ -523,13 +557,6 @@ class OfficeProjectServiceTest {
         cart.setProductId(productId);
         cart.setQty(qty);
         return cart;
-    }
-
-    private OfficeProductDto product(String id, String price) {
-        var product = new OfficeProductDto();
-        product.setId(id);
-        product.setPrice(new BigDecimal(price));
-        return product;
     }
 
     private CreateOfficeProjectRequest request(String name, List<String> floorNames) {

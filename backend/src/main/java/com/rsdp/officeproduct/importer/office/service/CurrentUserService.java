@@ -55,7 +55,7 @@ public class CurrentUserService {
             return;
         }
         OfficeUser user = currentUser();
-        if (!"ADMIN".equalsIgnoreCase(user.getRole())) {
+        if (!Boolean.TRUE.equals(user.getIsSystemAdmin())) {
             throw new AccessDeniedException("只有系统管理员可以管理用户");
         }
     }

@@ -16,6 +16,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -45,7 +46,7 @@ public class RsdpClient {
     /**
      * 调用主项目 GET 接口，返回 Result.data 节点。
      *
-     * @param path 以 /api/v1 开头的接口路径（可带 query）
+     * @param path 以 /api/v1 开头的接口路径（查询值需编码）
      * @return data 节点
      */
     public JsonNode get(String path) {
@@ -95,6 +96,10 @@ public class RsdpClient {
     public String baseUrl() {
         ensureConfigured();
         return properties.getBaseUrl().replaceAll("/+$", "");
+    }
+
+    String catalogFactoryCode() {
+        return properties.getCatalogFactoryCode();
     }
 
     /**
@@ -151,7 +156,7 @@ public class RsdpClient {
         HttpHeaders headers = new HttpHeaders();
         headers.add(HttpHeaders.COOKIE, COOKIE_NAME + "=" + sessionCookie);
         ResponseEntity<String> response = restTemplate.exchange(
-            baseUrl() + path, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            URI.create(baseUrl() + path), HttpMethod.GET, new HttpEntity<>(headers), String.class);
         JsonNode root;
         try {
             root = objectMapper.readTree(response.getBody());
@@ -160,7 +165,7 @@ public class RsdpClient {
         }
         int code = root.path("code").asInt(-1);
         if (code != 200) {
-            throw new BusinessException(code >= 400 && code < 500 ? code : 400,
+            throw new BusinessException(code >= 400 && code < 600 ? code : 400,
                     "主项目接口返回错误: " + root.path("message").asText("未知错误"));
         }
         return root.path("data");
@@ -218,6 +223,6 @@ public class RsdpClient {
             // 非 JSON 错误体，原样使用
         }
         log.warn("主项目接口错误: {} status={}, body={}", path, e.getStatusCode(), message);
-        return new BusinessException("主项目接口返回错误: " + message);
+        return new BusinessException(e.getStatusCode().value(), "主项目接口返回错误: " + message);
     }
 }
