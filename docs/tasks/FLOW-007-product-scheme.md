@@ -1,0 +1,30 @@
+# FLOW-007 产品方案、房间版本与确认效果图
+
+状态：已实现，真实商品源和百炼效果图验收待执行。承接 [WORKSPACE-005](WORKSPACE-005-project-overview-navigation.md) 和 [CAT-011](CAT-011-product-catalog-layout.md)。
+
+- 房间当前方案使用既有画布和清单。首次使用以现有内容为 A。切换 A/B 时在楼层事务中保存当前家具与清单、恢复目标方案，切换令牌阻止切换前的画布写入覆盖结果。
+- 商品组合为个人目录草稿，保存真实商品、变体、数量。应用到已确认房间时重新校验商品与待匹配家具，批量写入画布和清单。
+- 项目清单按楼层生成服务端确认快照。正式效果图绑定其确认 ID 和房间快照，沿用已有 AI 服务和历史记录。图片仍需与实物和排版核对。
+
+## 操作与数据边界
+
+- 产品库的「加入组合」和拖放共用变体选择。组合是个人资产，其他项目的成员不会读到；同一个人可以在有权限的不同楼层中应用自己的组合。
+- 在「产品方案」进入已复核的房间，切换 Plan A / Plan B 可编辑各自排版和选品。首次 B 复制当前 A。空间轮廓和底图由两个版本共用；轮廓改动后恢复的排版需要重新确认。
+- 自动选品可以部分匹配并报告剩余件数。显式组合与粘贴选品是全量校验，若有一件无法安放或商品已失效则整批失败。家具占地和坐标沿用已确认的排版。
+- 「项目清单」确认只针对当前楼层的活动房间方案。至少需要一件家具，已排版家具均需确认并绑定可用且有报价的变体，同时校验清单数量和家具关联。报价仍从当前清单独立生成。
+- 图中的 S/A/B 商品等级、材质与尺寸等扩展筛选、桌脚与收纳分类、语义/以图搜品、推荐组合和组合效果图片需相应目录数据或能力，本轮只使用已有目录和匹配逻辑。底部的三个入口预设风格文字，3D 预览复用现有白模。
+
+## 接口
+
+- `GET /api/v1/office/floors/{floorId}/room-scheme?zoneId=…` 查询活动房间方案，`POST` 子路径 `activate`、`clear-selection` 和 `apply-products` 原子返回完整画布与清单。
+- `GET /api/v1/office/product-bundles` 查询个人组合，`PUT` 和 `DELETE` 在 `/{bundleId}` 上使用保存修订防止旧记录覆盖。
+- `GET|POST /api/v1/office/floors/{floorId}/proposal-confirmation` 查询当前确认和提交新确认。渲染沿用 `/api/v1/office/projects/{floorId}/render-previews`，带 `confirmationId` 的请求绑定正式快照。
+- 第一次方案写入后，画布保存以及单件选品携带 `schemeToken`，直接清单写入携带 `X-Office-Scheme` 请求头。切换前的并发写入会被拒绝，刷新时以较新的活动方案为准。
+
+## 验证
+
+- `pnpm build` 通过。Nuxt 仍报告既有的布局工具重复自动导入及构建包体积告警。
+- `mvn -f backend/pom.xml test` 通过，343 项中 4 项跳过，0 失败。新增批量绑定和正式渲染快照回归。
+- `pnpm e2e:product-scheme`、`pnpm e2e:render-preview`、`pnpm e2e:project-floors`、`pnpm e2e:quotes`、`pnpm e2e:delete-modules`、`pnpm e2e:workflows` 和 `MOCK_API=1 pnpm e2e:smoke` 通过，均模拟 API。核对产品方案桌面和窄屏截图。
+- 本地 Spring 与隔离 PostgreSQL 验证房间方案恢复、清空、过期写入拒绝、组合保存/改名/删除、确认持久化与失效。用模拟商品目录验证变体回源、组合应用、自动匹配和重新确认。
+- 真实主库账号、客户图纸和百炼效果图未做业务验收。未部署。

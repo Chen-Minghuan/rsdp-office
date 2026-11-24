@@ -4,6 +4,8 @@ import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanni
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
+import { ringProblem, zoneMeasurements } from '~/utils/spatial/review'
+import { money } from '~/utils/helpers'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const route = useRoute()
@@ -13,19 +15,55 @@ const tool = ref('select')
 const selectedId = ref<string | null>(null)
 const layoutPreview = ref<LayoutPreview | null>(null)
 const referenceEditing = ref<LayoutReferenceEditing | null>(null)
-const showSubmit = ref(false)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
 /** 从 3D 白模发起 AI 效果图时携带的当前视角截图；工具栏直接发起时为空（RENDER-006）。 */
 const renderViewImage = ref('')
-function openRenderPreview(viewImage = '') { renderViewImage.value = viewImage; showRenderPreview.value = true }
-const overviewCollapsed = ref(false)
+const selectedRenderId = ref<string>()
+function openRenderPreview(viewImage = '', previewId?: string) {
+  renderViewImage.value = viewImage
+  selectedRenderId.value = previewId
+  showRenderPreview.value = true
+}
+const isProductScheme = computed(() => route.query.view === 'products' && store.canvasMode === 'design')
+const {
+  state: schemeState, busy: schemeBusy, error: schemeError, message: schemeMessage, source: schemeSource, favoriteIds,
+  sourceError, bundles, bundleId, clipboard, room: schemeRoom, furniture: schemeFurniture, selectedCount,
+  canApply, canClear, currentConfirmation, renders, refreshRenders, change: changeScheme, copy: copyScheme, applyBundle,
+} = useProductScheme(isProductScheme)
+watch(showRenderPreview, open => { if (!open && isProductScheme.value) void refreshRenders() })
+const schemeArea = computed(() => {
+  const zone = schemeRoom.value
+  if (!zone?.polygon || ringProblem(zone.polygon)) return null
+  return zoneMeasurements(zone).area?.toFixed(1)
+})
+const renderStyles = ['现代简约', '暖木自然', '深色商务']
+const renderStyle = ref(renderStyles[0])
+const renderFiles = useRenderPreviewApi()
+const selectedSchemeProducts = computed(() => schemeFurniture.value
+  .filter(item => item.productSelection && item.productId).map(item => ({ id: item.id, product: item.productSelection!.product })))
+const inspectedProduct = computed(() => selectedSchemeProducts.value.find(item => item.id === selectedId.value)?.product)
+const proposalRoute = computed(() => ({ path: '/proposal', query: { floorId: workspace.currentFloorId } }))
+async function switchScheme(targetSlot: 'A' | 'B') {
+  if (!await changeScheme('activate', { targetSlot })) return
+  layoutPreview.value = null
+  referenceEditing.value = null
+  selectedId.value = null
+  tool.value = 'select'
+}
+function clearScheme() {
+  if (window.confirm('清空当前房间方案中的商品？家具排版将保留。')) void changeScheme('clear-selection')
+}
 const viewRotation = ref(0)
 const showDimensions = ref(true)
 const snapEnabled = ref(true)
 const showUnderlay = ref(true)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
-const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void } | null>(null)
+const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void; openRecommendations: () => void } | null>(null)
+function pickSchemeSource(source: 'auto' | 'project' | 'personal') {
+  schemeSource.value = source
+  if (store.designZoneId && store.layoutConfirmedForZone(store.designZoneId)) workflowRef.value?.openRecommendations()
+}
 watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
 watch(() => !!referenceEditing.value, active => {
   if (active) {
@@ -40,7 +78,6 @@ watch(tool, value => {
 })
 
 const mode = computed<'overview' | 'design'>(() => store.canvasMode)
-const designZoneId = computed(() => store.designZoneId)
 
 // Sync URL query -> store (browser back/forward, direct links)
 watch([() => route.query, () => store.initialized, () => workspace.loading], ([q, initialized]) => {
@@ -135,7 +172,6 @@ watch(() => store.designZoneId, (id, oldId) => {
   if (id === oldId || store.canvasMode !== 'design') return
   selectedId.value = null
   tool.value = 'select'
-  showSubmit.value = false
   showRenderPreview.value = false
   showWhiteModel.value = false
   store.cancelFurniturePlacement()
@@ -145,11 +181,6 @@ watch(() => store.designZoneId, (id, oldId) => {
     router.replace({ path: route.path, query })
   }
 })
-
-function openSubmit() {
-  store.submitCanvas()
-  showSubmit.value = true
-}
 
 // 3D「定位到 2D」：关闭预览并在无限画布中选中同一家具实例
 function onLocateFrom3d(id: string) {
@@ -181,19 +212,29 @@ watch(() => store.canEnterLayout, (confirmed) => {
     </div>
   </section>
   <OfficeCanvasSpaceReview v-else-if="mode === 'overview'" />
-  <div v-else class="flex h-full flex-col">
-    <div class="flex-1 min-h-0 flex">
-      <!-- Left sidebar -->
-      <OfficeCanvasOverviewSidebar v-if="mode === 'overview'" v-model="selectedId" />
-
-      <!-- Canvas -->
-      <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-y border-r border-line bg-white">
+  <div v-else class="flex h-full min-w-0 flex-col" :data-testid="isProductScheme ? 'product-scheme' : undefined">
+    <header v-if="isProductScheme" class="scheme-header">
+      <span class="scheme-floor">{{ workspace.currentFloorName }}</span>
+      <h1>{{ schemeRoom?.name || '未选择空间' }}</h1>
+      <span v-if="schemeArea">{{ schemeArea }} m²</span>
+      <span>已选 <strong>{{ selectedCount }}</strong> / {{ schemeFurniture.length }} 件</span>
+      <div class="scheme-versions" aria-label="房间方案">
+        <button v-for="slot in (['A', 'B'] as const)" :key="slot" type="button"
+          :aria-pressed="schemeState ? schemeState.activeSlot === slot : undefined" :disabled="schemeBusy || !store.apiReady || !schemeRoom"
+          @click="switchScheme(slot)">Plan {{ slot }}</button>
+      </div>
+      <button type="button" :disabled="schemeBusy || !store.apiReady || !canClear" @click="clearScheme">清空选品</button>
+      <p v-if="schemeError || schemeMessage" class="scheme-feedback" :role="schemeError ? 'alert' : 'status'">{{ schemeError || schemeMessage }}</p>
+    </header>
+    <div class="flex-1 min-h-0 flex" :class="{ 'scheme-body': isProductScheme }" :inert="schemeBusy || undefined">
+      <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-y border-r border-line bg-white" :class="{ 'scheme-board': isProductScheme }">
         <OfficeCanvasToolbar
           v-model:tool="tool"
           v-model:show-dimensions="showDimensions"
           v-model:snap-enabled="snapEnabled"
           :view-rotation="viewRotation"
           :mode="mode"
+          :preview-in-footer="isProductScheme"
           @undo="store.undo"
           @redo="store.redo"
           @zoom-in="store.zoom = Math.min(2, store.zoom * 1.17)"
@@ -203,68 +244,206 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:show-submit="showSubmit" v-model:mode="mode" v-model:snap-enabled="snapEnabled" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" />
-        <div class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
-          <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
-          <div v-else class="flex gap-5">
-            <span class="flex items-center gap-1.5">已圈选 <strong class="text-bronze text-sm">{{ store.zoneCount }}</strong> 个区域</span>
-            <span class="flex items-center gap-1.5">便签 <strong class="text-bronze text-sm">{{ store.noteCount }}</strong> 条</span>
-            <span class="flex items-center gap-1.5">参考图 <strong class="text-bronze text-sm">{{ store.refCount }}</strong> 张</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button v-if="mode === 'overview'" class="px-4 py-2 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 shadow-sm" @click="openSubmit">
-              整理需求并提交 <AppIcon name="arrowRight" size="3.5" />
-            </button>
-            <button v-else class="px-4 py-2 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark flex items-center gap-2 shadow-sm" @click="store.setCanvasMode('overview')">
-              完成当前空间 <AppIcon name="check" size="3.5" />
-            </button>
-          </div>
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" />
+        <div v-if="isProductScheme" class="scheme-board-footer">
+          <span v-if="inspectedProduct"><strong>{{ inspectedProduct.name }}</strong> · {{ inspectedProduct.variant }} · {{ money(inspectedProduct.price) }}</span>
+          <span v-else-if="selectedCount">点击画布家具查看已选商品</span>
+          <button type="button" :disabled="!selectedCount" @click="copyScheme">复制选品</button>
+          <button type="button" :disabled="!canApply || !clipboard.length" @click="changeScheme('apply-products', { items: clipboard })">粘贴选品</button>
+        </div>
+        <div v-else class="h-12 flex-none border-t border-line flex items-center justify-between px-4 text-xs bg-white">
+          <div class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === store.designZoneId)?.name || '未选择' }}</div>
+          <button type="button" class="bg-bronze px-4 py-2 text-xs font-semibold text-white hover:bg-bronze-dark" @click="store.setCanvasMode('overview')">完成当前空间</button>
         </div>
       </div>
 
-      <!-- Right sidebar -->
-      <OfficeCanvasDesignWorkflowSidebar v-if="mode === 'design'" ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing" :current-preview="layoutPreview" :open-selection="route.query.view === 'products'" @preview="layoutPreview = $event" />
-      <aside v-else :class="['flex-none bg-white border border-line rounded-none shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
-        <div v-show="!overviewCollapsed" class="w-72 h-full p-4 flex flex-col gap-4">
-          <div class="relative flex items-center justify-between">
-            <div class="flex items-center gap-2 text-[15px] font-bold">
-              <AppIcon name="documentText" size="4" />
-              <span>结构化需求</span>
+      <OfficeCanvasDesignWorkflowSidebar ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing"
+        :current-preview="layoutPreview" :open-selection="isProductScheme" :allowed-rspu-ids="isProductScheme ? favoriteIds : undefined" @preview="layoutPreview = $event">
+        <template v-if="isProductScheme" #scheme-tools>
+          <div class="scheme-tools">
+            <div class="scheme-sources" aria-label="选品来源">
+              <button type="button" :aria-pressed="schemeSource === 'auto'" @click="pickSchemeSource('auto')">自动选品</button>
+              <button type="button" :aria-pressed="schemeSource === 'project'" @click="pickSchemeSource('project')">项目选品库</button>
+              <button type="button" :aria-pressed="schemeSource === 'personal'" @click="pickSchemeSource('personal')">个人收藏夹</button>
             </div>
-            <button class="absolute top-0 right-0 p-1 rounded-none hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="overviewCollapsed = true">
-              <AppIcon name="arrowRight" size="4" />
-            </button>
-          </div>
-          <div class="pb-3 border-b border-line">
-            <div class="flex justify-between text-xs text-[#78736d] my-3">
-              <span class="flex items-center gap-1"><AppIcon name="zone" size="3.5" /> 功能区数量</span>
-              <strong class="text-[#383432]">{{ store.zoneCount }} 个</strong>
-            </div>
-            <div class="flex justify-between text-xs text-[#78736d] my-3">
-              <span class="flex items-center gap-1"><AppIcon name="warning" size="3.5" /> 待校准</span>
-              <strong class="text-[#383432]">{{ store.zones.filter(z => !z.calibratedWidth).length }} 个</strong>
+            <p v-if="sourceError" role="alert" class="text-xs text-red-700">{{ sourceError }}</p>
+            <button v-if="schemeSource === 'auto'" type="button" class="scheme-auto" :disabled="!canApply" @click="changeScheme('apply-products', { automatic: true })">一键匹配待选家具</button>
+            <div v-if="bundles.length" class="scheme-bundle">
+              <select v-model="bundleId" aria-label="选择商品组合">
+                <option value="">选择商品组合</option>
+                <option v-for="bundle in bundles" :key="bundle.bundleId" :value="bundle.bundleId" :disabled="!bundle.items.length">{{ bundle.name }}</option>
+              </select>
+              <button type="button" :disabled="!canApply || !bundleId" @click="applyBundle">应用组合</button>
             </div>
           </div>
-          <div class="mt-auto">
-            <div class="text-xs font-semibold mb-2 flex items-center gap-1"><AppIcon name="info" size="3.5" /> 提示</div>
-            <div class="text-xs text-muted leading-relaxed">
-              在总览模式下圈选办公区域后，点击左侧卡片「进入设计」即可切换到单空间设计模式，进行家具布局与选品。
-            </div>
-          </div>
-        </div>
-        <div v-show="overviewCollapsed" class="w-12 h-full flex flex-col items-center py-3">
-          <button class="p-1.5 rounded-none hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="overviewCollapsed = false">
-            <AppIcon name="arrowLeft" size="5" />
-          </button>
-          <div class="text-[10px] text-muted tracking-widest" style="writing-mode: vertical-rl;">
-            需求
-          </div>
-        </div>
-      </aside>
+        </template>
+      </OfficeCanvasDesignWorkflowSidebar>
     </div>
 
-    <OfficeCanvasSubmitDialog v-model:show="showSubmit" />
-    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :view-image="renderViewImage" />
+    <footer v-if="isProductScheme" class="scheme-output" :inert="schemeBusy || undefined">
+      <div class="scheme-styles" aria-label="效果图风格">
+        <button v-for="style in renderStyles" :key="style" type="button" :aria-pressed="style === renderStyle" @click="renderStyle = style">{{ style }}</button>
+      </div>
+      <button type="button" :disabled="!schemeFurniture.length" @click="showWhiteModel = true">3D 预览</button>
+      <button v-if="currentConfirmation" class="scheme-generate" type="button" @click="openRenderPreview()">生成方案效果图</button>
+      <NuxtLink v-else class="scheme-generate" :to="proposalRoute">去项目清单确认</NuxtLink>
+      <button type="button" @click="openRenderPreview()">生成记录</button>
+      <button v-for="image in renders" :key="image.previewId" class="scheme-thumbnail" type="button" :aria-label="image.style + '效果图'" @click="openRenderPreview('', image.previewId)">
+        <img :src="renderFiles.imageUrl(image.imageUrl)" :alt="image.style" :class="{ 'opacity-50': image.stale }">
+      </button>
+    </footer>
+
+    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :view-image="renderViewImage" :formal="isProductScheme"
+      :confirmation-id="currentConfirmation" :initial-style="isProductScheme ? renderStyle : undefined" :initial-preview-id="selectedRenderId" />
     <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" @ai-render="openRenderPreview" @locate="onLocateFrom3d" />
   </div>
 </template>
+
+<style scoped>
+.scheme-header,
+.scheme-output,
+.scheme-board-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem;
+  background: #fff;
+  border: 1px solid var(--color-line);
+  padding: .7rem;
+}
+
+.scheme-header {
+  border-bottom: 3px solid var(--color-accent);
+  color: var(--color-muted);
+  font-size: .8rem;
+}
+
+.scheme-header h1 {
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: #27202e;
+  margin-right: .4rem;
+}
+
+.scheme-header strong {
+  color: var(--color-accent-ink);
+}
+
+.scheme-floor {
+  background: var(--color-accent);
+  color: white;
+  padding: .22rem .45rem;
+  font-weight: 700;
+}
+
+.scheme-versions {
+  display: flex;
+  gap: .25rem;
+  margin-left: auto;
+}
+
+.scheme-header button,
+.scheme-output button,
+.scheme-output a,
+.scheme-board-footer button,
+.scheme-tools button,
+.scheme-tools select {
+  padding: .37rem .55rem;
+  border: 1px solid var(--color-accent-line);
+  color: var(--color-accent-ink);
+  background: white;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.scheme-header button[aria-pressed=true],
+.scheme-tools button[aria-pressed=true],
+.scheme-output .scheme-generate,
+.scheme-output button[aria-pressed=true] {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.scheme-header button:disabled,
+.scheme-output button:disabled,
+.scheme-tools button:disabled,
+.scheme-board-footer button:disabled {
+  opacity: .45;
+}
+
+.scheme-feedback {
+  width: 100%;
+  margin: 0;
+}
+
+.scheme-feedback[role=alert] {
+  color: #992d39;
+}
+
+.scheme-tools {
+  display: grid;
+  gap: .4rem;
+  padding: .55rem;
+  background: var(--color-accent-tint);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.scheme-sources,
+.scheme-bundle,
+.scheme-styles {
+  display: flex;
+  gap: .3rem;
+  flex-wrap: wrap;
+}
+
+.scheme-sources button {
+  flex: 1 1 auto;
+}
+
+.scheme-bundle select {
+  min-width: 0;
+  flex: 1;
+}
+
+.scheme-board-footer {
+  justify-content: flex-end;
+  font-size: .75rem;
+  color: var(--color-muted);
+}
+
+.scheme-board-footer span {
+  margin-right: auto;
+}
+
+.scheme-output {
+  border-top: 0;
+}
+
+.scheme-output .scheme-thumbnail {
+  padding: 0;
+}
+
+.scheme-thumbnail img {
+  width: 3.25rem;
+  height: 2rem;
+  object-fit: cover;
+}
+
+@media (max-width: 1100px) {
+  .scheme-body {
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .scheme-body .scheme-board {
+    flex: none;
+    height: max(28rem, 62vh);
+  }
+
+  .scheme-body :deep([data-testid=design-workflow-sidebar]) {
+    width: 100%;
+    min-height: 34rem;
+  }
+}
+</style>

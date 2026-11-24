@@ -50,6 +50,8 @@ const products = Array.from({ length: 23 }, (_, index) => ({
   rspuCode: `RSDP-${String(index + 1).padStart(3, '0')}`,
   externalCode: `EXTERNAL-${index + 1}`,
   productName: index % 2 ? `简约办公桌 ${index + 1}` : `人体工学椅 ${index + 1}`,
+  categoryPath: index < 4 ? ['办公家具', index % 2 ? '办公桌' : '办公椅'] : undefined,
+  colorPrimaryName: index < 4 ? (index < 2 ? '浅木色' : '深木色') : null,
   positioningLabel: '现代办公', primaryImageUrl: null, retailPrice: 980 + index * 100,
   referencePriceBand: '标准', productLevel: 'L2', warrantyYears: 3,
   sixDimTags: '{"A":["A1"],"B":["B2"]}', status: index % 3 ? 'active' : 'inactive',
@@ -63,6 +65,7 @@ await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200
 const reviewMock = createReviewConfirmMock()
 const defaultProject = {
   projectId: 'OFFICE-PROJECT-001', name: '默认办公项目', customerRequirements: '', requirementsRevision: 1,
+  budgetTotal: 124331.15, budgetStatus: 'PENDING_PRICING',
   leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
   floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
 }
@@ -78,6 +81,12 @@ await context.route('**/api/v1/**', async route => {
   const url = new URL(request.url())
   const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: status === 200 ? '成功' : '服务暂不可用', data }) })
   if (url.pathname === '/api/v1/office/projects' && request.method() === 'GET') return respond(availableProjects)
+  if (url.pathname === '/api/v1/office/projects/OFFICE-PROJECT-001/requirements' && request.method() === 'PATCH') {
+    defaultProject.customerRequirements = request.postDataJSON().customerRequirements
+    defaultProject.requirementsRevision++
+    const { budgetStatus, budgetTotal, ...details } = defaultProject
+    return respond(details)
+  }
   if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: catalogManaged })
   if (url.pathname.startsWith('/api/v1/dicts/')) {
     return respond([{ dictCode: 'CODE-1', dictName: '测试字典项' }])
@@ -198,17 +207,16 @@ async function heading(text) {
   await page.getByRole('heading', { name: text, exact: true }).waitFor()
 }
 
-async function assertNoProjectSteps() {
-  assert.equal(await page.getByRole('navigation', { name: '项目设计步骤' }).count(), 0)
-}
-
 const productCards = () => page.getByRole('list', { name: '商品卡片列表' }).getByRole('listitem')
+const mainNav = page.getByRole('navigation', { name: '主导航' })
+const productsLink = mainNav.getByRole('link', { name: '产品库', exact: true })
 
 
 try {
   await page.goto(`${baseUrl}/products`, { waitUntil: 'networkidle' })
   await heading('商品库')
-  await assertNoProjectSteps()
+  assert.equal(await productsLink.getAttribute('aria-current'), 'page')
+  assert.equal(await page.getByTestId('workspace-topbar-context').count(), 0)
   assert.equal(await productCards().count(), 20)
   const firstRow = await productCards().evaluateAll(cards => cards.slice(0, 5).map(card => {
     const rect = card.getBoundingClientRect()
@@ -222,12 +230,30 @@ try {
   await page.setViewportSize({ width: 2306, height: 960 })
   assert.equal(await gridColumnCount(), 8, '2306px 超宽屏显示八列')
   await page.setViewportSize({ width: 1440, height: 960 })
+  const categoryFilter = page.getByRole('combobox', { name: '筛选产品分类' })
+  const colorFilter = page.getByRole('combobox', { name: '筛选商品主色' })
+  await categoryFilter.selectOption('办公家具 / 办公椅')
+  assert.equal(await productCards().count(), 2)
+  await colorFilter.selectOption('深木色')
+  assert.equal(await productCards().count(), 1)
+  await productCards().getByText('人体工学椅 3', { exact: true }).waitFor()
+  await page.getByLabel('搜索商品名称或编码').fill('RSDP-001')
+  await heading('没有找到匹配的商品')
+  await page.getByRole('button', { name: '清空筛选', exact: true }).click()
+  assert.equal(await productCards().count(), 20)
+  assert.equal(await categoryFilter.inputValue(), '')
+  assert.equal(await colorFilter.inputValue(), '')
+  const catalogFavorites = page.getByRole('complementary', { name: '产品库收藏' })
+  const openCollections = catalogFavorites.getByRole('link', { name: '打开收藏中心' })
+  await openCollections.waitFor()
+  assert.equal(await openCollections.getAttribute('href'), '/favorites?tab=project')
+  assert.equal(await catalogFavorites.getByRole('button', { name: '项目收藏', exact: true }).getAttribute('aria-pressed'), 'true')
   const firstCard = productCards().first()
   await firstCard.getByText('人体工学椅 1', { exact: true }).waitFor()
   await firstCard.getByText('RSDP-001', { exact: true }).waitFor()
   await firstCard.getByText('¥ 980.00', { exact: true }).waitFor()
   await firstCard.getByText('非在售', { exact: true }).waitFor()
-  await firstCard.getByText(/2026[/-]10[/-]12/).waitFor()
+  await firstCard.getByText('暂无商品图片', { exact: true }).waitFor()
   await firstCard.getByRole('link', { name: '查看人体工学椅 1详情' }).first().waitFor()
 
   const favoriteButton = firstCard.getByRole('button', { name: '个人收藏人体工学椅 1' })
@@ -263,6 +289,11 @@ try {
   assert.deepEqual(projectFavoriteSaveRequests[0], { projectId: 'OFFICE-PROJECT-001', rspuId: 'PRODUCT-1', selected: true })
   assert.equal(await projectFavoriteButton.getAttribute('aria-pressed'), 'true')
   assert.equal(await favoriteButton.getAttribute('aria-pressed'), 'false', '项目收藏不改变个人爱心状态')
+  await catalogFavorites.getByRole('link', { name: '人体工学椅 1', exact: true }).waitFor()
+  await catalogFavorites.getByRole('button', { name: '个人收藏', exact: true }).click()
+  assert.equal(await openCollections.getAttribute('href'), '/favorites')
+  await catalogFavorites.getByText('当前目录范围内暂无收藏商品。', { exact: true }).waitFor()
+  assert.equal(await catalogFavorites.getByRole('link', { name: '人体工学椅 1', exact: true }).count(), 0)
 
   await projectFavoriteButton.click()
   const secondProjectRadio = favoriteDialog.getByRole('radio', { name: /第二个办公项目/ })
@@ -315,6 +346,7 @@ try {
   await favoriteDialog.waitFor({ state: 'hidden' })
   assert.deepEqual(favoriteSaveRequests[0], { rspuId: 'PRODUCT-1', folderIds: ['F-CUSTOM-1', 'F-DEFAULT'] })
   assert.equal(await favoriteButton.getAttribute('aria-pressed'), 'true')
+  await catalogFavorites.getByRole('link', { name: '人体工学椅 1', exact: true }).waitFor()
 
   failNextFavoriteSave = true
   await favoriteButton.click()
@@ -517,49 +549,61 @@ try {
   assert.equal(await productCards().count(), 15)
   await page.getByLabel('筛选商品状态').selectOption('')
 
-  const workspaceNavigation = page.getByRole('navigation', { name: '工作区导航' })
-  const sidebarWorkbench = workspaceNavigation.getByRole('link', { name: '项目工作台', exact: true })
-  await sidebarWorkbench.click()
+  const workbenchLink = mainNav.getByRole('link', { name: '项目工作台', exact: true })
+  await workbenchLink.click()
   await heading('项目工作台')
-  await page.getByRole('region', { name: '项目列表', exact: true }).getByRole('button', { name: '进入项目 默认办公项目', exact: true }).first().click()
+  const workbench = page.getByTestId('project-bench-overview')
+  await workbench.getByRole('heading', { name: '默认办公项目', exact: true }).waitFor()
+  assert.equal(await workbenchLink.getAttribute('aria-current'), 'page')
+  assert.match(await workbench.getByTestId('project-reference-budget').innerText(), /124,331\.15/)
+  await workbench.getByRole('button', { name: '项目需求录入与更新', exact: true }).click()
+  await heading('客户需求备注')
+  await page.getByPlaceholder('填写客户需求与注意事项').fill('回归测试项目需求')
+  await page.getByRole('button', { name: '保存备注', exact: true }).click()
+  await page.getByText('已保存。既有推荐和方案请结合新需求重新复核。', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '关闭客户需求', exact: true }).click()
+  assert.match(await workbench.getByTestId('project-reference-budget').innerText(), /124,331\.15/)
+  await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
+  await page.getByRole('region', { name: '项目列表', exact: true }).getByRole('button', { name: '进入项目 默认办公项目', exact: true }).click()
+  const drawingLink = workbench.getByRole('link', { name: '上传或识别图纸', exact: true })
+  await drawingLink.click()
   await heading('默认楼层 · 上传办公图纸')
-  assert.equal(await sidebarWorkbench.getAttribute('aria-current'), 'page')
-  const projectFlow = page.getByRole('region', { name: '项目设计流程' })
-  await projectFlow.getByText('空间设计', { exact: true }).waitFor()
-  await projectFlow.getByText(/当前图纸：/).waitFor()
-  const projectNav = page.getByRole('navigation', { name: '项目设计步骤' })
-  assert.deepEqual(await projectNav.getByRole('link').evaluateAll(links => links.map(link => link.lastElementChild.textContent)), ['项目工作台', '空间总览', '布局选品', '预算清单'])
-  const workbenchStep = projectNav.getByRole('link', { name: '1 项目工作台', exact: true })
-  assert.equal(await workbenchStep.getAttribute('href'), await sidebarWorkbench.getAttribute('href'))
-  assert.equal(await workbenchStep.getAttribute('aria-current'), 'step')
-  const overviewStep = projectNav.getByRole('link', { name: '2 空间总览', exact: true })
+  assert.deepEqual(await mainNav.getByRole('link').allTextContents(), ['项目工作台', '产品库', '空间设计', '产品方案', '项目清单'])
+  const overviewStep = mainNav.getByRole('link', { name: '空间设计', exact: true })
+  const schemeLink = mainNav.getByRole('link', { name: '产品方案', exact: true })
   await overviewStep.click()
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
-  assert.equal(await overviewStep.getAttribute('aria-current'), 'step')
+  assert.equal(await overviewStep.getAttribute('aria-current'), 'page')
+  const projectContext = page.getByTestId('workspace-topbar-context')
+  await projectContext.getByText('默认办公项目 / 默认楼层', { exact: true }).waitFor()
   const topbar = page.getByTestId('workspace-topbar')
-  assert.equal(await topbar.getByRole('navigation', { name: '项目设计步骤' }).count(), 1)
   for (const width of [1440, 1280, 390]) {
     await page.setViewportSize({ width, height: 960 })
     const bar = await topbar.boundingBox()
-    const links = await projectNav.getByRole('link').evaluateAll(elements => elements.map(element => {
+    const links = await mainNav.getByRole('link').evaluateAll(elements => elements.map(element => {
       const { left, right } = element.getBoundingClientRect()
       return { left, right }
     }))
-    assert.equal(links.length, 4)
-    assert.ok(links.every(link => link.left >= bar.x && link.right <= bar.x + bar.width), `steps fit in topbar at ${width}px`)
+    assert.equal(links.length, 5)
+    assert.ok(links.every(link => link.left >= bar.x && link.right <= bar.x + bar.width), `navigation fits in topbar at ${width}px`)
     if (width >= 1280) {
       const canvas = await page.locator('.review-canvas-panel').boundingBox()
       const roomPanel = await page.locator('.review-rooms').boundingBox()
-      assert.ok(bar.height <= 65, `project steps share a single top row at ${width}px`)
       assert.equal(Math.round(canvas.y), Math.round(bar.y + bar.height))
       assert.equal(Math.round(roomPanel.y), Math.round(bar.y + bar.height))
+    } else {
+      const sidebar = page.getByRole('button', { name: '项目侧栏', exact: true })
+      assert.equal(await sidebar.getAttribute('aria-expanded'), 'false')
+      await sidebar.click()
+      assert.equal(await sidebar.getAttribute('aria-expanded'), 'true')
+      await sidebar.click()
     }
   }
   await page.setViewportSize({ width: 1440, height: 960 })
-  await workbenchStep.click()
+  await workbenchLink.click()
   await heading('项目工作台')
-  assert.equal(await workbenchStep.getAttribute('aria-current'), 'step')
-  await page.getByRole('link', { name: '默认楼层 · 上传识别图纸', exact: true }).click()
+  assert.equal(await workbenchLink.getAttribute('aria-current'), 'page')
+  await drawingLink.click()
   await heading('默认楼层 · 上传办公图纸')
   await overviewStep.click()
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
@@ -572,18 +616,19 @@ try {
   await designSidebar.waitFor()
   const designBar = await topbar.boundingBox()
   assert.equal(Math.round((await designSidebar.boundingBox()).y), Math.round(designBar.y + designBar.height))
-  await projectFlow.getByRole('button', { name: /查看当前空间模板/ }).click()
+  await topbar.getByRole('button', { name: /查看空间模板/ }).click()
   await page.getByRole('dialog', { name: '空间模板', exact: true }).waitFor()
   await page.getByRole('button', { name: '关闭空间模板', exact: true }).click()
-  const designUrl = page.url()
-  await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
+  await productsLink.click()
   await heading('商品库')
-  await assertNoProjectSteps()
-  await page.getByRole('link', { name: '空间设计', exact: true }).click()
-  await page.waitForURL(designUrl)
-  assert.equal(page.url(), designUrl)
+  assert.equal(await projectContext.count(), 0)
+  await schemeLink.click()
+  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('view') === 'products')
+  await page.getByTestId('tab-product-selection').waitFor()
+  assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
+  assert.equal(await schemeLink.getAttribute('aria-current'), 'page')
 
-  await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
+  await productsLink.click()
   await page.getByRole('link', { name: '去 RSDP 管理商品' }).waitFor()
   assert.equal(await page.getByRole('link', { name: '手工录入' }).count(), 0)
   assert.equal(await page.getByRole('link', { name: '批量导入' }).count(), 0)
@@ -621,6 +666,12 @@ try {
     await page.setViewportSize({ width, height: 900 })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Overflow at ${width}px`)
   }
+  const collectionToggle = page.getByRole('button', { name: '收藏夹', exact: true })
+  assert.equal(await collectionToggle.getAttribute('aria-expanded'), 'false')
+  await collectionToggle.click()
+  await catalogFavorites.waitFor()
+  assert.equal(await collectionToggle.getAttribute('aria-expanded'), 'true')
+  await page.getByRole('button', { name: '项目侧栏', exact: true }).click()
   await page.getByRole('link', { name: '导入记录', exact: true }).click()
   await heading('Office 历史导入记录')
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)

@@ -10,7 +10,7 @@ const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { required: true })
 /** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
-const props = defineProps<{ currentPreview?: LayoutPreview | null; openSelection?: boolean }>()
+const props = defineProps<{ currentPreview?: LayoutPreview | null; openSelection?: boolean; allowedRspuIds?: string[] }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void }
@@ -23,7 +23,7 @@ function openFurniture(id: string, fromGroup: boolean) {
   if (activePage.value !== 'recommendations') activePage.value = 'products'
   collapsed.value = false
 }
-defineExpose({ openFurniture })
+defineExpose({ openFurniture, openRecommendations: () => openPage('recommendations') })
 const collapsed = ref(false), autoLayout = ref<AutoLayoutPanel | null>(null), actionMessage = ref('')
 const pages: Array<{ id: WorkflowPage; label: string; testId: string }> = [
   { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },
@@ -118,7 +118,7 @@ function clearAutomaticLayout() {
           <span>返回空间总览</span>
         </button>
         <span class="min-w-0 flex-1 truncate text-right text-xs font-semibold text-[#4f493f]" :title="zone?.name">{{ zone?.name || '未选择空间' }}</span>
-        <button class="flex-none p-0.5 text-muted hover:bg-[#f7f3ef]" title="收起侧边栏" @click="collapsed = true"><AppIcon name="arrowRight" size="3.5" /></button>
+        <button class="flex-none p-0.5 text-muted hover:bg-cream" title="收起侧边栏" @click="collapsed = true"><AppIcon name="arrowRight" size="3.5" /></button>
       </div>
       <div class="grid grid-cols-3 gap-1" role="tablist" aria-label="布局选品页面">
         <button
@@ -128,18 +128,18 @@ function clearAutomaticLayout() {
           role="tab"
           :data-testid="page.testId"
           :aria-selected="activePage === page.id"
-          :class="['rounded-none px-2 py-1.5 text-[11px] font-medium transition', activePage === page.id ? 'bg-[#83d94f] text-[#214326]' : 'bg-[#f4f5f1] text-[#6f776a] hover:bg-[#e8eee1']"
+          :class="['rounded-none px-2 py-1.5 text-[11px] font-medium transition', activePage === page.id ? 'bg-bronze text-white' : 'bg-bg text-[#6f776a] hover:bg-[#e8eee1']"
           @click="openPage(page.id)"
         >{{ page.label }}</button>
       </div>
     </div>
 
     <template v-if="activePage === 'auto' && zone">
-      <div v-show="!collapsed" class="flex-none border-b border-line bg-[#fafbf7] px-3 py-2">
+      <div v-show="!collapsed" class="flex-none border-b border-line bg-bg px-3 py-2">
         <div class="flex items-center justify-between gap-2">
           <label class="flex min-w-0 items-center gap-2 text-[11px] text-[#596252]">
             <span class="flex-none font-semibold">房间类型</span>
-            <select v-model="zoneType" aria-label="布局房间类型" title="采用识别初步判断；修改后重新核验当前排版" class="min-w-0 rounded-none border border-[#cbd8c1] bg-white px-2 py-1 text-[11px] text-[#38523a]">
+            <select v-model="zoneType" aria-label="布局房间类型" title="采用识别初步判断；修改后重新核验当前排版" class="min-w-0 rounded-none border border-line bg-white px-2 py-1 text-[11px] text-bronze-dark">
               <option v-for="[value, label] in ZONE_TYPES" :key="value" :value="value">{{ label }}</option>
             </select>
           </label>
@@ -159,7 +159,7 @@ function clearAutomaticLayout() {
             type="button"
             :data-testid="'functional-category-' + category.id"
             :aria-pressed="selectedCategories.includes(category.id)"
-            :class="['rounded-none px-1.5 py-1.5 text-[10px]', selectedCategories.includes(category.id) ? 'bg-[#83d94f] text-[#214326]' : 'bg-[#f4f5f1] text-[#687260] hover:bg-[#e8eee1]']"
+            :class="['rounded-none px-1.5 py-1.5 text-[10px]', selectedCategories.includes(category.id) ? 'bg-bronze text-white' : 'bg-bg text-[#687260] hover:bg-cream']"
             @click="selectCategory(category.id)"
           >{{ category.label }}</button>
         </div>
@@ -168,23 +168,24 @@ function clearAutomaticLayout() {
 
     </template>
 
+    <slot v-if="!collapsed" name="scheme-tools" />
     <div v-show="!collapsed" class="flex min-h-0 flex-1 flex-col">
       <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && !isSingleModule" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="forwardPreview(false, $event)" />
       <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="automaticModuleId" :current-preview="currentPreview" @module-change="automaticModuleId = $event" @preview="forwardPreview(true, $event)" />
       <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
-      <OfficeCanvasDesignSidebar v-else embedded v-model:selected-id="selectedId" />
+      <OfficeCanvasDesignSidebar v-else v-model:selected-id="selectedId" :allowed-rspu-ids="allowedRspuIds" :show-floor-summary="!openSelection" />
     </div>
-    <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-[#fafbf7] px-3 py-2.5" data-testid="auto-layout-next-actions">
+    <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-bg px-3 py-2.5" data-testid="auto-layout-next-actions">
       <p class="mb-2 text-[9px] leading-relaxed text-muted">可直接确认并推荐款式，也可进入产品选型手动调整，无需按固定顺序操作。</p>
       <div class="grid grid-cols-2 gap-1.5">
         <button data-testid="auto-manual-layout" class="rounded-none border border-line bg-white px-2 py-2 text-[10px] font-semibold text-[#596252]" @click="activePage = 'products'">产品选型 · 手动调整</button>
-        <button data-testid="auto-confirm-recommend" class="rounded-none bg-[#83d94f] px-2 py-2 text-[10px] font-semibold text-[#214326]" @click="confirmAndRecommend">确认排版并进入款式推荐</button>
+        <button data-testid="auto-confirm-recommend" class="rounded-none bg-bronze px-2 py-2 text-[10px] font-semibold text-white" @click="confirmAndRecommend">确认排版并进入款式推荐</button>
       </div>
       <button data-testid="auto-clear-layout" title="清空当前空间家具，并取消全部已选功能模块" class="mt-1.5 w-full rounded-none border border-line bg-white px-3 py-1.5 text-[10px] text-muted hover:text-[#a65e4c]" @click="clearAutomaticLayout">清空排版</button>
       <p v-if="actionMessage" role="status" class="mt-1.5 text-[10px] leading-relaxed text-[#a65e4c]">{{ actionMessage }}</p>
     </div>
     <div v-if="collapsed" class="flex h-full flex-col items-center py-3">
-      <button class="p-1.5 text-muted hover:bg-[#f7f3ef]" title="展开侧边栏" @click="collapsed = false"><AppIcon name="arrowLeft" size="5" /></button>
+      <button class="p-1.5 text-muted hover:bg-cream" title="展开侧边栏" @click="collapsed = false"><AppIcon name="arrowLeft" size="5" /></button>
       <span class="mt-3 text-[10px] text-muted" style="writing-mode: vertical-rl">布局选品</span>
     </div>
   </aside>

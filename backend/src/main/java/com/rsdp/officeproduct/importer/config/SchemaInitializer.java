@@ -69,6 +69,7 @@ public class SchemaInitializer {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261120_office_requirements_summary.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261122_office_personal_favorites.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261123_office_project_favorites.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_product_scheme.sql"));
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

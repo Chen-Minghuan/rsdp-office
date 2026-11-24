@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { money } from '~/utils/helpers'
+import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
-const collapsed = ref(false)
 
 const zone = computed(() => store.zones.find((z) => z.id === store.designZoneId) || null)
 const hasFurniture = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
@@ -10,46 +10,21 @@ const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone
 const layoutReviewNotice = computed(() => layoutConfirmed.value && zone.value ? store.layoutReviewWarning(zone.value.id) : null)
 
 const selectedId = defineModel<string | null>('selectedId')
-withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
-
-function backToOverview() {
-  store.setCanvasMode('overview')
-}
+defineProps<{ allowedRspuIds?: string[]; showFloorSummary: boolean }>()
+const zoneTypeLabel = computed(() => ZONE_TYPES.find(([value]) => value === zone.value?.zoneType)?.[1] || '其他')
 </script>
 
 <template>
-  <div :class="['bg-white flex flex-col overflow-hidden transition-all duration-300', embedded ? 'w-full flex-1 min-h-0' : collapsed ? 'flex-none w-12 border-y border-r border-line' : 'flex-none w-[360px] border-y border-r border-line']">
-    <div v-show="!collapsed" :class="[embedded ? 'w-full' : 'w-[360px]', 'h-full min-h-0 flex flex-col']">
-      <!-- Header -->
-      <div v-if="!embedded" class="relative px-4 py-4 border-b border-line flex-none">
-        <button class="absolute top-3 right-3 p-1 rounded-none hover:bg-[#f7f3ef] text-muted" title="收起侧边栏" @click="collapsed = true">
-          <AppIcon name="arrowRight" size="4" />
-        </button>
-        <button class="inline-flex items-center gap-1 text-xs text-bronze hover:underline mb-2" @click="backToOverview">
-          <AppIcon name="arrowLeft" size="3.5" />
-          <span>返回空间总览</span>
-        </button>
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2 text-[15px] font-bold">
-          <AppIcon name="zone" size="4" />
-          <span>{{ zone?.name || '未选择空间' }}</span>
-        </div>
-        <span class="px-1.5 py-0.5 rounded-none text-[10px] bg-[#f4eee5] text-[#946c45]">单空间设计</span>
-      </div>
-      <p class="text-xs text-muted mt-1.5">
-        {{ zone ? (zone.seats ? '目标人数：' + zone.seats + ' 人' : '功能区域') : '请在总览中选择一个功能区' }}
-      </p>
-    </div>
-
+  <div class="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-white">
     <!-- 兜底滚动层：高度充足时内容不溢出、本层无滚动条，仅商品列表自滚，表现与原布局一致；
          视口不足（小屏或浏览器放大）时本层出现滚动条，上方信息区可滚走，结算条在层外钉底 -->
     <div class="flex-1 min-h-0 overflow-y-auto flex flex-col" data-testid="sidebar-fallback-scroll">
 
     <!-- Zone info -->
-    <div v-if="zone" class="px-4 py-3 bg-[#f9f7f4] border-b border-line flex-none">
+    <div v-if="zone" class="px-4 py-3 bg-bg border-b border-line flex-none">
       <div class="flex justify-between text-xs text-[#78736d] my-1">
         <span>功能类型</span>
-        <strong class="text-[#383432]">{{ zone.zoneType }}</strong>
+        <strong class="text-[#383432]">{{ zoneTypeLabel }}</strong>
       </div>
       <div class="flex justify-between text-xs text-[#78736d] my-1">
         <span>尺寸（{{ zone.reviewUnit === 'mm' ? '毫米' : '待校准' }}）</span>
@@ -81,7 +56,7 @@ function backToOverview() {
         </p>
       </div>
 
-      <div class="bg-[#f9f7f4] rounded-none p-3.5 text-xs text-[#78736d] leading-relaxed">
+      <div class="bg-bg rounded-none p-3.5 text-xs text-[#78736d] leading-relaxed">
         <div class="font-semibold text-[#5b5751] mb-2 flex items-center gap-1.5">
           <AppIcon name="info" size="3.5" />
           <span>排版步骤</span>
@@ -113,35 +88,24 @@ function backToOverview() {
     <!-- Layout confirmed: real SKU recommendations for current module footprints -->
     <template v-else>
       <p v-if="layoutReviewNotice" class="border-b border-[#f0d9b3] bg-[#fff8e8] px-3 py-2 text-[10px] leading-relaxed text-[#8a6a2c]" data-testid="layout-review-notice">{{ layoutReviewNotice }}</p>
-      <OfficeCanvasModuleProductRecommendations v-model:selected-id="selectedId" />
+      <OfficeCanvasModuleProductRecommendations v-model:selected-id="selectedId" :allowed-rspu-ids="allowedRspuIds" />
     </template>
     </div>
 
     <!-- 结算条钉底：位于兜底滚动层之外，任何有效视口高度下保持可见，随时可进入方案 -->
-    <div v-if="layoutConfirmed" class="px-4 py-3 border-t border-line bg-[#fefcfb] flex-none">
+    <div v-if="layoutConfirmed && showFloorSummary" class="px-4 py-3 border-t border-line bg-bg flex-none">
         <div class="flex justify-between text-xs text-[#78736d] my-1">
           <span>已选商品</span>
           <strong class="text-[#383432]">{{ store.cart.length }}</strong>
         </div>
         <div class="flex justify-between text-xs text-[#78736d] my-1">
           <span>参考金额</span>
-          <strong class="text-lg text-[#9c7047]">{{ money(store.totalPrice) }}</strong>
+          <strong class="text-lg text-bronze-dark">{{ money(store.totalPrice) }}</strong>
         </div>
         <NuxtLink :to="{ path: '/proposal', query: { floorId: store.workspaceId } }" class="inline-flex items-center justify-center gap-1 w-full text-center px-4 py-2.5 rounded-none text-xs font-semibold text-white bg-bronze hover:bg-bronze-dark">
           <span>生成整体方案</span>
           <AppIcon name="arrowRight" size="3.5" />
         </NuxtLink>
       </div>
-    </div>
-
-    <!-- Collapsed strip -->
-    <div v-if="!embedded" v-show="collapsed" class="w-12 h-full flex flex-col items-center py-3">
-      <button class="p-1.5 rounded-none hover:bg-[#f7f3ef] text-muted mb-4" title="展开侧边栏" @click="collapsed = false">
-        <AppIcon name="arrowLeft" size="5" />
-      </button>
-      <div class="text-[10px] text-muted tracking-widest" style="writing-mode: vertical-rl;">
-        选品
-      </div>
-    </div>
   </div>
 </template>

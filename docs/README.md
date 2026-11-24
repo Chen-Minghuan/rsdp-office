@@ -74,6 +74,7 @@
 | [空间复核确认门禁与一键复核](tasks/FLOW-004-review-gate-and-batch-confirm.md) | 全部空间确认复核才能进入排版、一键复核批量确认、徽标统一 |
 | [空间复核提示规则](tasks/FLOW-002-advisory-space-review.md) | 已被 FLOW-004 取代；未知比例/无效轮廓拦截结论保留 |
 | [方案确认服务端购物车数量复核](tasks/FLOW-006-server-proposal-cart-validation.md) | 方案确认时服务端逐空间复核画布家具、购物车数量及选品关联 |
+| [产品方案和确认效果图](tasks/FLOW-007-product-scheme.md) | 商品组合、房间 Plan A/B、楼层确认与效果图快照 |
 | [工装空间核对工作台](tasks/GEOM-003-space-review-workbench.md) | 原图贴合、毫米编辑、图层对照与进入排版前的复核门禁；本轮实现和模拟验证 |
 | [空间首期文档调整](tasks/DOC-002-spatial-canvas-first-phase.md) | PDF/PNG 识别、画布编辑与保存确认的首期范围和调整证据 |
 | [Spatial 系统架构](../Spatial_Canvas_Engine_空间解析编辑与无限画布系统架构设计_V1.1.md) | PDF/PNG 如何成为可校准、可编辑的无限画布空间 |

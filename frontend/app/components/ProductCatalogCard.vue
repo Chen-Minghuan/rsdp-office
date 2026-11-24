@@ -8,9 +8,10 @@ const props = defineProps<{
   personalFavorite: boolean
   projectFavorite: boolean
   projectAvailable: boolean
+  bundleAvailable: boolean
 }>()
 
-const emit = defineEmits<{ personal: []; project: [] }>()
+const emit = defineEmits<{ personal: []; project: []; bundle: [] }>()
 const name = computed(() => props.product.productName || '未命名商品')
 const price = computed(() => {
   const amount = props.product.retailPrice
@@ -20,10 +21,16 @@ const projectActionTitle = computed(() => !props.projectAvailable
   ? '请先选择项目'
   : props.projectFavorite ? '已加入当前项目，点击调整' : '收藏到当前项目')
 
+function dragProduct(event: DragEvent) {
+  if (!props.bundleAvailable || props.product.status !== 'active' || !event.dataTransfer) return
+  event.dataTransfer.setData('application/x-rsdp-product', props.product.rspuId)
+  event.dataTransfer.effectAllowed = 'copy'
+}
 </script>
 
 <template>
-  <li class="catalog-card group relative flex min-w-0 flex-col border border-neutral-300 bg-white">
+  <li class="catalog-card group relative flex min-w-0 flex-col border border-neutral-300 bg-white"
+    :draggable="bundleAvailable && product.status === 'active'" @dragstart="dragProduct">
     <NuxtLink :to="`/products/${product.rspuId}`"
       class="flex h-full min-w-0 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
       :aria-label="`查看${product.productName || '商品'}详情`">
@@ -43,6 +50,9 @@ const projectActionTitle = computed(() => !props.projectAvailable
         </div>
       </div>
     </NuxtLink>
+    <button v-if="product.status === 'active'" type="button"
+      class="border-t border-line px-2.5 py-1.5 text-left text-xs font-medium text-accent-ink enabled:hover:bg-accent-tint disabled:opacity-45"
+      :aria-label="`加入组合 ${name}`" :disabled="!bundleAvailable" @click="emit('bundle')">加入组合</button>
     <button type="button" class="favorite-action absolute top-2 left-2 z-10 grid size-8 place-items-center border border-neutral-200 bg-white text-accent-ink disabled:opacity-40"
       :class="{ 'is-saved': projectFavorite }" :aria-label="`项目收藏${product.productName || '商品'}`"
       :aria-pressed="projectFavorite" :disabled="!projectAvailable" :title="projectActionTitle" @click="emit('project')">

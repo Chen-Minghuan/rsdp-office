@@ -4,6 +4,7 @@ import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
 import type { CartItem, FurnitureObject, Product, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
+import type { ProposalConfirmation } from '~/types/productScheme'
 
 
 type ProposalModule = {
@@ -48,9 +49,10 @@ const workspace = useWorkspaceStore()
 const route = useRoute()
 const router = useRouter()
 const selectedDetail = ref<Detail | null>(null)
-// 效果图详情页签：3D 交互 / AI 概念图 / 2D 布局（RENDER-004）
+// 效果图详情页签：3D 交互、AI 效果图与 2D 布局。
 const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
-const confirmed = ref(false)
+const demoConfirmed = ref(false)
+const savedConfirmation = ref<ProposalConfirmation | null>(null)
 const checkingCatalog = ref(false)
 const catalogApi = useOfficeApi()
 const notice = ref('')
@@ -62,6 +64,20 @@ const loadedRenderZones = new Set<string>()
 const renderApi = useRenderPreviewApi()
 
 const previewMode = computed(() => route.query.preview === '1')
+const confirmed = computed(() => previewMode.value ? demoConfirmed.value
+  : !!savedConfirmation.value?.current && savedConfirmation.value.canvasRevision === store.canvasRevision)
+const cartSignature = computed(() => JSON.stringify(store.cart.map(item => [item.id, item.zoneId, item.productId, item.qty])))
+let confirmationRead = 0
+watch([previewMode, () => store.initialized, () => store.workspaceId, () => store.canvasRevision, cartSignature], async ([preview, ready, floorId]) => {
+  const read = ++confirmationRead
+  savedConfirmation.value = null
+  demoConfirmed.value = false
+  if (preview || !ready || !floorId || !store.apiReady) return
+  try {
+    const result = await catalogApi.loadProposalConfirmation(floorId)
+    if (read === confirmationRead) savedConfirmation.value = result
+  } catch { /* Confirmation remains unknown and can be requested again. */ }
+}, { immediate: true })
 const overviewRoute = computed(() => ({ path: '/canvas', query: { floorId: workspace.currentFloorId } }))
 const products = computed(() => previewMode.value ? (store.products.length ? store.products : PRODUCTS) : store.products)
 const assetBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
@@ -198,18 +214,29 @@ function rotateTransform(item: { rotation: number; x: number; y: number; w: numb
 
 async function loadRenderPreviews() {
   if (previewMode.value || !store.initialized) return
+  const floor = store.workspaceId
   const ids = spaces.value.map(space => space.zoneId).filter(id => !id.startsWith('cart-') && !loadedRenderZones.has(id))
   if (!ids.length) return
   ids.forEach(id => loadedRenderZones.add(id))
   const results = await Promise.allSettled(ids.map(async id => ({ id, jobs: await renderApi.list(id) })))
+  if (floor !== store.workspaceId) return
   const next = { ...renderJobs.value }
   for (const result of results) {
-    if (result.status === 'fulfilled') next[result.value.id] = result.value.jobs || []
+    if (result.status === 'fulfilled') next[result.value.id] = (result.value.jobs || []).slice().sort((left, right) => {
+      const rank = (job: RenderPreview) => job.purpose === 'CONFIRMED_SCHEME' && !job.stale ? 0 : job.stale ? 2 : 1
+      return rank(left) - rank(right)
+    })
   }
   renderJobs.value = next
 }
 
-watch(() => [store.initialized, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
+watch(() => store.workspaceId, () => {
+  loadedRenderZones.clear()
+  renderJobs.value = {}
+  confirmedSpaceIds.value = {}
+  selectedDetail.value = null
+})
+watch(() => [store.initialized, store.workspaceId, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
 
 const groups = computed<ProposalGroup[]>(() => {
   const floor = floorLabel()
@@ -304,14 +331,23 @@ function confirmGroup(group: ProposalGroup) {
 
 async function confirmProposal() {
   if (checkingCatalog.value) return
+  if (previewMode.value) {
+    demoConfirmed.value = true
+    setNotice('已在演示中确认')
+    return
+  }
+  const floorId = store.workspaceId
   checkingCatalog.value = true
-  confirmed.value = false
   try {
-    if (spaces.value.some(space => !space.preview)) await catalogApi.checkProposalCatalog()
-    confirmed.value = true
-    setNotice('商品目录已核验，方案确认状态已更新（当前为界面预览）')
+    const version = await store.flushSchemeCanvas(floorId)
+    const result = await catalogApi.confirmProposal(floorId, version)
+    if (store.workspaceId !== floorId || store.canvasRevision !== version.revision) return
+    if (!result?.current) throw new Error('服务端未返回有效的方案确认')
+    confirmationRead++
+    savedConfirmation.value = result
+    setNotice('楼层方案已确认，可以在产品方案页生成效果图。')
   } catch (e) {
-    setNotice(e instanceof Error ? e.message : '商品目录核验失败，请稍后重试')
+    if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案确认失败，请稍后重试')
   } finally {
     checkingCatalog.value = false
   }
@@ -330,13 +366,13 @@ function detailTitle(detail: Detail | null) {
 
 <template>
   <div class="proposal-page">
-    <header class="proposal-heading"><div><div class="proposal-eyebrow">{{ previewMode ? '方案演示' : `${workspace.currentProjectName} / ${workspace.currentFloorName}` }}</div><div class="proposal-title-line"><h1>整体方案与清单</h1><span class="proposal-file">{{ store.drawingName }}</span></div><p>按楼层、空间类别和具体空间逐级核对方案，确认后进入正式交付。</p></div><span class="heading-status"><span></span>待最终确认</span></header>
+    <header class="proposal-heading"><div><div class="proposal-eyebrow">{{ previewMode ? '方案演示' : `${workspace.currentProjectName} / ${workspace.currentFloorName}` }}</div><div class="proposal-title-line"><h1>整体方案与清单</h1><span class="proposal-file">{{ store.drawingName }}</span></div><p>按楼层、空间类别和具体空间逐级核对方案，确认后进入正式交付。</p></div><span class="heading-status" :class="{ 'is-confirmed': confirmed }"><span></span>{{ confirmed ? '已确认' : '待最终确认' }}</span></header>
     <div v-if="previewMode" class="preview-banner"><AppIcon name="info" size="3.5" /><span>界面预览数据：同一张演示户型图归入 {{ floorLabel() }}，下面按空间类别分组，不会写入项目草稿。</span></div>
 
     <div v-if="!spaces.length" class="proposal-empty"><div class="proposal-empty-icon"><AppIcon name="table" size="7" /></div><h2>还没有可确认的空间方案</h2><p>请先完成空间确认、家具排版和商品选择，再进入方案确认页。</p><NuxtLink :to="overviewRoute" class="proposal-primary">返回空间总览 <AppIcon name="arrowRight" size="3.5" /></NuxtLink></div>
 
     <div v-else class="proposal-layout">
-      <main class="proposal-main">
+      <section class="proposal-main" aria-label="按空间查看清单">
         <section class="group-list"><div class="group-list-heading"><div><span class="section-kicker">FLOOR &amp; SPACE GROUPS</span><h2>空间分组</h2></div><span>{{ floorLabel() }} · {{ groups.length }} 个类别</span></div>
           <article v-for="group in groups" :key="group.id" class="group-card" :class="{ collapsed: !isGroupOpen(group) }">
             <div class="group-header-row">
@@ -379,7 +415,7 @@ function detailTitle(detail: Detail | null) {
                         <span v-else>效果图{{ index + 1 }}<small>{{ renderStatus(job) }}</small></span>
                       </button>
                     </div>
-                    <div class="preset-panel-foot"><span>{{ renderJobsFor(activeSpace(group)!).length }} 张真实效果图</span><small>查看生成状态</small></div>
+                    <div class="preset-panel-foot"><span>{{ renderJobsFor(activeSpace(group)!).length }} 条效果图记录</span><small>查看生成状态</small></div>
                   </div>
                   <button type="button" class="preset-panel comment-module comment-panel" @click="openDetail({ kind: 'comment', space: activeSpace(group)! })">
                     <div class="preset-panel-title"><span>客户批注</span><AppIcon name="arrowRight" size="3" /></div>
@@ -391,9 +427,9 @@ function detailTitle(detail: Detail | null) {
             </div>
           </article>
         </section>
-      </main>
+      </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项查看空间分组和具体空间。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -405,7 +441,7 @@ function detailTitle(detail: Detail | null) {
       <template v-else-if="selectedDetail.kind === 'render'">
         <div class="render-tabs" data-testid="proposal-render-tabs">
           <button type="button" :class="{ active: renderTab === 'model' }" data-testid="proposal-render-tab-model" @click="renderTab = 'model'">3D 交互</button>
-          <button type="button" :class="{ active: renderTab === 'ai' }" data-testid="proposal-render-tab-ai" @click="renderTab = 'ai'">AI 概念图</button>
+          <button type="button" :class="{ active: renderTab === 'ai' }" data-testid="proposal-render-tab-ai" @click="renderTab = 'ai'">AI 效果图</button>
           <button type="button" :class="{ active: renderTab === 'layout' }" data-testid="proposal-render-tab-layout" @click="renderTab = 'layout'">2D 布局</button>
         </div>
         <template v-if="renderTab === 'model'">

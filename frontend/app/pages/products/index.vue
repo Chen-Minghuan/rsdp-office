@@ -46,10 +46,18 @@ const projectFavoriteStatusError = ref<string | null>(null)
 const favoriteLoading = ref(true)
 const projectFavoriteLoading = ref(false)
 const collectionOpen = ref(false)
+const bundlesAvailable = ref(false)
 const collectionId = useId()
 const collectionPanel = ref<HTMLElement | null>(null)
 const selectedCollection = ref<'project' | 'personal'>()
 const favoriteDialog = ref<{ open: (product: ImportedProduct, section?: 'project' | 'personal') => Promise<void> } | null>(null)
+const bundlePanel = ref<{ addProduct: (product: ImportedProduct) => Promise<void> } | null>(null)
+
+function addToBundle(product: ImportedProduct) {
+  collectionOpen.value = true
+  void bundlePanel.value?.addProduct(product)
+  nextTick(() => collectionPanel.value?.focus())
+}
 let favoriteIdsRequest = 0
 let favoriteStateVersion = 0
 let projectFavoriteIdsRequest = 0
@@ -412,7 +420,8 @@ onMounted(() => {
             :personal-favorite="favoriteProductIds.has(product.rspuId)"
             :project-favorite="projectFavoriteProductIds.has(product.rspuId)"
             :project-available="!!workspace.currentProjectId"
-            @personal="togglePersonalFavorite(product)" @project="openFavorites(product, 'project')"
+            :bundle-available="bundlesAvailable"
+            @personal="togglePersonalFavorite(product)" @project="openFavorites(product, 'project')" @bundle="addToBundle(product)"
           />
         </ul>
 
@@ -453,6 +462,7 @@ onMounted(() => {
       </section>
       <aside :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
         :class="{ 'is-open': collectionOpen }" aria-label="产品库收藏" tabindex="-1">
+        <ProductBundlePanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="pageProducts" class="mb-4" />
         <ProductCatalogFavorites
           :section="collection"
           :project-name="workspace.currentProject?.projectName || ''"

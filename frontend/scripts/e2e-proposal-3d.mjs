@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 // 方案页 3D 交互接入 UI 回归（RENDER-004）：独立端口 + 模拟 API。
-// 覆盖：效果图详情三页签（3D 交互 / AI 概念图 / 2D 布局）、3D 只读限制、属性展示、定位到 2D 跳转。
+// 覆盖：效果图详情三页签（3D 交互 / AI 效果图 / 2D 布局）、3D 只读限制、属性展示、定位到 2D 跳转。
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
@@ -27,21 +27,26 @@ try {
   assert.ok(up, '测试预览服务没有就绪')
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const projectId = 'OPRJ-PROPOSAL-3D'
+  const floorId = 'OFLR-PROPOSAL-3D'
+  const storageKey = 'rsdp-office-v01:MOCK-USER:' + floorId
   const P1 = { id: 'P1', rspuId: 'R1', variantId: 'V1', widthMm: 1200, depthMm: 550, heightMm: 750, widthCm: 120, depthCm: 55, name: '行政桌 1200', desc: '', variant: '暖白 / 钢脚', price: 1999, kind: 'desk' }
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   await context.route('**/api/v1/**', route => {
     const path = new URL(route.request().url()).pathname
     const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: '成功', data }) })
+    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '清单预览项目', floors: [{ floorId, projectId, name: '1F' }] }])
     if (path === '/api/v1/office/products') return respond([P1])
-    return respond(path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : [])
+    return respond(path.endsWith('/canvas') ? null : [])
   })
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
 
-  await page.goto(baseUrl + '/proposal', { waitUntil: 'networkidle' })
-  await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
+  const url = baseUrl + '/proposal?floorId=' + floorId
+  await page.goto(url, { waitUntil: 'networkidle' })
+  await page.evaluate(key => {
+    const state = JSON.parse(localStorage.getItem(key) || '{}')
     state.objects = [
       { id: 'Z1', kind: 'zone', name: '开放办公区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', confirmed: true, reviewConfirmation: { status: 'CONFIRMED' },
         polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]], obstacles: [], facilities: [] },
@@ -53,9 +58,9 @@ try {
     state.cart = [{ id: 'L1', productId: 'P1', zoneId: 'Z1', zoneName: '开放办公区', qty: 1 }]
     state.canvasRevision = 3; state.canvasMode = 'overview'; state.designZoneId = null
     state.floorPlan = null; state.spaceTemplate = null
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(state))
-  })
-  await page.goto(baseUrl + '/proposal', { waitUntil: 'networkidle' })
+    localStorage.setItem(key, JSON.stringify(state))
+  }, storageKey)
+  await page.goto(url, { waitUntil: 'networkidle' })
 
   // 打开 3D 交互效果（真实空间，无需已有 AI 任务）
   await page.getByTestId('open-3d-view').click()

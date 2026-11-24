@@ -6,7 +6,7 @@ import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { uid } from '~/utils/helpers'
 
 const store = useOfficeStore()
-const props = defineProps<{ viewRotation?: number }>()
+const props = defineProps<{ viewRotation?: number; previewInFooter?: boolean }>()
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
 const tool = defineModel<string>('tool', { default: 'select' })
@@ -33,7 +33,10 @@ const designTools = [
   { key: 'channels', icon: 'merge', label: '通道' },
 ]
 
-const tools = computed(() => mode.value === 'design' ? designTools : overviewTools)
+const tools = computed(() => {
+  if (mode.value !== 'design') return overviewTools
+  return props.previewInFooter ? designTools.filter(tool => tool.key !== 'white-model' && tool.key !== 'render') : designTools
+})
 
 const emit = defineEmits<{
   undo: []
@@ -116,7 +119,7 @@ function removeChannel(id: string) {
 <template>
   <div class="relative flex min-h-14 flex-none flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-white px-2.5 py-1">
     <div class="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-      <span class="text-[10px] px-1.5 py-0.5 rounded-none bg-[#f4eee5] text-[#946c45]">
+      <span class="text-[10px] px-1.5 py-0.5 rounded-none bg-cream text-bronze-dark">
         {{ mode === 'design' ? '单空间设计' : '空间总览' }}
       </span>
       <div class="flex flex-wrap gap-1">
@@ -125,7 +128,7 @@ function removeChannel(id: string) {
           :key="t.key"
           :class="[
             'flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-none min-w-[52px] text-[10px] transition',
-            tool === t.key ? 'text-[#976c43] bg-[#f4e9dc]' : 'text-[#746f69] hover:bg-[#f6f2ed]',
+            tool === t.key ? 'bg-cream text-bronze-dark' : 'text-muted hover:bg-bg',
           ]"
           :data-testid="t.key === 'constraints' ? 'toolbar-constraints' : t.key === 'channels' ? 'toolbar-channels' : t.key === 'regions' ? 'toolbar-regions' : t.key === 'facilities' ? 'toolbar-facilities' : undefined"
           :aria-expanded="t.key === 'constraints' ? constraintsOpen : t.key === 'channels' ? channelsOpen : t.key === 'regions' ? regionsOpen : t.key === 'facilities' ? facilitiesOpen : undefined"
@@ -147,40 +150,40 @@ function removeChannel(id: string) {
         <button class="px-2 py-1.5 rounded-none text-[11px] border border-line" aria-label="旋转场景视图" title="顺时针旋转视图 90°，不改变排版" @click="emit('rotate', 90)">↻ {{ props.viewRotation || 0 }}°</button>
         <button v-if="props.viewRotation" class="px-2 py-1.5 rounded-none text-[11px] border border-line" aria-label="复位场景视图" @click="emit('rotate', -props.viewRotation)">复位</button>
       </template>
-      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef] disabled:opacity-40" aria-label="撤销" title="撤销" :disabled="!store.undoStack.length" @click="emit('undo')">
+      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-cream disabled:opacity-40" aria-label="撤销" title="撤销" :disabled="!store.undoStack.length" @click="emit('undo')">
         <AppIcon name="undo" size="4" />
       </button>
-      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef] disabled:opacity-40" aria-label="恢复" title="恢复上一次撤销的编辑" :disabled="!store.redoStack.length" @click="emit('redo')">
+      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-cream disabled:opacity-40" aria-label="恢复" title="恢复上一次撤销的编辑" :disabled="!store.redoStack.length" @click="emit('redo')">
         <AppIcon name="redo" size="4" />
       </button>
-      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef]" aria-label="缩小画布" @click="emit('zoomOut')">
+      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-cream" aria-label="缩小画布" @click="emit('zoomOut')">
         <AppIcon name="zoomOut" size="4" />
       </button>
       <span class="text-xs text-[#7e7770] min-w-[44px] text-center font-medium">{{ Math.round(store.zoom * 100) }}%</span>
-      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef]" aria-label="放大画布" @click="emit('zoomIn')">
+      <button class="p-1.5 rounded-none text-[11px] border border-line hover:bg-cream" aria-label="放大画布" @click="emit('zoomIn')">
         <AppIcon name="zoomIn" size="4" />
       </button>
-      <button class="px-2 py-1.5 rounded-none text-[11px] border border-line hover:bg-[#f7f3ef] flex items-center gap-1" @click="emit('fit')">
+      <button class="px-2 py-1.5 rounded-none text-[11px] border border-line hover:bg-cream flex items-center gap-1" @click="emit('fit')">
         <AppIcon name="fit" size="4" /> 适屏
       </button>
     </div>
     <div v-if="constraintsOpen && zone" class="absolute left-48 top-full z-30 w-40 border border-line bg-white p-2 text-[11px] text-[#5f5b56]" data-testid="constraint-popover" @click.stop>
       <strong class="block px-1 pb-1.5 text-xs text-[#4f493f]">建筑标注</strong>
-      <button class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" data-testid="constraint-tool-COLUMN" @click="startConstraint('COLUMN')">标柱</button>
-      <button class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" data-testid="constraint-tool-DOOR_CLEARANCE" @click="startConstraint('DOOR_CLEARANCE')">门洞净空</button>
-      <button class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" data-testid="constraint-tool-WINDOW" @click="startConstraint('WINDOW')">窗</button>
-      <button class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" data-testid="constraint-tool-NO_PLACEMENT" @click="startConstraint('NO_PLACEMENT')">禁放区</button>
+      <button class="w-full px-2 py-1.5 text-left hover:bg-cream" data-testid="constraint-tool-COLUMN" @click="startConstraint('COLUMN')">标柱</button>
+      <button class="w-full px-2 py-1.5 text-left hover:bg-cream" data-testid="constraint-tool-DOOR_CLEARANCE" @click="startConstraint('DOOR_CLEARANCE')">门洞净空</button>
+      <button class="w-full px-2 py-1.5 text-left hover:bg-cream" data-testid="constraint-tool-WINDOW" @click="startConstraint('WINDOW')">窗</button>
+      <button class="w-full px-2 py-1.5 text-left hover:bg-cream" data-testid="constraint-tool-NO_PLACEMENT" @click="startConstraint('NO_PLACEMENT')">禁放区</button>
       <p class="px-2 pt-1 text-[9px] leading-relaxed text-muted">在当前空间底图上拖出标注，Esc 取消。</p>
     </div>
     <div v-if="regionsOpen && zone" class="absolute left-56 top-full z-30 w-52 border border-line bg-white p-2 text-[11px] text-[#5f5b56]" data-testid="region-popover" @click.stop>
       <strong class="block px-1 pb-1.5 text-xs text-[#4f493f]">家具布置区</strong>
-      <button class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" data-testid="region-tool-rect" @click="startRegionTool('rect')">矩形布置区</button>
-      <button class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" data-testid="region-tool-poly" @click="startRegionTool('poly')">多边形布置区</button>
+      <button class="w-full px-2 py-1.5 text-left hover:bg-cream" data-testid="region-tool-rect" @click="startRegionTool('rect')">矩形布置区</button>
+      <button class="w-full px-2 py-1.5 text-left hover:bg-cream" data-testid="region-tool-poly" @click="startRegionTool('poly')">多边形布置区</button>
       <p class="px-2 pt-1 text-[9px] leading-relaxed text-muted">启用中的布置区限制家具可排范围（并集 ∩ 空间轮廓）；没有启用区时维持全房间可排。多边形逐点绘制，Enter 或双击结束，Esc 取消。列表与开关在画布左侧面板。</p>
     </div>
     <div v-if="facilitiesOpen && zone" class="absolute left-64 top-full z-30 w-56 border border-line bg-white p-2 text-[11px] text-[#5f5b56]" data-testid="facility-popover" @click.stop>
       <strong class="block px-1 pb-1.5 text-xs text-[#4f493f]">设施 / 点位标注</strong>
-      <button v-for="item in facilityTools" :key="item.kind" class="w-full px-2 py-1.5 text-left hover:bg-[#f7f3ef]" :data-testid="'facility-tool-' + item.kind" @click="startFacilityTool(item.kind)">
+      <button v-for="item in facilityTools" :key="item.kind" class="w-full px-2 py-1.5 text-left hover:bg-cream" :data-testid="'facility-tool-' + item.kind" @click="startFacilityTool(item.kind)">
         {{ item.label }}<span class="block text-[9px] text-muted">{{ item.hint }}</span>
       </button>
       <p class="px-2 pt-1 text-[9px] leading-relaxed text-muted">设施只提示不阻断排版、不扣净面积；操作净空需人工标注。需要实际禁放请用建筑标注的禁放区。</p>

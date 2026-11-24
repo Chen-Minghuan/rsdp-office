@@ -58,8 +58,11 @@ const previewTiles = computed(() => {
   const { imageUrl } = useRenderPreviewApi(props.floorId)
   return previews.value.flatMap(preview => {
     const url = imageUrl(preview.imageUrl)
-    const label = '概念效果图'
+    const label = preview.purpose === 'CONFIRMED_SCHEME' ? '方案效果图' : '概念效果图'
     return preview.status === 'SUCCEEDED' && url ? [{ ...preview, label, url }] : []
+  }).sort((left, right) => {
+    const rank = (preview: RenderPreview) => preview.stale ? 2 : preview.purpose === 'CONFIRMED_SCHEME' ? 0 : 1
+    return rank(left) - rank(right)
   }).slice(0, 4)
 })
 
