@@ -2,6 +2,7 @@ import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSe
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, AgentMessage, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
 import type { CatalogCapabilities, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
@@ -111,6 +112,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers?
 }
 
 export function useOfficeApi() {
+  const favoriteCountVersion = useState('favorite-count-version', () => 0)
   const selectedProjectId = () => useWorkspaceStore().currentFloorId || ''
   const requireProjectId = () => {
     const projectId = selectedProjectId()
@@ -316,6 +318,49 @@ export function useOfficeApi() {
     return await request('GET', '/api/v1/products/capabilities')
   }
 
+  async function loadFavoriteFolders(rspuId?: string): Promise<FavoriteFolder[]> {
+    const query = rspuId ? `?rspuId=${encodeURIComponent(rspuId)}` : ''
+    return await request<FavoriteFolder[]>('GET', `/api/v1/office/favorites/folders${query}`)
+  }
+
+  async function createFavoriteFolder(name: string): Promise<FavoriteFolder> {
+    return await request<FavoriteFolder>('POST', '/api/v1/office/favorites/folders', { name })
+  }
+
+  async function saveProductFavoriteFolders(rspuId: string, folderIds: string[]): Promise<void> {
+    await request<void>('PUT', `/api/v1/office/favorites/products/${encodeURIComponent(rspuId)}`, { folderIds })
+    favoriteCountVersion.value++
+  }
+
+  async function deleteFavoriteFolder(folderId: string): Promise<void> {
+    await request<void>('DELETE', `/api/v1/office/favorites/folders/${encodeURIComponent(folderId)}`)
+    favoriteCountVersion.value++
+  }
+
+  async function loadFavoriteProductIds(): Promise<string[]> {
+    return await request<string[]>('GET', '/api/v1/office/favorites/product-ids')
+  }
+
+  async function loadFavoriteItems(folderId?: string): Promise<ImportedProduct[]> {
+    const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : ''
+    return await request<ImportedProduct[]>('GET', `/api/v1/office/favorites/items${query}`)
+  }
+
+  async function loadProjectFavoriteItems(projectId: string): Promise<ImportedProduct[]> {
+    return await request<ImportedProduct[]>('GET', `/api/v1/office/projects/${encodeURIComponent(projectId)}/favorites/items`)
+  }
+
+  async function loadProjectFavoriteProductIds(projectId: string): Promise<string[]> {
+    return await request<string[]>('GET', `/api/v1/office/projects/${encodeURIComponent(projectId)}/favorites/product-ids`)
+  }
+
+  async function loadProjectFavorite(projectId: string, rspuId: string): Promise<ProjectFavoriteState> {
+    return await request<ProjectFavoriteState>('GET', `/api/v1/office/projects/${encodeURIComponent(projectId)}/favorites/${encodeURIComponent(rspuId)}`)
+  }
+
+  async function saveProjectFavorite(projectId: string, rspuId: string, selected: boolean): Promise<ProjectFavoriteState> {
+    return await request<ProjectFavoriteState>('PUT', `/api/v1/office/projects/${encodeURIComponent(projectId)}/favorites/${encodeURIComponent(rspuId)}`, { selected })
+  }
 
 
 
@@ -439,6 +484,16 @@ export function useOfficeApi() {
     resetProject,
     loadImportedProducts,
     loadCatalogCapabilities,
+    loadFavoriteFolders,
+    createFavoriteFolder,
+    saveProductFavoriteFolders,
+    deleteFavoriteFolder,
+    loadFavoriteProductIds,
+    loadFavoriteItems,
+    loadProjectFavoriteProductIds,
+    loadProjectFavoriteItems,
+    loadProjectFavorite,
+    saveProjectFavorite,
     catalogImportHistory,
     catalogHistoricalStatus,
     parseCad,
