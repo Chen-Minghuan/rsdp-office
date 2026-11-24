@@ -10,7 +10,10 @@ export interface WorkspaceMember {
   username: string
   displayName: string
   role: 'LEADER' | 'COLLABORATOR'
+  permissions?: ProjectPermission[]
 }
+
+export type ProjectPermission = 'READ' | 'EDIT' | 'QUOTE_READ' | 'MARGIN_READ' | 'EXPORT_PROJECT' | 'MANAGE_MEMBERS' | 'EXPORT_QUOTE'
 
 export interface ProjectReferenceImage {
   url: string
@@ -18,6 +21,11 @@ export interface ProjectReferenceImage {
 }
 
 export type ProjectBudgetStatus = 'COMPLETE' | 'PENDING_PRICING' | 'UNAVAILABLE'
+
+export interface ProjectBudget {
+  budgetTotal: number | null
+  budgetStatus: ProjectBudgetStatus
+}
 
 export interface AssignableUser {
   userId: string
@@ -34,8 +42,6 @@ export interface WorkspaceProject {
   collaborators: WorkspaceMember[]
   referenceImages: ProjectReferenceImage[]
   floors: WorkspaceFloor[]
-  budgetTotal: number | null
-  budgetStatus: ProjectBudgetStatus
 }
 
 export interface WorkspaceRequirementsSummary {

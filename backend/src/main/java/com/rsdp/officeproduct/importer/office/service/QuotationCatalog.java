@@ -9,11 +9,9 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /** 解析报价所需的商品和变体出厂价，试算与确认共用缓存。 */
 @Slf4j
@@ -26,12 +24,8 @@ class QuotationCatalog {
     private final RsdpCatalogGateway catalogGateway;
     private final Map<String, FactoryPriceCache> factoryPriceCache = new ConcurrentHashMap<>();
 
-    Map<String, OfficeProductDto> loadProducts() {
-        // 已选商品仍需查询价格，使用全量目录。
-        return catalogGateway.listOfficeProducts("full").stream()
-            .filter(product -> StringUtils.hasText(product.getId()))
-            .collect(Collectors.toMap(OfficeProductDto::getId, product -> product, (first, second) -> first,
-                LinkedHashMap::new));
+    Map<String, OfficeProductDto> loadProducts(Set<String> productIds) {
+        return catalogGateway.quotationProducts(productIds);
     }
 
     /** 同一次试算内按商品主档去重，每个变体仍使用自己的出厂价。 */

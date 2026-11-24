@@ -202,7 +202,6 @@ watch(() => store.canEnterLayout, (confirmed) => {
           <div v-if="mode === 'design'" class="text-muted">当前空间：{{ store.zones.find(zone => zone.id === designZoneId)?.name || '未选择' }}</div>
           <div v-else class="flex gap-5">
             <span class="flex items-center gap-1.5">已圈选 <strong class="text-bronze text-sm">{{ store.zoneCount }}</strong> 个区域</span>
-            <span class="flex items-center gap-1.5">便签 <strong class="text-bronze text-sm">{{ store.noteCount }}</strong> 条</span>
             <span class="flex items-center gap-1.5">参考图 <strong class="text-bronze text-sm">{{ store.refCount }}</strong> 张</span>
           </div>
           <div class="flex items-center gap-2">

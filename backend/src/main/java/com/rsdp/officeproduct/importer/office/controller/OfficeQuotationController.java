@@ -56,8 +56,17 @@ public class OfficeQuotationController {
                        @RequestBody ConfirmProjectQuotationRequest request,
                        HttpServletResponse response) throws IOException {
         ProjectQuotationRecordDto draft = quotationService.previewConfirmation(projectId, request);
-        byte[] workbook = workbookBuilder.build(draft);
-        String fileName = URLEncoder.encode(draft.getProjectName() + "-报价单.xlsx", StandardCharsets.UTF_8)
+        writeWorkbook(draft, workbookBuilder.build(draft), response);
+    }
+
+    @GetMapping("/latest/export")
+    public void exportLatest(@PathVariable String projectId, HttpServletResponse response) throws IOException {
+        ProjectQuotationRecordDto record = quotationService.latestForExport(projectId);
+        writeWorkbook(record, workbookBuilder.build(record, record.getPricingMode() != null), response);
+    }
+
+    private void writeWorkbook(ProjectQuotationRecordDto record, byte[] workbook, HttpServletResponse response) throws IOException {
+        String fileName = URLEncoder.encode(record.getProjectName() + "-报价单.xlsx", StandardCharsets.UTF_8)
             .replace("+", "%20");
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         response.setHeader("Content-Disposition", "attachment; filename=\"quotation.xlsx\"; filename*=UTF-8''" + fileName);

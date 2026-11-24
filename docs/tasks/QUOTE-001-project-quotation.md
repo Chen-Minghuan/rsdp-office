@@ -8,7 +8,7 @@
 
 - 成交价 = 出厂价 × 系数，或 出厂价 ÷ (1 − 毛利率)
 - 入口在左侧导航「经销商工作区」组内、`工作区账号` 之上，名为「商品报价」
-- 只有经销商主号可见，其他角色接口一律拒绝
+- 经销商主号负责试算、确认及编辑稿导出。项目成员可以由主号授予已确认报价的查看、毛利查看和导出权限。
 
 已实现：只读试算、页内手填（数量/成交单价）、可增删的多项费用、底部固定合计、确认前 Excel 风格预览与 `.xlsx` 下载、确认报价落库、最近一次确认回显。
 未实现：底线拦截（主号最低系数/最低毛利、项目底线）、部门合并报价、费用项模板、上游变更后的失效联动。
@@ -33,11 +33,12 @@
 | GET | `/api/v1/office/projects/{projectId}/quotation/preview?mode=&value=` | 试算，不落库 |
 | POST | `/api/v1/office/projects/{projectId}/quotation/confirm` | 确认报价：服务端重算并落库 |
 | POST | `/api/v1/office/projects/{projectId}/quotation/export` | 导出当前编辑稿：与确认共用重算，返回 `.xlsx`，不落库或生成版本 |
-| GET | `/api/v1/office/projects/{projectId}/quotation/latest` | 最近一次确认（含已失效版本），无记录返回空 |
+| GET | `/api/v1/office/projects/{projectId}/quotation/latest` | 当前已确认报价，无记录返回空 |
+| GET | `/api/v1/office/projects/{projectId}/quotation/latest/export` | 导出当前已确认报价，按查看权限提供成本字段 |
 
 ## 规则
 
-- **权限**：`OfficeProjectAccessService.requireWorkspaceOwner` —— 认证开启时要求 `role=DEALER` 且为项目所属工作区主号。匿名 401、管理员 403。
+- **权限**。试算、确认与编辑稿导出要求工作区主号。项目成员需要 `QUOTE_READ`，导出已确认报价还需要 `EXPORT_QUOTE`。成本和计价参数依赖 `MARGIN_READ`。见 [TENANT-004](TENANT-004-office-role-model.md)。
 - **服务端重算**：`商品合计 = Σ(数量 × 成交单价)`、`合计 = 商品合计 + Σ(全部费用金额)`，不采用前端提交的合计值；导出与确认共用同一准备逻辑。
 - **校验**：明细非空、≤2000 行；数量与金额不得为负；毛利率 `0 < m < 1`；系数 `0 < c ≤ 100`；明细楼层必须属于该项目。费用最多 50 条，名称去首尾空格后必填且不超过 100 字，空名称的零金额行忽略，金额按 `HALF_UP` 保留两位小数。
 - **价格固化**：`factory_price`、`unit_price`、商品名/规格/图片、楼层与空间名写入明细行，后续商品调价不影响历史报价单。

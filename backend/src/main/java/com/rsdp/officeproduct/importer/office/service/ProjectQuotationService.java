@@ -52,7 +52,7 @@ public class ProjectQuotationService {
                 .eq("project_id", projectId).last("FOR UPDATE")) == null) {
             throw new BusinessException("项目不存在");
         }
-        OfficeQuotation previous = findLatest(projectId);
+        OfficeQuotation previous = findLatest(projectId, false);
         int revision = previous == null || previous.getRevision() == null ? 1 : previous.getRevision() + 1;
         String quotationId = "QT-" + UUID.randomUUID().toString().replace("-", "");
         quotation.setQuotationId(quotationId);
@@ -86,18 +86,35 @@ public class ProjectQuotationService {
     }
 
     public ProjectQuotationRecordDto latest(String projectId) {
-        requireProjectAccess(projectId);
-        OfficeQuotation quotation = findLatest(projectId);
+        accessService.requirePermission(projectId, OfficeProjectPermission.QUOTE_READ);
+        OfficeQuotation quotation = findLatest(projectId, true);
         if (quotation == null) {
             return null;
         }
         List<OfficeQuotationLine> rows = quotationLineMapper.findByQuotationId(quotation.getQuotationId());
-        return recordAssembler.assemble(quotation, rows, recordAssembler.readFees(quotation.getFeesJson()));
+        ProjectQuotationRecordDto record = recordAssembler.assemble(quotation, rows, recordAssembler.readFees(quotation.getFeesJson()));
+        if (!accessService.can(projectId, OfficeProjectPermission.MARGIN_READ)) {
+            record.setPricingMode(null);
+            record.setPricingValue(null);
+            record.getLines().forEach(line -> {
+                line.setFactoryPrice(null);
+                line.setIssue(null);
+            });
+            record.setMissingPriceLines(null);
+        }
+        return record;
     }
 
-    private OfficeQuotation findLatest(String projectId) {
+    public ProjectQuotationRecordDto latestForExport(String projectId) {
+        accessService.requirePermission(projectId, OfficeProjectPermission.EXPORT_QUOTE);
+        ProjectQuotationRecordDto record = latest(projectId);
+        if (record == null) throw new BusinessException("项目暂无已确认报价");
+        return record;
+    }
+
+    private OfficeQuotation findLatest(String projectId, boolean confirmedOnly) {
         return quotationMapper.selectOne(new QueryWrapper<OfficeQuotation>()
-            .eq("project_id", projectId).orderByDesc("revision").last("limit 1"));
+            .eq("project_id", projectId).eq(confirmedOnly, "status", "CONFIRMED").orderByDesc("revision").last("limit 1"));
     }
 
     private OfficeDesignProject requireProjectAccess(String projectId) {

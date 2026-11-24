@@ -2,11 +2,17 @@ package com.rsdp.officeproduct.importer.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,6 +25,128 @@ import static org.mockito.Mockito.*;
 class RsdpCatalogGatewayTest {
 
     private final ObjectMapper json = new ObjectMapper();
+
+    @Test
+    void confirmsLegacyServerBeforeFallingBackFromWrappedBatchError() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        String batch = "/api/v1/products/variants/retail-prices?viewMode=full&variantId=V-A";
+        String probe = "/api/v1/products/catalog-page?page=1&size=1&viewMode=full";
+        String list = "/api/v1/products?page=1&size=500&viewMode=full&status=active";
+        when(client.get(batch)).thenThrow(new BusinessException(500, "legacy batch route"));
+        when(client.get(probe)).thenThrow(new BusinessException(404, "missing page route"));
+        when(client.get(list)).thenReturn(json.readTree("""
+            {"total":2,"rows":[
+              {"rspuId":"P1","productName":"旧版桌子","status":"active","retailPrice":190},
+              {"rspuId":"P2","productName":"旧版椅子","status":"active"}]}
+            """));
+        when(client.get("/api/v1/products/P1/variants")).thenReturn(json.readTree("[{\"variantId\":\"V-A\"}]"));
+        when(client.get("/api/v1/products/P2/variants")).thenReturn(json.createArrayNode());
+
+        assertEquals(Map.of("V-A", new BigDecimal("190")), gateway.retailPrices("full", Set.of("V-A")));
+        assertEquals("旧版桌子", gateway.quotationProducts(Set.of("V-A")).get("V-A").getName());
+        assertEquals(2, gateway.pageProducts("full", 1, 1, "", "", null).catalogTotal());
+        assertEquals("P2", gateway.pageProducts("full", 2, 1, "", "", null).rows().getFirst().getRspuId());
+        verify(client).get(batch);
+        verify(client).get(probe);
+    }
+
+    @Test
+    void preservesPermissionErrorsAndNewServerBatchFailures() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        String batch = "/api/v1/products/variants/retail-prices?viewMode=full&variantId=V-A";
+        var forbidden = new BusinessException(403, "permission denied");
+        var failure = new BusinessException(500, "pricing unavailable");
+        when(client.get(batch)).thenThrow(forbidden).thenThrow(failure);
+        when(client.get("/api/v1/products/catalog-page?page=1&size=1&viewMode=full"))
+            .thenReturn(json.createObjectNode());
+
+        assertSame(forbidden, assertThrows(BusinessException.class,
+            () -> gateway.retailPrices("full", Set.of("V-A"))));
+        assertSame(failure, assertThrows(BusinessException.class,
+            () -> gateway.retailPrices("full", Set.of("V-A"))));
+        verify(client, times(2)).get(batch);
+        verify(client).get("/api/v1/products/catalog-page?page=1&size=1&viewMode=full");
+        verifyNoMoreInteractions(client);
+    }
+
+    @Test
+    void legacyManagedCatalogRequiresVerifiedFactoryOwnership() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        when(client.catalogFactoryCode()).thenReturn("A001");
+        when(client.get("/api/v1/products/catalog-page?page=1&size=20&viewMode=managed&factoryCode=A001"))
+            .thenThrow(new BusinessException(404, "missing page route"));
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=managed&factoryCode=A001")).thenReturn(json.readTree("""
+            {"total":3,"rows":[
+              {"rspuId":"GOOD","ownerFactoryCode":"A001","ownerVerified":true,"status":"active"},
+              {"rspuId":"UNKNOWN","ownerFactoryCode":"A001","status":"active"},
+              {"rspuId":"FOREIGN","ownerFactoryCode":"A002","ownerVerified":true,"status":"active"}]}
+            """));
+
+        var page = gateway.pageProducts("managed", 1, 20, "", "", null);
+        assertEquals(1, page.catalogTotal());
+        assertEquals("GOOD", page.rows().getFirst().getRspuId());
+    }
+
+    @Test
+    void sharesColdRefreshWithinOneViewAndKeepsManagedCatalogSeparate() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        String full = "/api/v1/products?page=1&size=500&viewMode=full&status=active";
+        String managed = "/api/v1/products/catalog-page?page=1&size=100&viewMode=managed&factoryCode=A001";
+        when(client.catalogFactoryCode()).thenReturn("A001");
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        when(client.get(full)).thenAnswer(call -> {
+            started.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return json.readTree("""
+                {"total":1,"rows":[{"rspuId":"RSPU-SHARED","status":"active"}]}
+                """);
+        });
+        when(client.get(managed)).thenReturn(json.readTree("""
+            {"total":1,"catalogTotal":1,"activeTotal":1,"rows":[{"rspuId":"RSPU-FACTORY","status":"active"}]}
+            """));
+        when(client.get("/api/v1/products/RSPU-SHARED/variants")).thenReturn(
+            json.createArrayNode().add(json.createObjectNode().put("variantId", "PUBLIC-V")));
+        when(client.get("/api/v1/products/RSPU-FACTORY/variants")).thenReturn(
+            json.createArrayNode().add(json.createObjectNode().put("variantId", "FACTORY-V")));
+
+        try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = workers.submit(() -> gateway.listOfficeProducts("full"));
+            try {
+                assertTrue(started.await(5, TimeUnit.SECONDS));
+                var second = workers.submit(() -> gateway.listOfficeProducts("full"));
+                var factory = workers.submit(() -> gateway.listOfficeProducts("managed"));
+                assertEquals("FACTORY-V", factory.get(5, TimeUnit.SECONDS).getFirst().getId());
+                release.countDown();
+                assertSame(first.get(5, TimeUnit.SECONDS), second.get(5, TimeUnit.SECONDS));
+                assertEquals("PUBLIC-V", gateway.listOfficeProducts("full").getFirst().getId());
+            } finally {
+                release.countDown();
+            }
+        }
+
+        assertTrue(gateway.listOfficeProducts("none").isEmpty());
+        verify(client, times(1)).get(full);
+        verify(client, times(1)).get(managed);
+        verify(client, never()).get("/api/v1/products?page=1&size=500&viewMode=none");
+    }
+
+    @Test
+    void failedRefreshCanRetryOnNextRequest() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        String path = "/api/v1/products?page=1&size=500&viewMode=full&status=active";
+        when(client.get(path)).thenThrow(new IllegalStateException("upstream unavailable"))
+            .thenReturn(json.readTree("{\"total\":0,\"rows\":[]}"));
+
+        assertThrows(IllegalStateException.class, () -> gateway.listOfficeProducts("full"));
+        assertTrue(gateway.listOfficeProducts("full").isEmpty());
+        verify(client, times(2)).get(path);
+    }
 
     @Test
     void productDetailFormatsStructuredDimensionsWithoutReplacingSourceText() throws Exception {
@@ -68,9 +196,10 @@ class RsdpCatalogGatewayTest {
         when(client.get("/api/v1/products/RSPU-TARGET/variants")).thenReturn(json.readTree("""
             [{"variantId":"V1","status":"active"}]
             """));
-        when(client.get("/api/v1/products?page=1&size=500&viewMode=managed"))
+        when(client.catalogFactoryCode()).thenReturn("A001");
+        when(client.get("/api/v1/products/catalog-page?page=1&size=1&viewMode=managed&factoryCode=A001&rspuId=RSPU-TARGET"))
             .thenReturn(json.readTree("""
-                {"total":1,"rows":[{"rspuId":"RSPU-FIRST","status":"active"}]}
+                {"total":0,"catalogTotal":1,"activeTotal":1,"rows":[]}
                 """));
 
         assertTrue(gateway.inView("RSPU-TARGET", "full"));
@@ -79,6 +208,43 @@ class RsdpCatalogGatewayTest {
         assertEquals("RSPU-TARGET", gateway.currentVariant("full", "RSPU-TARGET", "V1").getRspuId());
         assertNull(gateway.currentVariant("full", "RSPU-MISSING", "V1"));
         verify(client, never()).get("/api/v1/products/RSPU-MISSING/variants");
+    }
+
+    @Test
+    void batchesRequestedRetailPricesAndKeepsVisibilityScopesSeparate() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        when(client.catalogFactoryCode()).thenReturn("A001");
+        String full = "/api/v1/products/variants/retail-prices?viewMode=full&variantId=V-A&variantId=V-MISSING";
+        String managed = "/api/v1/products/variants/retail-prices?viewMode=managed&factoryCode=A001&variantId=V-A&variantId=V-MISSING";
+        when(client.get(full)).thenReturn(json.readTree("{\"V-A\": 100, \"UNREQUESTED\": 99}"));
+        when(client.get(managed)).thenReturn(json.createObjectNode());
+
+        assertEquals(Map.of("V-A", new BigDecimal("100")), gateway.retailPrices("full", Set.of("V-MISSING", "V-A")));
+        assertEquals(1, gateway.retailPrices("full", Set.of("V-A", "V-MISSING")).size());
+        assertTrue(gateway.retailPrices("managed", Set.of("V-A", "V-MISSING")).isEmpty());
+        assertTrue(gateway.retailPrices("none", Set.of("V-A")).isEmpty());
+        verify(client).get(full);
+        verify(client).get(managed);
+        verify(client, never()).get(argThat(path -> !path.contains("/retail-prices?")));
+    }
+
+    @Test
+    void fetchesOnlyRequestedPageAndEncodesSearchText() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        String path = "/api/v1/products/catalog-page?page=2&size=10&viewMode=full&search=%E6%A1%8C+%26%2B%25&status=active";
+        when(client.get(path)).thenReturn(json.readTree("""
+            {"total":11,"catalogTotal":185,"activeTotal":185,
+             "rows":[{"rspuId":"ROW-11","productName":"办公桌","externalCode":"EXT-11"}]}
+            """));
+
+        var result = gateway.pageProducts("full", 2, 10, "桌 &+%", "active", null);
+        assertEquals(11, result.total());
+        assertEquals(185, result.catalogTotal());
+        assertEquals("EXT-11", result.rows().getFirst().getExternalCode());
+        verify(client).get(path);
+        verifyNoMoreInteractions(client);
     }
 
     @Test

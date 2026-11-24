@@ -8,10 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.*;
-import com.rsdp.officeproduct.importer.office.entity.OfficeAgentMessage;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
@@ -37,7 +35,6 @@ public class OfficeService {
     private final OfficeProjectAccessService accessService;
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeCartMapper cartMapper;
-    private final OfficeAgentMessageMapper messageMapper;
     private final RsdpCatalogGateway rsdpCatalogGateway;
     private final SharedCatalogService sharedCatalogService;
     private final ObjectMapper objectMapper;
@@ -63,7 +60,7 @@ public class OfficeService {
         }
         String projectId = request.getProjectId();
         projectService.requireFloor(projectId);
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         workspaceLocks.lockWorkspace(projectId);
         CanvasDto latest = getCanvas(projectId);
         int revision = request.getRevision() != null ? request.getRevision() : 1;
@@ -149,7 +146,7 @@ public class OfficeService {
 
     @Transactional
     public CartItemDto addCartItem(String projectId, CartItemDto dto) {
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         String lineId = StringUtils.hasText(dto.getLineId()) ? dto.getLineId() : UUID.randomUUID().toString().replace("-", "");
         OfficeCart existing = cartMapper.selectById(lineId);
         if (existing != null) {
@@ -173,7 +170,7 @@ public class OfficeService {
 
     @Transactional
     public CartItemDto updateCartItemQty(String projectId, String lineId, Integer qty) {
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         OfficeCart cart = cartMapper.selectById(lineId);
         if (cart == null || !cart.getProjectId().equals(projectId)) {
             throw new BusinessException("购物车行不存在");
@@ -190,7 +187,7 @@ public class OfficeService {
 
     @Transactional
     public void deleteCartItem(String projectId, String lineId) {
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         OfficeCart cart = cartMapper.selectById(lineId);
         if (cart != null && cart.getProjectId().equals(projectId)) {
             cartMapper.deleteById(lineId);
@@ -199,35 +196,8 @@ public class OfficeService {
 
     @Transactional
     public void clearCart(String projectId) {
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
-    }
-
-    public List<AgentMessageDto> listMessages(String projectId) {
-        accessService.requireFloorAccess(projectId);
-        List<OfficeAgentMessage> list = messageMapper.selectList(
-            new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId).orderByAsc("created_at"));
-        return list.stream().map(this::toAgentMessageDto).collect(Collectors.toList());
-    }
-
-    @Transactional
-    public AgentMessageDto sendMessage(String projectId, SendMessageRequest request) {
-        accessService.requireFloorAccess(projectId);
-        OfficeAgentMessage userMsg = new OfficeAgentMessage();
-        userMsg.setProjectId(projectId);
-        userMsg.setRole("user");
-        userMsg.setContent(request.getContent());
-        userMsg.setCreatedAt(LocalDateTime.now());
-        messageMapper.insert(userMsg);
-
-        String reply = generateBotReply(projectId, request.getContent());
-        OfficeAgentMessage botMsg = new OfficeAgentMessage();
-        botMsg.setProjectId(projectId);
-        botMsg.setRole("bot");
-        botMsg.setContent(reply);
-        botMsg.setCreatedAt(LocalDateTime.now());
-        messageMapper.insert(botMsg);
-        return toAgentMessageDto(botMsg);
     }
 
     /**
@@ -242,8 +212,9 @@ public class OfficeService {
     public void checkProposalCatalog(String projectId) {
         CanvasDto canvas = getCanvas(projectId);
         if (canvas == null || canvas.getObjects() == null) return;
-        Map<List<String>, OfficeProductDto> checked = new HashMap<>();
         JsonNode items = objectMapper.valueToTree(canvas.getObjects());
+        requireProposalCartMatchesFurniture(projectId, items);
+        Map<List<String>, OfficeProductDto> checked = new HashMap<>();
         for (JsonNode item : items) {
             JsonNode selected = item.path("productSelection").path("product");
             String rspuId = selected.path("rspuId").asText(null);
@@ -261,6 +232,62 @@ public class OfficeService {
         }
     }
 
+    private void requireProposalCartMatchesFurniture(String projectId, JsonNode items) {
+        Map<String, String> zoneNames = new LinkedHashMap<>();
+        Map<String, List<JsonNode>> furnitureByZone = new LinkedHashMap<>();
+        for (JsonNode item : items) {
+            String kind = item.path("kind").asText();
+            String zoneId = item.path("id").asText(null);
+            if ("zone".equals(kind) && StringUtils.hasText(zoneId)) {
+                zoneNames.put(zoneId, item.path("name").asText(zoneId));
+            } else if ("furniture".equals(kind)) {
+                zoneId = item.path("zoneId").asText(null);
+                if (StringUtils.hasText(zoneId)) {
+                    furnitureByZone.computeIfAbsent(zoneId, ignored -> new ArrayList<>()).add(item);
+                }
+            }
+        }
+
+        List<OfficeCart> cart = cartMapper.selectList(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
+        Map<String, List<OfficeCart>> cartByZone = cart.stream()
+            .filter(line -> StringUtils.hasText(line.getZoneId()))
+            .collect(Collectors.groupingBy(OfficeCart::getZoneId, LinkedHashMap::new, Collectors.toList()));
+        Set<String> zoneIds = new LinkedHashSet<>(zoneNames.keySet());
+        zoneIds.addAll(furnitureByZone.keySet());
+        zoneIds.addAll(cartByZone.keySet());
+
+        for (String zoneId : zoneIds) {
+            List<JsonNode> furniture = furnitureByZone.getOrDefault(zoneId, List.of());
+            List<OfficeCart> zoneCart = cartByZone.getOrDefault(zoneId, List.of());
+            int furnitureCount = furniture.size();
+            int cartQuantity = zoneCart.stream().map(OfficeCart::getQty)
+                .filter(Objects::nonNull).filter(qty -> qty > 0).mapToInt(Integer::intValue).sum();
+            if (furnitureCount != cartQuantity) {
+                throw new BusinessException("空间「" + zoneNames.getOrDefault(zoneId, zoneId) + "」家具数量为 "
+                    + furnitureCount + "，购物车数量为 " + cartQuantity + "，请回到款式推荐核对选品数量");
+            }
+
+            Map<String, Integer> remainingByLineId = new HashMap<>();
+            Map<String, OfficeCart> cartByLineId = new HashMap<>();
+            for (OfficeCart line : zoneCart) {
+                if (!StringUtils.hasText(line.getLineId())) continue;
+                remainingByLineId.put(line.getLineId(), line.getQty() == null ? 0 : Math.max(0, line.getQty()));
+                cartByLineId.put(line.getLineId(), line);
+            }
+            for (JsonNode item : furniture) {
+                String lineId = item.path("productSelection").path("cartLineId").asText(null);
+                String productId = item.path("productId").asText(null);
+                OfficeCart line = lineId == null ? null : cartByLineId.get(lineId);
+                int remaining = lineId == null ? 0 : remainingByLineId.getOrDefault(lineId, 0);
+                if (line == null || remaining < 1 || !Objects.equals(productId, line.getProductId())) {
+                    throw new BusinessException("空间「" + zoneNames.getOrDefault(zoneId, zoneId)
+                        + "」有家具未关联有效购物车商品，请回到款式推荐重新核验");
+                }
+                remainingByLineId.put(lineId, remaining - 1);
+            }
+        }
+    }
+
     private boolean changed(JsonNode recorded, BigDecimal current) {
         if (recorded == null || recorded.isNull()) return current != null;
         return !recorded.isNumber() || current == null || recorded.decimalValue().compareTo(current) != 0;
@@ -272,21 +299,9 @@ public class OfficeService {
 
     @Transactional
     public void resetProjectData(String projectId) {
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", projectId));
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
-        messageMapper.delete(new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId));
-    }
-
-    private String generateBotReply(String projectId, String text) {
-        String t = text == null ? "" : text;
-        if (t.contains("预算") || t.contains("便宜") || t.contains("经济") || t.contains("价格")) {
-            return "已记录预算敏感偏好。演示中可先比较候选价格；真实环境将以 RSDP 可售商品、规格与定价策略进行检索，不直接采用模拟价格。";
-        }
-        if (t.contains("图纸") || t.contains("画布") || t.contains("空间")) {
-            return "您可以使用左侧“返回修改画布”继续修改区域或标注，再提交新版需求快照。原有已选商品将保留以便复核。";
-        }
-        return "已记录您对办公项目的补充说明：“" + t.trim() + "”。\n\n右侧可查看演示商品候选，您可以加入当前区域并调整数量；真实推荐将在接入 RSDP 商品服务与 Office Skill 后实现。";
     }
 
     private CanvasDto toCanvasDto(OfficeCanvas c) {
@@ -319,15 +334,6 @@ public class OfficeService {
         dto.setZoneName(c.getZoneName());
         dto.setProductId(c.getProductId());
         dto.setQty(c.getQty());
-        return dto;
-    }
-
-    private AgentMessageDto toAgentMessageDto(OfficeAgentMessage m) {
-        AgentMessageDto dto = new AgentMessageDto();
-        dto.setMessageId(m.getMessageId());
-        dto.setProjectId(m.getProjectId());
-        dto.setRole(m.getRole());
-        dto.setContent(m.getContent());
         return dto;
     }
 

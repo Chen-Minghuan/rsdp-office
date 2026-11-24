@@ -32,7 +32,11 @@ try {
   await context.route('**/api/v1/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname
     const respond = (data, code = 200, message = 'success') => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code, message, data }) })
-    if (path === '/api/v1/office/projects') return respond([{ projectId: 'OFFICE-PROJECT-001', name: '效果图测试项目', floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }])
+    if (path === '/api/v1/office/projects') return respond([{
+      projectId: 'OFFICE-PROJECT-001', name: '效果图测试',
+      leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '一层' }],
+    }])
     if (path.endsWith('/canvas')) {
       if (req.method() === 'PUT') saved = req.postDataJSON()
       return respond(saved)
@@ -118,11 +122,11 @@ try {
   await page.getByRole('button', { name: '关闭效果预览' }).click()
   saved = JSON.parse(JSON.stringify(saved)); saved.revision++; saved.objects[1].x += 200
   await page.evaluate(data => {
-    const local = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
+    const local = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     local.project = { name: '效果图测试', area: 0, headcount: 4, budget: 0, style: '现代简约', description: '' }
     local.canvasMode = 'design'; local.designZoneId = 'ROOM-X'
     local.objects = data.objects; local.canvasRevision = data.revision
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(local))
+    localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(local))
   }, saved)
   mode = 'SUCCEEDED'
   await page.reload({ waitUntil: 'networkidle' })
@@ -132,7 +136,7 @@ try {
   await page.getByTestId('render-generation-timing').waitFor()
   assert.ok((await page.getByTestId('render-generation-timing').innerText()).includes('本次耗时'))
   await page.getByText('布局已变化，需重新生成', { exact: true }).waitFor()
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(item => item.id === 'F1').x), -5300)
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'F1').x), -5300)
   assert.equal(submissions.length, 1, '恢复查询不得再次提交生图')
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: '下载图片', exact: true }).click()

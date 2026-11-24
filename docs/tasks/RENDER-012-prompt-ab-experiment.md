@@ -54,4 +54,4 @@ http://localhost:3007/canvas?...&renderExperiment=1
 ## 自动化验证
 
 覆盖精简提示词无坐标 JSON、数量/两排/头尾保留、A/C/D/E 参数约束、C 组审核平面图保留、实验幂等隔离、direct/seed 请求体、布局结构化事实和实验面板 mock 请求。测试不访问真实 VL 或收费生图。
-实际执行：后端全量347项，0失败、0错误、3跳过；前端生产构建与本地Edge全mock回归通过；`git diff --check`通过。未调用真实VL或收费生图，A/B/C/D/E实际效果待手动对照。
+实际执行：合并最新 upstream/main 后，后端全量403项，0失败、0错误、8跳过；前端生产构建与本地Edge全mock回归通过；`git diff --check`通过。未在本轮验证中调用真实VL或收费生图，E已由用户根据真实A/D/E对照确认为正式默认方案。

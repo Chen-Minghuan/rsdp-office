@@ -4,6 +4,7 @@ import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectMemberDto;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
@@ -19,9 +20,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/office/projects")
@@ -31,8 +34,13 @@ public class OfficeProjectController {
     private final OfficeProjectService projectService;
 
     @GetMapping
-    public Result<List<OfficeProjectDto>> listProjects() {
-        return Result.ok(projectService.listProjects());
+    public Result<List<OfficeProjectDto>> listProjects(@RequestParam(defaultValue = "true") boolean includeBudget) {
+        return Result.ok(includeBudget ? projectService.listProjects() : projectService.listProjects(false));
+    }
+
+    @GetMapping("/budgets")
+    public Result<Map<String, OfficeProjectBudgetDto>> listProjectBudgets() {
+        return Result.ok(projectService.listProjectBudgets());
     }
 
     @PostMapping

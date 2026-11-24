@@ -25,6 +25,15 @@ public class CurrentUserService {
         return authService.isEnabled();
     }
 
+    /** 仅为关闭认证的本地收藏补齐外键身份；该账号禁用登录且不属于任何工作区。 */
+    public String ensureLocalFavoriteUser() {
+        if (authService.isEnabled()) {
+            throw new AccessDeniedException("认证开启时必须使用当前会话用户");
+        }
+        userMapper.insertLocalFavoriteUser();
+        return "LOCAL-DEV";
+    }
+
     /** 认证开启时返回会话对应的有效用户；认证关闭返回 null。 */
     public OfficeUser currentUser() {
         if (!authService.isEnabled()) {
@@ -46,7 +55,7 @@ public class CurrentUserService {
             return;
         }
         OfficeUser user = currentUser();
-        if (!"ADMIN".equalsIgnoreCase(user.getRole())) {
+        if (!Boolean.TRUE.equals(user.getIsSystemAdmin())) {
             throw new AccessDeniedException("只有系统管理员可以管理用户");
         }
     }

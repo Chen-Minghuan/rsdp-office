@@ -118,17 +118,6 @@ function onImageChange(e: Event) {
     </button>
   </div>
 
-  <div v-else-if="obj.kind === 'note'" class="flex flex-col gap-3">
-    <div class="flex items-center justify-between mb-1">
-      <span class="text-sm font-bold flex items-center gap-2"><AppIcon name="note" size="4" /> 便签内容</span>
-      <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#f4eee5] text-[#946c45]">用户说明</span>
-    </div>
-    <textarea :value="obj.text" rows="6" class="w-full border border-[#e9e4de] rounded-lg p-2.5 text-sm outline-none focus:border-[#be9369] resize-none leading-relaxed" @input="update({ text: ($event.target as HTMLTextAreaElement).value })" />
-    <button class="mt-2 px-4 py-2 rounded-lg text-xs font-semibold border border-line hover:bg-[#fff0f0] hover:text-red-500 flex items-center justify-center gap-2 transition" @click="remove">
-      <AppIcon name="trash" size="4" /> 删除便签
-    </button>
-  </div>
-
   <div v-else-if="obj.kind === 'reference'" class="flex flex-col gap-3">
     <div class="flex items-center justify-between mb-1">
       <span class="text-sm font-bold flex items-center gap-2"><AppIcon name="photo" size="4" /> 参考素材</span>
