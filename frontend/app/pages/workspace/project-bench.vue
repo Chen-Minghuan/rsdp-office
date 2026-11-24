@@ -8,9 +8,11 @@ const { canCreateProject } = useAuth()
 const { isProjectDrawing, isProjectOverview } = useWorkspaceNavigation()
 const showCreate = ref(false)
 const activeStatus = ref<ProjectStatusFilter>('ALL')
+// 已完成看板保留占位：业务口径待后续定义，暂不展示数据、不参与筛选
 const statusCards = computed(() => [
-  { value: 'ALL' as const, label: '全部项目', count: workspace.projects.length },
-  ...projectStatusOptions.map(option => ({ ...option, count: workspace.projects.filter(project => project.status === option.value).length })),
+  { value: 'ALL' as const, label: '全部项目', count: workspace.projects.length as number | null },
+  ...projectStatusOptions.map(option => ({ value: option.value as ProjectStatusFilter, label: option.label, count: workspace.projects.filter(project => project.status === option.value).length as number | null })),
+  { value: 'COMPLETED' as const, label: '已完成', count: null },
 ])
 </script>
 
@@ -26,11 +28,11 @@ const statusCards = computed(() => [
     </header>
 
     <section v-if="!isProjectDrawing && !isProjectOverview" class="grid flex-none grid-cols-2 gap-3 md:grid-cols-4" aria-label="项目阶段筛选">
-      <button v-for="card in statusCards" :key="card.value" type="button" class="border p-4 text-left transition focus-visible:outline-accent sm:p-5"
+      <button v-for="card in statusCards" :key="card.value" type="button" class="border p-4 text-left transition focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60 sm:p-5"
         :class="activeStatus === card.value ? 'border-accent bg-accent-tint text-accent-ink' : 'border-line bg-white hover:border-accent-line'"
-        :aria-pressed="activeStatus === card.value" @click="activeStatus = card.value">
+        :aria-pressed="activeStatus === card.value" :disabled="card.count === null" @click="card.count !== null && (activeStatus = card.value)">
         <span class="block text-sm">{{ card.label }}</span>
-        <span class="mt-2 block text-3xl font-bold tabular-nums">{{ workspace.initialized && !workspace.error ? card.count : '—' }}</span>
+        <span class="mt-2 block text-3xl font-bold tabular-nums">{{ card.count !== null && workspace.initialized && !workspace.error ? card.count : '—' }}</span>
       </button>
     </section>
 
