@@ -73,11 +73,18 @@ export const useWorkspaceStore = defineStore('workspace', {
         }
       }
     },
-    async refresh() {
+    async refresh(loadFloor: boolean) {
       useOfficeStore().$reset()
       this.$reset()
       await this.init()
-      await useOfficeStore().init()
+      if (loadFloor) await useOfficeStore().init()
+    },
+    selectFloorContext(floorId: string) {
+      const floor = this.projects.flatMap(project => project.floors).find(item => item.floorId === floorId)
+      if (!floor) return
+      this.currentFloorId = floor.floorId
+      this.currentProjectId = floor.projectId
+      this.rememberSelection()
     },
     async activateFloor(floorId: string, openDrawing = false) {
       const floor = this.projects.flatMap(project => project.floors).find(item => item.floorId === floorId)
@@ -182,8 +189,9 @@ export const useWorkspaceStore = defineStore('workspace', {
       }
       return updated
     },
-    async updateMembers(projectId: string, leaderUserId: string, collaboratorUserIds: string[]) {
-      const updated = await useWorkspaceApi().replaceMembers(projectId, leaderUserId, collaboratorUserIds)
+    async updateMembers(projectId: string, leaderUserId: string, collaboratorUserIds: string[],
+      permissions?: Record<string, import('~/types/workspace').ProjectPermission[]>) {
+      const updated = await useWorkspaceApi().replaceMembers(projectId, leaderUserId, collaboratorUserIds, permissions)
       const project = this.projects.find(item => item.projectId === projectId)
       if (project) {
         project.leader = updated.leader

@@ -2,6 +2,7 @@
 import { authEnabled } from '~/composables/useAuth'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { createUuid } from '~/utils/uuid'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 import type {
   ConfirmQuotationRequest,
   ProjectQuotationPreview,
@@ -50,10 +51,10 @@ interface QuotationDraft {
 }
 
 const api = useOfficeApi()
-const { me } = useAuth()
+const { me, user } = useAuth()
 const workspace = useWorkspaceStore()
 
-const authorized = ref(false)
+const canPrice = computed(() => !authEnabled || user.value?.role === 'DEALER')
 const checking = ref(true)
 const loading = ref(false)
 const error = ref('')
@@ -72,28 +73,30 @@ const marginPercent = ref(35)
 const overrides = ref<Record<string, RowOverride>>({})
 const fees = ref<FeeRow[]>([createFee('服务费'), createFee('物流搬运安装费')])
 
-const projects = computed(() => workspace.projects)
+const projects = computed(() => canPrice.value ? workspace.projects : workspace.projects.filter(project =>
+  projectPermissionsFor(project, user.value?.userId).includes('QUOTE_READ')))
+const authorized = computed(() => canPrice.value || projects.value.length > 0)
 const currentProject = computed(() => projects.value.find(project => project.projectId === projectId.value) || null)
+const canExport = computed(() => projectPermissionsFor(currentProject.value, user.value?.userId).includes('EXPORT_QUOTE'))
 
 onMounted(async () => {
   checking.value = true
   try {
-    if (!authEnabled) {
-      authorized.value = true
-    } else {
-      const user = await me()
-      authorized.value = user?.role === 'DEALER'
-    }
-    if (!authorized.value) return
-    projectId.value = workspace.currentProjectId || projects.value[0]?.projectId || ''
+    if (authEnabled) await me()
+    selectAccessibleProject()
   } finally {
     checking.value = false
   }
 })
 
-watch(() => workspace.projects.length, () => {
-  if (authorized.value && !projectId.value) projectId.value = workspace.currentProjectId || projects.value[0]?.projectId || ''
-})
+function selectAccessibleProject() {
+  const ids = projects.value.map(project => project.projectId)
+  if (!ids.includes(projectId.value)) {
+    projectId.value = ids.includes(workspace.currentProjectId) ? workspace.currentProjectId : ids[0] ?? ''
+  }
+}
+
+watch(projects, selectAccessibleProject)
 
 watch(projectId, (value, previous) => {
   if (value !== previous) {
@@ -104,7 +107,7 @@ watch(projectId, (value, previous) => {
     dialogError.value = ''
   }
   if (authorized.value) {
-    void loadPreview()
+    if (canPrice.value) void loadPreview()
     void loadLatest()
   }
 })
@@ -133,10 +136,41 @@ async function loadLatest() {
     record.value = null
     return
   }
+  const requestProject = projectId.value
+  if (!canPrice.value) {
+    loading.value = true
+    error.value = ''
+  }
   try {
-    record.value = await api.latestProjectQuotation(projectId.value)
-  } catch {
-    record.value = null
+    const latest = await api.latestProjectQuotation(requestProject)
+    if (requestProject === projectId.value) record.value = latest
+  } catch (cause) {
+    if (requestProject === projectId.value) {
+      record.value = null
+      if (!canPrice.value) error.value = cause instanceof Error ? cause.message : '报价读取失败'
+    }
+  } finally {
+    if (!canPrice.value && requestProject === projectId.value) loading.value = false
+  }
+}
+
+async function downloadConfirmedQuote() {
+  if (!currentProject.value || !canExport.value) return
+  downloading.value = true
+  error.value = ''
+  const selected = currentProject.value
+  try {
+    const blob = await api.exportLatestProjectQuotation(selected.projectId)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${selected.projectName}-报价单.xlsx`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '报价导出失败'
+  } finally {
+    downloading.value = false
   }
 }
 
@@ -350,13 +384,46 @@ function modeLabel() {
   <div class="flex min-h-full flex-col p-4 md:p-6">
     <header class="mb-4">
       <h1 class="text-lg font-bold">商品报价</h1>
-      <p class="mt-1 text-xs text-muted">
-        按项目楼层与空间汇总已选商品，套用「出厂价×系数」或「出厂价÷(1−毛利率)」试算成交价。仅经销商主号可见；数量、成交单价与费用明细可手动调整，全部计入底部合计。
+      <p v-if="canPrice" class="mt-1 text-xs text-muted">
+        按项目楼层与空间汇总已选商品，支持试算成交价、调整数量和费用。
       </p>
     </header>
 
-    <p v-if="checking" class="text-sm text-muted">正在核验经销商主号身份…</p>
-    <p v-else-if="!authorized" class="border border-line bg-white px-4 py-6 text-sm text-muted">无权访问：只有经销商主号可以查看项目报价。</p>
+    <p v-if="checking" class="text-sm text-muted">正在核验报价权限…</p>
+    <p v-else-if="!authorized" class="border border-line bg-white px-4 py-6 text-sm text-muted">当前账号暂无报价查看权限。</p>
+
+    <section v-else-if="!canPrice" class="space-y-4 border border-line bg-white p-4">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <label class="grid gap-1 text-sm">项目
+          <select v-model="projectId" aria-label="报价所属项目" class="border border-line px-3 py-2">
+            <option v-for="project in projects" :key="project.projectId" :value="project.projectId">{{ project.projectName }}</option>
+          </select>
+        </label>
+        <button v-if="canExport && record" class="rounded-lg bg-bronze px-4 py-2 text-sm text-white" :disabled="downloading" @click="downloadConfirmedQuote">导出已确认报价</button>
+      </div>
+      <p v-if="error" role="alert" class="text-sm text-red-700">{{ error }}</p>
+      <p v-else-if="loading" class="text-sm text-muted">报价加载中…</p>
+      <p v-else-if="!record" class="text-sm text-muted">暂无已确认报价</p>
+      <div v-if="record" class="overflow-x-auto">
+        <p class="mb-3 text-sm font-semibold">报价合计 ¥{{ record.totalAmount }}</p>
+        <p v-if="record.pricingMode" class="mb-3 text-sm text-muted">{{ record.pricingMode === 'MARGIN' ? `毛利率 ${(record.pricingValue ?? 0) * 100}%` : `报价系数 ${record.pricingValue}` }}</p>
+        <table class="w-full min-w-[480px] text-left text-sm">
+          <thead><tr class="border-b border-line">
+            <th class="p-2">商品</th><th class="p-2">规格</th><th class="p-2">数量</th>
+            <th v-if="record.pricingMode" class="p-2">出厂价</th><th class="p-2">成交单价</th><th class="p-2">小计</th>
+            <th v-if="record.pricingMode" class="p-2">商品毛利</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="(line, index) in record.lines" :key="index" class="border-b border-line">
+              <td class="p-2">{{ line.productName }}</td><td class="p-2">{{ line.variant || '—' }}</td><td class="p-2">{{ line.qty }}</td>
+              <td v-if="record.pricingMode" class="p-2">{{ line.factoryPrice ?? '—' }}</td>
+              <td class="p-2">{{ line.unitPrice ?? '—' }}</td><td class="p-2">{{ line.subtotal ?? '—' }}</td>
+              <td v-if="record.pricingMode" class="p-2">{{ line.factoryPrice != null && line.subtotal != null ? amount(line.subtotal - line.factoryPrice * line.qty) : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <template v-else>
       <section class="mb-4 border border-line bg-white p-4" aria-label="报价条件">

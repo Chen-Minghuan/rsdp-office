@@ -49,6 +49,7 @@ class OfficeWorkspaceServiceTest {
         authService = mock(AuthService.class);
         OfficeUserMapper userMapper = mock(OfficeUserMapper.class);
         OfficeWorkspaceMapper workspaceMapper = mock(OfficeWorkspaceMapper.class);
+        when(workspaceMapper.nextDealerSlot()).thenAnswer(call -> workspaces.size() < 20 ? workspaces.size() + 1 : null);
         OfficeDesignProjectMapper projectMapper = mock(OfficeDesignProjectMapper.class);
         OfficeAuditLogMapper auditLogMapper = mock(OfficeAuditLogMapper.class);
 
@@ -118,6 +119,7 @@ class OfficeWorkspaceServiceTest {
         user.setUsername(username);
         user.setDisplayName(username + " 显示名");
         user.setRole(role);
+        user.setIsSystemAdmin("ADMIN".equals(role));
         user.setStatus("active");
         user.setWorkspaceId(workspaceId);
         user.setCreatedAt(LocalDateTime.now());

@@ -37,7 +37,7 @@ try {
   const draftKey = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
   const project = {
     projectId: 'OFFICE-PROJECT-001', name: '图纸交接测试项目',
-    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' },
+    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT'] },
     floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
   }
 

@@ -5,6 +5,8 @@ import com.rsdp.officeproduct.importer.office.dto.OfficeProductBundleDtos;
 import com.rsdp.officeproduct.importer.office.dto.OfficeSchemeDtos;
 import com.rsdp.officeproduct.importer.office.service.OfficeModuleRecommendationService;
 import com.rsdp.officeproduct.importer.office.service.OfficeProductBundleService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.office.service.OfficeProposalConfirmationService;
 import com.rsdp.officeproduct.importer.office.service.OfficeRoomSchemeService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ public class OfficeProductSchemeController {
     private final OfficeProposalConfirmationService confirmations;
     private final OfficeProductBundleService bundles;
     private final OfficeModuleRecommendationService recommendations;
+    private final OfficeProjectAccessService access;
 
     @GetMapping("/floors/{floorId}/room-scheme")
     public Result<OfficeSchemeDtos.State> state(@PathVariable String floorId, @RequestParam String zoneId) {
@@ -28,16 +31,19 @@ public class OfficeProductSchemeController {
 
     @PostMapping("/floors/{floorId}/room-scheme/activate")
     public Result<OfficeSchemeDtos.Result> activate(@PathVariable String floorId, @RequestBody OfficeSchemeDtos.Change change) {
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         return Result.ok(rooms.activate(floorId, change));
     }
 
     @PostMapping("/floors/{floorId}/room-scheme/clear-selection")
     public Result<OfficeSchemeDtos.Result> clear(@PathVariable String floorId, @RequestBody OfficeSchemeDtos.Change change) {
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         return Result.ok(rooms.clearSelection(floorId, change));
     }
 
     @PostMapping("/floors/{floorId}/room-scheme/apply-products")
     public Result<OfficeSchemeDtos.Result> apply(@PathVariable String floorId, @RequestBody OfficeProductBundleDtos.Apply apply) {
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         return Result.ok(recommendations.applyRoomProducts(floorId, apply));
     }
 

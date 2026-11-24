@@ -54,6 +54,7 @@ try {
       return ok([{ projectId, name: '办公总部', customerRequirements: '深色木纹', floors: [{ projectId, floorId, name: '11F' }] }])
     }
     if (path === '/api/v1/products') return ok(catalog)
+    if (path === '/api/v1/products/page') return ok({ rows: catalog, total: catalog.length, catalogTotal: catalog.length, activeTotal: catalog.length, page: 1, size: 20 })
     if (path.endsWith('/products/RSPU')) return ok({ variants: [{ variantId: 'SKU', displayName: product.variant, status: 'active' }] })
     if (path.endsWith('/product-bundles')) {
       if (bundleApiMissing) return route.fulfill({ status: 404, json: { message: 'No static resource api/v1/office/product-bundles' } })

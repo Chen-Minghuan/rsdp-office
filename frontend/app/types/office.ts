@@ -178,11 +178,6 @@ export interface ProjectFile {
   mock: boolean
 }
 
-export interface AgentMessage {
-  role: 'bot' | 'user'
-  content: string
-}
-
 export interface CartItem {
   id: string
   productId: string

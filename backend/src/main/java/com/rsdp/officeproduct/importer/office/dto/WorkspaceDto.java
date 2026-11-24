@@ -14,6 +14,7 @@ public class WorkspaceDto {
     private String ownerUsername;
     private String ownerDisplayName;
     private String ownerStatus;
+    private Integer dealerSlotNo;
     private long userCount;
     private long projectCount;
     private LocalDateTime createdAt;

@@ -35,7 +35,7 @@ try {
   await context.route('**/api/v1/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname
     const respond = (data, code = 200, message = 'success') => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code, message, data }) })
-    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '效果图测试', floors: [{ projectId, floorId, name: '1F' }] }])
+    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '效果图测试', leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] }, floors: [{ projectId, floorId, name: '1F' }] }])
     if (path.endsWith('/canvas')) {
       if (req.method() === 'PUT') saved = req.postDataJSON()
       return respond(saved)

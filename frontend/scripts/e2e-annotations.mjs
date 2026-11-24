@@ -44,10 +44,17 @@ try {
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/office/projects') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [{
+        projectId: 'OFFICE-PROJECT-001', name: '视图隔离测试项目',
+        leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
+        floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
+      }] }) })
+    }
     const data = path.endsWith('/floor-plan/SINGLE-SPACE') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
-  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
@@ -71,15 +78,16 @@ try {
   await confirmAllReviews(page)
   await page.locator('.review-rooms').getByRole('button', { name: '选择空间 独立 L 形办公室', exact: true }).waitFor()
   await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem('rsdp-office-v01'))
+    const key = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
+    const draft = JSON.parse(localStorage.getItem(key))
     for (const [id, zoneId] of [['F-L','ROOM-L'],['F-B','ROOM-B']]) {
       const zone = draft.objects.find(zone => zone.id === zoneId)
       draft.objects.push({ id, zoneId, kind: 'furniture', x: zone.x + 500, y: zone.y + 500, w: 1200, h: 600, rotation: 0, productId: '', label: id })
     }
-    draft.objects.push({ id: 'GLOBAL-NOTE', kind: 'note', x: -17500, y: -7500, text: '整层便签' },
+    draft.objects.push(
       { id: 'GLOBAL-REF', kind: 'reference', x: -17500, y: -7500, caption: '整层参考' },
       { id: 'GLOBAL-ARROW', kind: 'arrow', x: -17500, y: -7500, x2: -17000, y2: -7000 })
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(draft))
+    localStorage.setItem(key, JSON.stringify(draft))
   })
   await enter('ROOM-L')
   const spaceSelect = page.getByTestId('design-space-switcher')
@@ -127,70 +135,26 @@ try {
   assert.ok(Math.abs(moved.y - original.y - 15 / zoom) < 3)
   assert.equal(moved.zoneId, 'ROOM-L')
 
-  // New local annotations remain attached to this room instead of appearing in other designs.
-  await page.getByRole('button', { name: '便签', exact: true }).click()
-  const roomBox = await canvas().locator('polygon.board-element').boundingBox()
-  await page.mouse.click(roomBox.x + roomBox.width * 0.25, roomBox.y + roomBox.height * 0.6)
-  const note = (await state()).objects.find(object => object.kind === 'note' && object.zoneId === 'ROOM-L')
-  assert.ok(note && note.x < 0 && note.y < 0)
-  const noteLocator = canvas().locator('[data-id="' + note.id + '"]')
-  const noteScreenSize = () => noteLocator.evaluate(element => {
-    const board = element.closest('[data-view-rotation]')
-    const transform = new DOMMatrixReadOnly(getComputedStyle(board).transform)
-    const zoom = Math.hypot(transform.a, transform.b)
-    return {
-      width: element.getBoundingClientRect().width,
-      fontSize: parseFloat(getComputedStyle(element).fontSize) * zoom,
-    }
-  })
-  const noteBeforeZoom = await noteScreenSize()
-  assert.ok(noteBeforeZoom.width >= 220 && noteBeforeZoom.width < 230, JSON.stringify(noteBeforeZoom))
-  assert.ok(Math.abs(noteBeforeZoom.fontSize - 14) < 0.01, JSON.stringify(noteBeforeZoom))
-  await page.getByRole('button', { name: '放大画布', exact: true }).click()
-  await page.waitForFunction(width => document.querySelector('polygon.board-element').getBoundingClientRect().width > width * 1.1, roomBox.width)
-  const noteAfterZoom = await noteScreenSize()
-  assert.ok(Math.abs(noteAfterZoom.width - noteBeforeZoom.width) < 0.5, JSON.stringify({ noteBeforeZoom, noteAfterZoom }))
-  assert.ok(Math.abs(noteAfterZoom.fontSize - 14) < 0.01, JSON.stringify(noteAfterZoom))
-  await page.getByRole('button', { name: '缩小画布', exact: true }).click()
+  // 便签入口与快捷键已移除（RENDER-003 后删除画布便签功能）。
+  assert.equal(await page.getByRole('button', { name: '便签', exact: true }).count(), 0, '工具栏不应再显示便签按钮')
+  assert.equal(await page.getByText('便签').count(), 0, '状态栏不应再显示便签计数')
+  const objectsBeforeShortcut = (await state()).objects.length
+  await page.keyboard.press('n')
+  await page.waitForTimeout(100)
+  assert.equal((await state()).objects.length, objectsBeforeShortcut, '按 n 键不应再创建便签对象')
 
-  await noteLocator.dblclick()
-  const noteEditor = page.getByTestId('note-editor')
-  await noteEditor.waitFor()
-  await noteEditor.fill('靠窗预留 600 mm\n第二行说明')
-  await page.getByRole('button', { name: '完成标注编辑', exact: true }).click()
-  await page.waitForFunction(({ id, text }) => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === id)?.text === text,
-    { id: note.id, text: '靠窗预留 600 mm\n第二行说明' })
-  assert.equal((await state()).objects.find(object => object.id === note.id).text, '靠窗预留 600 mm\n第二行说明')
-  await page.getByRole('button', { name: '编辑标注', exact: true }).click()
-  await noteEditor.fill('取消时不应保存')
-  await noteEditor.press('Escape')
-  assert.equal(await noteEditor.count(), 0)
-  assert.equal((await state()).objects.find(object => object.id === note.id).text, '靠窗预留 600 mm\n第二行说明')
-  await page.screenshot({ path: outDir + '/03-readable-annotation.png' })
-  await page.getByRole('button', { name: '删除标注', exact: true }).click()
-  await page.waitForFunction(id => !JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.some(object => object.id === id), note.id)
-  assert.equal((await state()).objects.some(object => object.id === note.id), false)
-  await page.getByRole('button', { name: '撤销', exact: true }).click()
-  await page.waitForFunction(({ id, text }) => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(object => object.id === id)?.text === text,
-    { id: note.id, text: '靠窗预留 600 mm\n第二行说明' })
-  assert.equal((await state()).objects.find(object => object.id === note.id).text, '靠窗预留 600 mm\n第二行说明')
   // Local annotations stay with their room and survive refresh.
   await spaceSelect.locator('[data-space-id="ROOM-B"]').click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-B')
   await assertFit('ROOM-B')
-  assert.equal(await noteLocator.count(), 0)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   await page.getByRole('button', { name: '上一个空间', exact: true }).click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-L')
   await assertFit('ROOM-L')
-  assert.equal(await noteLocator.count(), 1)
   await page.reload({ waitUntil: 'networkidle' })
   await assertFit('ROOM-L')
-  assert.match(await noteLocator.textContent(), /靠窗预留 600 mm/)
-  assert.match(await noteLocator.textContent(), /第二行说明/)
-  assert.equal((await state()).objects.find(object => object.id === note.id).text, '靠窗预留 600 mm\n第二行说明')
   assert.deepEqual(errors, [])
-  console.log('画布标注 UI 通过：缩放保持屏幕可读尺寸、双击/按钮编辑、取消、删除、撤销、空间归属与刷新恢复。全部 API 模拟。')
+  console.log('画布标注 UI 通过：便签入口与快捷键已移除，空间切换与刷新后数据保留。全部 API 模拟。')
 } catch (failure) {
   await debugPage?.screenshot({ path: outDir + '/failure.png' }).catch(() => {})
   throw failure

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { RenderPreview } from '~/types/renderPreview'
-import type { WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, WorkspaceProject } from '~/types/workspace'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { drawingMatchesPlan } from '~/utils/drawingContext'
 import { projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
@@ -14,14 +14,28 @@ const previews = ref<RenderPreview[]>([])
 const previewsLoading = ref(false)
 const previewsFailed = ref(false)
 const retryPreviews = ref(0)
+const loadedBudget = ref<ProjectBudget>()
+const { storageScope } = useAuth()
+const budgetApi = useWorkspaceApi()
+
+watch([() => props.project.projectId, storageScope], async ([projectId], _, onCleanup) => {
+  let active = true
+  onCleanup(() => { active = false })
+  loadedBudget.value = undefined
+  if (props.project.budgetTotal != null) return
+  try {
+    const totals = await budgetApi.listProjectBudgets()
+    if (active) loadedBudget.value = totals?.[projectId]
+  } catch { /* The budget is optional in the project overview. */ }
+}, { immediate: true })
 
 const floors = computed(() => [...props.project.floors].sort((a, b) => a.sortOrder - b.sortOrder))
 const cover = computed(() => props.project.referenceImages[0])
 const memberNames = computed(() => [props.project.leader, ...props.project.collaborators]
   .flatMap(member => member ? [member.displayName || member.username] : []))
 const budget = computed(() => {
-  const { budgetTotal, budgetStatus } = props.project
-  if (budgetTotal === null || budgetStatus === 'UNAVAILABLE') return '—'
+  const { budgetTotal, budgetStatus } = loadedBudget.value ?? props.project
+  if (budgetTotal == null || budgetStatus === 'UNAVAILABLE') return '—'
   return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(budgetTotal)
 })
 const drawing = computed(() => store.files[0])
@@ -107,7 +121,7 @@ function roomRoute(zoneId: string) {
       <div class="min-w-0">
         <p class="wrap-break-word text-[clamp(1.65rem,3.4vw,3.75rem)] font-bold leading-none tracking-tight tabular-nums" data-testid="project-reference-budget">{{ budget }}</p>
         <p class="mt-2 text-sm font-medium">商品参考金额</p>
-        <p v-if="project.budgetStatus === 'PENDING_PRICING'" class="mt-1 text-xs text-amber-800">部分商品待补价</p>
+        <p v-if="(loadedBudget ?? project).budgetStatus === 'PENDING_PRICING'" class="mt-1 text-xs text-amber-800">部分商品待补价</p>
         <p v-else-if="budget === '—'" class="mt-1 text-xs text-neutral-600">暂无可用价格</p>
       </div>
       <div class="min-w-0 text-sm">

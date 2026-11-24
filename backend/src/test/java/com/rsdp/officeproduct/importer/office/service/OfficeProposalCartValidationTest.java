@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
@@ -63,7 +62,7 @@ class OfficeProposalCartValidationTest {
         when(canvases.selectList(any())).thenReturn(List.of(canvas));
         when(carts.selectList(any())).thenReturn(cart);
         return new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeProjectService.class),
-            mock(OfficeProjectAccessService.class), canvases, carts, mock(OfficeAgentMessageMapper.class),
+            mock(OfficeProjectAccessService.class), canvases, carts,
             mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), objectMapper);
     }
 

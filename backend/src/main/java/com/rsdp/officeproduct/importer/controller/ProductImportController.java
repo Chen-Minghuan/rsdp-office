@@ -1,6 +1,7 @@
 package com.rsdp.officeproduct.importer.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
+import com.rsdp.officeproduct.importer.dto.response.CatalogProductPageDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.office.service.OfficeCatalogAccess;
@@ -26,6 +27,15 @@ public class ProductImportController {
     @GetMapping
     public Result<List<ProductListItemDto>> listProducts(@RequestParam(defaultValue = "false") boolean managed) {
         return Result.ok(productQueryService.listProducts(managed));
+    }
+
+    @GetMapping("/page")
+    public Result<CatalogProductPageDto> page(@RequestParam(defaultValue = "false") boolean managed,
+                                              @RequestParam(defaultValue = "1") int page,
+                                              @RequestParam(defaultValue = "20") int size,
+                                              @RequestParam(defaultValue = "") String search,
+                                              @RequestParam(defaultValue = "") String status) {
+        return Result.ok(productQueryService.pageProducts(managed, page, size, search, status));
     }
 
     @GetMapping("/capabilities")

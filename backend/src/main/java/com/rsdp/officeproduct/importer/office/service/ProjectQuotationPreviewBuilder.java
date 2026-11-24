@@ -48,13 +48,12 @@ class ProjectQuotationPreviewBuilder {
     ProjectQuotationPreviewDto build(OfficeDesignProject project, QuotationPricing pricing) {
         List<OfficeDesignFloor> floors = floorMapper.selectList(new QueryWrapper<OfficeDesignFloor>()
             .eq("project_id", project.getProjectId()).orderByAsc("sort_order").orderByAsc("created_at"));
-        Map<String, OfficeProductDto> productsById = catalog.loadProducts();
         List<FloorProducts> floorProducts = floors.stream().map(this::collectFloor).toList();
         Set<String> productIds = floorProducts.stream()
             .flatMap(floor -> floor.spaces().stream())
             .flatMap(space -> space.quantities().keySet().stream())
             .collect(Collectors.toCollection(LinkedHashSet::new));
-        Map<String, QuotationCatalog.ProductPrice> prices = catalog.priceProducts(productIds, productsById);
+        Map<String, QuotationCatalog.ProductPrice> prices = catalog.priceProducts(productIds, catalog.loadProducts(productIds));
 
         ProjectQuotationPreviewDto preview = new ProjectQuotationPreviewDto();
         preview.setProjectId(project.getProjectId());

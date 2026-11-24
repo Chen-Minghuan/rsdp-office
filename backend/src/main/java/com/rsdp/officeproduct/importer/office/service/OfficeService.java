@@ -8,10 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.*;
-import com.rsdp.officeproduct.importer.office.entity.OfficeAgentMessage;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
@@ -37,7 +35,6 @@ public class OfficeService {
     private final OfficeProjectAccessService accessService;
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeCartMapper cartMapper;
-    private final OfficeAgentMessageMapper messageMapper;
     private final RsdpCatalogGateway rsdpCatalogGateway;
     private final SharedCatalogService sharedCatalogService;
     private final ObjectMapper objectMapper;
@@ -73,7 +70,7 @@ public class OfficeService {
         }
         String projectId = request.getProjectId();
         projectService.requireFloor(projectId);
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         workspaceLocks.lockWorkspace(projectId);
         CanvasDto latest = getCanvas(projectId);
         int revision = request.getRevision() != null ? request.getRevision() : 1;
@@ -228,37 +225,10 @@ public class OfficeService {
     }
 
     private void lockCart(String floorId, String schemeToken) {
-        accessService.requireFloorAccess(floorId);
+        accessService.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         workspaceLocks.lockWorkspace(floorId);
         String latestToken = canvasMapper.selectLatestSchemeToken(floorId);
         if (!Objects.equals(latestToken, schemeToken)) throw new BusinessException("房间方案已变化，请刷新清单后重试");
-    }
-
-    public List<AgentMessageDto> listMessages(String projectId) {
-        accessService.requireFloorAccess(projectId);
-        List<OfficeAgentMessage> list = messageMapper.selectList(
-            new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId).orderByAsc("created_at"));
-        return list.stream().map(this::toAgentMessageDto).collect(Collectors.toList());
-    }
-
-    @Transactional
-    public AgentMessageDto sendMessage(String projectId, SendMessageRequest request) {
-        accessService.requireFloorAccess(projectId);
-        OfficeAgentMessage userMsg = new OfficeAgentMessage();
-        userMsg.setProjectId(projectId);
-        userMsg.setRole("user");
-        userMsg.setContent(request.getContent());
-        userMsg.setCreatedAt(LocalDateTime.now());
-        messageMapper.insert(userMsg);
-
-        String reply = generateBotReply(projectId, request.getContent());
-        OfficeAgentMessage botMsg = new OfficeAgentMessage();
-        botMsg.setProjectId(projectId);
-        botMsg.setRole("bot");
-        botMsg.setContent(reply);
-        botMsg.setCreatedAt(LocalDateTime.now());
-        messageMapper.insert(botMsg);
-        return toAgentMessageDto(botMsg);
     }
 
     /**
@@ -360,24 +330,12 @@ public class OfficeService {
 
     @Transactional
     public void resetProjectData(String projectId) {
-        accessService.requireFloorAccess(projectId);
+        accessService.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         workspaceLocks.lockWorkspace(projectId);
         canvasMapper.deleteRoomSchemes(projectId);
         canvasMapper.retireProposalConfirmations(projectId);
         canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", projectId));
         cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", projectId));
-        messageMapper.delete(new QueryWrapper<OfficeAgentMessage>().eq("project_id", projectId));
-    }
-
-    private String generateBotReply(String projectId, String text) {
-        String t = text == null ? "" : text;
-        if (t.contains("预算") || t.contains("便宜") || t.contains("经济") || t.contains("价格")) {
-            return "已记录预算敏感偏好。演示中可先比较候选价格；真实环境将以 RSDP 可售商品、规格与定价策略进行检索，不直接采用模拟价格。";
-        }
-        if (t.contains("图纸") || t.contains("画布") || t.contains("空间")) {
-            return "您可以使用左侧“返回修改画布”继续修改区域或标注，再提交新版需求快照。原有已选商品将保留以便复核。";
-        }
-        return "已记录您对办公项目的补充说明：“" + t.trim() + "”。\n\n右侧可查看演示商品候选，您可以加入当前区域并调整数量；真实推荐将在接入 RSDP 商品服务与 Office Skill 后实现。";
     }
 
     private CanvasDto toCanvasDto(OfficeCanvas c) {
@@ -411,15 +369,6 @@ public class OfficeService {
         dto.setZoneName(c.getZoneName());
         dto.setProductId(c.getProductId());
         dto.setQty(c.getQty());
-        return dto;
-    }
-
-    private AgentMessageDto toAgentMessageDto(OfficeAgentMessage m) {
-        AgentMessageDto dto = new AgentMessageDto();
-        dto.setMessageId(m.getMessageId());
-        dto.setProjectId(m.getProjectId());
-        dto.setRole(m.getRole());
-        dto.setContent(m.getContent());
         return dto;
     }
 

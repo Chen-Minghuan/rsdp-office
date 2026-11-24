@@ -1,10 +1,13 @@
 import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeState, SchemeSlot } from '~/types/productScheme'
 import type { RenderPreview } from '~/types/renderPreview'
 import { productBundleError } from '~/utils/productBundleError'
+import { authEnabled } from '~/composables/useAuth'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 
 export function useProductScheme(active: Ref<boolean>) {
   const store = useOfficeStore()
   const workspace = useWorkspaceStore()
+  const { user } = useAuth()
   const api = useOfficeApi()
   const state = ref<RoomSchemeState | null>(null)
   const busy = ref(false)
@@ -19,7 +22,9 @@ export function useProductScheme(active: Ref<boolean>) {
   const confirmation = ref<ProposalConfirmation | null>(null)
   const renders = ref<RenderPreview[]>([])
   const room = computed(() => store.zones.find(zone => zone.id === store.designZoneId))
-  const ready = computed(() => store.apiReady && !!room.value && room.value.evidenceKind !== 'DEMO' && store.layoutConfirmedForZone(room.value.id))
+  const canEdit = computed(() => !authEnabled || user.value?.role === 'DEALER'
+    || projectPermissionsFor(workspace.currentProject, user.value?.userId).includes('EDIT'))
+  const ready = computed(() => canEdit.value && store.apiReady && !!room.value && room.value.evidenceKind !== 'DEMO' && store.layoutConfirmedForZone(room.value.id))
   const furniture = computed(() => store.furnitureForZone(room.value?.id || ''))
   const selectedCount = computed(() => furniture.value.filter(item => item.productSelection && item.productId).length)
   const canClear = computed(() => !!room.value && (furniture.value.some(item => item.productId || item.productSelection)
@@ -99,7 +104,7 @@ export function useProductScheme(active: Ref<boolean>) {
   async function change(action: 'activate' | 'clear-selection' | 'apply-products',
     options: { targetSlot?: SchemeSlot; automatic?: boolean; items?: BundleItem[] } = {}) {
     const floorId = store.workspaceId, zoneId = store.designZoneId
-    if (!floorId || !zoneId || !store.apiReady || busy.value) return false
+    if (!canEdit.value || !floorId || !zoneId || !store.apiReady || busy.value) return false
     if (action === 'activate' && state.value?.activeSlot === options.targetSlot) return false
     busy.value = true
     error.value = ''
@@ -146,5 +151,5 @@ export function useProductScheme(active: Ref<boolean>) {
   }
 
   return { state, busy, error, message, source, favoriteIds, sourceError, bundles, bundleId, clipboard,
-    room, furniture, selectedCount, canApply, canClear, currentConfirmation, renders, refreshRenders, change, copy, applyBundle }
+    room, furniture, selectedCount, canEdit, canApply, canClear, currentConfirmation, renders, refreshRenders, change, copy, applyBundle }
 }

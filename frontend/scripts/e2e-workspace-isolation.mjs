@@ -111,8 +111,10 @@ try {
       return respond(project)
     }
     if (path === '/api/v1/office/users/assignable') return respond([currentUser])
-    if (path === '/api/v1/products' && currentUser.userId === 'USER-UNASSIGNED') {
-      return respond([{ rspuId: 'RSPU-AUTHORIZED', productName: '独立浏览商品', status: 'active', retailPrice: null }])
+    if (currentUser.userId === 'USER-UNASSIGNED') {
+      const rows = [{ rspuId: 'RSPU-AUTHORIZED', productName: '独立浏览商品', status: 'active', retailPrice: null }]
+      if (path === '/api/v1/products/page') return respond({ page: 1, size: 20, rows, total: 1, catalogTotal: 1, activeTotal: 1 })
+      if (path === '/api/v1/products' || path === '/api/v1/office/favorites/items') return respond(rows)
     }
     if (path === '/api/v1/office/favorites/product-ids' && currentUser.userId === 'USER-UNASSIGNED') return respond(['RSPU-AUTHORIZED'])
     if (path.endsWith('/favorites/product-ids')) projectFavoriteReads.push(currentUser.userId)
@@ -138,7 +140,7 @@ try {
   failProjects = false
   await page.getByRole('button', { name: '重新加载', exact: true }).click()
   await page.getByRole('heading', { name: '暂无可访问项目', exact: true }).waitFor()
-  await page.getByTestId('user-session-role').filter({ hasText: /^设计师$/ }).waitFor()
+  assert.equal(await page.getByTestId('user-session-role').count(), 0, '未分配项目的账号没有项目角色标签')
   assert.equal(await page.getByRole('button', { name: /新建项目/ }).count(), 0)
   assert.equal(await page.getByText('默认办公项目', { exact: true }).count(), 0)
   assert.equal(canvasReads.length, 0, '空项目列表不得读取默认画布')

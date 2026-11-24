@@ -36,7 +36,7 @@ public class OfficeProposalConfirmationService {
 
     @Transactional
     public Status confirm(String floorId, Request request) {
-        access.requireFloorAccess(floorId);
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         locks.lockWorkspace(floorId);
         CanvasDto canvas = office.getCanvas(floorId);
         if (request == null || canvas == null || !Objects.equals(canvas.getRevision(), request.canvasRevision())

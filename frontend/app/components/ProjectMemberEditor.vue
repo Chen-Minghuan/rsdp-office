@@ -5,9 +5,10 @@ const props = withDefaults(defineProps<{
   leader: AssignableUser | null
   collaborators: AssignableUser[]
   disabled?: boolean
+  leaderDisabled?: boolean
   /** 开发模式（未开启认证）允许不指定负责人。 */
   leaderOptional?: boolean
-}>(), { disabled: false, leaderOptional: false })
+}>(), { disabled: false, leaderDisabled: false, leaderOptional: false })
 
 const emit = defineEmits<{
   'update:leader': [AssignableUser | null]
@@ -75,10 +76,10 @@ onMounted(search)
   <section class="grid gap-3" data-testid="project-member-editor">
     <div>
       <h3 class="text-sm font-semibold">项目成员</h3>
-      <p class="mt-1 text-xs text-muted">每个项目有一位负责人。协作者可查看和编辑项目，负责人和工作区主号可管理成员。开启认证后，从本工作区选择已有账号。</p>
+      <p class="mt-1 text-xs text-muted">每个项目有一位负责人。工作区主号可为每位成员分配具体权限。</p>
     </div>
     <label class="grid gap-2 text-sm font-semibold">项目负责人
-      <select :value="leader?.userId || ''" :disabled="disabled" data-testid="leader-select"
+      <select :value="leader?.userId || ''" :disabled="disabled || leaderDisabled" data-testid="leader-select"
         class="rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-normal outline-none focus:border-bronze disabled:opacity-60"
         @change="selectLeader">
         <option v-if="leaderOptional" value="">（暂不指定）</option>

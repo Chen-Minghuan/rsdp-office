@@ -2,6 +2,8 @@ package com.rsdp.officeproduct.importer.service.spatial;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.dto.response.FloorPlanAnalysisResponse;
 import com.rsdp.officeproduct.importer.dto.response.FloorPlanRoomResponse;
 import com.rsdp.officeproduct.importer.dto.spatial.*;
@@ -42,9 +44,11 @@ public class SpatialSceneService {
     private final SpatialGeometryService geometryService;
     private final SpatialCalibrationService calibrationService;
     private final ObjectMapper objectMapper;
+    private final OfficeProjectAccessService access;
 
     @Transactional
     public SpatialSceneSnapshot createScene(CreateSceneRequest request) {
+        access.requireFloorPermission(request.getProjectId(), OfficeProjectPermission.EDIT);
         String sceneId = IdGenerator.spatialId("SCENE");
         String pageId = request.getPageId();
         String sourceSceneId = null;
@@ -81,6 +85,7 @@ public class SpatialSceneService {
     public SpatialSceneSnapshot getScene(String sceneId) {
         FloorPlanDesignScene scene = designSceneMapper.selectById(sceneId);
         if (scene == null) return null;
+        access.requireFloorAccess(scene.getProjectId());
         FloorPlanDesignRevision rev = designRevisionMapper.selectByRevision(sceneId, scene.getCurrentRevision());
         if (rev == null) return null;
         return readSnapshot(rev.getSnapshotJson());
@@ -90,6 +95,7 @@ public class SpatialSceneService {
     public MutationData saveDraft(String sceneId, DraftRequest request) {
         FloorPlanDesignScene scene = designSceneMapper.selectById(sceneId);
         if (scene == null) throw new IllegalArgumentException("Scene not found");
+        access.requireFloorPermission(scene.getProjectId(), OfficeProjectPermission.EDIT);
         if (!Objects.equals(scene.getCurrentRevision(), request.getBaseRevision())) {
             throw new SpatialVersionConflictException(scene.getCurrentRevision());
         }
@@ -122,6 +128,7 @@ public class SpatialSceneService {
     public MutationData applyCalibration(String sceneId, CalibrationRequest request) {
         FloorPlanDesignScene scene = designSceneMapper.selectById(sceneId);
         if (scene == null) throw new IllegalArgumentException("Scene not found");
+        access.requireFloorPermission(scene.getProjectId(), OfficeProjectPermission.EDIT);
         if (!Objects.equals(scene.getCurrentRevision(), request.getBaseRevision())) {
             throw new SpatialVersionConflictException(scene.getCurrentRevision());
         }
@@ -169,6 +176,7 @@ public class SpatialSceneService {
     public MutationData confirm(String sceneId, ConfirmationRequest request) {
         FloorPlanDesignScene scene = designSceneMapper.selectById(sceneId);
         if (scene == null) throw new IllegalArgumentException("Scene not found");
+        access.requireFloorPermission(scene.getProjectId(), OfficeProjectPermission.EDIT);
         if (!Objects.equals(scene.getCurrentRevision(), request.getBaseRevision())) {
             throw new SpatialVersionConflictException(scene.getCurrentRevision());
         }

@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { projectBenchPath, projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
 
 withDefaults(defineProps<{ compact?: boolean; requirements?: boolean }>(), { compact: false, requirements: true })
 const workspace = useWorkspaceStore()
 const office = useOfficeStore()
-const { canCreateProject } = useAuth()
+const { canCreateProject, user } = useAuth()
 const route = useRoute()
 const router = useRouter()
 const { isProjectWorkflow, isProjectOverview, floorReady } = useWorkspaceNavigation()
@@ -25,6 +26,9 @@ const savingEdit = ref(false)
 const nameInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 const projectListId = 'project-list-popover'
 const visibleProjects = computed(() => workspace.currentProject ? [workspace.currentProject] : [])
+const permissions = computed(() => projectPermissionsFor(workspace.currentProject, user.value?.userId))
+const canEditCurrentProject = computed(() => canCreateProject.value || permissions.value.includes('EDIT'))
+const canOpenSettings = computed(() => canEditCurrentProject.value || permissions.value.includes('MANAGE_MEMBERS'))
 
 function closeProjectList() {
   showProjectList.value = false
@@ -64,7 +68,7 @@ function focusNameInput(select = false) {
 }
 
 function startEdit(key: string, projectId: string, floorId: string, name: string) {
-  if (savingEdit.value) return
+  if (!canEditCurrentProject.value || savingEdit.value) return
   actionError.value = ''
   editingKey.value = key
   editingProjectId.value = projectId
@@ -98,6 +102,7 @@ async function saveEdit() {
 }
 
 async function addFloor() {
+  if (!canEditCurrentProject.value) return
   actionError.value = ''
   if (!floorName.value.trim()) { actionError.value = '请输入楼层名称'; return }
   savingFloor.value = true
@@ -185,12 +190,12 @@ async function selectFloor(floorId: string) {
       <article v-for="project in visibleProjects" :key="project.projectId" class="border-y border-line bg-white">
         <div class="flex items-center" :class="project.projectId === workspace.currentProjectId ? 'bg-cream' : ''">
           <input v-if="editingKey === `project:${project.projectId}`" ref="nameInput" v-model="editingName" class="mx-2 min-w-0 flex-1 rounded-none border border-bronze bg-white px-2 py-1 text-xs font-semibold" aria-label="双击编辑项目名称" :disabled="savingEdit" @keydown.enter.prevent="saveEdit" @keydown.esc.prevent="cancelEdit" @blur="saveEdit">
-          <button v-else class="min-w-0 flex-1 px-2 py-2 text-left" :aria-expanded="!workspace.collapsedProjectIds.includes(project.projectId)" title="单击折叠，双击修改项目名称" @click="workspace.toggleProject(project.projectId)" @dblclick.stop.prevent="startEdit(`project:${project.projectId}`, project.projectId, '', project.projectName)">
+          <button v-else class="min-w-0 flex-1 px-2 py-2 text-left" :aria-expanded="!workspace.collapsedProjectIds.includes(project.projectId)" :title="canEditCurrentProject ? '单击折叠，双击修改项目名称' : '单击折叠'" @click="workspace.toggleProject(project.projectId)" @dblclick.stop.prevent="startEdit(`project:${project.projectId}`, project.projectId, '', project.projectName)">
             <span class="flex items-center gap-1.5"><span class="text-[10px] text-muted">{{ workspace.collapsedProjectIds.includes(project.projectId) ? '▶' : '▼' }}</span><strong class="truncate text-xs">{{ project.projectName }}</strong></span>
             <span v-if="project.leader" class="mt-0.5 block truncate text-[10px] text-muted">负责人 {{ project.leader.displayName || project.leader.username }}<template v-if="project.collaborators.length"> · 协作 {{ project.collaborators.length }} 人</template></span>
           </button>
           <div v-if="project.projectId === workspace.currentProjectId" class="mr-1.5 flex shrink-0 items-center gap-0.5">
-            <button class="rounded-none px-1 py-0.5 text-[10px] text-bronze-dark hover:bg-white" title="编辑项目名称和楼层名称" @click="showSettings = true">编辑</button>
+            <button v-if="canOpenSettings" class="rounded-none px-1 py-0.5 text-[10px] text-bronze-dark hover:bg-white" :title="canEditCurrentProject ? '编辑项目名称和楼层名称' : '管理项目成员'" @click="showSettings = true">编辑</button>
             <button class="rounded-none px-1 py-0.5 text-[10px] text-bronze-dark hover:bg-white" title="查看或修改客户需求" @click="showRequirements = true">需求</button>
           </div>
         </div>
@@ -198,7 +203,7 @@ async function selectFloor(floorId: string) {
           <template v-for="floor in project.floors" :key="floor.floorId">
             <input v-if="editingKey === `floor:${floor.floorId}`" ref="nameInput" v-model="editingName" class="mx-1 rounded-none border border-bronze bg-white px-2 py-1 text-xs" aria-label="双击编辑楼层名称" :disabled="savingEdit" @keydown.enter.prevent="saveEdit" @keydown.esc.prevent="cancelEdit" @blur="saveEdit">
             <div v-else class="flex items-center rounded-none transition" :class="floor.floorId === workspace.currentFloorId ? 'bg-bronze font-semibold text-white' : 'text-[#5f5b56] hover:bg-bg'">
-              <button class="flex min-w-0 flex-1 items-center justify-between px-2 py-1.5 text-left text-xs" :aria-current="floor.floorId === workspace.currentFloorId ? 'page' : undefined" title="单击切换楼层，双击修改楼层名称" @click="selectFloor(floor.floorId)" @dblclick.stop.prevent="startEdit(`floor:${floor.floorId}`, project.projectId, floor.floorId, floor.floorName)">
+              <button class="flex min-w-0 flex-1 items-center justify-between px-2 py-1.5 text-left text-xs" :aria-current="floor.floorId === workspace.currentFloorId ? 'page' : undefined" :title="canEditCurrentProject ? '单击切换楼层，双击修改楼层名称' : '单击切换楼层'" @click="selectFloor(floor.floorId)" @dblclick.stop.prevent="startEdit(`floor:${floor.floorId}`, project.projectId, floor.floorId, floor.floorName)">
                 <span class="truncate">{{ floor.floorName }}</span><span v-if="floor.floorId === workspace.currentFloorId" class="text-[9px] font-normal opacity-80">当前</span>
               </button>
               <button v-if="floor.floorId === workspace.currentFloorId" class="mr-1 shrink-0 rounded-none px-1 py-0.5 text-[10px] hover:bg-white/15" :aria-label="`${workspace.collapsedFloorIds.includes(floor.floorId) ? '展开' : '折叠'}${floor.floorName}空间`" :aria-expanded="!workspace.collapsedFloorIds.includes(floor.floorId)" :title="workspace.collapsedFloorIds.includes(floor.floorId) ? '展开空间' : '折叠空间'" @click="workspace.toggleFloorSpaces(floor.floorId)">
@@ -213,18 +218,18 @@ async function selectFloor(floorId: string) {
               @select="selectSpace"
             />
           </template>
-          <button v-if="project.projectId === workspace.currentProjectId" class="rounded-none px-2 py-1 text-left text-[11px] text-bronze-dark hover:bg-bg" @click="addingFloor = !addingFloor">＋ 添加新楼层</button>
+          <button v-if="canEditCurrentProject && project.projectId === workspace.currentProjectId" class="rounded-none px-2 py-1 text-left text-[11px] text-bronze-dark hover:bg-bg" @click="addingFloor = !addingFloor">＋ 添加新楼层</button>
         </div>
       </article>
     </div>
     <p v-if="canCreateProject && workspace.initialized && !workspace.projects.length" class="border-y border-line px-2 py-3 text-[11px] leading-5 text-muted">当前账号暂无可访问项目</p>
-    <form v-if="addingFloor" class="mt-1.5 flex gap-1" @submit.prevent="addFloor">
+    <form v-if="addingFloor && canEditCurrentProject" class="mt-1.5 flex gap-1" @submit.prevent="addFloor">
       <input v-model="floorName" class="min-w-0 flex-1 rounded-none border border-line bg-white px-2 py-1.5 text-xs" placeholder="如 3F / B1F" aria-label="新楼层名称">
       <button class="rounded-none bg-bronze px-2 text-xs text-white disabled:opacity-50" :disabled="savingFloor">添加</button>
     </form>
     <p v-if="actionError || workspace.error" role="alert" class="mt-1.5 px-1 text-[10px] leading-4 text-red-700">{{ actionError || workspace.error }}</p>
     <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
     <ProjectSettingsDialog v-if="showSettings" @close="showSettings = false" />
-    <CustomerRequirementsDialog v-if="showRequirements" @close="showRequirements = false" />
+    <CustomerRequirementsDialog v-if="showRequirements" :readonly="!canEditCurrentProject" @close="showRequirements = false" />
   </section>
 </template>

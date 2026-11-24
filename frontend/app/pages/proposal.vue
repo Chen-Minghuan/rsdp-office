@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { authEnabled, useAuth } from '~/composables/useAuth'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { money } from '~/utils/helpers'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
@@ -47,6 +49,7 @@ type Detail =
 
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
+const { user } = useAuth()
 const route = useRoute()
 const router = useRouter()
 const selectedDetail = ref<Detail | null>(null)
@@ -81,6 +84,9 @@ watch([previewMode, () => store.initialized, () => store.workspaceId, () => stor
     if (read === confirmationRead) savedConfirmation.value = result
   } catch { /* Confirmation remains unknown and can be requested again. */ }
 }, { immediate: true })
+const projectPermissions = computed(() => projectPermissionsFor(workspace.currentProject, user.value?.userId))
+const canEdit = computed(() => previewMode.value || !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EDIT'))
+const canExport = computed(() => !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EXPORT_PROJECT'))
 const overviewRoute = computed(() => ({ path: '/canvas', query: { floorId: workspace.currentFloorId } }))
 const products = computed(() => previewMode.value ? (store.products.length ? store.products : PRODUCTS) : store.products)
 const assetBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
@@ -350,7 +356,7 @@ function confirmGroup(group: ProposalGroup) {
 }
 
 async function confirmProposal() {
-  if (checkingCatalog.value || selectionIssues.value.length) return
+  if (!canEdit.value || checkingCatalog.value || selectionIssues.value.length) return
   if (previewMode.value) {
     demoConfirmed.value = true
     setNotice('已在演示中确认')
@@ -370,6 +376,14 @@ async function confirmProposal() {
     if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案确认失败，请稍后重试')
   } finally {
     checkingCatalog.value = false
+  }
+}
+
+async function exportProposal() {
+  try {
+    await store.exportCsv()
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : '方案导出失败')
   }
 }
 
@@ -418,7 +432,7 @@ function detailTitle(detail: Detail | null) {
           <article v-for="group in groups" :key="group.id" class="group-card" :class="{ collapsed: !isGroupOpen(group) }">
             <div class="group-header-row">
               <button type="button" class="group-header" @click="toggleGroup(group)"><span class="floor-badge" :title="group.floorLabel"><span class="w-full truncate px-0.5 text-center">{{ group.floorLabel }}</span></span><span class="group-name">{{ group.name }}</span><span class="group-chevron">{{ isGroupOpen(group) ? '▼' : '▶' }}</span><span class="group-meta">面积：{{ groupArea(group) }} <i>|</i> 金额：{{ money(groupTotal(group)) }} <i>|</i> {{ groupModules(group) }} 件商品</span><span class="group-status" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'"><span></span>{{ group.spaces.every(space => space.status === '已确认') ? '已确认' : '待确认' }}</span></button>
-              <button type="button" class="group-confirm-button" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'" :disabled="group.spaces.every(space => space.status === '已确认')" @click="confirmGroup(group)"><AppIcon name="check" size="3" />{{ group.spaces.every(space => space.status === '已确认') ? '区域已确认' : '确认区域' }}</button>
+              <button v-if="canEdit" type="button" class="group-confirm-button" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'" :disabled="group.spaces.every(space => space.status === '已确认')" @click="confirmGroup(group)"><AppIcon name="check" size="3" />{{ group.spaces.every(space => space.status === '已确认') ? '区域已确认' : '确认区域' }}</button>
             </div>
             <div v-if="isGroupOpen(group)" class="group-body">
               <div class="space-rows">
@@ -435,7 +449,7 @@ function detailTitle(detail: Detail | null) {
                     <span class="space-row-status" :class="space.status === '已确认' ? 'is-confirmed' : 'is-pending'"><span></span>{{ space.status }}</span>
                   </button>
                   <section v-if="isSpaceOpen(group, space)" :id="roomDetailId(space)" class="space-detail-board" :aria-label="space.name + '详情'">
-                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
+                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" v-if="canEdit" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
                     <div class="space-modules preset-space-board">
                       <button type="button" class="preset-panel requirement-panel" @click="openDetail({ kind: 'requirement', space: space })">
                         <div class="preset-panel-title"><span>需求描述</span><AppIcon name="arrowRight" size="3" /></div>
@@ -484,7 +498,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -515,7 +529,7 @@ function detailTitle(detail: Detail | null) {
         </template>
         <button type="button" class="proposal-primary full" @click="closeDetail">返回方案确认</button>
       </template>
-      <template v-else><label class="comment-editor">客户批注<textarea :value="selectedDetail.space.note" rows="6" placeholder="记录客户对空间、材质或预算的补充要求"></textarea></label><p class="drawer-hint">批注会和空间一起进入方案快照，便于后续复核。</p><button type="button" class="proposal-primary full" @click="closeDetail">保存批注</button></template>
+      <template v-else><label class="comment-editor">客户批注<textarea :value="selectedDetail.space.note" rows="6" placeholder="记录客户对空间、材质或预算的补充要求"></textarea></label><p class="drawer-hint">批注会和空间一起进入方案快照，便于后续复核。</p><button v-if="canEdit" type="button" class="proposal-primary full" @click="closeDetail">保存批注</button></template>
     </aside></div>
   </div>
 </template>

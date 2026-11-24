@@ -3,8 +3,18 @@ import type { CatalogCapabilities, ImportedProduct } from '~/types/imported-prod
 
 const api = useOfficeApi()
 const workspace = useWorkspaceStore()
-const rsdpWeb = useRsdpWeb()
-const products = ref<ImportedProduct[]>([])
+const { storageScope } = useAuth()
+const facetProducts = ref<ImportedProduct[] | null>(null)
+const serverProducts = ref<ImportedProduct[]>([])
+const serverTotal = ref(0)
+const catalogTotal = ref(0)
+const activeCount = ref(0)
+const collectionItems = ref<ImportedProduct[]>([])
+const loadingCollectionItems = ref(false)
+const failedCollectionItems = ref(false)
+const facetLoading = ref(false)
+const facetError = ref('')
+let facetRequest = 0
 const capabilities = ref<CatalogCapabilities | null>(null)
 const managed = ref(false)
 let listRequest = 0
@@ -20,14 +30,13 @@ async function loadCapabilities() {
 function setManaged(next: boolean) {
   if (managed.value === next) return
   managed.value = next
-  currentPage.value = 1
-  void loadProducts()
 }
 const isLoading = ref(true)
 const listError = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 const actionMessage = ref<string | null>(null)
 const search = ref('')
+const submittedSearch = ref('')
 const status = ref('')
 const category = ref('')
 const color = ref('')
@@ -65,9 +74,9 @@ let projectFavoriteStateVersion = 0
 /** 公共库工作区级开关状态（仅经销商主号可切换；成员无个人开关，完全跟随主号设置） */
 const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
 const savingCatalogStatus = ref(false)
-const activeCount = computed(() => products.value.filter(product => product.status === 'active').length)
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
-const catalogRows = computed(() => products.value.map(product => ({
+const hasFacet = computed(() => !!(category.value || color.value))
+const catalogRows = computed(() => (facetProducts.value ?? serverProducts.value).map(product => ({
   product,
   category: (product.categoryPath || []).map(part => part.trim()).filter(Boolean).join(' / '),
   color: product.colorPrimaryName?.trim() || '',
@@ -81,7 +90,7 @@ const categories = computed(() => facetOptions(catalogRows.value.map(row => row.
 const colors = computed(() => facetOptions(catalogRows.value.map(row => row.color)))
 const filtersApplied = computed(() => !!(search.value || status.value || category.value || color.value))
 const filteredProducts = computed(() => {
-  const query = search.value.trim().toLowerCase()
+  const query = submittedSearch.value.toLowerCase()
   return catalogRows.value.filter(row => {
     const { product } = row
     const matchesSearch = !query || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(query))
@@ -91,17 +100,23 @@ const filteredProducts = computed(() => {
   }).map(row => row.product)
 })
 const collection = computed(() => selectedCollection.value ?? (workspace.currentProjectId ? 'project' : 'personal'))
-const collectionLoading = computed(() => isLoading.value || (collection.value === 'project' ? projectFavoriteLoading.value : favoriteLoading.value))
-const collectionError = computed(() => !!(collection.value === 'project' ? projectFavoriteStatusError.value : favoriteStatusError.value))
+const collectionLoading = computed(() => loadingCollectionItems.value
+  || (collection.value === 'project' ? projectFavoriteLoading.value : favoriteLoading.value))
+const collectionError = computed(() => failedCollectionItems.value
+  || !!(collection.value === 'project' ? projectFavoriteStatusError.value : favoriteStatusError.value))
 const collectionProducts = computed(() => {
   if (!statsAvailable.value) return []
   const ids = collection.value === 'project' ? projectFavoriteProductIds.value : favoriteProductIds.value
-  return products.value.filter(product => ids.has(product.rspuId))
+  const visible = managed.value ? facetProducts.value ?? [] : collectionItems.value
+  return visible.filter(product => ids.has(product.rspuId))
 })
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredProducts.value.length / pageSize.value)))
-const pageProducts = computed(() => filteredProducts.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
-const pageStart = computed(() => filteredProducts.value.length ? (currentPage.value - 1) * pageSize.value + 1 : 0)
-const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, filteredProducts.value.length))
+const resultTotal = computed(() => hasFacet.value ? filteredProducts.value.length : serverTotal.value)
+const pageCount = computed(() => Math.max(1, Math.ceil(resultTotal.value / pageSize.value)))
+const pageProducts = computed(() => hasFacet.value
+  ? filteredProducts.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value)
+  : serverProducts.value)
+const pageStart = computed(() => resultTotal.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
+const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, resultTotal.value))
 const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   const total = pageCount.value
   const current = currentPage.value
@@ -115,26 +130,36 @@ const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   })
   return items
 })
-watch([search, status, category, color, pageSize], () => {
-  currentPage.value = 1
+watch(search, (value, _, onCleanup) => {
+  const timeout = setTimeout(() => { submittedSearch.value = value.trim() }, 180)
+  onCleanup(() => clearTimeout(timeout))
 })
-watch(pageCount, count => {
-  currentPage.value = Math.min(currentPage.value, count)
-  pageInput.value = currentPage.value
-})
+watch([submittedSearch, status, category, color, pageSize], () => { currentPage.value = 1 }, { flush: 'sync' })
 watch(currentPage, value => { pageInput.value = value })
+watch([submittedSearch, status, pageSize, currentPage, hasFacet], () => { void loadProducts() })
+watch([managed, storageScope], () => { void refreshCatalog() })
+onBeforeUnmount(() => { listRequest++; facetRequest++ })
 
 async function loadProducts() {
   const request = ++listRequest
+  if (hasFacet.value) {
+    isLoading.value = false
+    listError.value = null
+    void loadFacets()
+    return
+  }
   isLoading.value = true
   listError.value = null
   try {
-    const result = await api.loadImportedProducts(managed.value)
-    if (request === listRequest) {
-      products.value = result
-      if (category.value && !categories.value.includes(category.value)) category.value = ''
-      if (color.value && !colors.value.includes(color.value)) color.value = ''
-    }
+    const result = await api.loadImportedProductPage({
+      page: currentPage.value, size: pageSize.value, search: submittedSearch.value, status: status.value, managed: managed.value,
+    })
+    if (request !== listRequest) return
+    serverProducts.value = result.rows
+    serverTotal.value = result.total
+    catalogTotal.value = result.catalogTotal
+    activeCount.value = result.activeTotal
+    if (currentPage.value > pageCount.value) currentPage.value = pageCount.value
   } catch (error) {
     if (request === listRequest) listError.value = error instanceof Error ? error.message : '商品列表请求失败'
   } finally {
@@ -142,6 +167,32 @@ async function loadProducts() {
   }
 }
 
+async function loadFacets() {
+  if (facetProducts.value !== null || facetLoading.value) return
+  const request = ++facetRequest
+  facetLoading.value = true
+  facetError.value = ''
+  try {
+    const visible = await api.loadImportedProducts(managed.value)
+    if (request === facetRequest) facetProducts.value = visible
+  } catch {
+    if (request === facetRequest) facetError.value = '分类和主色暂时无法加载，请重试。'
+  } finally {
+    if (request === facetRequest) facetLoading.value = false
+  }
+}
+
+async function refreshCatalog() {
+  facetRequest++
+  facetProducts.value = null
+  facetError.value = ''
+  facetLoading.value = false
+  category.value = ''
+  color.value = ''
+  currentPage.value = 1
+  await loadProducts()
+  if (managed.value) void loadFacets()
+}
 async function loadCatalogStatus() {
   try {
     catalogStatus.value = await api.getSharedCatalogStatus()
@@ -164,7 +215,7 @@ async function toggleWorkspaceSharedCatalog() {
     managed.value = false
     currentPage.value = 1
     actionMessage.value = updated.workspaceEnabled ? '公共库已开启，对整个工作区生效' : '公共库已关闭，对整个工作区生效'
-    await loadProducts()
+    await refreshCatalog()
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : '公共库开关切换失败'
   } finally {
@@ -174,6 +225,7 @@ async function toggleWorkspaceSharedCatalog() {
 
 function resetFilters() {
   search.value = ''
+  submittedSearch.value = ''
   status.value = ''
   category.value = ''
   color.value = ''
@@ -232,7 +284,26 @@ function openFavorites(product: ImportedProduct, section: 'project' | 'personal'
   void favoriteDialog.value?.open(product, section)
 }
 
+const collectionVersion = ref(0)
+watch([collection, () => workspace.currentProjectId, storageScope, collectionVersion, () => catalogStatus.value?.effectiveVisible],
+  async ([section, projectId], _, onCleanup) => {
+    let current = true
+    onCleanup(() => { current = false })
+    collectionItems.value = []
+    loadingCollectionItems.value = true
+    failedCollectionItems.value = false
+    try {
+      const rows = section === 'project' ? (projectId ? await api.loadProjectFavoriteItems(projectId) : []) : await api.loadFavoriteItems()
+      if (current) collectionItems.value = rows
+    } catch {
+      if (current) failedCollectionItems.value = true
+    } finally {
+      if (current) loadingCollectionItems.value = false
+    }
+  }, { immediate: true })
+
 function reloadCollection() {
+  collectionVersion.value++
   if (collection.value === 'project') return loadProjectFavoriteProductIds(true)
   return loadFavoriteProductIds()
 }
@@ -285,6 +356,7 @@ async function confirmRemoveFavorite() {
 }
 
 function favoriteSaved(payload: { rspuId: string, folderIds: string[] }) {
+  collectionVersion.value++
   favoriteStateVersion++
   const next = new Set(favoriteProductIds.value)
   if (payload.folderIds.length) next.add(payload.rspuId)
@@ -295,6 +367,7 @@ function favoriteSaved(payload: { rspuId: string, folderIds: string[] }) {
 }
 
 function projectFavoriteSaved(payload: { rspuId: string, projectId: string, selected: boolean }) {
+  collectionVersion.value++
   if (payload.projectId !== workspace.currentProjectId) return
   projectFavoriteStateVersion++
   const next = new Set(projectFavoriteProductIds.value)
@@ -327,9 +400,9 @@ onMounted(() => {
             {{ savingCatalogStatus ? '保存中' : catalogStatus.workspaceEnabled ? '已开启' : '已关闭' }}
           </span>
         </button>
-        <a :href="rsdpWeb('/products')" target="_blank" rel="noopener" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
-          去 RSDP 管理商品
-        </a>
+        <NuxtLink to="/products/local" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
+          本地商品
+        </NuxtLink>
         <button type="button" class="collection-toggle border border-neutral-300 px-3 py-2 text-sm font-semibold text-accent-ink"
           :aria-controls="collectionId" :aria-expanded="collectionOpen" @click="toggleCollection">收藏夹</button>
       </div>
@@ -340,7 +413,7 @@ onMounted(() => {
       <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': managed }" :aria-pressed="managed" @click="setManaged(true)">本厂录入</button>
     </nav>
     <div class="flex flex-none flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted" aria-live="polite">
-      <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? products.length : '—' }}</strong></span>
+      <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? catalogTotal : '—' }}</strong></span>
       <span>在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
       <span v-if="catalogStatus && !catalogStatus.workspaceEnabled">公共库已被工作区主号关闭，当前仅显示本厂商品</span>
       <span v-if="favoriteStatusError" class="text-red-800">收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadFavoriteProductIds">重试</button></span>
@@ -354,19 +427,19 @@ onMounted(() => {
             搜索商品
             <span class="relative block">
               <AppIcon name="search" size="4" class="absolute left-3 top-3 text-muted" />
-              <input v-model="search" type="search" aria-label="搜索商品名称或编码" placeholder="商品名称、编码" class="w-full border border-neutral-300 bg-white py-2.5 pl-9 pr-2 text-sm" :disabled="!statsAvailable">
+              <input v-model="search" type="search" maxlength="120" aria-label="搜索商品名称或编码" placeholder="商品名称、编码" class="w-full border border-neutral-300 bg-white py-2.5 pl-9 pr-2 text-sm" :disabled="!statsAvailable">
             </span>
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
             产品分类
-            <select v-model="category" aria-label="筛选产品分类" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" :disabled="!statsAvailable || !categories.length">
+            <select v-model="category" aria-label="筛选产品分类" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" @focus="loadFacets" @pointerenter="loadFacets" :disabled="!statsAvailable || !catalogTotal">
               <option value="">全部分类</option>
               <option v-for="value in categories" :key="value" :value="value">{{ value }}</option>
             </select>
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
             商品主色
-            <select v-model="color" aria-label="筛选商品主色" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" :disabled="!statsAvailable || !colors.length">
+            <select v-model="color" aria-label="筛选商品主色" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" @focus="loadFacets" @pointerenter="loadFacets" :disabled="!statsAvailable || !catalogTotal">
               <option value="">全部主色</option>
               <option v-for="value in colors" :key="value" :value="value">{{ value }}</option>
             </select>
@@ -378,11 +451,14 @@ onMounted(() => {
             </select>
           </label>
           <div class="flex flex-wrap items-center gap-2">
-            <button type="button" class="border border-neutral-300 p-2.5 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="loadProducts"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
+            <button type="button" class="border border-neutral-300 p-2.5 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="refreshCatalog"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
             <button v-if="filtersApplied" type="button" class="px-1 text-xs font-semibold text-accent-ink hover:underline" @click="resetFilters">清空条件</button>
           </div>
         </form>
 
+        <p v-if="facetError" class="py-2 text-xs text-red-700" role="status">
+          {{ facetError }} <button type="button" class="underline" @click="loadFacets">重试</button>
+        </p>
         <div v-if="actionError" class="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{{ actionError }}</div>
         <div v-if="actionMessage" class="border-b border-green/20 bg-green/10 px-4 py-3 text-sm text-green" role="status">{{ actionMessage }}</div>
 
@@ -401,16 +477,16 @@ onMounted(() => {
             <div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-red-50 text-red-700"><AppIcon name="warning" size="6" /></div>
             <h2 class="mb-2 text-base font-bold">商品暂时无法加载</h2>
             <p class="mb-5 text-sm text-muted">请检查服务连接后重试，商品数量暂不可用。</p>
-            <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark" @click="loadProducts"><AppIcon name="reset" size="4" />重新加载</button>
+            <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark" @click="refreshCatalog"><AppIcon name="reset" size="4" />重新加载</button>
             <details class="mt-5 text-left text-xs text-muted"><summary class="cursor-pointer text-center">技术详情</summary><p class="mt-3 break-all rounded-lg bg-bg p-3">{{ listError }}</p></details>
           </div>
         </div>
 
-        <div v-else-if="products.length === 0" class="grid min-h-[320px] place-items-center p-6">
+        <div v-else-if="catalogTotal === 0" class="grid min-h-[320px] place-items-center p-6">
           <div class="text-center"><div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-cream text-bronze"><AppIcon name="cube" size="6" /></div><h2 class="mb-2 text-base font-bold">商品库还是空的</h2><p class="text-sm text-muted">当前范围没有可读取的商品。</p></div>
         </div>
 
-        <div v-else-if="filteredProducts.length === 0" class="grid min-h-[280px] place-items-center p-6">
+        <div v-else-if="resultTotal === 0" class="grid min-h-[280px] place-items-center p-6">
           <div class="text-center"><h2 class="mb-2 text-base font-bold">没有找到匹配的商品</h2><p class="mb-4 text-sm text-muted">试试其他关键词，或调整筛选条件。</p><button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark" @click="resetFilters">清空筛选</button></div>
         </div>
 
@@ -425,10 +501,10 @@ onMounted(() => {
           />
         </ul>
 
-        <div v-if="statsAvailable && filteredProducts.length" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
+        <div v-if="statsAvailable && resultTotal" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="text-xs text-muted" aria-live="polite">
-              正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ filteredProducts.length }}</strong> 件商品
+              正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ resultTotal }}</strong> 件商品
             </div>
 
             <div class="flex min-w-0 flex-wrap items-center gap-3">

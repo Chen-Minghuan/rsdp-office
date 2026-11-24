@@ -35,7 +35,9 @@ try {
   await context.route('**/api/v1/**', route => {
     const path = new URL(route.request().url()).pathname
     const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: '成功', data }) })
-    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '清单预览项目', floors: [{ floorId, projectId, name: '1F' }] }])
+    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '清单预览项目', leader: {
+      userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'],
+    }, floors: [{ floorId, projectId, name: '1F' }] }])
     if (path === '/api/v1/office/products') return respond([P1])
     return respond(path.endsWith('/canvas') ? null : [])
   })

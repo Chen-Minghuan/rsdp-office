@@ -29,7 +29,7 @@ const isProductScheme = computed(() => route.query.view === 'products' && store.
 const {
   state: schemeState, busy: schemeBusy, error: schemeError, message: schemeMessage, source: schemeSource, favoriteIds,
   sourceError, bundles, bundleId, clipboard, room: schemeRoom, furniture: schemeFurniture, selectedCount,
-  canApply, canClear, currentConfirmation, renders, refreshRenders, change: changeScheme, copy: copyScheme, applyBundle,
+  canEdit: canEditScheme, canApply, canClear, currentConfirmation, renders, refreshRenders, change: changeScheme, copy: copyScheme, applyBundle,
 } = useProductScheme(isProductScheme)
 watch(showRenderPreview, open => { if (!open && isProductScheme.value) void refreshRenders() })
 const schemeArea = computed(() => {
@@ -220,10 +220,10 @@ watch(() => store.canEnterLayout, (confirmed) => {
       <span>已选 <strong>{{ selectedCount }}</strong> / {{ schemeFurniture.length }} 件</span>
       <div class="scheme-versions" aria-label="房间方案">
         <button v-for="slot in (['A', 'B'] as const)" :key="slot" type="button"
-          :aria-pressed="schemeState ? schemeState.activeSlot === slot : undefined" :disabled="schemeBusy || !store.apiReady || !schemeRoom"
+          :aria-pressed="schemeState ? schemeState.activeSlot === slot : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
           @click="switchScheme(slot)">Plan {{ slot }}</button>
       </div>
-      <button type="button" :disabled="schemeBusy || !store.apiReady || !canClear" @click="clearScheme">清空选品</button>
+      <button type="button" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !canClear" @click="clearScheme">清空选品</button>
       <p v-if="schemeError || schemeMessage" class="scheme-feedback" :role="schemeError ? 'alert' : 'status'">{{ schemeError || schemeMessage }}</p>
     </header>
     <div class="flex-1 min-h-0 flex" :class="{ 'scheme-body': isProductScheme }" :inert="schemeBusy || undefined">
@@ -285,8 +285,8 @@ watch(() => store.canEnterLayout, (confirmed) => {
         <button v-for="style in renderStyles" :key="style" type="button" :aria-pressed="style === renderStyle" @click="renderStyle = style">{{ style }}</button>
       </div>
       <button type="button" :disabled="!schemeFurniture.length" @click="showWhiteModel = true">3D 预览</button>
-      <button v-if="currentConfirmation" class="scheme-generate" type="button" @click="openRenderPreview()">生成方案效果图</button>
-      <NuxtLink v-else class="scheme-generate" :to="proposalRoute">去项目清单确认</NuxtLink>
+      <button v-if="canEditScheme && currentConfirmation" class="scheme-generate" type="button" @click="openRenderPreview()">生成方案效果图</button>
+      <NuxtLink v-else-if="canEditScheme" class="scheme-generate" :to="proposalRoute">去项目清单确认</NuxtLink>
       <button type="button" @click="openRenderPreview()">生成记录</button>
       <button v-for="image in renders" :key="image.previewId" class="scheme-thumbnail" type="button" :aria-label="image.style + '效果图'" @click="openRenderPreview('', image.previewId)">
         <img :src="renderFiles.imageUrl(image.imageUrl)" :alt="image.style" :class="{ 'opacity-50': image.stale }">
@@ -294,8 +294,8 @@ watch(() => store.canEnterLayout, (confirmed) => {
     </footer>
 
     <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :view-image="renderViewImage" :formal="isProductScheme"
-      :confirmation-id="currentConfirmation" :initial-style="isProductScheme ? renderStyle : undefined" :initial-preview-id="selectedRenderId" />
-    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" @ai-render="openRenderPreview" @locate="onLocateFrom3d" />
+      :confirmation-id="canEditScheme ? currentConfirmation : undefined" :initial-style="isProductScheme ? renderStyle : undefined" :initial-preview-id="selectedRenderId" />
+    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" :readonly="isProductScheme && !canEditScheme" @ai-render="openRenderPreview" @locate="onLocateFrom3d" />
   </div>
 </template>
 

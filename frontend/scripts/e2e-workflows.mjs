@@ -66,12 +66,12 @@ const reviewMock = createReviewConfirmMock()
 const defaultProject = {
   projectId: 'OFFICE-PROJECT-001', name: '默认办公项目', customerRequirements: '', requirementsRevision: 1,
   budgetTotal: 124331.15, budgetStatus: 'PENDING_PRICING',
-  leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+  leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT', 'EXPORT_PROJECT'] }, collaborators: [], referenceImages: [],
   floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
 }
 const secondProject = {
   projectId: 'OFFICE-PROJECT-002', name: '第二个办公项目', customerRequirements: '', requirementsRevision: 1,
-  leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+  leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT', 'EXPORT_PROJECT'] }, collaborators: [], referenceImages: [],
   floors: [{ projectId: 'OFFICE-PROJECT-002', floorId: 'OFFICE-PROJECT-002-FLOOR', name: '默认楼层', sortOrder: 1 }],
 }
 const availableProjects = [defaultProject, secondProject]
@@ -105,7 +105,20 @@ await context.route('**/api/v1/**', async route => {
   }
   if (url.pathname === '/api/v1/products' && request.method() === 'GET') {
     if (listMode === 'error') return respond(null, 404)
-    return respond(listMode === 'empty' ? [] : catalogEnabled ? products : [])
+    return respond(listMode === 'empty' || !catalogEnabled ? [] : products)
+  }
+  if (url.pathname === '/api/v1/products/page' && request.method() === 'GET') {
+    if (listMode === 'error') return respond(null, 404)
+    const catalog = listMode === 'empty' || !catalogEnabled ? [] : products
+    const page = Number(url.searchParams.get('page'))
+    const size = Number(url.searchParams.get('size'))
+    const search = (url.searchParams.get('search') || '').toLowerCase()
+    const status = url.searchParams.get('status')
+    const matches = catalog.filter(product => (
+      !search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search))
+    ) && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active')))
+    return respond({ page, size, rows: matches.slice((page - 1) * size, page * size), total: matches.length,
+      catalogTotal: catalog.length, activeTotal: catalog.filter(product => product.status === 'active').length })
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
@@ -123,6 +136,14 @@ await context.route('**/api/v1/**', async route => {
       await new Promise(resolve => setTimeout(resolve, 3000))
     }
     return respond(projectFavoriteItems.filter(item => item.projectId === projectId).map(item => item.rspuId).sort())
+  }
+  const projectFavoriteItemsMatch = url.pathname.match(/^\/api\/v1\/office\/projects\/([^/]+)\/favorites\/items$/)
+  if (projectFavoriteItemsMatch && request.method() === 'GET') {
+    const projectId = projectFavoriteItemsMatch[1]
+    return respond(products.filter(product => projectFavoriteItems.some(item => item.projectId === projectId && item.rspuId === product.rspuId)))
+  }
+  if (url.pathname === '/api/v1/office/favorites/items' && request.method() === 'GET') {
+    return respond(products.filter(product => favoriteItems.some(item => item.rspuId === product.rspuId)))
   }
   const projectFavoriteMatch = url.pathname.match(/^\/api\/v1\/office\/projects\/([^/]+)\/favorites\/(PRODUCT-[^/]+)$/)
   if (projectFavoriteMatch && request.method() === 'GET') {
@@ -232,6 +253,10 @@ try {
   await page.setViewportSize({ width: 1440, height: 960 })
   const categoryFilter = page.getByRole('combobox', { name: '筛选产品分类' })
   const colorFilter = page.getByRole('combobox', { name: '筛选商品主色' })
+  await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products'),
+    categoryFilter.focus(),
+  ])
   await categoryFilter.selectOption('办公家具 / 办公椅')
   assert.equal(await productCards().count(), 2)
   await colorFilter.selectOption('深木色')
@@ -240,6 +265,7 @@ try {
   await page.getByLabel('搜索商品名称或编码').fill('RSDP-001')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选', exact: true }).click()
+  await productCards().nth(19).waitFor()
   assert.equal(await productCards().count(), 20)
   assert.equal(await categoryFilter.inputValue(), '')
   assert.equal(await colorFilter.inputValue(), '')
@@ -527,12 +553,18 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await catalogSwitch.count(), 0)
 
-  await page.getByLabel('每页显示数量').selectOption('10')
+  const waitForCatalogPage = (pageNumber, size, search = null) => page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/v1/products/page' && url.searchParams.get('page') === String(pageNumber) &&
+      url.searchParams.get('size') === String(size) && url.searchParams.get('search') === search
+  })
+  await Promise.all([waitForCatalogPage(1, 10), page.getByLabel('每页显示数量').selectOption('10')])
+  await productCards().nth(9).waitFor()
+  await Promise.all([waitForCatalogPage(2, 10), page.getByRole('button', { name: '下一页', exact: true }).click()])
+  await page.getByText('11–20', { exact: true }).waitFor()
   assert.equal(await productCards().count(), 10)
-  await page.getByRole('button', { name: '下一页', exact: true }).click()
-  await page.waitForFunction(() => document.querySelectorAll('[aria-label="商品卡片列表"] > li').length === 10)
-  assert.equal(await productCards().count(), 10)
-  await page.getByLabel('搜索商品名称或编码').fill('RSDP-002')
+  await Promise.all([waitForCatalogPage(1, 10, 'RSDP-002'), page.getByLabel('搜索商品名称或编码').fill('RSDP-002')])
+  await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().waitFor()
   assert.equal(await productCards().count(), 1)
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
@@ -541,11 +573,25 @@ try {
   await page.getByRole('cell', { name: '供应商尺寸原文', exact: true }).waitFor()
   assert.equal(await page.getByRole('cell', { name: '1400 × 600 mm', exact: true }).count(), 0)
   assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
+
+  const detailRequests = []
+  const recordDetailRequest = request => {
+    if (request.method() === 'GET') detailRequests.push(new URL(request.url()).pathname)
+  }
+  page.on('request', recordDetailRequest)
+  await page.reload({ waitUntil: 'networkidle' })
+  await heading('简约办公桌 2')
+  page.off('request', recordDetailRequest)
+  const detailPath = `/api/v1${new URL(page.url()).pathname}`
+  assert.equal(detailRequests.filter(path => path === detailPath).length, 1, '直达商品详情只加载一次')
+  assert.ok(!detailRequests.some(path => path === '/api/v1/office/products' || /\/(?:canvas|cart|budgets)$/.test(path)), '商品详情无需加载楼层数据或项目预算')
+
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选' }).click()
   await page.getByLabel('筛选商品状态').selectOption('active')
+  await productCards().nth(14).waitFor()
   assert.equal(await productCards().count(), 15)
   await page.getByLabel('筛选商品状态').selectOption('')
 
@@ -629,7 +675,10 @@ try {
   assert.equal(await schemeLink.getAttribute('aria-current'), 'page')
 
   await productsLink.click()
-  await page.getByRole('link', { name: '去 RSDP 管理商品' }).waitFor()
+  const localProductsLink = page.getByRole('link', { name: '本地商品', exact: true })
+  await localProductsLink.waitFor()
+  assert.equal(await localProductsLink.getAttribute('href'), '/products/local')
+  assert.equal(await page.getByRole('link', { name: '去 RSDP 管理商品', exact: true }).count(), 0)
   assert.equal(await page.getByRole('link', { name: '手工录入' }).count(), 0)
   assert.equal(await page.getByRole('link', { name: '批量导入' }).count(), 0)
 

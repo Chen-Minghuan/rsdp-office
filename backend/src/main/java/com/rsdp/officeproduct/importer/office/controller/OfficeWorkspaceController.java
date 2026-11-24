@@ -1,5 +1,6 @@
 package com.rsdp.officeproduct.importer.office.controller;
 
+import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.office.dto.CreateWorkspaceUserRequest;
 import com.rsdp.officeproduct.importer.office.dto.WorkspaceDto;
@@ -9,6 +10,7 @@ import com.rsdp.officeproduct.importer.office.service.SharedCatalogService;
 import com.rsdp.officeproduct.importer.office.service.SharedCatalogService.SharedCatalogStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -40,6 +42,15 @@ public class OfficeWorkspaceController {
     @PostMapping("/users")
     public Result<WorkspaceUserDto> createUser(@RequestBody CreateWorkspaceUserRequest request) {
         return Result.ok(workspaceService.createWorkspaceUser(request));
+    }
+
+    @PutMapping("/users/{userId}/product-entry")
+    public Result<Void> setProductEntry(@PathVariable String userId, @RequestBody Map<String, Boolean> request) {
+        if (request.get("enabled") == null) {
+            throw new BusinessException("缺少商品录入权限设置");
+        }
+        workspaceService.setProductEntry(userId, request.get("enabled"));
+        return Result.ok(null);
     }
 
     /** 公共库开关状态（工作区级 + 是否主号），前端回显用。 */

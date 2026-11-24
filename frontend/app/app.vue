@@ -10,32 +10,31 @@ const route = router.currentRoute
 const isLoginPage = computed(() => route.value.name === 'login')
 const isSpatialWorkbench = computed(() => route.value.path === '/spatial-canvas')
 const isProjectPage = computed(() => isProjectBench.value || isProjectWorkflow.value)
-const isProductsPage = computed(() => route.value.path === '/products')
-const isFavoritesPage = computed(() => route.value.path === '/favorites')
-const pageKey = computed(() => isProductsPage.value ? 'products' : isFavoritesPage.value ? 'favorites' : workspace.currentFloorId)
-const floorPending = computed(() => !isProductsPage.value && !isFavoritesPage.value && (workspace.switching || (isProjectPage.value && !!workspace.currentFloorId && !floorReady.value)))
+const pageKey = computed(() => isProjectWorkflow.value ? workspace.currentFloorId : route.value.path)
+const floorPending = computed(() => isProjectWorkflow.value &&
+  (workspace.switching || (!!workspace.currentFloorId && !floorReady.value)))
+
 async function initializeWorkspace() {
-  if (isLoginPage.value || (workspace.initialized && store.initialized)) return
+  if (isLoginPage.value) return
   await workspace.init()
+  if (!isProjectWorkflow.value || !workspace.initialized || workspace.switching) return
   if (!store.initialized) await store.init()
+  else if (workspace.currentFloorId && store.workspaceId !== workspace.currentFloorId) {
+    await store.activateFloor(workspace.currentFloorId)
+  }
 }
 watch([() => route.value.query.floorId, () => workspace.initialized, () => workspace.switching], ([floorId, initialized, switching]) => {
   if (!initialized || switching || typeof floorId !== 'string') return
   if (floorId === workspace.currentFloorId) return
   if (workspace.projects.some(project => project.floors.some(floor => floor.floorId === floorId))) {
-    void workspace.activateFloor(floorId)
+    if (isProjectWorkflow.value) void workspace.activateFloor(floorId)
+    else workspace.selectFloorContext(floorId)
   } else if (isProjectPage.value) {
     void router.replace(projectBenchPath)
   }
 })
 onMounted(() => { void initializeWorkspace() })
-watch(isLoginPage, (loginPage, wasLoginPage) => {
-  if (wasLoginPage && !loginPage) void initializeWorkspace()
-})
-// 初始化曾失败（未锁定 initialized）时，切换路由自动重试加载真实工作区
-watch(() => route.value.path, () => {
-  if (!workspace.initialized && !isLoginPage.value) void initializeWorkspace()
-})
+watch([() => route.value.path, isProjectWorkflow], () => { void initializeWorkspace() })
 </script>
 
 <template>

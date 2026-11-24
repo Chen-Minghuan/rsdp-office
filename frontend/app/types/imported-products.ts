@@ -113,3 +113,11 @@ export interface ProductDetail {
   variants: ProductVariant[]
   images: ProductImage[]
 }
+export interface CatalogProductPage {
+  rows: ImportedProduct[]
+  total: number
+  catalogTotal: number
+  activeTotal: number
+  page: number
+  size: number
+}
