@@ -24,6 +24,7 @@ public class RenderPreviewService {
     private final OfficeService office;
     private final RenderProductReferences productReferences;
     private final RenderProductAuditService productAudit;
+    private final RenderGeometryAuditService geometryAudit;
     private final RenderLayoutContext layoutContext;
     private final OfficeWorkspaceLockMapper workspaceLocks;
     private final RenderPreviewMapper previews;
@@ -36,10 +37,13 @@ public class RenderPreviewService {
     public ObjectNode create(String projectId, RenderPreviewRequest request) {
         project(projectId);
         validateRequest(request);
+        var options=RenderGenerationOptions.from(request.getPromptMode(),request.getReferenceMode(),request.getPromptExtend(),request.getSeed(),request.getSampleIndex());
+        long requestStartedAt=System.currentTimeMillis();
         workspaceLocks.lockWorkspace(projectId);
         JsonNode expected=RenderPreviewScene.canonical(request.getExpectedSnapshot());
-        String hash=VisionImagePreparer.sha256(encode(RenderPreviewScene.canonical(json.valueToTree(Map.of("snapshot",expected,"style",request.getStyle(),"view",request.getView(),
-            "instructions",request.getInstructions(),"model",properties.getModel())))).getBytes(StandardCharsets.UTF_8));
+        Map<String,Object> content=new LinkedHashMap<>();content.put("snapshot",expected);content.put("style",request.getStyle());content.put("view",request.getView());content.put("instructions",request.getInstructions());content.put("model",properties.getModel());
+        if(options.explicit())content.put("generation",options.manifest());
+        String hash=VisionImagePreparer.sha256(encode(RenderPreviewScene.canonical(json.valueToTree(content))).getBytes(StandardCharsets.UTF_8));
         RenderPreview previous=previews.byChange(projectId,request.getClientChangeId());
         if (previous!=null) {
             if (!hash.equals(previous.getContentHash())) throw new BusinessException("同一生成请求对应不同内容，请重新发起");
@@ -53,6 +57,7 @@ public class RenderPreviewService {
         // Concept preview is deliberately allowed before product selection. It cannot confirm a final scheme.
         var physicalContext=layoutContext.prepare(projectId,scene);
         var bindings=RenderFurnitureBindings.from(scene);
+        var spatial=RenderSpatialControl.prepare(scene,bindings);
         var products=productReferences.prepare(scene,bindings);
         provider.requireConfigured();
         RenderPreview entry=new RenderPreview();
@@ -62,35 +67,47 @@ public class RenderPreviewService {
         entry.setStyle(request.getStyle()); entry.setView("ISOMETRIC"); entry.setInstructions(request.getInstructions());
         entry.setModel(properties.getModel()); entry.setProviderBaseUrl(provider.base()); entry.setStatus("SUBMITTING");
         entry.setCreatedAt(LocalDateTime.now()); entry.setUpdatedAt(entry.getCreatedAt());
-        entry.setPrompt(RenderPreviewScene.prompt(scene,entry.getStyle(),"ISOMETRIC",entry.getInstructions(),false) + bindings.prompt() + physicalContext.prompt() + products.prompt());
-        byte[] reference=RenderPreviewScene.referencePng(scene);
-        entry.setReferenceUrl(files.reference(entry.getPreviewId(),reference));
+        entry.setPrompt(RenderPromptCompiler.compile(scene,entry.getStyle(),entry.getInstructions(),bindings,physicalContext,products,spatial,options));
+        var planGuide=RenderPlanGuide.render(spatial,false);
+        entry.setReferenceUrl(files.reference(entry.getPreviewId()+"-plan",planGuide.image()));
         var referenceImages=new ArrayList<byte[]>();
         ObjectNode storedScene=scene.deepCopy();
         ObjectNode references=storedScene.putObject("renderProductReferences");
         references.put("sourceType","spaceGuide");
         references.put("bindingVersion","furniture-product-v1");
         references.set("furnitureBindings",bindings.manifest());
-        var guide=RenderSceneGuide.render(scene,"ISOMETRIC",bindings);
-        referenceImages.add(guide.image()); references.put("guideUrl",files.reference(entry.getPreviewId()+"-space-guide",guide.image()));
+        var generationGuide=RenderSceneGuide.render(scene,"ISOMETRIC",bindings,false,spatial);
+        var bindingGuide=RenderSceneGuide.render(scene,"ISOMETRIC",bindings,true,spatial);
+        String guideUrl=files.reference(entry.getPreviewId()+"-space-guide",generationGuide.image());
+        String bindingGuideUrl=files.reference(entry.getPreviewId()+"-space-binding-guide",bindingGuide.image());
+        referenceImages.add(generationGuide.image()); references.put("guideUrl",guideUrl);
+        references.put("bindingGuideUrl",bindingGuideUrl);
+        if(options.includePlan())referenceImages.add(planGuide.image());references.put("planGuideUrl",entry.getReferenceUrl());
+        references.set("spatialControl",spatial.manifest());
         var guideLabels=references.putArray("guideLabels");
-        for(var label:guide.labels()) guideLabels.addObject().put("referenceId",label.referenceId()).put("furnitureId",label.furnitureId()).put("x",label.x()).put("y",label.y());
+        for(var label:bindingGuide.labels()) guideLabels.addObject().put("referenceId",label.referenceId()).put("furnitureId",label.furnitureId()).put("x",label.x()).put("y",label.y());
         referenceImages.addAll(products.images());
         references.set("layoutContext",physicalContext.facts());
-        references.put("version",RenderProductReferences.VERSION); references.set("items",products.manifest());
+        references.put("version",options.concise()||options.promptExtend()?RenderGenerationOptions.EXPERIMENT_VERSION:RenderProductReferences.VERSION); references.set("generationExperiment",options.manifest()); references.putObject("generationTiming").put("requestStartedAt",requestStartedAt); references.set("items",products.manifest());
+        references.set("productUnderstanding",products.understanding());
         var urls=references.putArray("sheetUrls");
         for (int i=0;i<products.images().size();i++) urls.add(files.reference(entry.getPreviewId()+"-products-"+(i+1),products.images().get(i)));
+        var generationImages=references.putArray("generationImages");generationImages.addObject().put("role","CLEAN_GUIDE").put("url",guideUrl).put("sha256",VisionImagePreparer.sha256(generationGuide.image()));
+        if(options.includePlan())generationImages.addObject().put("role","CLEAN_PLAN").put("url",entry.getReferenceUrl()).put("sha256",VisionImagePreparer.sha256(planGuide.image()));
+        for(int i=0;i<products.images().size();i++)generationImages.addObject().put("role","PRODUCT_BOARD").put("url",urls.get(i).asText()).put("sha256",VisionImagePreparer.sha256(products.images().get(i)));
         entry.setSnapshotJson(encode(storedScene));
         previews.insert(entry);
+        long submitStartedAt=System.currentTimeMillis();references.withObject("/generationTiming").put("submitStartedAt",submitStartedAt);
         try {
-            JsonNode result=provider.submit(referenceImages,entry.getPrompt());
+            JsonNode result=provider.submit(referenceImages,entry.getPrompt(),options);
             String taskId=result.path("output").path("task_id").asText();
             if (!taskId.matches("[A-Za-z0-9_-]{1,128}")) throw new BusinessException("生图服务没有返回有效任务，请核对百炼请求记录后重试");
             entry.setProviderTaskId(taskId); entry.setProviderRequestId(result.path("request_id").asText());
-            entry.setStatus("PENDING");
+            entry.setStatus("PENDING");references.withObject("/generationTiming").put("submittedAt",System.currentTimeMillis());
         } catch (BusinessException e) {
-            entry.setStatus("FAILED"); entry.setErrorMessage(e.getMessage());
+            entry.setStatus("FAILED"); entry.setErrorMessage(e.getMessage());references.withObject("/generationTiming").put("failedAt",System.currentTimeMillis());
         }
+        entry.setSnapshotJson(encode(storedScene));
         entry.setUpdatedAt(LocalDateTime.now()); previews.update(entry);
         return response(entry);
     }
@@ -107,23 +124,23 @@ public class RenderPreviewService {
         if (entry==null) throw new BusinessException("效果预览不存在或不属于当前项目");
         if (List.of("SUBMITTING","PENDING","RUNNING").contains(entry.getStatus())) {
             if (entry.getCreatedAt().isBefore(LocalDateTime.now().minusHours(23))) {
-                entry.setStatus("FAILED"); entry.setErrorMessage("任务已超过可查询时限，请重新生成");
+                entry.setStatus("FAILED"); entry.setErrorMessage("任务已超过可查询时限，请重新生成");updateTiming(entry,timing->timing.put("failedAt",System.currentTimeMillis()));
             } else if (entry.getProviderTaskId()==null) {
-                entry.setStatus("FAILED"); entry.setErrorMessage("提交结果未知，请核对百炼请求记录后重试");
+                entry.setStatus("FAILED"); entry.setErrorMessage("提交结果未知，请核对百炼请求记录后重试");updateTiming(entry,timing->timing.put("failedAt",System.currentTimeMillis()));
             } else {
                 // A network/download error leaves the task pollable; never bill a replacement automatically.
                 JsonNode result=provider.poll(entry.getProviderTaskId(),entry.getProviderBaseUrl());
                 JsonNode output=result.path("output"); String status=output.path("task_status").asText();
                 switch (status) {
-                    case "PENDING", "RUNNING" -> entry.setStatus(status);
-                    case "SUCCEEDED" -> {
+                    case "PENDING", "RUNNING" -> { entry.setStatus(status);updateTiming(entry,timing->{timing.put("lastPolledAt",System.currentTimeMillis());if("RUNNING".equals(status)&&!timing.has("firstRunningAt"))timing.put("firstRunningAt",System.currentTimeMillis());}); }
+                    case "SUCCEEDED" -> { updateTiming(entry,timing->timing.put("providerCompletedAt",System.currentTimeMillis()));
                         String image=null;
                         for (JsonNode choice : output.path("choices")) for (JsonNode part : choice.path("message").path("content"))
                             if (part.hasNonNull("image") && image==null) image=part.path("image").asText();
-                        if (image==null || image.isBlank()) { entry.setStatus("FAILED"); entry.setErrorMessage("生图任务已结束，但没有返回图片，请核对百炼请求记录"); }
-                        else { entry.setImageUrl(files.download(entry.getPreviewId(),image)); entry.setStatus("SUCCEEDED"); entry.setErrorMessage(null); auditResult(entry); }
+                        if (image==null || image.isBlank()) { entry.setStatus("FAILED"); entry.setErrorMessage("生图任务已结束，但没有返回图片，请核对百炼请求记录");updateTiming(entry,timing->timing.put("failedAt",System.currentTimeMillis())); }
+                        else { entry.setImageUrl(files.download(entry.getPreviewId(),image)); entry.setStatus("SUCCEEDED"); entry.setErrorMessage(null);updateTiming(entry,timing->timing.put("readyAt",System.currentTimeMillis()));auditResult(entry); }
                     }
-                    case "FAILED", "CANCELED", "UNKNOWN" -> { entry.setStatus("FAILED"); entry.setErrorMessage("UNKNOWN".equals(status) ? "百炼任务不存在或已过期，请核对任务记录后重新生成" : "生图任务失败或被取消，请检查百炼任务详情、内容要求及额度后重试"); }
+                    case "FAILED", "CANCELED", "UNKNOWN" -> { entry.setStatus("FAILED"); entry.setErrorMessage("UNKNOWN".equals(status) ? "百炼任务不存在或已过期，请核对任务记录后重新生成" : "生图任务失败或被取消，请检查百炼任务详情、内容要求及额度后重试");updateTiming(entry,timing->timing.put("failedAt",System.currentTimeMillis())); }
                     default -> throw new BusinessException("暂时无法读取生图任务状态，请稍后查询");
                 }
                 if (result.hasNonNull("request_id")) entry.setProviderRequestId(result.path("request_id").asText());
@@ -133,14 +150,28 @@ public class RenderPreviewService {
         return response(entry);
     }
 
-    private ObjectNode response(RenderPreview entry) {
+    private void updateTiming(RenderPreview entry,java.util.function.Consumer<ObjectNode> update) {
+        ObjectNode stored=(ObjectNode)decode(entry.getSnapshotJson());ObjectNode references=(ObjectNode)stored.path("renderProductReferences");if(!references.isObject())return;
+        ObjectNode timing=references.withObject("/generationTiming");if(!timing.has("requestStartedAt"))timing.put("requestStartedAt",entry.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
+        update.accept(timing);entry.setSnapshotJson(encode(stored));
+    }
+    private ObjectNode presentTiming(JsonNode source) {
+        ObjectNode timing=(ObjectNode)source.deepCopy();long now=System.currentTimeMillis(),start=timing.path("requestStartedAt").asLong(now);
+        long ready=timing.path("readyAt").asLong(0),failed=timing.path("failedAt").asLong(0),end=ready>0?ready:failed>0?failed:now;
+        timing.put("totalMs",Math.max(0,end-start));long submitStart=timing.path("submitStartedAt").asLong(0),submitted=timing.path("submittedAt").asLong(0),providerComplete=timing.path("providerCompletedAt").asLong(0);
+        if(submitStart>0)timing.put("preparationMs",Math.max(0,submitStart-start));if(submitted>0&&submitStart>0)timing.put("submitMs",Math.max(0,submitted-submitStart));
+        if(submitted>0)timing.put("providerMs",Math.max(0,(providerComplete>0?providerComplete:end)-submitted));if(ready>0&&providerComplete>0)timing.put("downloadMs",Math.max(0,ready-providerComplete));return timing;
+    }    private ObjectNode response(RenderPreview entry) {
         ObjectNode result=json.valueToTree(entry);
         ObjectNode snapshot=(ObjectNode)decode(entry.getSnapshotJson());
         JsonNode references=snapshot.remove("renderProductReferences");
         result.set("snapshot",snapshot);
         if (references!=null) { result.set("productReferences",references); if(references.has("layoutContext")) result.set("layoutContext",references.get("layoutContext")); if(references.hasNonNull("guideUrl")) result.put("layoutGuideUrl",references.path("guideUrl").asText());
             result.put("sourceType",references.path("sourceType").asText("spaceGuide")); if(references.hasNonNull("viewUrl")) result.put("viewImageUrl",references.path("viewUrl").asText());
-            if(references.has("qualityAudit")) result.set("qualityAudit",references.get("qualityAudit")); }
+            if(references.hasNonNull("planGuideUrl")) result.put("planGuideUrl",references.path("planGuideUrl").asText());
+            if(references.has("qualityAudit")) result.set("qualityAudit",references.get("qualityAudit"));
+            if(references.has("geometryAudit")) result.set("geometryAudit",references.get("geometryAudit")); if(references.has("generationTiming")) result.set("generationTiming",presentTiming(references.get("generationTiming"))); if(references.has("generationExperiment")&&(references.path("generationExperiment").path("promptMode").asText().equals("CONCISE_V11")||references.path("generationExperiment").path("promptExtend").asBoolean()||!references.path("generationExperiment").path("seed").isNull()||!references.path("generationExperiment").path("sampleIndex").isNull())) result.set("generationExperiment",references.get("generationExperiment"));
+            if(references.has("productUnderstanding")) { result.set("productUnderstanding",references.get("productUnderstanding")); result.put("agentStatus",references.path("productUnderstanding").path("status").asText("UNAVAILABLE")); } }
         result.put("productImagesUsed", references!=null && !references.path("items").isEmpty());
         boolean stale=true;
         try {
@@ -154,15 +185,18 @@ public class RenderPreviewService {
     private void auditResult(RenderPreview entry) {
         ObjectNode stored=(ObjectNode)decode(entry.getSnapshotJson());
         ObjectNode references=(ObjectNode)stored.path("renderProductReferences");
-        if(!references.isObject() || !"furniture-product-v1".equals(references.path("bindingVersion").asText()) || references.has("qualityAudit")) return;
-        try {
+        if(!references.isObject() || !"furniture-product-v1".equals(references.path("bindingVersion").asText())) return;
+        if(references.has("qualityAudit") && (references.has("geometryAudit") || !references.has("spatialControl"))) return;
+        var bindings=RenderFurnitureBindings.from(stored);
+        if(!references.has("qualityAudit")) try {
             List<byte[]> boards=new ArrayList<>();for(JsonNode url:references.path("sheetUrls")) boards.add(files.read(url.asText()));
-            var bindings=RenderFurnitureBindings.from(stored);
-            ObjectNode audit=productAudit.audit(files.read(entry.getImageUrl()),files.read(references.path("guideUrl").asText()),boards,bindings,(ArrayNode)references.path("items"));
+            ObjectNode audit=productAudit.audit(files.read(entry.getImageUrl()),files.read(references.path("bindingGuideUrl").asText(references.path("guideUrl").asText())),boards,bindings,(ArrayNode)references.path("items"),references.path("layoutContext"));
             references.set("qualityAudit",audit);
-        } catch(BusinessException e) {
-            references.set("qualityAudit",productAudit.unavailable());
-        }
+        } catch(BusinessException e) { references.set("qualityAudit",productAudit.unavailable()); }
+        if(!references.has("geometryAudit")&&references.has("spatialControl")) try {
+            var spatial=RenderSpatialControl.prepare(stored,bindings);
+            references.set("geometryAudit",geometryAudit.audit(files.read(entry.getImageUrl()),files.read(references.path("guideUrl").asText(references.path("bindingGuideUrl").asText())),files.read(references.path("planGuideUrl").asText()),spatial));
+        } catch(BusinessException e) { references.set("geometryAudit",geometryAudit.unavailable()); }
         entry.setSnapshotJson(encode(stored));
         previews.updateSnapshot(entry);
     }

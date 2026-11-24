@@ -43,6 +43,16 @@ rsdp:
     base-url: ${RSDP_RENDER_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
     model: ${RSDP_RENDER_MODEL:qwen-image-3.0}
     storage-directory: ${RSDP_RENDER_STORAGE_DIRECTORY:uploads/render-previews}
+    product-agent:
+      enabled: ${RSDP_RENDER_PRODUCT_AGENT_ENABLED:true}
+      max-new-products-per-render: ${RSDP_RENDER_PRODUCT_AGENT_MAX_NEW:4}
+    geometry-audit:
+      center-pass-ratio: ${RSDP_RENDER_GEOMETRY_AUDIT_CENTER_PASS_RATIO:0.04}
+      center-fail-ratio: ${RSDP_RENDER_GEOMETRY_AUDIT_CENTER_FAIL_RATIO:0.10}
+      iou-pass: ${RSDP_RENDER_GEOMETRY_AUDIT_IOU_PASS:0.45}
+      iou-fail: ${RSDP_RENDER_GEOMETRY_AUDIT_IOU_FAIL:0.20}
+      min-detection-confidence: ${RSDP_RENDER_GEOMETRY_AUDIT_MIN_CONFIDENCE:0.65}
+      room-iou-pass: ${RSDP_RENDER_GEOMETRY_AUDIT_ROOM_IOU_PASS:0.75}
   cad-parser:
     url: http://127.0.0.1:8091
   # 主项目（RSDP）连接：Office 通过目录读取账号访问商品、字典和历史导入记录。

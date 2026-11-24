@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import javax.imageio.ImageIO;
 import java.io.ByteArrayInputStream;
+import java.util.Arrays;
 import java.util.HashSet;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,7 +34,7 @@ class RenderFurnitureBindingsTest {
         assertEquals("空间左侧后侧",bindings.byFurnitureId("A").location());
         assertEquals(90,bindings.byFurnitureId("A").rotation());
         String prompt=bindings.prompt();
-        assertTrue(prompt.contains("共4件家具"));assertTrue(prompt.contains("F1是职员桌"));assertTrue(prompt.contains("F2是访客椅"));assertTrue(prompt.contains("必须使用P1"));
+        assertTrue(prompt.contains("共4件家具"));assertTrue(prompt.contains("职员桌"));assertTrue(prompt.contains("访客椅"));assertTrue(prompt.contains("商品外观"));assertTrue(prompt.contains("位置、朝向和占地比例"));assertFalse(prompt.contains("90度"));assertTrue(prompt.contains("F1"));assertTrue(prompt.contains("P1"));
         assertEquals(4,bindings.manifest().size());
     }
     @Test void guideContainsExactlyOneVisibleLabelPerFurniture() throws Exception {
@@ -44,6 +45,9 @@ class RenderFurnitureBindingsTest {
         if(example!=null) java.nio.file.Files.write(java.nio.file.Path.of(example),guide.image());
         assertEquals(1536,image.getWidth());assertEquals(1024,image.getHeight());
         assertEquals(4,guide.labels().size());assertEquals(4,new HashSet<>(guide.labels().stream().map(RenderSceneGuide.LabelPlacement::referenceId).toList()).size());
+        var clean=RenderSceneGuide.render(scene,"ISOMETRIC",bindings,false);
+        assertTrue(clean.labels().isEmpty());assertFalse(Arrays.equals(guide.image(),clean.image()));
+        if(example!=null) java.nio.file.Files.write(java.nio.file.Path.of(example.replaceFirst("(?i)\\.png$","-clean.png")),clean.image());
         for(var label:guide.labels()) {
             assertTrue(label.x()>=0 && label.x()<=image.getWidth());assertTrue(label.y()>=0 && label.y()<=image.getHeight());
             assertEquals(bindings.byFurnitureId(label.furnitureId()).referenceId(),label.referenceId());

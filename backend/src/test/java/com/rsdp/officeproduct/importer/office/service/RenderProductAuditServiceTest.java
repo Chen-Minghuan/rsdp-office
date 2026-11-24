@@ -27,6 +27,14 @@ class RenderProductAuditServiceTest {
         ((com.fasterxml.jackson.databind.node.ObjectNode)raw).putArray("items");
         var missing=service.normalize(raw,bindings());assertEquals("UNCERTAIN",missing.path("status").asText());assertEquals("UNCERTAIN",missing.path("items").get(0).path("status").asText());
     }
+    @Test void auditIncludesArchitecturalFactsAndProductVisualProfiles() throws Exception {
+        var products=json.createArrayNode();var product=products.addObject().put("productId","SKU-1");product.putArray("candidateImages").addObject().put("imageUrl","/uploads/images/private.png");product.putObject("visualProfile").put("appearancePrompt","保持单侧柜体").putArray("views").addObject().put("imageId","P1-V1");
+        var facts=json.createObjectNode().put("openingsKnown",true);facts.putArray("openings").addObject().put("kind","WINDOW");
+        when(vision.auditRender(anyString(),anyList())).thenReturn(json.readTree("{\"furnitureCount\":{\"observed\":2,\"status\":\"PASS\"},\"layout\":{\"status\":\"PASS\"},\"architecture\":{\"status\":\"FAIL\",\"reason\":\"窗缺失\"},\"imageQuality\":{\"status\":\"PASS\"},\"items\":[{\"furnitureReferenceId\":\"F1\",\"status\":\"PASS\"}]}"));
+        var result=service.audit(new byte[]{1},new byte[]{2},List.of(),bindings(),products,facts);
+        assertEquals("FAIL",result.path("status").asText());assertEquals("窗缺失",result.path("architecture").path("reason").asText());
+        verify(vision).auditRender(argThat(prompt->prompt.contains("建筑事实") && prompt.contains("保持单侧柜体") && prompt.contains("后续图片作为输入参考资料存在") && prompt.contains("这里的“成品”始终只指图1") && !prompt.contains("candidateImages") && !prompt.contains("private.png") && !prompt.contains("P1-V1")),anyList());
+    }
     @Test void auditUsesResultGuideAndProductBoardWithoutRetryingGeneration() throws Exception {
         when(vision.auditRender(anyString(),anyList())).thenReturn(json.readTree("{\"furnitureCount\":{\"observed\":2,\"status\":\"PASS\"},\"layout\":{\"status\":\"PASS\"},\"items\":[{\"furnitureReferenceId\":\"F1\",\"status\":\"PASS\"}]}"));
         var result=service.audit(new byte[]{1},new byte[]{2},List.of(new byte[]{3}),bindings(),json.createArrayNode());

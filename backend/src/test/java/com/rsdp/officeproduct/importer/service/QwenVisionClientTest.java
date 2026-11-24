@@ -595,6 +595,31 @@ class QwenVisionClientTest {
     }
 
     @Test
+    void productUnderstandingUsesStructuredVisionRequestAndSeparateImages() throws Exception {
+        server.expect(requestTo(properties.getBaseUrl()+"/chat/completions"))
+            .andExpect(jsonPath("$.temperature").value(0)).andExpect(jsonPath("$.max_tokens").value(6000))
+            .andExpect(jsonPath("$.enable_thinking").value(false)).andExpect(jsonPath("$.response_format.type").value("json_object"))
+            .andExpect(jsonPath("$.messages[0].content[0].text").value("理解商品"))
+            .andExpect(jsonPath("$.messages[0].content[1].image_url.url").value(org.hamcrest.Matchers.startsWith("data:image/png;base64,")))
+            .andExpect(jsonPath("$.messages[0].content[2].image_url.url").exists())
+            .andRespond(withSuccess(completion("{\"productId\":\"SKU1\"}"),MediaType.APPLICATION_JSON));
+        var result=client.understandProduct("理解商品",List.of(image().getBytes(),image().getBytes()));
+        assertEquals("SKU1",result.path("productId").asText());assertEquals("test-request",result.path("providerRequestId").asText());server.verify();
+    }
+    @Test
+    void productUnderstandingSeparatesSystemRoleFromDynamicUserTask() throws Exception {
+        server.expect(requestTo(properties.getBaseUrl()+"/chat/completions"))
+            .andExpect(jsonPath("$.messages[0].role").value("system"))
+            .andExpect(jsonPath("$.messages[0].content").value("固定商品审核职责"))
+            .andExpect(jsonPath("$.messages[1].role").value("user"))
+            .andExpect(jsonPath("$.messages[1].content[0].text").value("动态商品记录"))
+            .andExpect(jsonPath("$.messages[1].content[1].image_url.url").value(org.hamcrest.Matchers.startsWith("data:image/png;base64,")))
+            .andRespond(withSuccess(completion("{\"productId\":\"SKU1\"}"),MediaType.APPLICATION_JSON));
+        var result=client.understandProduct("固定商品审核职责","动态商品记录",List.of(image().getBytes()));
+        assertEquals("SKU1",result.path("productId").asText());server.verify();
+    }
+
+    @Test
     void nullModelOutputFailsAsBusinessError() throws Exception {
         server.expect(jsonPath("$.max_tokens").value(12288)).andRespond(withSuccess(completion("null"), MediaType.APPLICATION_JSON));
         assertThrows(BusinessException.class, () -> client.recognize(image(), 1));

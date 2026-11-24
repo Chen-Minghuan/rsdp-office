@@ -18,4 +18,10 @@ public class RenderPreviewRequest {
      * primary structure reference (whiteModelView); the server decodes and validates it, never trusting pixels blindly.
      */
     private String viewImage;
+    /** Optional controlled render experiment; null values preserve the current v10 baseline. */
+    private String promptMode;
+    private String referenceMode;
+    private Boolean promptExtend;
+    private Long seed;
+    private Integer sampleIndex;
 }

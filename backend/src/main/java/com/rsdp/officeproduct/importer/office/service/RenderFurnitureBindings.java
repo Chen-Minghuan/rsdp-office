@@ -21,18 +21,19 @@ public final class RenderFurnitureBindings {
                 .orElseThrow(()->new BusinessException("家具定位关系缺失，请重新保存排版后生成"));
         }
         public String prompt() {
-            StringBuilder text=new StringBuilder("\n图1家具定位关系：共").append(items.size()).append("件家具，不得增加、删除、合并、替换或移动。\n");
+            StringBuilder text=new StringBuilder("\n家具身份与商品映射：图1和图2是无文字的固定空间结构参考，下列每个F编号通过坐标指向唯一家具块体；后续商品参考板使用P编号标识商品组。共").append(items.size()).append("件家具，不得增加、删除、合并、复制或移动。\n");
+            Map<String,List<String>> quantities=new LinkedHashMap<>();
+            for(Binding item:items) if(!item.productReferenceId().isBlank()) quantities.computeIfAbsent(item.productReferenceId(),key->new ArrayList<>()).add(item.referenceId());
+            quantities.forEach((product,furniture)->text.append(product).append("仅提供外观，使用数量为").append(furniture.size()).append("件，对应").append(String.join("、",furniture)).append("；商品照片数量不代表家具数量。\n"));
             for(Binding item:items) {
-                text.append(item.referenceId()).append("是").append(item.type()).append("，位于").append(item.location())
-                    .append("，保持图1中的位置、").append(item.rotation()).append("度朝向和占地比例");
-                if(!item.productReferenceId().isBlank()) text.append("，必须使用").append(item.productReferenceId()).append("商品外观");
-                else text.append("，未绑定商品，只按该家具类型表达");
-                text.append("。\n");
+                text.append(item.referenceId()).append("（位于").append(item.location()).append("的").append(item.type()).append("）→ ");
+                if(!item.productReferenceId().isBlank()) text.append(item.productReferenceId()).append("，仅将原F块体替换为该商品外观");
+                else text.append("未绑定商品，仅按该家具类型表达");
+                text.append("，保持原位置、朝向和占地比例。\n");
             }
-            text.append("F编号和标签引线仅用于识别图1中的对应家具，不是场景实体，不得出现在最终图片中。未绑定商品的家具不得套用其他家具的商品外观。\n");
+            text.append("同一P可以应用到多个F，不得按照商品照片数量改变家具数量。未绑定商品的家具不得套用其他家具的商品外观。F/P编号均不是场景实体，不得出现在最终图片中。\n");
             return text.toString();
-        }
-        public ArrayNode manifest() {
+        }        public ArrayNode manifest() {
             ArrayNode result=JsonNodeFactory.instance.arrayNode();
             for(Binding item:items) {
                 var entry=result.addObject().put("referenceId",item.referenceId()).put("furnitureId",item.furnitureId())
