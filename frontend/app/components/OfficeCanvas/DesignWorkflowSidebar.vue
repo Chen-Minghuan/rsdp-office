@@ -5,10 +5,8 @@ import type { LayoutReferenceEditing, LayoutReferenceRecognitionTask } from '~/t
 import type { OfficeModuleTemplate } from '~/types/officeModule'
 import { furnitureById } from '~/utils/manualFurniture'
 import { ZONE_TYPES } from '~/utils/sample'
-import { REFERENCE_TEMPLATES } from '~/utils/mixedLayout'
 
 const store = useOfficeStore()
-const api = useOfficeApi()
 const selectedId = defineModel<string | null>('selectedId')
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { required: true })
 /** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
@@ -22,38 +20,11 @@ watch(activePage, page => {
   // 参考原图摆位是自动布局页内的临时编辑态；离开该页时必须退出，否则残留状态会拦截产品选型添加模块。
   if (page !== 'auto') referenceEditing.value = null
 })
-const recognition = reactive<LayoutReferenceRecognitionTask>({
-  status: 'idle', workspaceId: '', analysisId: '', revision: 0, zoneId: '', message: '', result: null, sequence: 0,
-})
 const plan = computed(() => store.floorPlan)
-const recognitionKey = (analysisId: string, revision: number, zoneId: string) => `${store.workspaceId}|${analysisId}|${revision}|${zoneId}`
-const currentRecognitionKey = () => recognitionKey(plan.value?.analysisId || '', plan.value?.analysisRevision || 1, store.designZoneId || '')
-function resetRecognition() {
-  recognition.sequence += 1
-  Object.assign(recognition, { status: 'idle', workspaceId: store.workspaceId, analysisId: plan.value?.analysisId || '', revision: plan.value?.analysisRevision || 0, zoneId: store.designZoneId || '', message: '', result: null })
-}
-watch(() => [store.workspaceId, store.designZoneId, plan.value?.analysisId, plan.value?.analysisRevision], resetRecognition, { immediate: true })
-async function recognizeReference(payload: { image: Blob; analysisId: string; revision: number; zoneId: string }) {
-  if (recognition.status === 'running') return
-  const key = recognitionKey(payload.analysisId, payload.revision, payload.zoneId)
-  const sequence = recognition.sequence + 1
-  Object.assign(recognition, { status: 'running', workspaceId: store.workspaceId, analysisId: payload.analysisId, revision: payload.revision, zoneId: payload.zoneId, message: '', result: null, sequence })
-  try {
-    const detected = await api.recognizeLayoutReference(payload.image, payload.analysisId, payload.revision)
-    if (sequence !== recognition.sequence || key !== currentRecognitionKey()) return
-    const valid = detected.filter(mark => furnitureById.has(mark.templateId) && (REFERENCE_TEMPLATES[mark.categoryId] || []).includes(mark.templateId))
-    const state = referenceEditing.value
-    if (state?.zoneId === payload.zoneId) {
-      const manual = state.marks.filter(mark => mark.confidence === 'manual')
-      const newMarks = valid.filter(mark => !manual.some(item => item.categoryId === mark.categoryId
-        && Math.hypot(item.x + item.width / 2 - mark.x - mark.width / 2, item.y + item.depth / 2 - mark.y - mark.depth / 2) < 0.04))
-      referenceEditing.value = { ...state, marks: [...manual, ...newMarks], selected: null, placement: null }
-    }
-    Object.assign(recognition, { status: 'success', result: valid, message: valid.length ? `识别到 ${valid.length} 个家具标记，请核对图例、方向和分组` : '裁图中未识别到可靠家具，可以在画布手动添加' })
-  } catch (error) {
-    if (sequence !== recognition.sequence || key !== currentRecognitionKey()) return
-    Object.assign(recognition, { status: 'error', result: null, message: error instanceof Error ? error.message : '识别失败，可手动添加' })
-  }
+const idleRecognition: LayoutReferenceRecognitionTask = { status: 'idle', workspaceId: '', analysisId: '', revision: 0, zoneId: '', message: '', result: null, sequence: 0 }
+const recognition = computed<LayoutReferenceRecognitionTask>(() => store.layoutReferenceRecognitionFor(store.designZoneId || '') || idleRecognition)
+function recognizeReference(payload: { image: Blob; analysisId: string; revision: number; zoneId: string }) {
+  void store.recognizeLayoutReference(payload)
 }
 function openFurniture(id: string, fromGroup: boolean) {
   if (!store.designZoneId || !store.furnitureForZone(store.designZoneId).some(item => item.id === id)) return

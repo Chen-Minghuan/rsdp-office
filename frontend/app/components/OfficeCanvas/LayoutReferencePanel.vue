@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { ZoneObject } from '~/types/office'
-import type { LayoutReference, LayoutReferenceEditing, LayoutReferenceRecognitionTask } from '~/types/layoutPlanning'
+import type { LayoutReference, LayoutReferenceEditing, LayoutReferenceMark, LayoutReferenceRecognitionTask } from '~/types/layoutPlanning'
 import { canvasDrawingRect, canvasZoneBounds } from '~/utils/officeCanvasView'
 import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
@@ -10,6 +10,8 @@ import { deleteReferenceSelection, rotateReferenceSelection, MIXED_CATEGORY_IDS,
 const emit = defineEmits<{ close: []; apply: [value: LayoutReference]; recognize: [value: { image: Blob; analysisId: string; revision: number; zoneId: string }] }>()
 const props = defineProps<{ plan: FloorPlanAnalysisResponse; zone: ZoneObject; categoryIds: string[]; existing: LayoutReference | null; problem: string; recognition: LayoutReferenceRecognitionTask }>()
 const editing = defineModel<LayoutReferenceEditing | null>({ required: true })
+/** 识别结果早于面板裁图完成时暂存，crop 就绪后合并，避免跨页面返回时丢失标记。 */
+const pendingMarks = ref<LayoutReferenceMark[] | null>(null)
 const api = useOfficeApi()
 const upload = ref<Blob>()
 const category = ref(props.categoryIds[0] || 'workstation')
@@ -25,6 +27,13 @@ const categoryLabel = (id: string) => MIXED_LAYOUT_CATEGORIES[MIXED_CATEGORY_IDS
 const revision = props.plan.analysisRevision || 1
 let disposed = false
 watch(category, id => { template.value = options(id)[0] || ''; addToExistingGroup.value = false }, { immediate: true })
+watch(() => editing.value?.marks, (marks, previous) => {
+  const state = editing.value
+  if (!state || state.crop || !marks?.length) return
+  if (marks.every(mark => mark.confidence === 'manual')) return
+  pendingMarks.value = marks.map(mark => ({ ...mark }))
+  editing.value = { ...state, marks: (previous || []).map(mark => ({ ...mark })) }
+})
 onUnmounted(() => { disposed = true })
 
 onMounted(async () => {
@@ -74,7 +83,9 @@ onMounted(async () => {
       : previous && JSON.stringify(previous.crop) === JSON.stringify(worldCrop)
         ? previous.marks.map(mark => ({ ...mark }))
         : []
-    editing.value = { ...current, crop: worldCrop, marks }
+    const merged = pendingMarks.value?.length ? [...marks.filter(mark => mark.confidence === 'manual'), ...pendingMarks.value] : marks
+    pendingMarks.value = null
+    editing.value = { ...current, crop: worldCrop, marks: merged }
     status.value = ''
   } catch (error) {
     if (!disposed) status.value = error instanceof Error ? '无法读取空间底图 · ' + error.message : '无法读取空间底图'

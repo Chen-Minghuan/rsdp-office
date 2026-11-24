@@ -41,13 +41,13 @@ import { captureSpaceTemplate, templateMatches, templateLayoutProblem, zonesFrom
 import { officeReviewExample } from '~/utils/spatial/example'
 import { applyDesignCorrections } from '~/utils/spatial/designCorrections'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
-import type { LayoutChannel, LayoutPreferences, LayoutProposal } from '~/types/layoutPlanning'
+import type { LayoutChannel, LayoutPreferences, LayoutProposal, LayoutReferenceRecognitionTask } from '~/types/layoutPlanning'
 import type { LayoutRegion, SpatialFacility, SpatialObstacle } from '~/types/spatial'
 import { migrateLegacyDoorClearances, migrateLayoutExclusions, obstacleRing } from '~/utils/spatial/obstacles'
 import { layoutRegionProblem, layoutRegionRing, measureLayoutRegionWallOffsets } from '~/utils/spatial/layoutRegions'
 import { facilityCanvasPoints, facilityProblem } from '~/utils/spatial/facilities'
 import { layoutSourceKey, furnitureSeatCount, confirmedLayoutProblem, confirmedLayoutWarning } from '~/utils/layoutPlanning'
-import { mixedOfficeSeats, mixedPlacementProblem } from '~/utils/mixedLayout'
+import { mixedOfficeSeats, mixedPlacementProblem, REFERENCE_TEMPLATES } from '~/utils/mixedLayout'
 import { clampChannelsToZone } from '~/utils/layoutChannels'
 import { proposalFurnitureCartMismatches, type ProposalFurnitureCartMismatch } from '~/utils/proposalFurnitureGate'
 import { planCartLineReduction } from '~/utils/cartLineReduction'
@@ -145,6 +145,8 @@ interface OfficeState {
   reviewFocusZoneId: string | null
   syncState: 'idle' | 'saving' | 'saved' | 'error'
   syncError: string | null
+  /** Session-only：按空间键控的「识别原图家具」任务，键为 workspaceId|analysisId|revision|zoneId；不持久化，页面离开后任务继续在 store 结算。 */
+  referenceRecognitions: Record<string, LayoutReferenceRecognitionTask>
 }
 
 type CanvasHistorySnapshot = Pick<OfficeState, 'objects' | 'blank' | 'floorPlan' | 'spaceTemplate' | 'cart' | 'submitted'>
@@ -188,6 +190,7 @@ function defaultState(): OfficeState {
     reviewFocusZoneId: null,
     syncState: 'idle',
     syncError: null,
+    referenceRecognitions: {},
   }
 }
 
@@ -229,7 +232,7 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
       localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
     const { undoStack, redoStack, workspaceId: storedWorkspaceId, initialized, loading, apiReady, ...rest } = parsed
-    return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null }
+    return { ...rest, customModules: restoreCustomModules(rest.customModules), furniturePlacement: null, referenceRecognitions: {} }
   } catch {
     return {}
   }
@@ -258,6 +261,11 @@ export const useOfficeStore = defineStore('office', {
     refCount: (state) => state.objects.filter((o) => o.kind === 'reference').length,
     furnitureForZone: (state) => (zoneId: string) =>
       state.objects.filter((o): o is FurnitureObject => o.kind === 'furniture' && o.zoneId === zoneId),
+    layoutReferenceRecognitionFor: (state) => (zoneId: string) => {
+      const analysisId = state.floorPlan?.analysisId || ''
+      const revision = state.floorPlan?.analysisRevision || 0
+      return state.referenceRecognitions[`${state.workspaceId}|${analysisId}|${revision}|${zoneId}`] || null
+    },
     totalPrice(): number {
       const allProducts = this.products.length ? this.products : SAMPLE_PRODUCTS
       return this.cart.reduce((sum, c) => {
@@ -311,6 +319,41 @@ export const useOfficeStore = defineStore('office', {
   },
 
   actions: {
+    recognizeLayoutReferenceKey(analysisId: string, revision: number, zoneId: string) {
+      return `${this.workspaceId}|${analysisId}|${revision}|${zoneId}`
+    },
+    async recognizeLayoutReference(payload: { image: Blob; analysisId: string; revision: number; zoneId: string }) {
+      const key = this.recognizeLayoutReferenceKey(payload.analysisId, payload.revision, payload.zoneId)
+      const existing = this.referenceRecognitions[key]
+      if (existing?.status === 'running') return
+      // 画布已有家具图例时不发起识别（面板层负责提醒，这里兜底防其他入口）。
+      if (this.furnitureForZone(payload.zoneId).length) return
+      const sequence = (existing?.sequence || 0) + 1
+      this.referenceRecognitions[key] = {
+        status: 'running', workspaceId: this.workspaceId, analysisId: payload.analysisId, revision: payload.revision,
+        zoneId: payload.zoneId, message: '', result: null, sequence,
+      }
+      try {
+        const detected = await useOfficeApi().recognizeLayoutReference(payload.image, payload.analysisId, payload.revision)
+        const task = this.referenceRecognitions[key]
+        if (!task || task.sequence !== sequence) return
+        const valid = detected.filter(mark => furnitureById.has(mark.templateId) && (REFERENCE_TEMPLATES[mark.categoryId] || []).includes(mark.templateId))
+        task.status = 'success'
+        task.result = valid
+        task.message = valid.length ? `识别到 ${valid.length} 个家具标记，请核对图例、方向和分组` : '裁图中未识别到可靠家具，可以在画布手动添加'
+      } catch (error) {
+        const task = this.referenceRecognitions[key]
+        if (!task || task.sequence !== sequence) return
+        task.status = 'error'
+        task.result = null
+        task.message = error instanceof Error ? error.message : '识别失败，可手动添加'
+      }
+    },
+    clearLayoutReferenceRecognition(zoneId: string, analysisId: string, revision: number) {
+      const key = this.recognizeLayoutReferenceKey(analysisId, revision, zoneId)
+      const task = this.referenceRecognitions[key]
+      if (task && task.status !== 'running') delete this.referenceRecognitions[key]
+    },
     async init() {
       if (this.loading || this.initialized) return
       const workspaceId = useWorkspaceStore().currentFloorId
@@ -320,7 +363,12 @@ export const useOfficeStore = defineStore('office', {
       }
       this.workspaceId = workspaceId
       const storageScope = useAuth().storageScope.value
-      this.$patch(loadLocalState(workspaceId))
+      // 合并本地草稿：草稿缺少的运行中识别任务保留在内存，路由离开后任务继续结算。
+      const draft = loadLocalState(workspaceId)
+      for (const [key, task] of Object.entries(this.referenceRecognitions)) {
+        if (task.status === 'running') draft.referenceRecognitions = { ...draft.referenceRecognitions, [key]: task }
+      }
+      this.$patch(draft)
       this.loading = true
       const api = useOfficeApi()
       try {

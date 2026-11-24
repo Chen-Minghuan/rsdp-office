@@ -161,6 +161,37 @@ watch(() => store.canEnterLayout, (confirmed) => {
   if (!confirmed && store.canvasMode === 'design') store.setCanvasMode('overview')
 })
 
+// 识别原图家具任务驻留在 store，离开本页后仍继续结算；回到画布时恢复面板并消费结果。
+watch(() => {
+  const task = store.layoutReferenceRecognitionFor(store.designZoneId || '')
+  // 同时读取 status/message/canvasMode，确保对任务对象属性的后续修改与切回设计模式都触发 watcher。
+  return task ? [task, task.status, task.message, store.canvasMode] as const : null
+}, () => {
+  const task = store.layoutReferenceRecognitionFor(store.designZoneId || '')
+  if (!task || store.canvasMode !== 'design' || !store.designZoneId) return
+  if (task.status === 'running') {
+    if (!referenceEditing.value) {
+      referenceEditing.value = { zoneId: task.zoneId, crop: null, marks: [], selected: null, placement: null }
+    }
+    return
+  }
+  if (task.status === 'success' || task.status === 'error') {
+    const result = task.result || []
+    const state = referenceEditing.value?.zoneId === task.zoneId ? referenceEditing.value : null
+    if (!result.length) {
+      // 识别失败或零结果：重开面板并保留任务，让面板显示 recognition.message；关闭面板或再次识别时清除。
+      if (!state) referenceEditing.value = { zoneId: task.zoneId, crop: null, marks: [], selected: null, placement: null }
+      return
+    }
+    const base = state || { zoneId: task.zoneId, crop: null, marks: [], selected: null, placement: null }
+    const manual = base.marks.filter(mark => mark.confidence === 'manual')
+    const newMarks = result.filter(mark => !manual.some(item => item.categoryId === mark.categoryId
+      && Math.hypot(item.x + item.width / 2 - mark.x - mark.width / 2, item.y + item.depth / 2 - mark.y - mark.depth / 2) < 0.04))
+    referenceEditing.value = { ...base, marks: [...manual, ...newMarks], selected: null, placement: null }
+    store.clearLayoutReferenceRecognition(task.zoneId, task.analysisId, task.revision)
+  }
+}, { immediate: true })
+
 </script>
 
 <template>

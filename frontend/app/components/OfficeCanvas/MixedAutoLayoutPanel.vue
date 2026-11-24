@@ -72,6 +72,24 @@ function openReference() {
   referenceMessage.value = ''
   referenceEditing.value = { zoneId: zone.value.id, crop: null, marks: [], selected: null, placement: null }
 }
+/** 当前空间画布已有家具图例时阻止识别（弹窗提醒），避免识别结果与现有排版冲突。 */
+const recognizeBlocked = ref(false)
+function recognizeReference(payload: { image: Blob; analysisId: string; revision: number; zoneId: string }) {
+  const room = zone.value
+  if (!room) return
+  if (store.furnitureForZone(room.id).length) {
+    recognizeBlocked.value = true
+    return
+  }
+  referenceMessage.value = ''
+  emit('recognize', payload)
+}
+function closeReference() {
+  const room = zone.value
+  referenceEditing.value = null
+  // 关闭面板时消费已结束的识别任务（失败/零结果任务为展示消息而保留），避免下次回到画布重新顶开面板。
+  if (room && plan.value) store.clearLayoutReferenceRecognition(room.id, plan.value.analysisId, plan.value.analysisRevision || 1)
+}
 function generate() {
   previewReady.value = true
 }
@@ -128,7 +146,7 @@ function apply() {
 
 <template>
   <section class="flex min-h-0 flex-1 flex-col" data-testid="mixed-auto-layout-panel">
-    <OfficeCanvasLayoutReferencePanel v-if="referenceEditing && plan && zone" v-model="referenceEditing" :plan="plan" :zone="zone" :category-ids="categoryIds" :existing="reference" :problem="referenceMessage" :recognition="recognition" @close="referenceEditing = null" @recognize="emit('recognize', $event)" @apply="applyReference" />
+    <OfficeCanvasLayoutReferencePanel v-if="referenceEditing && plan && zone" v-model="referenceEditing" :plan="plan" :zone="zone" :category-ids="categoryIds" :existing="reference" :problem="referenceMessage" :recognition="recognition" @close="closeReference" @recognize="recognizeReference" @apply="applyReference" />
     <template v-else>
     <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
       <div class="border-b border-line pb-2.5">
@@ -202,5 +220,16 @@ function apply() {
       <button v-else data-testid="mixed-layout-apply" class="w-full rounded-none border border-dashed border-[#8bc66b] bg-[#e9f8df] px-3 py-2.5 text-xs font-semibold text-[#38682d] disabled:cursor-not-allowed disabled:opacity-50" :disabled="!activeCandidate || !!activeProposal?.problem || !!liveProblem" @click="apply">{{ currentPreview?.manuallyAdjusted ? '应用当前预览（含手动调整）' : '应用所选组合' }}</button>
     </div>
     </template>
+    <Teleport to="body">
+      <div v-if="recognizeBlocked" class="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" @click.self="recognizeBlocked = false" @keydown.esc.stop.prevent="recognizeBlocked = false">
+        <section role="dialog" aria-modal="true" aria-labelledby="reference-recognize-blocked-title" data-testid="reference-recognize-blocked" class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+          <h2 id="reference-recognize-blocked-title" class="text-base font-bold">无法识别原图家具</h2>
+          <p class="mt-2 text-xs leading-5 text-muted">当前画布上已经有家具图例，请先移除现有家具后再识别。</p>
+          <div class="mt-5 flex justify-end">
+            <button type="button" data-testid="reference-recognize-blocked-ok" class="rounded-xl bg-bronze px-4 py-2 text-sm font-semibold text-white hover:bg-bronze-dark" @click="recognizeBlocked = false">知道了</button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>

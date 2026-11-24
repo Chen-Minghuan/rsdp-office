@@ -23,6 +23,7 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
   const context = await browser.newContext({ viewport: { width: 1700, height: 1100 } })
   const page = await context.newPage()
+  page.on('console', message => { if (message.text().includes('recognition-debug')) console.log('B:', message.text().slice(0, 300)) })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   const source = {
@@ -178,12 +179,31 @@ try {
   await pendingManual.waitFor()
   await page.getByTestId('reference-recognize').click()
   await recognitionStarted
-  await page.getByTestId('tab-product-selection').click()
-  await page.getByTestId('tab-style-recommendation').click()
-  await page.getByTestId('tab-auto-layout').click()
+  // 识别进行中跳转到站内其他页面，任务不中断；回到画布时面板自动恢复并显示识别中状态。
+  await page.getByRole('link', { name: '商品库', exact: true }).click()
+  await page.waitForURL('**/products')
+  await page.waitForTimeout(300)
+  console.log('TASKS-AT-PRODUCTS', await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia._s.get('office')
+    return JSON.stringify(store?.referenceRecognitions)
+  }))
+  await page.goto(`${baseUrl}/canvas?analysisId=PREVIEW-DRAG&mode=design&zoneId=DRAG-ROOM`, { waitUntil: 'networkidle' })
+  console.log('TASKS-AFTER-GOTO', await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia._s.get('office')
+    return JSON.stringify(store?.referenceRecognitions)
+  }))
   await page.getByTestId('layout-reference-panel').waitFor()
   await page.getByText('正在识别裁图中的家具…', { exact: true }).waitFor()
   releaseRecognition()
+  await referenceLayer.locator('[data-reference-confidence="high"]').first().waitFor()
+  const restored = referenceLayer.locator('[data-reference-index]')
+  assert.equal(await restored.count(), 4, '手动标记保留，识别结果跨页面返回后合并')
+  assert.equal(await restored.locator('[data-reference-confidence="manual"]').count(), 1, '已有手动标记未被识别结果覆盖')
+  // 手动关闭面板后再次识别仍在进行中时，回到画布自动重开面板。
+  await page.getByRole('button', { name: '返回组合布局', exact: true }).click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
   await pendingManual.click()
   await page.keyboard.press('Delete')
   await pendingManual.waitFor({ state: 'detached' })
