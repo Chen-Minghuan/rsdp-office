@@ -193,8 +193,9 @@ export function useOfficeApi() {
     return list.map(c => ({ id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }))
   }
 
-  async function addCartItem(item: CartItem): Promise<CartItem> {
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${requireProjectId()}/cart`, {
+  async function addCartItem(item: CartItem, workspaceId?: string): Promise<CartItem> {
+    const targetFloorId = workspaceId || requireProjectId()
+    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`, {
       lineId: item.id,
       projectId: item.projectId,
       zoneId: item.zoneId,
@@ -205,18 +206,21 @@ export function useOfficeApi() {
     return { id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }
   }
 
-  async function updateCartItemQty(lineId: string, qty: number): Promise<CartItem | null> {
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${requireProjectId()}/cart/${lineId}?qty=${qty}`, {})
+  async function updateCartItemQty(lineId: string, qty: number, workspaceId?: string): Promise<CartItem | null> {
+    const targetFloorId = workspaceId || requireProjectId()
+    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart/${lineId}?qty=${qty}`, {})
     if (!c) return null
     return { id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }
   }
 
-  async function deleteCartItem(lineId: string): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/projects/${requireProjectId()}/cart/${lineId}`)
+  async function deleteCartItem(lineId: string, workspaceId?: string): Promise<void> {
+    const targetFloorId = workspaceId || requireProjectId()
+    await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart/${lineId}`)
   }
 
-  async function clearCart(): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/projects/${requireProjectId()}/cart`)
+  async function clearCart(workspaceId?: string): Promise<void> {
+    const targetFloorId = workspaceId || requireProjectId()
+    await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`)
   }
 
   async function loadMessages(): Promise<AgentMessage[]> {
