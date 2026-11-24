@@ -30,6 +30,13 @@ export const useWorkspaceStore = defineStore('workspace', {
     currentFloorName(): string { return this.currentFloor?.floorName || '未选择楼层' },
   },
   actions: {
+    async updateProjectStatus(projectId: string, status: import('~/types/workspace').ProjectStatus) {
+      const scope = useAuth().storageScope.value
+      const updated = await useWorkspaceApi().updateProjectStatus(projectId, status)
+      if (scope !== useAuth().storageScope.value) return
+      const project = this.projects.find(item => item.projectId === projectId)
+      if (project) project.status = updated.status
+    },
     rememberSelection() {
       if (import.meta.client) localStorage.setItem(selectionStorageKey(), JSON.stringify({ projectId: this.currentProjectId, floorId: this.currentFloorId, collapsed: this.collapsedProjectIds, collapsedFloors: this.collapsedFloorIds }))
     },

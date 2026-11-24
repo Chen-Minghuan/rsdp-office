@@ -34,6 +34,7 @@
 | [当前图纸进入对应空间](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 上传 ID/识别绑定、后台空间入口、旧底图/模板/家具隔离与空稿恢复 |
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
+| [项目阶段与工作台分类](tasks/WORKSPACE-005-project-status.md) | 设计中、交付中、已完成的保存、权限、计数和筛选 |
 | [项目需求 AI 总结](tasks/WORKSPACE-004-project-requirements-ai-summary.md) | 原文/总结双面翻转、事实抽取、版本复核、持久化缓存与真实模型验证 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
 | [工作区账号中心](tasks/TENANT-003-workspace-account-center.md) | 账号行悬停菜单、报价/账号直达与经销商角色隔离；收藏入口由 CAT-010 扩展为全角色 |

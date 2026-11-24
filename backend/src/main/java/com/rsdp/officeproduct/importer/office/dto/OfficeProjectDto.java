@@ -10,6 +10,8 @@ import java.util.List;
 public class OfficeProjectDto {
     private String projectId;
     private String name;
+    private String status;
+    private boolean canManageStatus;
     private String customerRequirements;
     private Integer requirementsRevision;
     private ProjectMemberDto leader;

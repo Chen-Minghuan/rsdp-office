@@ -77,6 +77,7 @@ public class SchemaInitializer {
             Resource legacyAgentMessages = new ClassPathResource("db/migrations/20261124_remove_unused_agent_messages.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(legacyAgentMessages), false, false, "--",
                 ScriptUtils.EOF_STATEMENT_SEPARATOR, "/*", "*/");
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_project_status.sql"));
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

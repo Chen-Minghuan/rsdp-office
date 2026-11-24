@@ -125,6 +125,27 @@ public class OfficeProjectAccessService {
         }
     }
 
+    /** 项目阶段仅由实际负责人或所属工作区主号维护，不沿用可转授的成员管理权限。 */
+    public boolean canManageStatus(OfficeDesignProject project, List<OfficeProjectMember> members) {
+        if (!enforcementEnabled()) return true;
+        OfficeUser user = currentUserOrNull();
+        if (user == null) return false;
+        if ("DEALER".equalsIgnoreCase(user.getRole()) && isWorkspaceOwner(user, project.getWorkspaceId())) return true;
+        return sameWorkspace(user, project) && members.stream().anyMatch(member ->
+            project.getProjectId().equals(member.getProjectId()) && user.getUserId().equals(member.getUserId())
+                && "LEADER".equals(member.getRole()) && OfficeProjectPermission.READ.granted(member.getPermissionFlags()));
+    }
+
+    public void requireStatusManager(String projectId) {
+        OfficeDesignProject project = requireProject(projectId);
+        if (!enforcementEnabled()) return;
+        List<OfficeProjectMember> members = memberMapper.selectList(
+            new QueryWrapper<OfficeProjectMember>().eq("project_id", projectId).eq("user_id", currentUserId()));
+        if (!canManageStatus(project, members)) {
+            throw new AccessDeniedException("只有项目负责人或所属工作区主号可以修改项目阶段");
+        }
+    }
+
     /**
      * 历史画布等接口的路径参数名为 projectId，实际承载楼层工作区 ID；
      * 先由楼层查证所属项目，再校验成员权限。

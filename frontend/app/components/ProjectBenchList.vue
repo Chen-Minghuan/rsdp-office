@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import type { ProjectBudget, WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, ProjectStatus, WorkspaceProject } from '~/types/workspace'
+import { projectStatusOptions, type ProjectStatusFilter } from '~/utils/projectStatus'
+
+const props = withDefaults(defineProps<{ statusFilter?: ProjectStatusFilter }>(), { statusFilter: 'ALL' })
 
 // 项目树由应用外壳加载，只有本列表展示时才单独读取预算。
 const workspace = useWorkspaceStore()
@@ -7,6 +10,8 @@ const { storageScope } = useAuth()
 const api = useWorkspaceApi()
 const budgetByProject = ref<Record<string, ProjectBudget>>({})
 const budgetsLoading = ref(false)
+const updatingStatus = ref<Record<string, boolean>>({})
+const statusError = ref('')
 const projectKeys = computed(() => workspace.projects.map(project => project.projectId).join(','))
 
 watch([projectKeys, storageScope], async ([projects, scope], _previous, onCleanup) => {
@@ -44,13 +49,35 @@ async function openProject(project: WorkspaceProject) {
   await workspace.activateFloor(firstFloor.floorId, true)
 }
 
+async function changeStatus(project: WorkspaceProject, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const previous = project.status
+  const scope = storageScope.value
+  const next = select.value as ProjectStatus
+  if (updatingStatus.value[project.projectId] || next === previous) return
+  updatingStatus.value[project.projectId] = true
+  statusError.value = ''
+  try {
+    await workspace.updateProjectStatus(project.projectId, next)
+  } catch (error) {
+    if (scope === storageScope.value) {
+      select.value = previous
+      statusError.value = error instanceof Error ? error.message : '项目阶段保存失败，请重试'
+    }
+  } finally {
+    updatingStatus.value[project.projectId] = false
+  }
+}
+
 const visibleProjects = computed(() => {
   const keyword = search.value.trim().toLowerCase()
+  const categoryProjects = props.statusFilter === 'ALL'
+    ? workspace.projects : workspace.projects.filter(project => project.status === props.statusFilter)
   const filtered = keyword
-    ? workspace.projects.filter(p =>
+    ? categoryProjects.filter(p =>
         p.projectName.toLowerCase().includes(keyword)
         || leaderName(p).toLowerCase().includes(keyword))
-    : [...workspace.projects]
+    : [...categoryProjects]
   const by: Record<typeof sortKey.value, (a: WorkspaceProject, b: WorkspaceProject) => number> = {
     name: (a, b) => a.projectName.localeCompare(b.projectName, 'zh'),
     floors: (a, b) => b.floors.length - a.floors.length,
@@ -83,17 +110,20 @@ const visibleProjects = computed(() => {
       </div>
     </div>
 
+    <p v-if="statusError" role="alert" class="border-t border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{{ statusError }}</p>
+
     <p v-if="workspace.error" role="alert" class="border-t border-line px-5 py-6 text-sm text-red-700">{{ workspace.error }}</p>
     <p v-else-if="!workspace.initialized" class="border-t border-line px-5 py-8 text-center text-sm text-muted">正在加载项目…</p>
     <p v-else-if="!workspace.projects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">当前账号暂无可访问项目</p>
-    <p v-else-if="!visibleProjects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">没有匹配的项目，换个关键词试试。</p>
-    <div v-else class="overflow-x-auto border-t border-line">
+    <p v-else-if="!visibleProjects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">{{ search.trim() ? '没有匹配的项目，换个关键词试试。' : '当前分类暂无项目。' }}</p>
+    <div v-else class="relative overflow-x-auto border-t border-line">
       <table class="w-full min-w-[600px] border-collapse text-left">
         <thead class="bg-bg">
           <tr class="text-xs text-muted">
             <th scope="col" class="px-5 py-2.5 text-left font-normal">项目名</th>
             <th scope="col" class="px-4 py-2.5 font-normal">负责人</th>
             <th scope="col" class="px-4 py-2.5 font-normal">楼层数</th>
+            <th scope="col" class="px-4 py-2.5 font-normal">项目阶段</th>
             <th scope="col" class="px-5 py-2.5 font-normal">项目预算</th>
             <th scope="col" class="w-12 px-3 py-2.5"><span class="sr-only">进入项目</span></th>
           </tr>
@@ -120,6 +150,13 @@ const visibleProjects = computed(() => {
               <span v-else class="text-muted">—</span>
             </td>
             <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
+            <td class="px-4 py-3.5 text-sm" @click.stop @keydown.stop>
+              <select v-if="project.canManageStatus" :value="project.status" :disabled="updatingStatus[project.projectId]"
+                :aria-label="`${project.projectName}的项目阶段`" class="border border-line bg-white px-2 py-1.5 text-sm outline-bronze disabled:opacity-50" @change="changeStatus(project, $event)">
+                <option v-for="option in projectStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+              <span v-else>{{ projectStatusOptions.find(option => option.value === project.status)?.label }}</span>
+            </td>
             <td class="px-5 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
               <span v-if="budgetsLoading" class="text-xs text-muted">加载中…</span>
               <template v-else-if="budgetByProject[project.projectId]?.budgetTotal != null && budgetByProject[project.projectId]?.budgetStatus !== 'UNAVAILABLE'">
