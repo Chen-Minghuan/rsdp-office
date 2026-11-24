@@ -44,16 +44,16 @@ watch(() => route.value.path, () => {
 
 <template>
   <NuxtPage v-if="isLoginPage" />
-  <div v-else :class="isSpatialWorkbench ? '' : 'flex h-dvh min-h-[600px] flex-col overflow-hidden bg-bg text-ink md:flex-row'">
-    <AppSidebar v-if="!isSpatialWorkbench" />
-    <main :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-w-0 min-h-0'">
-      <AppTopbar v-if="!isSpatialWorkbench" />
-      <div :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-h-0 overflow-y-auto'">
+  <div v-else :class="isSpatialWorkbench ? '' : 'flex h-dvh min-h-[600px] flex-col overflow-hidden bg-white text-ink'">
+    <AppTopbar v-if="!isSpatialWorkbench" />
+    <div :class="isSpatialWorkbench ? '' : 'flex flex-1 min-h-0 flex-col md:flex-row'">
+      <AppSidebar v-if="!isSpatialWorkbench" />
+      <main :class="isSpatialWorkbench ? '' : 'flex flex-1 flex-col min-w-0 min-h-0 overflow-y-auto'">
         <div v-if="floorPending" class="grid flex-1 place-items-center text-sm text-muted">正在加载当前楼层…</div>
         <ProjectEmptyState v-else-if="isDesignWorkflow && !workspace.currentFloorId" />
         <NuxtPage v-else :key="pageKey" />
-      </div>
-    </main>
+      </main>
+    </div>
     <ProposalFurnitureGateDialog v-if="proposalFurnitureGateDialog.mismatches.value.length" :mismatches="proposalFurnitureGateDialog.mismatches.value" @close="proposalFurnitureGateDialog.close" />
   </div>
 </template>

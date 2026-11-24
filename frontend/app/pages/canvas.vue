@@ -46,14 +46,17 @@ const designZoneId = computed(() => store.designZoneId)
 watch([() => route.query, () => store.initialized, () => workspace.loading], ([q, initialized]) => {
   if (!initialized) return
   const urlMode = q.mode === 'design' && !store.layoutEntryBlocker ? 'design' : 'overview'
-  const urlZoneId = q.zoneId as string | undefined
+  const urlZoneId = typeof q.zoneId === 'string' ? q.zoneId : undefined
   if (urlMode !== store.canvasMode || urlZoneId !== store.designZoneId) {
-    if (urlMode === 'design') store.enterDesign(store.zones.some(zone => zone.id === urlZoneId) ? urlZoneId! : store.zones[0]?.id || '')
+    if (urlMode === 'design') store.enterDesign(urlZoneId && store.zones.some(zone => zone.id === urlZoneId) ? urlZoneId : store.zones[0]?.id || '')
     else { store.canvasMode = 'overview'; store.designZoneId = null }
+  }
+  if (q.mode !== 'design' && urlZoneId && store.zones.some(zone => zone.id === urlZoneId)) {
+    store.reviewFocusZoneId = urlZoneId
   }
   // 楼层数据加载途中门禁条件会短暂不满足，等加载结束再决定是否剥离设计入口参数，避免误丢 zoneId
   if (q.mode === 'design' && !!store.layoutEntryBlocker && !workspace.loading) {
-    const { mode, zoneId, ...query } = q
+    const { mode, zoneId, view, ...query } = q
     router.replace({ path: '/canvas', query })
   }
 }, { immediate: true, deep: true })
@@ -68,7 +71,8 @@ watch(() => store.canvasMode, (m, oldM) => {
     query.zoneId = store.designZoneId || store.zones[0]?.id || ''
   } else {
     delete query.mode
-    delete query.zoneId
+    if (route.query.mode === 'design') delete query.zoneId
+    delete query.view
   }
   router.replace({ path: route.path, query })
 })
@@ -219,7 +223,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
       </div>
 
       <!-- Right sidebar -->
-      <OfficeCanvasDesignWorkflowSidebar v-if="mode === 'design'" ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing" :current-preview="layoutPreview" @preview="layoutPreview = $event" />
+      <OfficeCanvasDesignWorkflowSidebar v-if="mode === 'design'" ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing" :current-preview="layoutPreview" :open-selection="route.query.view === 'products'" @preview="layoutPreview = $event" />
       <aside v-else :class="['flex-none bg-white border border-line rounded-none shadow-panel overflow-hidden transition-all duration-300', overviewCollapsed ? 'w-12' : 'w-72']">
         <div v-show="!overviewCollapsed" class="w-72 h-full p-4 flex flex-col gap-4">
           <div class="relative flex items-center justify-between">

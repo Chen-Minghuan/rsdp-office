@@ -10,7 +10,7 @@ const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { required: true })
 /** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
-const props = defineProps<{ currentPreview?: LayoutPreview | null }>()
+const props = defineProps<{ currentPreview?: LayoutPreview | null; openSelection?: boolean }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void }
@@ -57,8 +57,10 @@ const zoneType = computed({
     if (zone.value && value !== zone.value.zoneType) store.updateZoneType(zone.value.id, value)
   },
 })
-watch(() => store.designZoneId, () => {
-  activePage.value = 'auto'
+watch([() => store.designZoneId, () => props.openSelection], ([zoneId, openSelection]) => {
+  activePage.value = openSelection && zoneId
+    ? (store.layoutConfirmedForZone(zoneId) ? 'recommendations' : 'products')
+    : 'auto'
   selectedCategories.value = []
   selectedCatalogId.value = ''
   automaticModuleId.value = ''
