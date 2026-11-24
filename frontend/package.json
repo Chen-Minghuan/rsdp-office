@@ -16,6 +16,8 @@
     "e2e:workflows": "node scripts/e2e-workflows.mjs",
     "e2e:proposal-confirmation": "node scripts/e2e-proposal-confirmation.mjs",
     "e2e:quotes": "node scripts/e2e-quotes.mjs",
+    "e2e:account-center": "node scripts/e2e-account-center.mjs",
+    "e2e:favorites-page": "node scripts/e2e-favorites-page.mjs",
     "test:auto-layout": "node scripts/test-auto-layout.mjs",
     "test:arrangement-presets": "node scripts/test-arrangement-presets.mjs",
     "test:design-corrections": "node scripts/test-design-corrections.mjs",

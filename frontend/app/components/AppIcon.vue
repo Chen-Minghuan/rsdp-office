@@ -54,7 +54,9 @@ import {
   ViewfinderCircleIcon,
   WindowIcon,
   ArrowRightOnRectangleIcon,
+  HeartIcon,
 } from '@heroicons/vue/24/outline'
+import { HeartIcon as HeartSolidIcon } from '@heroicons/vue/24/solid'
 
 const icons: Record<string, any> = {
   home: HomeIcon,
@@ -112,6 +114,8 @@ const icons: Record<string, any> = {
   fitScreen: ViewfinderCircleIcon,
   window: WindowIcon,
   door: ArrowRightOnRectangleIcon,
+  heart: HeartIcon,
+  heartSolid: HeartSolidIcon,
 }
 
 const props = defineProps<{
