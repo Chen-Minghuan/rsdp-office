@@ -61,6 +61,7 @@ const loadedRenderZones = new Set<string>()
 const renderApi = useRenderPreviewApi()
 // 当前项目最新已确认报价单；方案状态以数据库快照与当前购物车明细对比为准
 const latestQuotation = ref<ProjectQuotationRecord | null>(null)
+let quotationLoadToken = 0
 
 const previewMode = computed(() => route.query.preview === '1')
 const overviewRoute = computed(() => ({ path: '/canvas', query: { floorId: workspace.currentFloorId } }))
@@ -215,14 +216,16 @@ async function loadRenderPreviews() {
 watch(() => [store.initialized, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
 
 async function loadLatestQuotation() {
+  const token = ++quotationLoadToken
   if (previewMode.value || !store.initialized || !workspace.currentProjectId || !workspace.currentFloorId) {
     latestQuotation.value = null
     return
   }
   try {
-    latestQuotation.value = await catalogApi.latestProjectQuotation(workspace.currentProjectId)
+    const record = await catalogApi.latestProjectQuotation(workspace.currentProjectId)
+    if (token === quotationLoadToken) latestQuotation.value = record
   } catch {
-    latestQuotation.value = null
+    if (token === quotationLoadToken) latestQuotation.value = null
   }
 }
 
@@ -395,6 +398,7 @@ async function confirmProposal() {
       fees: [],
       lines,
     })
+    quotationLoadToken++
     latestQuotation.value = result
     setNotice(`方案已确认，报价单 ${result.quotationId}（第 ${result.revision} 版）已生成`)
   } catch (e) {
