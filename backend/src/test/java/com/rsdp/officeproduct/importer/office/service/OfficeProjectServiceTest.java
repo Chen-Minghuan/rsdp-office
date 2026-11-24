@@ -181,7 +181,7 @@ class OfficeProjectServiceTest {
         when(catalogGateway.listOfficeProducts("full")).thenReturn(List.of(
             product("V-1", "100"), product("V-2", "50"), product("V-3", "10")));
 
-        var result = budgetService().listProjects();
+        var result = service.listProjects();
 
         var headquarters = project(result, first.getProjectId());
         assertEquals(new BigDecimal("350"), budgetTotal(headquarters));
@@ -194,7 +194,7 @@ class OfficeProjectServiceTest {
     @Test void listsZeroBudgetForProjectsWithoutCartItems() {
         var created = service.createProject(request("空项目", List.of("一层")));
 
-        var project = project(budgetService().listProjects(), created.getProjectId());
+        var project = project(service.listProjects(), created.getProjectId());
 
         assertEquals(BigDecimal.ZERO, budgetTotal(project));
         assertEquals("COMPLETE", budgetStatus(project));
@@ -212,9 +212,9 @@ class OfficeProjectServiceTest {
         quotation("Q-P", partial.getProjectId(), "CONFIRMED");
         quotationLines.add(line("Q-D", "OLD-FLOOR-1"));
         quotationLines.add(line("Q-D", "OLD-FLOOR-2"));
-        quotationLines.add(line("Q-L", "EXTERNAL-FLOOR-1"));
-        quotationLines.add(line("Q-L", "EXTERNAL-FLOOR-1"));
-        quotationLines.add(line("Q-L", "EXTERNAL-FLOOR-2"));
+        quotationLines.add(line("Q-L", delivering.getFloors().get(0).getFloorId()));
+        quotationLines.add(line("Q-L", delivering.getFloors().get(0).getFloorId()));
+        quotationLines.add(line("Q-L", delivering.getFloors().get(1).getFloorId()));
         quotationLines.add(line("Q-P", partial.getFloors().get(0).getFloorId()));
 
         var result = service.listProjects();
@@ -223,6 +223,24 @@ class OfficeProjectServiceTest {
         assertEquals("DESIGNING", project(result, confirmedEmpty.getProjectId()).getStage());
         assertEquals("DELIVERING", project(result, delivering.getProjectId()).getStage());
         assertEquals("DESIGNING", project(result, partial.getProjectId()).getStage());
+    }
+
+    @Test void ignoresQuotationLinesReferencingForeignOrRemovedFloors() {
+        var foreign = service.createProject(request("外来楼层", List.of("一层", "二层")));
+        var removed = service.createProject(request("含已删楼层", List.of("一层", "二层")));
+        quotation("Q-F", foreign.getProjectId(), "CONFIRMED");
+        quotation("Q-R", removed.getProjectId(), "CONFIRMED");
+        quotationLines.add(line("Q-F", "EXTERNAL-FLOOR-1"));
+        quotationLines.add(line("Q-F", "EXTERNAL-FLOOR-1"));
+        quotationLines.add(line("Q-F", "EXTERNAL-FLOOR-2"));
+        quotationLines.add(line("Q-R", removed.getFloors().get(0).getFloorId()));
+        quotationLines.add(line("Q-R", removed.getFloors().get(1).getFloorId()));
+        quotationLines.add(line("Q-R", "REMOVED-FLOOR"));
+
+        var result = service.listProjects();
+
+        assertEquals("DESIGNING", project(result, foreign.getProjectId()).getStage());
+        assertEquals("DELIVERING", project(result, removed.getProjectId()).getStage());
     }
 
     private OfficeQuotation quotation(String id, String projectId, String status) {
@@ -247,7 +265,7 @@ class OfficeProjectServiceTest {
         cartLines.add(cart(created.getFloors().get(0).getFloorId(), "V-1", 1));
         when(catalogGateway.listOfficeProducts("full")).thenThrow(new BusinessException("商品目录不可用"));
 
-        var project = project(budgetService().listProjects(), created.getProjectId());
+        var project = project(service.listProjects(), created.getProjectId());
 
         assertNull(budgetTotal(project));
         assertEquals("UNAVAILABLE", budgetStatus(project));
@@ -537,21 +555,6 @@ class OfficeProjectServiceTest {
         assertEquals(2, result.size());
         assertTrue(result.stream().allMatch(user -> !user.getUserId().equals("USR-3")));
         assertEquals("alpha", result.get(0).getUsername());
-    }
-
-    private OfficeProjectService budgetService() {
-        try {
-            return OfficeProjectService.class.getConstructor(
-                OfficeDesignProjectMapper.class, OfficeDesignFloorMapper.class, OfficeProjectMemberMapper.class,
-                OfficeUserMapper.class, OfficeProjectAccessService.class, OfficeAuditService.class, ObjectMapper.class,
-                OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class
-            ).newInstance(projectMapper, floorMapper, memberMapper, userMapper, access, auditService, new ObjectMapper(),
-                cartMapper, catalogGateway, sharedCatalogService);
-        } catch (NoSuchMethodException missingBudgetDependencies) {
-            throw new AssertionError("项目服务尚未提供购物车预算聚合依赖", missingBudgetDependencies);
-        } catch (ReflectiveOperationException failed) {
-            throw new AssertionError("无法构造带预算聚合能力的项目服务", failed);
-        }
     }
 
     private OfficeProjectDto project(List<OfficeProjectDto> projects, String projectId) {

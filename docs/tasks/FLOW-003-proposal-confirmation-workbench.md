@@ -61,3 +61,11 @@ PDF 的主要信息关系是“楼层/类别 → 具体空间 → 需求/布局/
 - confirmed 由本地 ref 改为 proposalMatches computed：刷新页面后已确认状态仍正确；修改购物车数量/商品/单价自动回到待最终确认；切换楼层时先清空旧报价单避免误判；预览模式、未选楼层和接口失败均按无方案处理，不阻塞页面。
 - 顶部 heading-status 与右侧「确认状态」卡片同步三态文案与绿色已确认样式；确认成功后直接把返回的报价记录写入 latestQuotation。
 - 验证：pnpm build、node scripts/e2e-proposal-confirmation.mjs（mock 的确认接口改为回显提交明细的完整报价记录，保证确认后状态置为已确认）与 pnpm e2e:workflows 通过；API 均为 Playwright mock，未做真实后端业务验收。
+
+## 2026-11-23 多楼层方案确认状态隔离
+
+- 问题：`/proposal` 仅提交当前楼层明细，但后端每次确认都会以该明细替换项目唯一的已确认报价版本。确认二楼后，最新记录不再含一楼行，一楼页面按当前楼层比对时被错误判为「待最终确认」。
+- 请求新增可选 `confirmationScope`（`PROJECT`/`FLOOR`）和 `floorId`。商品报价页继续省略该字段并维持项目级全量替换；方案页明确提交 `FLOOR` 与当前楼层 ID。
+- `FLOOR` 确认要求全部提交行属于 `floorId`，当前楼层按最新目录重新校验；上一版的其他楼层行直接复制历史商品、价格、图片与异常快照。新项目报价版本因此保留各已确认楼层，仅替换当前楼层行；已有项目级定价口径和费用在后续楼层确认时保持不变。
+- 新增后端回归覆盖其他楼层快照保留、目标楼层替换与跨楼层行拒绝；现有未设置范围的测试保留项目级替换契约。前端 Playwright 回归覆盖一楼确认 → 二楼确认 → 返回一楼仍显示「已确认方案」，并校验两次请求均为楼层范围。
+- 验证：`pnpm build`、`pnpm e2e:proposal-confirmation` 与临时前端预览上的 `pnpm e2e:workflows` 通过，均为 API mock。`mvn -f backend/pom.xml test` 未能执行到测试：本机 `JAVA_HOME=D:\Java\jdk-17`，项目编译要求 Java 21；未将该环境阻塞表述为后端通过。未执行真实数据库/角色业务验收。

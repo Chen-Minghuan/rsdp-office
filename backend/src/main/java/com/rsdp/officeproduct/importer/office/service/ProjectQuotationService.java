@@ -5,6 +5,7 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.ConfirmProjectQuotationRequest;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationPreviewDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationRecordDto;
+import com.rsdp.officeproduct.importer.office.dto.QuotationFeeDto;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeQuotation;
 import com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine;
@@ -18,6 +19,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,6 +27,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class ProjectQuotationService {
+
+    private enum ConfirmationScope { PROJECT, FLOOR }
 
     private final OfficeProjectAccessService accessService;
     private final OfficeDesignProjectMapper projectMapper;
@@ -43,9 +47,12 @@ public class ProjectQuotationService {
     /** 确认报价后保留历史版本，并在同一事务内更新当前版本和审计。 */
     @Transactional
     public ProjectQuotationRecordDto confirm(String projectId, ConfirmProjectQuotationRequest request) {
-        ProjectQuotationDraftBuilder.Draft draft = draftBuilder.build(requireProjectAccess(projectId), request);
-        OfficeQuotation quotation = draft.quotation();
-        quotation.setFeesJson(recordAssembler.writeFees(draft.fees()));
+        OfficeDesignProject project = requireProjectAccess(projectId);
+        ConfirmationScope scope = confirmationScope(request);
+        if (scope == ConfirmationScope.FLOOR) {
+            requireFloorScopedLines(request);
+        }
+        ProjectQuotationDraftBuilder.Draft draft = draftBuilder.build(project, request);
 
         // 锁定项目后再分配版本，首次确认也能串行写入。
         if (projectMapper.selectOne(new QueryWrapper<OfficeDesignProject>().select("project_id")
@@ -53,6 +60,11 @@ public class ProjectQuotationService {
             throw new BusinessException("项目不存在");
         }
         OfficeQuotation previous = findLatest(projectId);
+        ConfirmationDraft confirmation = scope == ConfirmationScope.FLOOR
+            ? mergeFloorConfirmation(draft, previous, request.getFloorId())
+            : new ConfirmationDraft(draft.quotation(), draft.rows(), draft.fees());
+        OfficeQuotation quotation = confirmation.quotation();
+        quotation.setFeesJson(recordAssembler.writeFees(confirmation.fees()));
         int revision = previous == null || previous.getRevision() == null ? 1 : previous.getRevision() + 1;
         String quotationId = "QT-" + UUID.randomUUID().toString().replace("-", "");
         quotation.setQuotationId(quotationId);
@@ -68,14 +80,17 @@ public class ProjectQuotationService {
             .eq("project_id", projectId).eq("status", "CONFIRMED"));
 
         quotationMapper.insert(quotation);
-        for (OfficeQuotationLine row : draft.rows()) {
+        int lineNo = 0;
+        for (OfficeQuotationLine row : confirmation.rows()) {
             row.setQuotationId(quotationId);
+            row.setLineNo(lineNo++);
             quotationLineMapper.insert(row);
         }
-        ProjectQuotationRecordDto record = recordAssembler.assemble(quotation, draft.rows(), draft.fees());
+        ProjectQuotationRecordDto record = recordAssembler.assemble(quotation, confirmation.rows(), confirmation.fees());
         auditService.record("QUOTATION_CONFIRMED", "PROJECT", projectId,
             "quotationId=" + quotationId + "; revision=" + revision + "; total=" + quotation.getTotalAmount()
-                + "; lines=" + record.getLineCount() + "; missing=" + record.getMissingPriceLines());
+                + "; lines=" + record.getLineCount() + "; missing=" + record.getMissingPriceLines()
+                + "; scope=" + scope);
         return record;
     }
 
@@ -98,6 +113,99 @@ public class ProjectQuotationService {
     private OfficeQuotation findLatest(String projectId) {
         return quotationMapper.selectOne(new QueryWrapper<OfficeQuotation>()
             .eq("project_id", projectId).orderByDesc("revision").last("limit 1"));
+    }
+
+    private ConfirmationScope confirmationScope(ConfirmProjectQuotationRequest request) {
+        String rawScope = request == null ? null : request.getConfirmationScope();
+        if (!StringUtils.hasText(rawScope) || ConfirmationScope.PROJECT.name().equalsIgnoreCase(rawScope)) {
+            return ConfirmationScope.PROJECT;
+        }
+        if (ConfirmationScope.FLOOR.name().equalsIgnoreCase(rawScope)) {
+            return ConfirmationScope.FLOOR;
+        }
+        throw new BusinessException("确认范围仅支持 PROJECT 或 FLOOR");
+    }
+
+    private void requireFloorScopedLines(ConfirmProjectQuotationRequest request) {
+        String floorId = request.getFloorId();
+        if (!StringUtils.hasText(floorId)) {
+            throw new BusinessException("楼层确认缺少 floorId");
+        }
+        if (request.getLines() == null || request.getLines().isEmpty()) {
+            return;
+        }
+        for (ConfirmProjectQuotationRequest.Line line : request.getLines()) {
+            if (line == null || !floorId.equals(line.getFloorId())) {
+                throw new BusinessException("楼层确认明细必须全部属于当前楼层");
+            }
+        }
+    }
+
+    /**
+     * 楼层确认创建新的项目报价版本：当前楼层按最新商品目录核验和重建，其他楼层直接复制已确认快照。
+     * 这样其他楼层的停售商品、历史价格和展示信息不会被本次确认重新校验或静默改写。
+     */
+    private ConfirmationDraft mergeFloorConfirmation(ProjectQuotationDraftBuilder.Draft draft, OfficeQuotation previous,
+                                                      String floorId) {
+        if (previous == null) {
+            return new ConfirmationDraft(draft.quotation(), draft.rows(), draft.fees());
+        }
+
+        List<OfficeQuotationLine> rows = new ArrayList<>();
+        for (OfficeQuotationLine previousRow : quotationLineMapper.findByQuotationId(previous.getQuotationId())) {
+            if (!floorId.equals(previousRow.getFloorId())) {
+                rows.add(copyLine(previousRow));
+            }
+        }
+        for (OfficeQuotationLine currentRow : draft.rows()) {
+            rows.add(copyLine(currentRow));
+        }
+
+        List<QuotationFeeDto> fees = previousFees(previous);
+        OfficeQuotation quotation = draft.quotation();
+        quotation.setPricingMode(previous.getPricingMode());
+        quotation.setPricingValue(previous.getPricingValue());
+        quotation.setTotalAmount(totalAmount(rows, fees));
+        return new ConfirmationDraft(quotation, rows, fees);
+    }
+
+    private List<QuotationFeeDto> previousFees(OfficeQuotation previous) {
+        return StringUtils.hasText(previous.getFeesJson())
+            ? recordAssembler.readFees(previous.getFeesJson())
+            : new ArrayList<>();
+    }
+
+    private BigDecimal totalAmount(List<OfficeQuotationLine> rows, List<QuotationFeeDto> fees) {
+        BigDecimal goodsTotal = rows.stream()
+            .filter(row -> row.getUnitPrice() != null)
+            .map(row -> QuotationPricing.subtotal(row.getUnitPrice(), row.getQty()))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal feeTotal = fees.stream()
+            .map(QuotationFeeDto::getAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return QuotationPricing.money(goodsTotal.add(feeTotal));
+    }
+
+    private OfficeQuotationLine copyLine(OfficeQuotationLine source) {
+        OfficeQuotationLine copy = new OfficeQuotationLine();
+        copy.setFloorId(source.getFloorId());
+        copy.setFloorName(source.getFloorName());
+        copy.setZoneId(source.getZoneId());
+        copy.setZoneName(source.getZoneName());
+        copy.setProductId(source.getProductId());
+        copy.setRspuId(source.getRspuId());
+        copy.setProductName(source.getProductName());
+        copy.setVariant(source.getVariant());
+        copy.setImageUrl(source.getImageUrl());
+        copy.setQty(source.getQty());
+        copy.setFactoryPrice(source.getFactoryPrice());
+        copy.setUnitPrice(source.getUnitPrice());
+        copy.setIssue(source.getIssue());
+        return copy;
+    }
+
+    private record ConfirmationDraft(OfficeQuotation quotation, List<OfficeQuotationLine> rows,
+                                     List<QuotationFeeDto> fees) {
     }
 
     private OfficeDesignProject requireProjectAccess(String projectId) {

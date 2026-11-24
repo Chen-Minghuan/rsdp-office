@@ -10,6 +10,10 @@ import java.util.List;
 @Data
 public class ConfirmProjectQuotationRequest {
 
+    /** PROJECT（默认）替换整项目报价；FLOOR 仅替换 floorId 对应楼层的已确认快照。 */
+    private String confirmationScope;
+    /** confirmationScope=FLOOR 时必填，且全部 lines 必须属于该楼层。 */
+    private String floorId;
     private String pricingMode;
     private BigDecimal pricingValue;
     private List<Fee> fees = new ArrayList<>();

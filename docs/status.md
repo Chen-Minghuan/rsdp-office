@@ -1,5 +1,9 @@
 # 开发进度与下一步
 
+2026-11-23 [FLOW-003](tasks/FLOW-003-proposal-confirmation-workbench.md#2026-11-23-多楼层方案确认状态隔离) 修复同项目跨楼层确认互相覆盖：方案页改用 `FLOOR` 范围确认，后端在新的项目报价版本中仅替换当前楼层行并复制其他楼层已确认快照，保留旧商品/价格/图片/异常信息及既有项目级费用和定价口径。一楼确认 → 二楼确认 → 返回一楼的 Playwright 回归、前端构建和模拟工作流通过；后端回归已补充，但本机仅 Java 17、项目要求 Java 21，`mvn -f backend/pom.xml test` 在编译阶段阻塞，未声称后端测试通过。
+
+2026-11-23 修复 Java 回归中 3 项预算测试失败：`OfficeProjectService` 新增报价 Mapper 依赖后，`OfficeProjectServiceTest.budgetService()` 仍反射查找旧 10 参构造器触发 `NoSuchMethodException`。删除该反射辅助方法，三处调用改用 `setup()` 已注入完整依赖的 `service`。使用 `E:\software\jdk21\jdk-21` 运行 `mvn -f backend/pom.xml test`：304 项、0 失败、0 错误、3 跳过。此前 FLOW-003 记录的「本机无 Java 21 编译阻塞」已通过该 JDK 解除。
+
 2026-11-20 [FLOW-003](tasks/FLOW-003-proposal-confirmation-workbench.md#2026-11-20-方案状态与数据库已确认方案联动) 方案页确认状态改为以数据库为准：加载最新已确认报价单并按当前楼层过滤，与购物车明细按商品×数量展开后严格对比（productId/zoneId/unitPrice），一致显示「已确认方案」，无方案或不一致显示「待最终确认」；修改购物车自动失效回待确认。`pnpm build`、方案确认专项与 `pnpm e2e:workflows` 通过，API 为模拟。
 
 2026-11-20 [FLOW-003](tasks/FLOW-003-proposal-confirmation-workbench.md) 方案确认按钮接入项目报价确认：用父项目 ID 调用报价确认接口，明细只提交当前楼层的已选商品，页面商品价作为成交单价；确认状态仅在服务端成功后更新，预览、无商品和失败不误显示已确认。新增 Playwright 回归覆盖路径/载荷及成功、失败、空明细、预览分支；`pnpm build`、该专项与 `pnpm e2e:workflows` 通过，API 为模拟。接口创建项目级报价版本，因此当前行为不是全项目多楼层汇总或方案快照验收。

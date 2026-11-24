@@ -116,6 +116,10 @@ public class OfficeProjectService {
         if (projectIds.isEmpty()) {
             return stages;
         }
+        Map<String, Set<String>> realFloorIdsByProject = floors.stream()
+            .filter(floor -> StringUtils.hasText(floor.getFloorId()))
+            .collect(Collectors.groupingBy(OfficeDesignFloor::getProjectId,
+                Collectors.mapping(OfficeDesignFloor::getFloorId, Collectors.toSet())));
 
         List<OfficeQuotation> confirmed = quotationMapper.selectList(new QueryWrapper<OfficeQuotation>()
             .in("project_id", projectIds).eq("status", "CONFIRMED")
@@ -139,9 +143,9 @@ public class OfficeProjectService {
         for (Map.Entry<String, OfficeQuotation> entry : quotationByProject.entrySet()) {
             String projectId = entry.getKey();
             OfficeQuotation quotation = entry.getValue();
-            long floorCount = floors.stream().filter(floor -> projectId.equals(floor.getProjectId())).count();
+            Set<String> realFloorIds = realFloorIdsByProject.getOrDefault(projectId, Set.of());
             Set<String> quotedFloors = floorsByQuotation.getOrDefault(quotation.getQuotationId(), Set.of());
-            if (floorCount > 0 && quotedFloors.size() == floorCount) {
+            if (!realFloorIds.isEmpty() && quotedFloors.containsAll(realFloorIds)) {
                 stages.put(projectId, "DELIVERING");
             }
         }

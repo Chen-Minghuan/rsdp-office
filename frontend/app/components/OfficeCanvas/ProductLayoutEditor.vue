@@ -83,6 +83,7 @@ function clearLayout() {
 }
 function addModule(module: OfficeModuleTemplate) {
   if (!zone.value) return
+  store.cancelFurniturePlacement()
   selectedCatalogId.value = module.id
   selectedId.value = null
   replacementMode.value = false

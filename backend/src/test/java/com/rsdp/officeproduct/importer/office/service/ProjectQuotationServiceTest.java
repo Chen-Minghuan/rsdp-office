@@ -183,6 +183,96 @@ class ProjectQuotationServiceTest {
     }
 
     @Test
+    void floorScopedConfirmationPreservesOtherFloorSnapshots() {
+        stubScenario(true);
+        String secondFloorId = "FLOOR-2";
+        OfficeDesignFloor firstFloor = floor(FLOOR_ID, "1F");
+        OfficeDesignFloor secondFloor = floor(secondFloorId, "2F");
+        when(floorMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(firstFloor, secondFloor));
+
+        OfficeQuotation previous = new OfficeQuotation();
+        previous.setQuotationId("QT-FIRST");
+        previous.setProjectId(PROJECT_ID);
+        previous.setProjectName("报价测试项目");
+        previous.setWorkspaceId("WS-1");
+        previous.setRevision(4);
+        previous.setStatus("CONFIRMED");
+        previous.setPricingMode("MARGIN");
+        previous.setPricingValue(new BigDecimal("0.35"));
+        previous.setFeesJson("[{\"name\":\"服务费\",\"amount\":50}]");
+
+        OfficeQuotationLine preserved = new OfficeQuotationLine();
+        preserved.setQuotationId(previous.getQuotationId());
+        preserved.setLineNo(0);
+        preserved.setFloorId(FLOOR_ID);
+        preserved.setFloorName("1F");
+        preserved.setZoneId("Z-OLD");
+        preserved.setZoneName("一楼旧空间");
+        preserved.setProductId("V-RETIRED");
+        preserved.setRspuId("RSPU-RETIRED");
+        preserved.setProductName("历史办公桌");
+        preserved.setVariant("停售旧款");
+        preserved.setImageUrl("/images/retired.png");
+        preserved.setQty(2);
+        preserved.setFactoryPrice(new BigDecimal("200"));
+        preserved.setUnitPrice(new BigDecimal("325"));
+
+        OfficeQuotationLine replaced = new OfficeQuotationLine();
+        replaced.setQuotationId(previous.getQuotationId());
+        replaced.setLineNo(1);
+        replaced.setFloorId(secondFloorId);
+        replaced.setFloorName("2F");
+        replaced.setZoneId("Z-REPLACED");
+        replaced.setZoneName("二楼旧空间");
+        replaced.setProductId("V-OLD-2F");
+        replaced.setProductName("二楼旧办公桌");
+        replaced.setQty(1);
+        replaced.setUnitPrice(new BigDecimal("300"));
+
+        when(quotationMapper.selectOne(any())).thenReturn(previous);
+        when(quotationLineMapper.findByQuotationId(previous.getQuotationId())).thenReturn(List.of(preserved, replaced));
+
+        ConfirmProjectQuotationRequest request = request("COEFFICIENT", "1.2", "0", "0",
+            List.of(confirmLine(secondFloorId, "V-DESK", 1, "700")));
+        scopeFloorConfirmation(request, secondFloorId);
+
+        ProjectQuotationRecordDto stored = service().confirm(PROJECT_ID, request);
+
+        assertEquals(2, stored.getLineCount());
+        assertEquals("MARGIN", stored.getPricingMode());
+        assertAmount("0.35", stored.getPricingValue());
+        assertEquals(1, stored.getFees().size());
+        assertAmount("1400", stored.getTotalAmount());
+
+        var preservedResult = stored.getLines().stream()
+            .filter(line -> FLOOR_ID.equals(line.getFloorId()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals("V-RETIRED", preservedResult.getProductId());
+        assertEquals("历史办公桌", preservedResult.getProductName());
+        assertAmount("325", preservedResult.getUnitPrice());
+
+        var secondFloorResult = stored.getLines().stream()
+            .filter(line -> secondFloorId.equals(line.getFloorId()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals("V-DESK", secondFloorResult.getProductId());
+        assertAmount("700", secondFloorResult.getUnitPrice());
+    }
+
+    @Test
+    void floorScopedConfirmationRejectsLinesOutsideTheCurrentFloor() {
+        stubScenario(true);
+        ConfirmProjectQuotationRequest request = request("COEFFICIENT", "1.2", "0", "0",
+            List.of(confirmLine(FLOOR_ID, "V-DESK", 1, "700")));
+        scopeFloorConfirmation(request, "FLOOR-2");
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID, request));
+
+        assertEquals("楼层确认明细必须全部属于当前楼层", failure.getMessage());
+    }
+
+    @Test
     void confirmRejectsEmptyLinesAndNegativeFees() {
         stubScenario(true);
         assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID,
@@ -274,14 +364,31 @@ class ProjectQuotationServiceTest {
     }
 
     private ConfirmProjectQuotationRequest.Line confirmLine(String productId, int qty, String unitPrice) {
+        return confirmLine(FLOOR_ID, productId, qty, unitPrice);
+    }
+
+    private ConfirmProjectQuotationRequest.Line confirmLine(String floorId, String productId, int qty, String unitPrice) {
         ConfirmProjectQuotationRequest.Line line = new ConfirmProjectQuotationRequest.Line();
-        line.setFloorId(FLOOR_ID);
+        line.setFloorId(floorId);
         line.setZoneId("Z1");
         line.setZoneName("开放办公区");
         line.setProductId(productId);
         line.setQty(qty);
         line.setUnitPrice(unitPrice == null ? null : new BigDecimal(unitPrice));
         return line;
+    }
+
+    private OfficeDesignFloor floor(String floorId, String name) {
+        OfficeDesignFloor floor = new OfficeDesignFloor();
+        floor.setFloorId(floorId);
+        floor.setProjectId(PROJECT_ID);
+        floor.setName(name);
+        return floor;
+    }
+
+    private void scopeFloorConfirmation(ConfirmProjectQuotationRequest request, String floorId) {
+        request.setConfirmationScope("FLOOR");
+        request.setFloorId(floorId);
     }
 
     private ProjectQuotationService service() {

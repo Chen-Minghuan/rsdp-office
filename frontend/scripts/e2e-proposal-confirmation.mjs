@@ -31,7 +31,10 @@ try {
     projectId: 'PROJ-PARENT', name: '方案确认测试项目', customerRequirements: '', requirementsRevision: 1,
     leader: { userId: 'DEALER-1', username: 'dealer', displayName: '经销商主号', role: 'LEADER' },
     collaborators: [], referenceImages: [],
-    floors: [{ projectId: 'PROJ-PARENT', floorId: 'FLOOR-CHILD', name: '二楼', sortOrder: 1 }],
+    floors: [
+      { projectId: 'PROJ-PARENT', floorId: 'FLOOR-1', name: '一楼', sortOrder: 1 },
+      { projectId: 'PROJ-PARENT', floorId: 'FLOOR-2', name: '二楼', sortOrder: 2 },
+    ],
   }
   const zone = {
     id: 'ZONE-1', kind: 'zone', name: '开放办公区', zoneType: 'OPEN_OFFICE', x: 0, y: 0, w: 6000, h: 4000,
@@ -46,10 +49,11 @@ try {
     kind: 'desk', uses: ['OPEN_OFFICE'], widthCm: 120, depthCm: 60, widthMm: 1200, depthMm: 600,
   }
 
-  async function openProposal({ cart = [], confirmFails = false, preview = false } = {}) {
+  async function openProposal({ carts = {}, confirmFails = false, preview = false, floorId = 'FLOOR-1' } = {}) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
     const page = await context.newPage()
     const confirmRequests = []
+    let latestQuotation = null
     await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: {
       userId: 'DEALER-1', username: 'dealer', displayName: '经销商主号', role: 'DEALER',
     } } }))
@@ -59,47 +63,75 @@ try {
       const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, message: '成功', data }) })
       if (path === '/api/v1/office/projects' && request.method() === 'GET') return respond([project])
       if (path === '/api/v1/office/projects/PROJ-PARENT') return respond(project)
-      if (path === '/api/v1/office/projects/FLOOR-CHILD/canvas') return respond({
-        canvasId: 1, projectId: 'FLOOR-CHILD', revision: 1, mode: 'overview', designZoneId: null,
+      const canvasFloorId = path.match(/^\/api\/v1\/office\/projects\/(FLOOR-[12])\/canvas$/)?.[1]
+      if (canvasFloorId) return respond({
+        canvasId: canvasFloorId === 'FLOOR-1' ? 1 : 2, projectId: canvasFloorId, revision: 1, mode: 'overview', designZoneId: null,
         objects: [zone, furniture], files: [], blank: false,
       })
-      if (path === '/api/v1/office/projects/FLOOR-CHILD/cart') return respond(cart)
-      if (path === '/api/v1/office/projects/FLOOR-CHILD/agent-messages') return respond([])
+      const cartFloorId = path.match(/^\/api\/v1\/office\/projects\/(FLOOR-[12])\/cart$/)?.[1]
+      if (cartFloorId) return respond(carts[cartFloorId] || [])
+      if (/^\/api\/v1\/office\/projects\/FLOOR-[12]\/agent-messages$/.test(path)) return respond([])
       if (path === '/api/v1/office/products') return respond([product])
-      if (path === '/api/v1/office/projects/FLOOR-CHILD/proposal/catalog-check') return respond(null)
+      if (/^\/api\/v1\/office\/projects\/FLOOR-[12]\/proposal\/catalog-check$/.test(path)) return respond(null)
+      if (path === '/api/v1/office/projects/PROJ-PARENT/quotation/latest' && request.method() === 'GET') return respond(latestQuotation)
       if (path === '/api/v1/office/projects/PROJ-PARENT/quotation/confirm' && request.method() === 'POST') {
-        confirmRequests.push(request.postDataJSON())
+        const payload = request.postDataJSON()
+        confirmRequests.push(payload)
         if (confirmFails) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 400, message: '模拟报价确认失败', data: null }) })
-        return respond({
-          quotationId: 'QT-MOCK-1', projectId: 'PROJ-PARENT', projectName: project.name, revision: 1, status: 'CONFIRMED',
-          pricingMode: 'COEFFICIENT', pricingValue: 1.2, goodsTotal: 0, serviceFee: 0, logisticsFee: 0, fees: [],
-          totalAmount: 0, lineCount: request.postDataJSON().lines.length, missingPriceLines: 0,
+        const retainedLines = (latestQuotation?.lines || []).filter(line => line.floorId !== payload.floorId)
+        const confirmedLines = payload.lines.map((line, index) => ({
+          ...line, lineNo: retainedLines.length + index, floorName: project.floors.find(floor => floor.floorId === line.floorId)?.name || '',
+          rspuId: null, productName: product.name, variant: product.variant, imageUrl: null, factoryPrice: null,
+          subtotal: line.unitPrice === null ? null : line.unitPrice * line.qty, issue: null,
+        }))
+        const lines = [...retainedLines, ...confirmedLines]
+        latestQuotation = {
+          quotationId: `QT-MOCK-${(latestQuotation?.revision || 0) + 1}`, projectId: 'PROJ-PARENT', projectName: project.name,
+          revision: (latestQuotation?.revision || 0) + 1, status: 'CONFIRMED',
+          pricingMode: latestQuotation?.pricingMode || payload.pricingMode, pricingValue: latestQuotation?.pricingValue || payload.pricingValue,
+          goodsTotal: lines.reduce((total, line) => total + (line.subtotal || 0), 0), serviceFee: 0, logisticsFee: 0,
+          fees: latestQuotation?.fees || payload.fees,
+          totalAmount: lines.reduce((total, line) => total + (line.subtotal || 0), 0), lineCount: lines.length, missingPriceLines: 0,
           createdBy: 'DEALER-1', createdAt: new Date().toISOString(),
-          lines: request.postDataJSON().lines.map((line, index) => ({
-            ...line, lineNo: index, floorName: '二楼', rspuId: null, productName: product.name,
-            variant: product.variant, imageUrl: null, factoryPrice: null, subtotal: null, issue: null,
-          })),
-        })
+          lines,
+        }
+        return respond(latestQuotation)
       }
       return respond(null)
     })
-    await page.goto(`${baseUrl}/proposal${preview ? '?preview=1' : ''}`, { waitUntil: 'networkidle' })
+    await page.goto(`${baseUrl}/proposal?floorId=${floorId}${preview ? '&preview=1' : ''}`, { waitUntil: 'networkidle' })
     await page.getByRole('heading', { name: '整体方案与清单', exact: true }).waitFor()
     return { context, page, confirmRequests }
   }
 
-  const populatedCart = [{ lineId: 'CART-1', projectId: 'FLOOR-CHILD', zoneId: 'ZONE-1', zoneName: '开放办公区', productId: 'VARIANT-1', qty: 2 }]
-  const success = await openProposal({ cart: populatedCart })
+  const firstFloorCart = [{ lineId: 'CART-1', projectId: 'FLOOR-1', zoneId: 'ZONE-1', zoneName: '开放办公区', productId: 'VARIANT-1', qty: 2 }]
+  const secondFloorCart = [{ lineId: 'CART-2', projectId: 'FLOOR-2', zoneId: 'ZONE-1', zoneName: '开放办公区', productId: 'VARIANT-1', qty: 1 }]
+  const success = await openProposal({ carts: { 'FLOOR-1': firstFloorCart } })
   await success.page.getByRole('button', { name: '确认方案', exact: true }).click()
   await success.page.getByRole('button', { name: '已确认方案', exact: true }).waitFor()
   assert.equal(success.confirmRequests.length, 1)
   assert.deepEqual(success.confirmRequests[0], {
+    confirmationScope: 'FLOOR', floorId: 'FLOOR-1',
     pricingMode: 'COEFFICIENT', pricingValue: 1.2, fees: [],
-    lines: [{ floorId: 'FLOOR-CHILD', zoneId: 'ZONE-1', zoneName: '开放办公区', productId: 'VARIANT-1', qty: 2, unitPrice: 1250 }],
+    lines: [{ floorId: 'FLOOR-1', zoneId: 'ZONE-1', zoneName: '开放办公区', productId: 'VARIANT-1', qty: 2, unitPrice: 1250 }],
   })
   await success.context.close()
 
-  const failed = await openProposal({ cart: populatedCart, confirmFails: true })
+  const crossFloor = await openProposal({ carts: { 'FLOOR-1': firstFloorCart, 'FLOOR-2': secondFloorCart } })
+  await crossFloor.page.getByRole('button', { name: '确认方案', exact: true }).click()
+  await crossFloor.page.getByRole('button', { name: '已确认方案', exact: true }).waitFor()
+  await crossFloor.page.goto(`${baseUrl}/proposal?floorId=FLOOR-2`, { waitUntil: 'networkidle' })
+  await crossFloor.page.getByRole('button', { name: '确认方案', exact: true }).click()
+  await crossFloor.page.getByRole('button', { name: '已确认方案', exact: true }).waitFor()
+  await crossFloor.page.goto(`${baseUrl}/proposal?floorId=FLOOR-1`, { waitUntil: 'networkidle' })
+  await crossFloor.page.getByRole('button', { name: '已确认方案', exact: true }).waitFor()
+  assert.deepEqual(crossFloor.confirmRequests.map(request => [request.confirmationScope, request.floorId]), [
+    ['FLOOR', 'FLOOR-1'],
+    ['FLOOR', 'FLOOR-2'],
+  ])
+  await crossFloor.context.close()
+
+  const failed = await openProposal({ carts: { 'FLOOR-1': firstFloorCart }, confirmFails: true })
   await failed.page.getByRole('button', { name: '确认方案', exact: true }).click()
   await failed.page.getByRole('status').filter({ hasText: '模拟报价确认失败' }).waitFor()
   assert.equal(await failed.page.getByRole('button', { name: '确认方案', exact: true }).count(), 1)
@@ -119,7 +151,7 @@ try {
   assert.equal(await preview.page.getByRole('button', { name: '确认方案', exact: true }).count(), 1)
   await preview.context.close()
 
-  console.log('PASS: project-scoped request payload, confirmed state after success only, error/empty/preview paths')
+  console.log('PASS: floor-scoped payload, cross-floor confirmation preservation, success/error/empty/preview paths')
 } finally {
   await browser?.close()
   app.kill()

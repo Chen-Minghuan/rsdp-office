@@ -63,6 +63,9 @@ watch([activeProposal, previewReady, () => !!referenceEditing.value], () => {
 }, { immediate: true, deep: true })
 onUnmounted(() => {
   emit('preview', null)
+  // 离开自动布局面板时清掉参考摆位编辑态与悬挂的摆放草稿，避免阻塞产品选型添加模块。
+  referenceEditing.value = null
+  store.cancelFurniturePlacement()
 })
 function openReference() {
   if (!zone.value) return
@@ -92,6 +95,7 @@ async function applyReference(value: LayoutReference) {
   reference.value = value
   referenceEditing.value = null
   previewReady.value = false
+  store.cancelFurniturePlacement()
   await nextTick()
   applicationMessage.value = `已应用当前方案，共 ${snapshot.furniture.length} 件参考家具`
 }

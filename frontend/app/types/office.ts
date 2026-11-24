@@ -345,6 +345,9 @@ export interface ConfirmQuotationLine {
 }
 
 export interface ConfirmQuotationRequest {
+  /** PROJECT 默认覆盖整项目；FLOOR 仅更新指定楼层的已确认方案快照。 */
+  confirmationScope?: 'PROJECT' | 'FLOOR'
+  floorId?: string
   pricingMode: QuotationPricingMode
   pricingValue: number
   fees: QuotationFee[]

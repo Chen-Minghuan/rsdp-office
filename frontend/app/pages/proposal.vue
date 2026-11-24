@@ -388,6 +388,8 @@ async function confirmProposal() {
   try {
     await catalogApi.checkProposalCatalog()
     const result = await catalogApi.confirmProjectQuotation(workspace.currentProjectId, {
+      confirmationScope: 'FLOOR',
+      floorId: workspace.currentFloorId,
       pricingMode: 'COEFFICIENT',
       pricingValue: 1.2,
       fees: [],

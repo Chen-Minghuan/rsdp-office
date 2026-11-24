@@ -17,7 +17,11 @@ const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void }
 const activePage = ref<WorkflowPage>('auto')
-watch(activePage, () => store.cancelFurniturePlacement())
+watch(activePage, page => {
+  store.cancelFurniturePlacement()
+  // 参考原图摆位是自动布局页内的临时编辑态；离开该页时必须退出，否则残留状态会拦截产品选型添加模块。
+  if (page !== 'auto') referenceEditing.value = null
+})
 const recognition = reactive<LayoutReferenceRecognitionTask>({
   status: 'idle', workspaceId: '', analysisId: '', revision: 0, zoneId: '', message: '', result: null, sequence: 0,
 })

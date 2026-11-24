@@ -11,8 +11,8 @@ const reservation = createServer()
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
 const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
-const baseUrl = `http://127.0.0.1:${port}`
-const app = spawn(process.execPath, ['.output/server/index.mjs'], {
+const baseUrl = process.env.BASE_URL || `http://127.0.0.1:${port}`
+const app = process.env.BASE_URL ? null : spawn(process.execPath, ['.output/server/index.mjs'], {
   cwd,
   env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' },
   stdio: 'ignore',
@@ -22,7 +22,7 @@ let browser
 try {
   for (let attempt = 0; ; attempt++) {
     try { if ((await fetch(baseUrl)).ok) break } catch {}
-    if (attempt >= 75 || app.exitCode !== null) throw new Error('请先 pnpm build；预览服务未就绪')
+    if (attempt >= 75 || (app && app.exitCode !== null)) throw new Error('请先 pnpm build；预览服务未就绪')
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
@@ -34,11 +34,21 @@ try {
     unitResolution: { canonicalUnit: 'mm', confirmed: true },
     rooms: [{ roomId: 'MEETING-ROOM', label: '测试会议室', roomType: 'MEETING_ROOM', geometrySource: 'cad_geometry', polygon: [[0, 0], [12000, 0], [12000, 8000], [0, 8000]] }, { roomId: 'OPEN-ROOM', label: '测试办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[20000, 0], [26093, 0], [26093, 17810], [20000, 17810]] }],
   }
+  // 1×1 PNG，作为参考原图摆位的底图来源
+  const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
+      const project = { projectId: 'OFFICE-PROJECT-001', name: '参考布局测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
+    }
+    if (path.endsWith('/layout-reference/source')) return route.fulfill({ contentType: 'image/png', body: png1x1 })
+    if (path.endsWith('/layout-reference/recognize')) {
+      return route.fulfill({ json: { code: 200, data: [{ templateId: 'desk-straight', categoryId: 'workstation', group: 'g1', x: 0.4, y: 0.4, width: 0.1, depth: 0.1, rotation: 0, confidence: 'high' }] } })
+    }
     const data = path.endsWith('/floor-plan/MEETING-TEST') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
@@ -110,6 +120,6 @@ try {
   console.log('PASS: preview wall/group distances, L-desk seats, 90/180/270/reset view with unchanged geometry, rotation-aware dragging/manual placement, catalogue chairs and dimension toggle')
 } finally {
   try { await browser?.close() } finally {
-    if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }
+    if (app && app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }
   }
 }
