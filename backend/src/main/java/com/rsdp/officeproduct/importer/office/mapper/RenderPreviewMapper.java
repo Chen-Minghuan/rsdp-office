@@ -22,6 +22,9 @@ public interface RenderPreviewMapper {
         """)
     int update(RenderPreview preview);
 
+    @Update("UPDATE office_render_preview SET snapshot_json=CAST(#{snapshotJson} AS jsonb), updated_at=#{updatedAt} WHERE preview_id=#{previewId} AND project_id=#{projectId}")
+    int updateSnapshot(RenderPreview preview);
+
     @Select("SELECT *, snapshot_json::text AS snapshot_json FROM office_render_preview WHERE project_id=#{projectId} AND client_change_id=#{changeId}")
     RenderPreview byChange(@Param("projectId") String projectId, @Param("changeId") String changeId);
 

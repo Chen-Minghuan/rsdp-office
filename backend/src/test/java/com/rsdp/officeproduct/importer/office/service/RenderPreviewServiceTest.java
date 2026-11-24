@@ -21,6 +21,8 @@ class RenderPreviewServiceTest {
     private final ObjectMapper json=new ObjectMapper().findAndRegisterModules();
     private final OfficeService office=mock(OfficeService.class);
     private final RenderProductReferences products=mock(RenderProductReferences.class);
+    private final RenderProductAuditService productAudit=mock(RenderProductAuditService.class);
+    private final RenderGeometryAuditService geometryAudit=mock(RenderGeometryAuditService.class);
     private final RenderLayoutContext physicalContext=new RenderLayoutContext(mock(FloorPlanService.class));
     private final OfficeWorkspaceLockMapper projects=mock(OfficeWorkspaceLockMapper.class);
     private final RenderPreviewMapper mapper=mock(RenderPreviewMapper.class);
@@ -28,7 +30,7 @@ class RenderPreviewServiceTest {
     private final RenderPreviewFiles files=mock(RenderPreviewFiles.class);
     private final RenderProperties properties=new RenderProperties();
     private final Map<String,RenderPreview> records=new HashMap<>();
-    private final RenderPreviewService service=new RenderPreviewService(office,products,physicalContext,projects,mapper,provider,files,properties,json);
+    private final RenderPreviewService service=new RenderPreviewService(office,products,productAudit,geometryAudit,physicalContext,projects,mapper,provider,files,properties,json);
     private CanvasDto canvas;
     private ArrayNode objects;
 
@@ -38,17 +40,23 @@ class RenderPreviewServiceTest {
               "polygon":[[-6000,-4000],[0,-4000],[0,-2000],[-2000,-2000],[-2000,0],[-6000,0]]},
              {"id":"F1","kind":"furniture","zoneId":"ROOM","label":"办公桌","x":-5500,"y":-3500,"w":1200,"h":600,"rotation":90,"productId":""}]
             """);
-        when(products.prepare(any(),anyBoolean())).thenReturn(RenderProductReferences.Prepared.empty());
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenReturn(RenderProductReferences.Prepared.empty());
         canvas=new CanvasDto(); canvas.setRevision(3); sync();
         when(office.getCanvas("PROJECT")).thenAnswer(call->canvas);
         when(projects.lockWorkspace("PROJECT")).thenReturn(1);
         when(provider.base()).thenReturn(properties.getBaseUrl());
-        when(provider.submit(anyList(),anyString())).thenReturn(json.readTree("{\"output\":{\"task_id\":\"task-1\"},\"request_id\":\"req-1\"}"));
+        when(provider.submit(anyList(),anyString(),any())).thenReturn(json.readTree("{\"output\":{\"task_id\":\"task-1\"},\"request_id\":\"req-1\"}"));
         when(files.reference(anyString(),any())).thenReturn("/uploads/render-previews/reference.png");
         when(files.download(anyString(),anyString())).thenReturn("/uploads/render-previews/result.png");
+        when(files.read(anyString())).thenReturn(new byte[]{1,2,3});
+        when(productAudit.audit(any(),any(),anyList(),any(),any(),any())).thenReturn(json.createObjectNode().put("status","PASS"));
+        when(productAudit.unavailable()).thenReturn(json.createObjectNode().put("status","UNAVAILABLE"));
+        when(geometryAudit.audit(any(),any(),any(),any())).thenReturn(json.createObjectNode().put("status","PASS"));
+        when(geometryAudit.unavailable()).thenReturn(json.createObjectNode().put("status","UNAVAILABLE"));
         when(mapper.insert(any())).thenAnswer(call->{ RenderPreview r=call.getArgument(0); records.put(r.getPreviewId(),r); return 1; });
         when(mapper.byChange(eq("PROJECT"),anyString())).thenAnswer(call->records.values().stream().filter(r->r.getClientChangeId().equals(call.getArgument(1))).findFirst().orElse(null));
         when(mapper.lock(eq("PROJECT"),anyString())).thenAnswer(call->records.get(call.getArgument(1)));
+        when(mapper.updateSnapshot(any())).thenReturn(1);
     }
     private void sync() { canvas.setObjects(json.convertValue(objects,new com.fasterxml.jackson.core.type.TypeReference<List<Object>>(){})); }
     private RenderPreviewRequest request() {
@@ -62,25 +70,25 @@ class RenderPreviewServiceTest {
         assertEquals(first.path("previewId"),repeated.path("previewId")); assertEquals("CONCEPT_PREVIEW",first.path("purpose").asText());
         assertFalse(first.path("stale").asBoolean()); assertFalse(first.has("snapshotJson")); assertFalse(first.has("prompt"));
         assertEquals(6,first.path("snapshot").path("zone").path("polygon").size());
-        verify(provider,times(1)).submit(anyList(),anyString());
+        verify(provider,times(1)).submit(anyList(),argThat(prompt->!prompt.contains("图3为带P编号")),any());
         var changed=request(); changed.setStyle("工业风"); assertThrows(BusinessException.class,()->service.create("PROJECT",changed));
     }
     @Test void sendsSelectedProductPhotosAndKeepsReferencesSeparateFromLayoutSnapshot() throws Exception {
         ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();
         ArrayNode manifest=json.createArrayNode(); manifest.addObject().put("productId","SKU-1").put("referenceId","P1");
-        when(products.prepare(any(),eq(false))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1，保留商品外观"));
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1，保留商品外观"));
         var result=service.create("PROJECT",request());
         assertTrue(result.path("productImagesUsed").asBoolean());
         assertEquals("SKU-1",result.path("productReferences").path("items").get(0).path("productId").asText());
         assertEquals(request().getExpectedSnapshot(),result.path("snapshot"));
         assertFalse(result.path("stale").asBoolean());
-        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==2 && Arrays.equals(refs.get(1),new byte[]{9,8,7})),contains("P1 对应家具1"));
+        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==3 && Arrays.equals(refs.get(2),new byte[]{9,8,7})),contains("P1 对应家具1"),any());
         String stored=records.values().iterator().next().getSnapshotJson();
         assertTrue(stored.contains("renderProductReferences"));
         assertTrue(stored.contains("guideUrl"));
     }
     @Test void missingSelectedProductPhotoStopsBeforeBilling() {
-        when(products.prepare(any(),anyBoolean())).thenThrow(new BusinessException("所选商品图片缺失"));
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenThrow(new BusinessException("所选商品图片缺失"));
         assertThrows(BusinessException.class,()->service.create("PROJECT",request()));
         verifyNoInteractions(provider); verify(mapper,never()).insert(any());
     }
@@ -101,19 +109,27 @@ class RenderPreviewServiceTest {
         assertEquals("SUCCEEDED",done.path("status").asText()); assertTrue(done.path("stale").asBoolean());
         assertEquals(-5500,done.path("snapshot").path("furniture").get(0).path("x").asInt());
         assertEquals(-5100,objects.get(1).path("x").asInt()); verify(files).download(eq(id),anyString());
+        assertEquals("PASS",done.path("qualityAudit").path("status").asText());
+        assertEquals("PASS",done.path("geometryAudit").path("status").asText());
+        assertTrue(done.path("generationTiming").path("requestStartedAt").asLong()>0);assertTrue(done.path("generationTiming").path("submittedAt").asLong()>0);
+        assertTrue(done.path("generationTiming").path("providerCompletedAt").asLong()>0);assertTrue(done.path("generationTiming").path("readyAt").asLong()>=done.path("generationTiming").path("providerCompletedAt").asLong());
+        assertTrue(done.path("generationTiming").path("totalMs").asLong()>=0);assertTrue(done.path("generationTiming").path("providerMs").asLong()>=0);
+        assertTrue(records.get(id).getSnapshotJson().contains("qualityAudit")); verify(mapper).updateSnapshot(records.get(id));
+        service.get("PROJECT",id); verify(productAudit,times(1)).audit(any(),any(),anyList(),any(),any(),any());
+        verify(geometryAudit,times(1)).audit(any(),any(),any(),any());
     }
     @Test void transientPollOrDownloadFailuresDoNotSubmitAnotherBilledTask() {
         String id=service.create("PROJECT",request()).path("previewId").asText();
         when(provider.poll(anyString(),anyString())).thenThrow(new BusinessException("暂时失败"));
         assertThrows(BusinessException.class,()->service.get("PROJECT",id));
-        assertEquals("PENDING",records.get(id).getStatus()); verify(provider,times(1)).submit(anyList(),anyString());
+        assertEquals("PENDING",records.get(id).getStatus()); verify(provider,times(1)).submit(anyList(),anyString(),any());
     }
     @Test void providerSubmissionFailureIsPersistedAndDoesNotFallBackToDemo() {
-        when(provider.submit(anyList(),anyString())).thenThrow(new BusinessException("模型权限不足"));
+        when(provider.submit(anyList(),anyString(),any())).thenThrow(new BusinessException("模型权限不足"));
         var failed=service.create("PROJECT",request());
         assertEquals("FAILED",failed.path("status").asText()); assertEquals("模型权限不足",failed.path("errorMessage").asText());
         assertTrue(failed.path("imageUrl").isNull());
-        service.create("PROJECT",request()); verify(provider,times(1)).submit(anyList(),anyString());
+        service.create("PROJECT",request()); verify(provider,times(1)).submit(anyList(),anyString(),any());
     }
     @Test void referencePreservesConcaveRoomNegativeCoordinatesAndRotationAndRejectsBadPlacement() throws Exception {
         var scene=RenderPreviewScene.snapshot(objects,"ROOM"); RenderPreviewScene.validate(scene);
@@ -131,11 +147,11 @@ class RenderPreviewServiceTest {
         byte[] flat=RenderPreviewScene.referencePng(scene),guide=RenderSceneGuide.png(scene,"ISOMETRIC");
         assertFalse(Arrays.equals(flat,guide),"provider must not receive the flat plan as an image to copy");
         var image=ImageIO.read(new ByteArrayInputStream(guide));assertEquals(1536,image.getWidth());assertEquals(1024,image.getHeight());
-        assertFalse(Arrays.equals(guide,RenderSceneGuide.png(scene,"INTERIOR")),"view guides differ");
+        assertArrayEquals(guide,RenderSceneGuide.png(scene,"INTERIOR"),"v9 keeps one fixed isometric control camera");
         String guideExample=System.getProperty("rsdp.render.guideExample");
         if(guideExample!=null) java.nio.file.Files.write(java.nio.file.Path.of(guideExample),guide);
         String prompt=RenderPreviewScene.prompt(scene,"现代简约","INTERIOR","");
-        assertTrue(prompt.contains("满幅"));assertTrue(prompt.contains("严禁出现二维平面图"));assertTrue(prompt.contains("同一透视空间"));
+        assertTrue(prompt.contains("照片级写实的3D室内效果图"));assertTrue(prompt.contains("材质真实细腻"));assertTrue(prompt.contains("不输出文字、标注、图表或拼贴"));assertTrue(prompt.contains("只输出一个完整空间画面"));assertFalse(prompt.contains("商品清单"));
     }
     @Test void overlappingFurnitureIsRejectedAndForeignProjectCannotReadTasks() {
         objects.add(objects.get(1).deepCopy()); ((ObjectNode)objects.get(2)).put("id","F2");
@@ -151,39 +167,47 @@ class RenderPreviewServiceTest {
         var r=request(); r.setViewImage("data:image/png;base64,"+Base64.getEncoder().encodeToString(png)); return r;
     }
 
-    @Test void guidedWhiteModelViewUsesScreenshotAsFirstReferenceAndSkipsSpaceGuide() throws Exception {
-        byte[] screenshot=viewPng(800,600);
-        var result=service.create("PROJECT",guidedRequest(screenshot));
-        assertEquals("whiteModelView",result.path("sourceType").asText());
-        assertTrue(result.hasNonNull("viewImageUrl")); assertFalse(result.path("productReferences").has("guideUrl"));
-        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==1 && Arrays.equals(refs.get(0),screenshot)),contains("白模的实时相机截图"));
-        String stored=records.values().iterator().next().getSnapshotJson();
-        assertTrue(stored.contains("whiteModelView")); assertTrue(stored.contains("viewUrl")); assertFalse(stored.contains("guideUrl"));
-        // 方案 A：绑定商品时截图为图1、商品外观板随后，仍不加入立体导视图。
-        ((ObjectNode)objects.get(1)).put("productId","SKU-1"); sync();
-        ArrayNode manifest=json.createArrayNode(); manifest.addObject().put("productId","SKU-1").put("referenceId","P1");
-        when(products.prepare(any(),eq(true))).thenReturn(new RenderProductReferences.Prepared(List.of(new byte[]{9,8,7}),manifest,"P1 对应家具1"));
-        var withProducts=guidedRequest(screenshot); withProducts.setExpectedSnapshot(RenderPreviewScene.snapshot(objects,"ROOM")); withProducts.setClientChangeId("CHANGE-2");
-        service.create("PROJECT",withProducts);
-        verify(provider).submit(argThat((List<byte[]> refs) -> refs.size()==2 && Arrays.equals(refs.get(0),screenshot) && Arrays.equals(refs.get(1),new byte[]{9,8,7})),contains("白模的实时相机截图"));
+    @Test void storesProductUnderstandingAndCompilesAgentTextBehindDeterministicRules() {
+        ObjectNode understanding=json.createObjectNode().put("status","PARTIAL").put("agentModel","qwen3-vl-max").put("cacheHits",1).put("generatedCount",0);
+        ArrayNode manifest=JsonNodeFactory.instance.arrayNode();manifest.addObject().put("agentStatus","CACHE_HIT").putObject("visualProfile").put("appearancePrompt","商品视觉描述");
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenReturn(new RenderProductReferences.Prepared(List.of(),manifest,"商品视觉描述",understanding));
+        var result=service.create("PROJECT",request());
+        assertEquals("PARTIAL",result.path("agentStatus").asText());
+        assertEquals("qwen3-vl-max",result.path("productUnderstanding").path("agentModel").asText());
+        assertEquals("PARTIAL",result.path("productReferences").path("productUnderstanding").path("status").asText());
+        verify(provider).submit(anyList(),argThat(prompt->prompt.contains("商品视觉描述") && prompt.contains("始终遵守程序给定的空间轮廓")),any());
     }
-    @Test void guidedContentHashSeparatesScreenshotRequests() throws Exception {
-        byte[] screenshot=viewPng(800,600);
-        var first=service.create("PROJECT",guidedRequest(screenshot));
-        assertEquals(first.path("previewId"),service.create("PROJECT",guidedRequest(screenshot)).path("previewId"));
-        var plain=request(); plain.setClientChangeId("CHANGE-1");
-        assertThrows(BusinessException.class,()->service.create("PROJECT",plain));
-        var other=guidedRequest(viewPng(640,480));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",other));
-        verify(provider,times(1)).submit(anyList(),anyString());
+    @Test void semanticGuideAndPromptShareFurnitureBindings() {
+        var result=service.create("PROJECT",request());
+        assertEquals("spaceGuide",result.path("sourceType").asText());
+        assertEquals("ISOMETRIC",result.path("view").asText());
+        assertEquals("furniture-product-v1",result.path("productReferences").path("bindingVersion").asText());
+        assertEquals("F1",result.path("productReferences").path("furnitureBindings").get(0).path("referenceId").asText());
+        assertEquals("F1",result.path("productReferences").path("guideLabels").get(0).path("referenceId").asText());
+        assertFalse(result.path("productReferences").path("bindingGuideUrl").asText().isBlank());
+        var scene=request().getExpectedSnapshot();var bindings=RenderFurnitureBindings.from(scene);var spatial=RenderSpatialControl.prepare(scene,bindings);
+        var clean=RenderSceneGuide.render(scene,"ISOMETRIC",bindings,false,spatial);var labelled=RenderSceneGuide.render(scene,"ISOMETRIC",bindings,true,spatial);var plan=RenderPlanGuide.render(spatial,false);
+        var references=org.mockito.ArgumentCaptor.forClass(List.class);verify(provider).submit(references.capture(),contains("位于空间左侧后侧的办公桌"),any());
+        List<byte[]> actual=references.getValue();assertEquals(2,actual.size());assertArrayEquals(clean.image(),actual.get(0));assertArrayEquals(plan.image(),actual.get(1));
+        assertFalse(Arrays.equals(clean.image(),labelled.image()));assertEquals(1,labelled.labels().size());assertTrue(clean.labels().isEmpty());
     }
-    @Test void invalidViewImageIsRejectedBeforeBilling() throws Exception {
-        var malformed=request(); malformed.setViewImage("data:image/png;base64,%%%not-base64%%%");
+    @Test void conciseNoPlanExperimentIsPersistedWithoutLosingAuditPlanOrIdempotencyIsolation() {
+        var experiment=request();experiment.setPromptMode("CONCISE_V11");experiment.setReferenceMode("GUIDE_PRODUCT");experiment.setSeed(1101L);experiment.setSampleIndex(1);
+        var result=service.create("PROJECT",experiment);assertEquals("C",result.path("generationExperiment").path("sampleGroup").asText());
+        assertEquals("selected-products-multiview-v11-prompt-ab",result.path("productReferences").path("version").asText());assertFalse(result.path("planGuideUrl").asText().isBlank());
+        assertEquals(1,result.path("productReferences").path("generationImages").size());assertEquals("CLEAN_GUIDE",result.path("productReferences").path("generationImages").get(0).path("role").asText());
+        var images=org.mockito.ArgumentCaptor.forClass(List.class);verify(provider).submit(images.capture(),argThat(prompt->!prompt.contains("SPATIAL_CONTROL_V1")&&prompt.contains("场景严格保持1件家具")),any());
+        assertEquals(1,images.getValue().size());
+        var collision=request();collision.setPromptMode("CONCISE_V11");assertThrows(BusinessException.class,()->service.create("PROJECT",collision));
+    }    @Test void legacyScreenshotsAndInteriorRequestsAreRejectedBeforeBilling() throws Exception {
+        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(800,600))));
+        var interior=request();interior.setView("INTERIOR");
+        assertThrows(BusinessException.class,()->service.create("PROJECT",interior));
+        verifyNoInteractions(provider);verify(mapper,never()).insert(any());
+    }
+    @Test void invalidViewImageIsRejectedBeforeBilling() {
+        var malformed=request();malformed.setViewImage("data:image/png;base64,%%%not-base64%%%");
         assertThrows(BusinessException.class,()->service.create("PROJECT",malformed));
-        var wrongType=request(); wrongType.setViewImage("data:image/jpeg;base64,"+Base64.getEncoder().encodeToString(new byte[200]));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",wrongType));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(16,16))));
-        assertThrows(BusinessException.class,()->service.create("PROJECT",guidedRequest(viewPng(8000,500))));
-        verifyNoInteractions(provider); verify(mapper,never()).insert(any());
+        verifyNoInteractions(provider);verify(mapper,never()).insert(any());
     }
 }
