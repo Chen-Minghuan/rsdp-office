@@ -2,7 +2,10 @@ package com.rsdp.officeproduct.importer.office.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.office.dto.*;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.office.service.OfficeService;
+import com.rsdp.officeproduct.importer.office.service.OfficeSpaceReviewService;
 import com.rsdp.officeproduct.importer.office.service.OfficeModuleRecommendationService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -19,8 +22,9 @@ import java.util.List;
 public class OfficeController {
 
     private final OfficeService officeService;
+    private final OfficeProjectAccessService projectAccess;
     private final OfficeModuleRecommendationService moduleRecommendations;
-    private final com.rsdp.officeproduct.importer.office.service.OfficeSpaceReviewService spaceReviewService;
+    private final OfficeSpaceReviewService spaceReviewService;
 
     @PostMapping("/floors/{floorId}/spaces/{spaceId}/review-confirm")
     public Result<SpaceReviewConfirmResult> confirmSpaceReview(@PathVariable String floorId, @PathVariable String spaceId,
@@ -41,6 +45,7 @@ public class OfficeController {
 
     @PostMapping("/projects/{projectId}/module-products")
     public Result<ModuleRecommendationDto.Selection> selectModuleProduct(@PathVariable String projectId, @RequestBody ModuleRecommendationRequest request) {
+        projectAccess.requireFloorPermission(projectId, OfficeProjectPermission.EDIT);
         return Result.ok(moduleRecommendations.select(projectId, request));
     }
 
@@ -83,16 +88,6 @@ public class OfficeController {
         return Result.ok(null);
     }
 
-    @GetMapping("/projects/{projectId}/agent-messages")
-    public Result<List<AgentMessageDto>> listMessages(@PathVariable String projectId) {
-        return Result.ok(officeService.listMessages(projectId));
-    }
-
-    @PostMapping("/projects/{projectId}/agent-messages")
-    public Result<AgentMessageDto> sendMessage(@PathVariable String projectId, @RequestBody SendMessageRequest request) {
-        return Result.ok(officeService.sendMessage(projectId, request));
-    }
-
     @GetMapping("/products")
     public Result<List<OfficeProductDto>> listProducts() {
         return Result.ok(officeService.listOfficeProducts());
@@ -106,6 +101,7 @@ public class OfficeController {
 
     @PostMapping("/projects/{projectId}/proposal/export")
     public void exportProposal(@PathVariable String projectId, HttpServletResponse response) throws IOException {
+        projectAccess.requireFloorPermission(projectId, OfficeProjectPermission.EXPORT_PROJECT);
         List<CartItemDto> cart = officeService.listCart(projectId);
         List<OfficeProductDto> products = officeService.listOfficeProducts();
 

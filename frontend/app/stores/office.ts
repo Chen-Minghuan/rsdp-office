@@ -4,7 +4,6 @@ import type {
   OfficeObject,
   ZoneObject,
   FurnitureObject,
-  AgentMessage,
   CartItem,
   DesignBrief,
   ZoneType,
@@ -19,7 +18,6 @@ import {
   PRODUCTS as SAMPLE_PRODUCTS,
   PRODUCT_COMBOS as SAMPLE_COMBOS,
   TONES,
-  createWelcomeMessages,
 } from '~/utils/sample'
 import { uid, money } from '~/utils/helpers'
 import { createFurnitureObjects } from '~/utils/layout'
@@ -52,6 +50,7 @@ import { clampChannelsToZone } from '~/utils/layoutChannels'
 import { proposalFurnitureCartMismatches, type ProposalFurnitureCartMismatch } from '~/utils/proposalFurnitureGate'
 import { planCartLineReduction } from '~/utils/cartLineReduction'
 import { authEnabled, useAuth } from '~/composables/useAuth'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 
 const STORAGE_KEY = 'rsdp-office-v01'
 const LEGACY_STORAGE_KEY = 'rsdp-office-demo-v01'
@@ -59,6 +58,14 @@ const LEGACY_WORKSPACE_ID = 'OFFICE-PROJECT-001'
 const CANVAS_HISTORY_LIMIT = 20
 let cartMutationQueue = Promise.resolve()
 const cartLineIdAliases = new Map<string, string>()
+
+function canEditFloor(floorId: string) {
+  if (!authEnabled) return true
+  const { user } = useAuth()
+  if (user.value?.role === 'DEALER') return true
+  const project = useWorkspaceStore().projects.find(item => item.floors.some(floor => floor.floorId === floorId))
+  return projectPermissionsFor(project, user.value?.userId).includes('EDIT')
+}
 
 function enqueueCartMutation(task: () => Promise<void>) {
   cartMutationQueue = cartMutationQueue.catch(() => undefined).then(task)
@@ -120,7 +127,6 @@ interface OfficeState {
   canvasMode: CanvasMode
   designZoneId: string | null
   submitted: DesignBrief | null
-  chat: AgentMessage[]
   cart: CartItem[]
   activeZoneId: string | null
   undoStack: string[]
@@ -165,7 +171,6 @@ function defaultState(): OfficeState {
     canvasMode: 'overview',
     designZoneId: null,
     submitted: null,
-    chat: [],
     cart: [],
     activeZoneId: null,
     undoStack: [],
@@ -213,7 +218,8 @@ function loadLocalState(workspaceId: string): Partial<OfficeState> {
       if (key === 'imageAssetId' && value === 'demo-reference') return 'sample-reference'
       if (key === 'source' && value === 'demo') return 'sample'
       return value
-    }) as OfficeState
+    }) as OfficeState & { chat?: unknown }
+    delete parsed.chat
     parsed.files = singleDrawing(parsed.files, parsed.floorPlan?.sourceName)
     const migratedZoneIds = [...new Set([...migrateLegacyDoorClearances(parsed.objects || []), ...migrateLayoutExclusions(parsed.objects || [])])]
     if (migratedZoneIds.length) {
@@ -320,14 +326,13 @@ export const useOfficeStore = defineStore('office', {
       }
       this.workspaceId = workspaceId
       const storageScope = useAuth().storageScope.value
-      this.$patch(loadLocalState(workspaceId))
+      if (canEditFloor(workspaceId)) this.$patch(loadLocalState(workspaceId))
       this.loading = true
       const api = useOfficeApi()
       try {
-        const [canvasResult, cart, messages, products] = await Promise.all([
+        const [canvasResult, cart, products] = await Promise.all([
           api.loadCanvas().then(canvas => ({ available: true, canvas })).catch(() => ({ available: false, canvas: null })),
           api.loadCart().catch(() => [] as CartItem[]),
-          api.loadMessages().catch(() => [] as AgentMessage[]),
           api.loadProducts().catch(() => [] as Product[]),
         ])
         if (this.workspaceId !== workspaceId || storageScope !== useAuth().storageScope.value) return
@@ -344,9 +349,6 @@ export const useOfficeStore = defineStore('office', {
         }
         if (cart.length) {
           this.cart = cart
-        }
-        if (messages.length) {
-          this.chat = messages
         }
         this.products = products.length ? products : SAMPLE_PRODUCTS
         this.combos = SAMPLE_COMBOS
@@ -385,7 +387,7 @@ export const useOfficeStore = defineStore('office', {
     async activateFloor(workspaceId: string) {
       if (this.workspaceId === workspaceId && this.initialized) return
       this.saveLocal()
-      if (this.apiReady) {
+      if (this.apiReady && canEditFloor(this.workspaceId)) {
         try {
           await useOfficeApi().saveCanvas({ objects: this.objects, files: this.files, mode: this.canvasMode, designZoneId: this.designZoneId, revision: this.canvasRevision, blank: this.blank }, this.workspaceId)
         } catch { /* The floor-scoped local draft remains available when the remote save is unavailable. */ }
@@ -395,13 +397,14 @@ export const useOfficeStore = defineStore('office', {
     },
 
     saveLocal() {
-      if (typeof window === 'undefined' || !this.workspaceId) return
+      if (typeof window === 'undefined' || !this.workspaceId || !canEditFloor(this.workspaceId)) return
       const { furniturePlacement, syncState, syncError, lastManualFurnitureEdit, reviewFocusZoneId, redoStack, ...persisted } = this.$state
       const payload = { ...persisted, undoStack: [] }
       localStorage.setItem(storageKey(this.workspaceId), JSON.stringify(payload))
     },
 
     schedulePersist() {
+      if (!canEditFloor(this.workspaceId)) return
       this.saveLocal()
       this.syncState = this.apiReady ? 'saving' : 'saved'
       this.syncError = null
@@ -413,7 +416,7 @@ export const useOfficeStore = defineStore('office', {
       const workspaceId = this.workspaceId
       const storageScope = useAuth().storageScope.value
       const revision = this.canvasRevision
-      if (!this.apiReady) {
+      if (!this.apiReady || !canEditFloor(workspaceId)) {
         this.syncState = 'saved'
         return
       }
@@ -461,7 +464,6 @@ export const useOfficeStore = defineStore('office', {
         canvasMode: 'overview',
         designZoneId: null,
         submitted: null,
-        chat: [],
         cart: [],
         activeZoneId: null,
         undoStack: [],
@@ -1543,40 +1545,8 @@ export const useOfficeStore = defineStore('office', {
         pendingQuestions,
       }
       this.submitted = brief
-      this.chat = createWelcomeMessages(brief)
       this.activeZoneId = this.zones[0]?.id || null
       this.schedulePersist()
-      this._persistMessages()
-    },
-
-    async sendChat(text: string) {
-      if (!text.trim()) return
-      const trimmed = text.trim()
-      this.chat.push({ role: 'user', content: trimmed })
-      const api = useOfficeApi()
-      if (this.apiReady) {
-        try {
-          const reply = await api.sendMessage(trimmed)
-          this.chat.push(reply)
-          return
-        } catch (e) {
-          console.warn('发送消息到后端失败', e)
-        }
-      }
-      const zone = this.activeZone
-      let reply = `已记录您对${zone ? '「' + zone.name + '」' : '办公项目'}的补充说明：“${trimmed}”。\n\n右侧可查看演示商品候选，您可以加入当前区域并调整数量；真实推荐将在接入 RSDP 商品服务与 Office Skill 后实现。`
-      if (/预算|便宜|经济|价格/.test(text)) {
-        reply = '已记录预算敏感偏好。演示中可先比较候选价格；真实环境将以 RSDP 可售商品、规格与定价策略进行检索，不直接采用模拟价格。'
-      } else if (/图纸|画布|空间/.test(text)) {
-        reply = '您可以使用左侧“返回修改画布”继续修改区域或标注，再提交新版需求快照。原有已选商品将保留以便复核。'
-      }
-      this.chat.push({ role: 'bot', content: reply })
-      this.saveLocal()
-    },
-
-    async _persistMessages() {
-      // Messages are persisted when sendChat calls API; local copy is enough for welcome messages.
-      this.saveLocal()
     },
 
     async addToCart(productId: string) {
@@ -1848,9 +1818,11 @@ export const useOfficeStore = defineStore('office', {
           setTimeout(() => URL.revokeObjectURL(url), 1500)
           return
         } catch (e) {
-          console.warn('后端导出失败，降级本地导出', e)
+          if (authEnabled) throw e
+          console.warn('后端导出失败，使用开发模式数据', e)
         }
       }
+      if (authEnabled) throw new Error('请先连接项目，再导出方案')
       const products = this.products.length ? this.products : SAMPLE_PRODUCTS
       const cols = ['空间区域', '演示商品ID', '商品名称', '规格', '数量', '参考单价', '参考小计']
       const rows = this.cart.map((c) => {

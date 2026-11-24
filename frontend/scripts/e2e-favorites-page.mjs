@@ -137,7 +137,7 @@ async function openAs(user) {
         : list.filter(p => p.rspuId !== rspuId)
       return respond({ selected })
     }
-    if (path === '/api/v1/products') return respond([])
+    if (path === '/api/v1/products/page') return respond({ rows: [], total: 0, catalogTotal: 0, activeTotal: 0 })
     if (path === '/api/v1/products/capabilities') return respond({ managed: false })
     return respond(path.endsWith('/canvas') || path.endsWith('/workspace/me') ? null : [])
   })

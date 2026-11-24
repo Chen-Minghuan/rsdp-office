@@ -131,7 +131,7 @@ try {
   failProjects = false
   await page.getByRole('button', { name: '重新加载', exact: true }).click()
   await page.getByRole('heading', { name: '暂无可访问项目', exact: true }).waitFor()
-  await page.getByTestId('user-session-role').filter({ hasText: /^设计师$/ }).waitFor()
+  assert.equal(await page.getByTestId('user-session-role').count(), 0, '未分配项目的账号没有项目角色标签')
   assert.equal(await page.getByRole('button', { name: /新建项目/ }).count(), 0)
   assert.equal(await page.getByText('默认办公项目', { exact: true }).count(), 0)
   assert.equal(canvasReads.length, 0, '空项目列表不得读取默认画布')

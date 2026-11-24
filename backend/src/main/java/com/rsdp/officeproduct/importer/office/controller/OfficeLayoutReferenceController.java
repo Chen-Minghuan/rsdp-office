@@ -4,6 +4,7 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.dto.response.FloorPlanAnalysisResponse;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.service.FloorPlanService;
 import com.rsdp.officeproduct.importer.service.QwenVisionClient;
 import java.util.List;
@@ -37,6 +38,7 @@ public class OfficeLayoutReferenceController {
     @PostMapping("/recognize")
     public Result<List<QwenVisionClient.FurnitureMark>> recognize(@PathVariable String floorId,
         @RequestParam String analysisId, @RequestParam int revision, @RequestParam MultipartFile image) {
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         requirePlan(floorId, analysisId, revision);
         return Result.ok(vision.recognizeFurniture(image));
     }

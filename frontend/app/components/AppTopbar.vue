@@ -1,7 +1,9 @@
 <script setup lang="ts">
 const { isProjectWorkflow, isProjectBench, floorReady } = useWorkspaceNavigation()
 const isProjectPage = computed(() => isProjectWorkflow.value || isProjectBench.value)
-const showProjectSteps = computed(() => isProjectPage.value && floorReady.value)
+const workspace = useWorkspaceStore()
+const showProjectSteps = computed(() => isProjectWorkflow.value
+  ? floorReady.value : isProjectBench.value && !!workspace.currentFloorId)
 </script>
 
 <template>

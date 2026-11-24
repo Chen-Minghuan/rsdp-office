@@ -1,4 +1,4 @@
-import type { ProjectFile, OfficeObject, FurnitureObject, Product, ProductCombo, AgentMessage, DesignBrief } from '~/types/office'
+import type { ProjectFile, OfficeObject, FurnitureObject, Product, ProductCombo } from '~/types/office'
 
 export const TONES = {
   blue: { stroke: '#82b5e5', fill: '#8fbcea46' },
@@ -119,14 +119,5 @@ export function sampleObjects(): OfficeObject[] {
     { id: 'f-exec-desk', kind: 'furniture', x: 337, y: 671, w: 90, h: 40, rotation: 0, productId: 'SAMPLE-OF-06', zoneId: 'z-exec', label: '经理办公桌' } as FurnitureObject,
     { id: 'f-exec-chair', kind: 'furniture', x: 367, y: 721, w: 30, h: 30, rotation: 0, productId: 'SAMPLE-OF-02', zoneId: 'z-exec', label: '办公椅' } as FurnitureObject,
     { id: 'f-reception-sofa', kind: 'furniture', x: 871, y: 669, w: 100, h: 40, rotation: 0, productId: 'SAMPLE-OF-05', zoneId: 'z-reception', label: '接待沙发' } as FurnitureObject,
-  ]
-}
-
-export function createWelcomeMessages(submitted: DesignBrief): AgentMessage[] {
-  return [
-    {
-      role: 'bot',
-      content: `已读取办公空间画布（${submitted.canvasRevisionId}）。\n\n画布已标注 ${submitted.zones.length} 个功能区。\n\n请先选择左侧区域，我可以根据区域用途给您展示办公家具的演示候选。实际尺寸与工位容量仍需校准确认。`,
-    },
   ]
 }

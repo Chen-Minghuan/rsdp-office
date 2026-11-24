@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.dto.response.CatalogProductPageDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.dto.response.CategoryDictDto;
@@ -13,20 +14,30 @@ import com.rsdp.officeproduct.importer.office.service.OfficeProductMatching;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.function.Supplier;
 
 /**
  * 主项目商品数据网关：把 RSDP 主库的产品/变体/报价/字典响应映射为 office 既有 DTO，
@@ -40,6 +51,10 @@ public class RsdpCatalogGateway {
     /** 主项目一次拉取的页大小（循环翻页直到取完）。 */
     private static final int PAGE_SIZE = 500;
     private static final int VARIANT_FETCH_MAX_CONCURRENCY = 8;
+    private static final int VARIANT_LOOKUP_BATCH_SIZE = 50;
+    private static final int MAX_VARIANT_LOOKUP_CACHE_BATCHES = 256;
+    private static final String CATALOG_PAGE_PATH = "/api/v1/products/catalog-page";
+    private static final long LEGACY_CATALOG_RECHECK_MS = 60_000;
 
     private final RsdpClient rsdpClient;
     private final ObjectMapper objectMapper;
@@ -47,21 +62,165 @@ public class RsdpCatalogGateway {
     /** 排版选品目录缓存（30s，按 viewMode 区分）：选品面板高频打开，避免每次都全量回源主项目。 */
     private static final long OFFICE_PRODUCTS_CACHE_TTL_MS = 30_000;
     private final Map<String, CacheEntry> officeProductsCache = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<CacheEntry>> officeProductsInFlight = new ConcurrentHashMap<>();
 
     private record CacheEntry(List<OfficeProductDto> data, long fetchedAt) {}
 
+    private record VariantBatch(List<String> ids, JsonNode rows, long fetchedAt) {}
+
+    private final Map<String, VariantBatch> variantLookupCache = Collections.synchronizedMap(
+        new LinkedHashMap<>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, VariantBatch> eldest) {
+                return size() > MAX_VARIANT_LOOKUP_CACHE_BATCHES;
+            }
+        });
+
     private final Semaphore variantFetchPermits = new Semaphore(VARIANT_FETCH_MAX_CONCURRENCY);
+    private volatile long legacyCatalogUntil;
+
+    public Map<String, BigDecimal> retailPrices(String viewMode, Set<String> ids) {
+        if (ids.isEmpty() || "none".equals(viewMode)) return Map.of();
+        return withCatalogCompatibility(true, () -> loadRetailPrices(viewMode, ids), () -> {
+            Map<String, BigDecimal> prices = new HashMap<>();
+            for (OfficeProductDto product : listOfficeProducts(viewMode)) {
+                if (ids.contains(product.getId()) && product.getPrice() != null && product.getPrice().signum() > 0) {
+                    prices.putIfAbsent(product.getId(), product.getPrice());
+                }
+            }
+            return prices;
+        });
+    }
+
+    private Map<String, BigDecimal> loadRetailPrices(String viewMode, Set<String> ids) {
+        Map<String, BigDecimal> prices = new HashMap<>();
+        for (VariantBatch batch : readVariantBatches("/retail-prices", queryScope(viewMode), ids)) {
+            for (String id : batch.ids()) {
+                BigDecimal price = decimalOrNull(batch.rows(), id);
+                if (price != null && price.signum() > 0) prices.put(id, price);
+            }
+        }
+        return prices;
+    }
+
+    /** 报价展示只读取所选规格，出厂价仍从受权的 RSKU 接口读取。 */
+    public Map<String, OfficeProductDto> quotationProducts(Set<String> ids) {
+        if (ids.isEmpty()) return Map.of();
+        return withCatalogCompatibility(true, () -> loadQuotationProducts(ids), () -> {
+            Map<String, OfficeProductDto> products = new HashMap<>();
+            for (OfficeProductDto product : listOfficeProducts("full")) {
+                if (ids.contains(product.getId())) products.putIfAbsent(product.getId(), product);
+            }
+            return products;
+        });
+    }
+
+    private Map<String, OfficeProductDto> loadQuotationProducts(Set<String> ids) {
+        Map<String, OfficeProductDto> products = new HashMap<>();
+        for (VariantBatch batch : readVariantBatches("/catalog-items", "", ids)) {
+            for (String id : batch.ids()) {
+                JsonNode row = batch.rows().path(id);
+                String rspuId = textOrNull(row, "rspuId");
+                if (!StringUtils.hasText(rspuId)) continue;
+                OfficeProductDto product = new OfficeProductDto();
+                product.setId(id);
+                product.setRspuId(rspuId);
+                product.setName(textOrNull(row, "productName"));
+                product.setVariant(buildVariantText(row));
+                String image = textOrNull(row, "primaryImageUrl");
+                product.setImageUrl(image == null ? null : absolutize(image));
+                products.put(id, product);
+            }
+        }
+        return products;
+    }
+
+    private <T> T withCatalogCompatibility(boolean variantBatch, Supplier<T> modern, Supplier<T> legacy) {
+        if (System.currentTimeMillis() < legacyCatalogUntil) return legacy.get();
+        try {
+            return modern.get();
+        } catch (BusinessException error) {
+            boolean absent = missingCatalogEndpoint(error);
+            if (!absent && variantBatch && error.getCode() >= 500) {
+                // Some older RSDP builds wrap an unmapped batch route in Result.code=500.
+                try {
+                    rsdpClient.get(CATALOG_PAGE_PATH + "?page=1&size=1&viewMode=full");
+                } catch (BusinessException probe) {
+                    absent = missingCatalogEndpoint(probe);
+                }
+            }
+            if (!absent) throw error;
+            legacyCatalogUntil = System.currentTimeMillis() + LEGACY_CATALOG_RECHECK_MS;
+            return legacy.get();
+        }
+    }
+
+    private boolean missingCatalogEndpoint(BusinessException error) {
+        return error.getCode() == 404 || error.getCode() == 405;
+    }
+
+    private List<VariantBatch> readVariantBatches(String endpoint, String scope, Set<String> ids) {
+        List<String> sorted = ids.stream().filter(id -> StringUtils.hasText(id) && id.length() <= 64).sorted().toList();
+        List<VariantBatch> result = new ArrayList<>();
+        for (int start = 0; start < sorted.size(); start += VARIANT_LOOKUP_BATCH_SIZE) {
+            List<String> batch = sorted.subList(start, Math.min(start + VARIANT_LOOKUP_BATCH_SIZE, sorted.size()));
+            var query = new StringJoiner("&", "/api/v1/products/variants" + endpoint + "?", "");
+            if (!scope.isEmpty()) query.add(scope);
+            batch.forEach(id -> query.add("variantId=" + encode(id)));
+            String path = query.toString();
+            VariantBatch entry = variantLookupCache.get(path);
+            if (entry == null || System.currentTimeMillis() - entry.fetchedAt() >= OFFICE_PRODUCTS_CACHE_TTL_MS) {
+                JsonNode data = rsdpClient.get(path);
+                if (!data.isObject()) throw new BusinessException("主项目规格批量查询结果格式无效");
+                entry = new VariantBatch(List.copyOf(batch), data, System.currentTimeMillis());
+                variantLookupCache.put(path, entry);
+            }
+            result.add(entry);
+        }
+        return result;
+    }
 
     /** 排版选品目录：主项目全量产品的有效变体平铺（含尺寸/价格/图片），30s 缓存。 */
     public List<OfficeProductDto> listOfficeProducts(String viewMode) {
         if ("none".equals(viewMode)) return List.of();
-        CacheEntry cached = officeProductsCache.get(viewMode);
-        if (cached != null && System.currentTimeMillis() - cached.fetchedAt() < OFFICE_PRODUCTS_CACHE_TTL_MS) {
-            return cached.data();
+        CacheEntry cached = freshOfficeProducts(viewMode);
+        if (cached != null) return cached.data();
+
+        // The upstream service account is fixed. The view mode distinguishes the shared catalog
+        // from the single managed factory binding that the caller has already authorized.
+        var refresh = new CompletableFuture<CacheEntry>();
+        var activeRefresh = officeProductsInFlight.putIfAbsent(viewMode, refresh);
+        if (activeRefresh != null) {
+            try {
+                return activeRefresh.join().data();
+            } catch (CompletionException failure) {
+                if (failure.getCause() instanceof RuntimeException cause) throw cause;
+                if (failure.getCause() instanceof Error cause) throw cause;
+                throw failure;
+            }
         }
-        List<OfficeProductDto> result = fetchOfficeProducts(viewMode);
-        officeProductsCache.put(viewMode, new CacheEntry(result, System.currentTimeMillis()));
-        return result;
+
+        try {
+            // A previous refresh may have finished between checking the cache and taking ownership.
+            cached = freshOfficeProducts(viewMode);
+            if (cached == null) {
+                cached = new CacheEntry(List.copyOf(fetchOfficeProducts(viewMode)), System.currentTimeMillis());
+                officeProductsCache.put(viewMode, cached);
+            }
+            refresh.complete(cached);
+            return cached.data();
+        } catch (RuntimeException | Error failure) {
+            refresh.completeExceptionally(failure);
+            throw failure;
+        } finally {
+            officeProductsInFlight.remove(viewMode, refresh);
+        }
+    }
+
+    private CacheEntry freshOfficeProducts(String viewMode) {
+        CacheEntry cached = officeProductsCache.get(viewMode);
+        return cached != null && System.currentTimeMillis() - cached.fetchedAt() < OFFICE_PRODUCTS_CACHE_TTL_MS
+            ? cached : null;
     }
 
     public OfficeProductDto currentVariant(String viewMode, String rspuId, String variantId) {
@@ -270,19 +429,91 @@ public class RsdpCatalogGateway {
         return readProducts(viewMode, "full".equals(viewMode), null);
     }
 
+    public CatalogProductPageDto pageProducts(String viewMode, int page, int size, String search,
+                                               String status, String rspuId) {
+        if ("none".equals(viewMode)) return CatalogProductPageDto.empty(page, size);
+        return withCatalogCompatibility(false, () -> loadProductPage(viewMode, page, size, search, status, rspuId),
+            () -> pageLegacyProducts(viewMode, page, size, search, status, rspuId));
+    }
+
+    private CatalogProductPageDto loadProductPage(String viewMode, int page, int size, String search,
+                                                  String status, String rspuId) {
+        String path = CATALOG_PAGE_PATH + "?page=" + page + "&size=" + size + "&" + queryScope(viewMode);
+        if (StringUtils.hasText(search)) path += "&search=" + encode(search);
+        if (StringUtils.hasText(status)) path += "&status=" + encode(status);
+        if (StringUtils.hasText(rspuId)) path += "&rspuId=" + encode(rspuId);
+        JsonNode result = rsdpClient.get(path);
+        if (!result.path("rows").isArray() || !result.path("catalogTotal").isIntegralNumber()
+                || !result.path("activeTotal").isIntegralNumber() || !result.path("total").isIntegralNumber()) {
+            throw new BusinessException("主项目商品分页结果格式无效");
+        }
+        List<ProductListItemDto> rows = new ArrayList<>();
+        result.path("rows").forEach(row -> rows.add(toListItem(row)));
+        return new CatalogProductPageDto(result.path("total").asLong(), result.path("catalogTotal").asLong(),
+            result.path("activeTotal").asLong(), page, size, rows);
+    }
+
+    private CatalogProductPageDto pageLegacyProducts(String viewMode, int page, int size, String search,
+                                                     String status, String rspuId) {
+        List<ProductListItemDto> visible = readLegacyProducts(viewMode, "full".equals(viewMode), null);
+        String term = search == null ? "" : search.strip().toLowerCase(Locale.ROOT);
+        List<ProductListItemDto> matching = visible.stream()
+            .filter(row -> rspuId == null || rspuId.equals(row.getRspuId()))
+            .filter(row -> !StringUtils.hasText(status) || "active".equals(status) == "active".equals(row.getStatus()))
+            .filter(row -> term.isEmpty() || java.util.stream.Stream.of(row.getProductName(), row.getRspuCode(),
+                row.getExternalCode(), row.getRspuId()).anyMatch(value -> value != null && value.toLowerCase(Locale.ROOT).contains(term)))
+            .toList();
+        int start = (int) Math.min((page - 1L) * size, matching.size());
+        long active = visible.stream().filter(row -> "active".equals(row.getStatus())).count();
+        return new CatalogProductPageDto(matching.size(), visible.size(), active, page, size,
+            matching.subList(start, Math.min(start + size, matching.size())));
+    }
+
+    private String queryScope(String viewMode) {
+        if ("full".equals(viewMode)) return "viewMode=full";
+        if (!"managed".equals(viewMode)) throw new BusinessException("商品目录范围无效");
+        String factoryCode = rsdpClient.catalogFactoryCode();
+        if (!StringUtils.hasText(factoryCode)) throw new BusinessException("尚未配置绑定工厂");
+        return "viewMode=managed&factoryCode=" + encode(factoryCode);
+    }
+
+    private String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
     /** 使用主库返回的可见列表。旧版主库会忽略列表请求中的 rspuId 参数。 */
     private List<ProductListItemDto> readProducts(String viewMode, boolean activeOnly, String targetId) {
+        if ("managed".equals(viewMode)) {
+            List<ProductListItemDto> products = new ArrayList<>();
+            int size = targetId == null ? 100 : 1;
+            for (int page = 1; ; page++) {
+                CatalogProductPageDto result = pageProducts(viewMode, page, size, "", activeOnly ? "active" : "", targetId);
+                products.addAll(result.rows());
+                if (products.size() >= result.total() || result.rows().isEmpty()) return products;
+            }
+        }
+        return readLegacyProducts(viewMode, activeOnly, targetId);
+    }
+
+    private List<ProductListItemDto> readLegacyProducts(String viewMode, boolean activeOnly, String targetId) {
+        if ("none".equals(viewMode)) return List.of();
+        String scope = queryScope(viewMode);
+        boolean managed = "managed".equals(viewMode);
+        // Older lists can ignore managed mode. Keep only ownership explicitly verified by RSDP.
+        String factoryCode = managed ? rsdpClient.catalogFactoryCode() : null;
         List<ProductListItemDto> all = new ArrayList<>();
         long rowsRead = 0;
         int page = 1;
         while (true) {
             JsonNode data = rsdpClient.get("/api/v1/products?page=" + page + "&size=" + PAGE_SIZE
-                + "&viewMode=" + viewMode + (activeOnly ? "&status=active" : ""));
+                + "&" + scope + (activeOnly ? "&status=active" : ""));
             JsonNode rows = data.path("rows");
             if (!rows.isArray() || rows.isEmpty()) {
                 break;
             }
             for (JsonNode row : rows) {
+                if (managed && (!row.path("ownerVerified").asBoolean()
+                        || !factoryCode.equals(row.path("ownerFactoryCode").asText()))) continue;
                 if (targetId == null) {
                     all.add(toListItem(row));
                 } else if (targetId.equals(row.path("rspuId").asText())) {

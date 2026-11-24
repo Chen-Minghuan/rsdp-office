@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
 import { workspaceOwnerLabel } from '~/utils/workspaceType'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 
 const auth = useAuth()
 const { user } = auth
@@ -25,6 +26,8 @@ let favoriteLoading = false
 let sidebarObserver: ResizeObserver | null = null
 
 const showDealerEntries = computed(() => !authEnabled || user.value?.role === 'DEALER')
+const showQuoteEntry = computed(() => showDealerEntries.value || workspace.projects.some(project =>
+  projectPermissionsFor(project, user.value?.userId).includes('QUOTE_READ')))
 const displayName = computed(() => user.value?.displayName || user.value?.username || (authEnabled ? '' : '本地开发'))
 const roleLabel = computed(() => {
   const account = user.value
@@ -36,7 +39,7 @@ const roleLabel = computed(() => {
   const project = workspace.currentProject
   if (project?.leader?.userId === account.userId) return '项目负责人'
   if (project?.collaborators.some(member => member.userId === account.userId)) return '项目协作者'
-  return workspace.projects.length ? '普通账号' : '设计师'
+  return ''
 })
 const avatarChar = computed(() => (displayName.value.trim()[0] || '').toUpperCase())
 const quoteProject = computed(() => workspace.currentProject || workspace.projects[0] || null)
@@ -279,7 +282,7 @@ onBeforeUnmount(() => {
             <span v-if="favoriteCount" class="ml-auto rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-medium text-bronze-dark">{{ favoriteCount }}</span>
           </NuxtLink>
           <NuxtLink
-            v-if="showDealerEntries"
+            v-if="showQuoteEntry"
             to="/workspace/quotes"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
             :class="route.path === '/workspace/quotes' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"

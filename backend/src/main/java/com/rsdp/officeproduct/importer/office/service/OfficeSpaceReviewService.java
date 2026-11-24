@@ -155,7 +155,7 @@ public class OfficeSpaceReviewService {
     /** 校验楼层/访问/版本并返回当前权威画布对象；复核确认只基于服务端最新画布签发。 */
     private AuthoritativeCanvas requireAuthoritativeObjects(String floorId, SpaceReviewConfirmRequest request) {
         projectService.requireFloor(floorId);
-        accessService.requireFloorAccess(floorId);
+        accessService.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
         workspaceLocks.lockWorkspace(floorId);
 
         OfficeCanvas latest = latestCanvas(floorId);

@@ -6,7 +6,6 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.SaveCanvasRequest;
 import com.rsdp.officeproduct.importer.office.dto.SpaceReviewConfirmRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeAgentMessageMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
@@ -59,7 +58,7 @@ class OfficeSpaceReviewServiceTest {
         OfficeWorkspaceLockMapper locks = mock(OfficeWorkspaceLockMapper.class);
         reviewService = new OfficeSpaceReviewService(projects, access, currentUser, canvasMapper, locks, json);
         officeService = new OfficeService(locks, projects, access, canvasMapper, mock(OfficeCartMapper.class),
-            mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), json);
+            mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), json);
     }
 
     private String zone(String id, double origin) {

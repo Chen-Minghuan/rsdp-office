@@ -25,12 +25,19 @@ import java.time.format.DateTimeFormatter;
 public class ProjectQuotationWorkbookBuilder {
 
     private static final String[] HEADERS = {"商品", "楼层 / 空间", "规格", "数量", "出厂价", "成交单价", "小计"};
+    private static final String[] CUSTOMER_HEADERS = {"商品", "楼层 / 空间", "规格", "数量", "成交单价", "小计"};
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public byte[] build(ProjectQuotationRecordDto quotation) {
+        return build(quotation, true);
+    }
+
+    public byte[] build(ProjectQuotationRecordDto quotation, boolean showCost) {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("项目报价");
-            int[] widths = {34, 24, 22, 10, 16, 16, 18};
+            int[] widths = showCost ? new int[]{34, 24, 22, 10, 16, 16, 18} : new int[]{34, 24, 22, 10, 16, 18};
+            String[] columns = showCost ? HEADERS : CUSTOMER_HEADERS;
+            int amountColumn = columns.length - 1;
             for (int column = 0; column < widths.length; column++) {
                 sheet.setColumnWidth(column, widths[column] * 256);
             }
@@ -55,22 +62,24 @@ public class ProjectQuotationWorkbookBuilder {
             Cell titleCell = title.createCell(0);
             titleCell.setCellValue(quotation.getProjectName() + " · 项目报价单");
             titleCell.setCellStyle(titleStyle);
-            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 6));
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, amountColumn));
 
             Row project = row(sheet, 1, 20);
             cell(project, 0, "项目", metaStyle);
             cell(project, 1, quotation.getProjectName(), metaStyle);
-            sheet.addMergedRegion(new CellRangeAddress(1, 1, 1, 6));
+            sheet.addMergedRegion(new CellRangeAddress(1, 1, 1, amountColumn));
             Row pricing = row(sheet, 2, 20);
-            cell(pricing, 0, "报价口径", metaStyle);
-            cell(pricing, 1, pricingLabel(quotation), metaStyle);
+            if (showCost) {
+                cell(pricing, 0, "报价口径", metaStyle);
+                cell(pricing, 1, pricingLabel(quotation), metaStyle);
+            }
             cell(pricing, 3, "导出时间", metaStyle);
             cell(pricing, 4, java.time.LocalDateTime.now().format(TIME_FORMAT), metaStyle);
             sheet.addMergedRegion(new CellRangeAddress(2, 2, 4, 6));
 
             Row header = row(sheet, 4, 22);
-            for (int column = 0; column < HEADERS.length; column++) {
-                cell(header, column, HEADERS[column], headerStyle);
+            for (int column = 0; column < columns.length; column++) {
+                cell(header, column, columns[column], headerStyle);
             }
 
             int rowIndex = 5;
@@ -81,19 +90,19 @@ public class ProjectQuotationWorkbookBuilder {
                 cell(row, 1, line.getFloorName() + " / " + line.getZoneName(), textStyle);
                 cell(row, 2, line.getVariant() == null ? "—" : line.getVariant(), textStyle);
                 cell(row, 3, line.getQty(), textStyle);
-                amount(row, 4, line.getFactoryPrice(), amountStyle);
-                amount(row, 5, line.getUnitPrice(), amountStyle);
-                amount(row, 6, line.getSubtotal(), amountStyle);
+                if (showCost) amount(row, 4, line.getFactoryPrice(), amountStyle);
+                amount(row, amountColumn - 1, line.getUnitPrice(), amountStyle);
+                amount(row, amountColumn, line.getSubtotal(), amountStyle);
             }
             for (QuotationFeeDto fee : quotation.getFees()) {
                 Row row = row(sheet, rowIndex++, 20);
                 cell(row, 0, fee.getName(), textStyle);
-                amount(row, 6, fee.getAmount(), amountStyle);
+                amount(row, amountColumn, fee.getAmount(), amountStyle);
             }
 
-            rowIndex = totalRow(sheet, rowIndex, "商品小计", quotation.getGoodsTotal(), textStyle, totalStyle);
-            rowIndex = totalRow(sheet, rowIndex, "费用合计", feeTotal(quotation), textStyle, totalStyle);
-            totalRow(sheet, rowIndex, "商品报价合计", quotation.getTotalAmount(), textStyle, totalStyle);
+            rowIndex = totalRow(sheet, rowIndex, "商品小计", quotation.getGoodsTotal(), textStyle, totalStyle, amountColumn);
+            rowIndex = totalRow(sheet, rowIndex, "费用合计", feeTotal(quotation), textStyle, totalStyle, amountColumn);
+            totalRow(sheet, rowIndex, "商品报价合计", quotation.getTotalAmount(), textStyle, totalStyle, amountColumn);
             sheet.createFreezePane(0, 5);
             workbook.write(output);
             return output.toByteArray();
@@ -103,10 +112,10 @@ public class ProjectQuotationWorkbookBuilder {
     }
 
     private int totalRow(org.apache.poi.xssf.usermodel.XSSFSheet sheet, int rowIndex, String label,
-                         BigDecimal amount, CellStyle textStyle, CellStyle amountStyle) {
+                         BigDecimal amount, CellStyle textStyle, CellStyle amountStyle, int amountColumn) {
         Row row = row(sheet, rowIndex, 22);
         cell(row, 0, label, textStyle);
-        amount(row, 6, amount, amountStyle);
+        amount(row, amountColumn, amount, amountStyle);
         return rowIndex + 1;
     }
 

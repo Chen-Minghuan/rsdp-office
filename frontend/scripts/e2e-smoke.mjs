@@ -15,20 +15,48 @@ if (process.env.MOCK_API === '1') {
   const reviewMock = createReviewConfirmMock()
   const defaultProject = {
     projectId: 'OFFICE-PROJECT-001', name: '默认办公项目', customerRequirements: '', requirementsRevision: 1,
-    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT'] }, collaborators: [], referenceImages: [],
     floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
   }
+  let savedCanvas = null
+  let cart = []
+  const product = { id: 'SMOKE-DESK', rspuId: 'SMOKE-DESK-PRODUCT', name: '验证办公桌', variant: '标准规格', price: 300 }
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
-    const url = new URL(route.request().url())
-    if (url.pathname === '/api/v1/office/projects' && route.request().method() === 'GET') {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 200, message: '成功', data: [defaultProject] }) })
+    const request = route.request()
+    const { pathname } = new URL(request.url())
+    const respond = data => route.fulfill({ json: { code: 200, message: '成功', data } })
+    if (pathname === '/api/v1/office/projects' && request.method() === 'GET') return respond([defaultProject])
+    if (pathname === '/api/v1/office/products') return respond([product])
+    if (pathname.endsWith('/canvas')) {
+      if (request.method() === 'PUT') savedCanvas = request.postDataJSON()
+      return respond(savedCanvas)
     }
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ code: 200, message: '成功', data: url.pathname.endsWith('/OFFICE-PROJECT-001') || url.pathname.endsWith('/canvas') ? null : [] }),
-    })
+    if (pathname.endsWith('/cart')) return respond(cart)
+    if (pathname.endsWith('/module-recommendations') || pathname.endsWith('/module-products')) {
+      const { zoneId, moduleId, canvasRevision, applyToSameModules } = request.postDataJSON()
+      const selected = savedCanvas.objects.find(item => item.id === moduleId && item.zoneId === zoneId)
+      assert.ok(selected?.layoutConfirmed)
+      assert.equal(canvasRevision, savedCanvas.revision)
+      const sameModules = savedCanvas.objects.filter(item => item.kind === 'furniture' && item.zoneId === zoneId
+        && item.furnitureTemplateId === selected.furnitureTemplateId && item.w === selected.w && item.h === selected.h)
+      const match = { product: { ...product, widthMm: selected.w, depthMm: selected.h },
+        rotationDeg: 0, fitRatio: 1, remainingWidthMm: 0, remainingDepthMm: 0, tier: 'CLOSE' }
+      if (pathname.endsWith('/module-recommendations')) {
+        return respond({ zoneId, moduleId, canvasRevision, widthMm: selected.w, depthMm: selected.h,
+          targetCategory: '办公桌', sameModuleCount: sameModules.length, candidates: [match], eligibleVariantCount: 1 })
+      }
+      const cartItems = (applyToSameModules ? sameModules : [selected]).map(item => {
+        const lineId = 'line-' + item.id
+        item.productId = product.id
+        item.productSelection = { ...match, cartLineId: lineId, sourceCanvasRevision: canvasRevision }
+        return { lineId, projectId: 'OFFICE-PROJECT-001', zoneId, zoneName: '验证空间', productId: product.id, qty: 1 }
+      })
+      cart = [...cart.filter(line => !cartItems.some(item => item.lineId === line.lineId)), ...cartItems]
+      savedCanvas.revision++
+      return respond({ canvas: savedCanvas, cartItems, match })
+    }
+    return respond(pathname.endsWith('/OFFICE-PROJECT-001') ? null : [])
   })
 }
 const page = await context.newPage()
@@ -188,12 +216,14 @@ await page.waitForTimeout(500)
 await page.getByTestId('auto-confirm-recommend').click()
 await page.waitForTimeout(300)
 await shot('04-design-layout-confirmed')
-const addButtons = await page.locator('button:has-text("加入方案")').all()
-console.log(`  found ${addButtons.length} products`)
-for (let i = 0; i < Math.min(3, addButtons.length); i++) {
-  await addButtons[i].click()
-  await page.waitForTimeout(200)
-}
+await page.getByRole('combobox', { name: '匹配单位模块' }).selectOption({ index: 1 })
+const applyProduct = page.getByRole('button', { name: '应用到当前家具', exact: true })
+await applyProduct.waitFor()
+const syncProducts = page.getByRole('checkbox', { name: /同步 \d+ 个同规格模块/ })
+if (await syncProducts.count()) await syncProducts.check()
+const selectedProduct = page.waitForResponse(response => response.url().endsWith('/module-products'))
+await page.getByRole('button', { name: /应用到(?:当前家具| \d+ 个模块)/ }).click()
+assert.equal((await (await selectedProduct).json()).code, 200)
 await shot('04-design-with-cart')
 
 // 5. 整体方案

@@ -94,9 +94,18 @@ await context.route('**/api/v1/**', async route => {
     importRequests += 1
     return respond(null, 403)
   }
-  if (url.pathname === '/api/v1/products' && request.method() === 'GET') {
+  if (url.pathname === '/api/v1/products/page' && request.method() === 'GET') {
     if (listMode === 'error') return respond(null, 404)
-    return respond(listMode === 'empty' ? [] : catalogEnabled ? products : [])
+    const catalog = listMode === 'empty' || !catalogEnabled ? [] : products
+    const page = Number(url.searchParams.get('page'))
+    const size = Number(url.searchParams.get('size'))
+    const search = (url.searchParams.get('search') || '').toLowerCase()
+    const status = url.searchParams.get('status')
+    const matches = catalog.filter(product => (
+      !search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search))
+    ) && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active')))
+    return respond({ page, size, rows: matches.slice((page - 1) * size, page * size), total: matches.length,
+      catalogTotal: catalog.length, activeTotal: catalog.filter(product => product.status === 'active').length })
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
@@ -495,12 +504,18 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await catalogSwitch.count(), 0)
 
-  await page.getByLabel('每页显示数量').selectOption('10')
+  const waitForCatalogPage = (pageNumber, size, search = null) => page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/v1/products/page' && url.searchParams.get('page') === String(pageNumber) &&
+      url.searchParams.get('size') === String(size) && url.searchParams.get('search') === search
+  })
+  await Promise.all([waitForCatalogPage(1, 10), page.getByLabel('每页显示数量').selectOption('10')])
+  await productCards().nth(9).waitFor()
+  await Promise.all([waitForCatalogPage(2, 10), page.getByRole('button', { name: '下一页', exact: true }).click()])
+  await page.getByText('11–20', { exact: true }).waitFor()
   assert.equal(await productCards().count(), 10)
-  await page.getByRole('button', { name: '下一页', exact: true }).click()
-  await page.waitForFunction(() => document.querySelectorAll('[aria-label="商品卡片列表"] > li').length === 10)
-  assert.equal(await productCards().count(), 10)
-  await page.getByLabel('搜索商品名称或编码').fill('RSDP-002')
+  await Promise.all([waitForCatalogPage(1, 10, 'RSDP-002'), page.getByLabel('搜索商品名称或编码').fill('RSDP-002')])
+  await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().waitFor()
   assert.equal(await productCards().count(), 1)
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
@@ -509,11 +524,25 @@ try {
   await page.getByRole('cell', { name: '供应商尺寸原文', exact: true }).waitFor()
   assert.equal(await page.getByRole('cell', { name: '1400 × 600 mm', exact: true }).count(), 0)
   assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
+
+  const detailRequests = []
+  const recordDetailRequest = request => {
+    if (request.method() === 'GET') detailRequests.push(new URL(request.url()).pathname)
+  }
+  page.on('request', recordDetailRequest)
+  await page.reload({ waitUntil: 'networkidle' })
+  await heading('简约办公桌 2')
+  page.off('request', recordDetailRequest)
+  const detailPath = `/api/v1${new URL(page.url()).pathname}`
+  assert.equal(detailRequests.filter(path => path === detailPath).length, 1, '直达商品详情只加载一次')
+  assert.ok(!detailRequests.some(path => path === '/api/v1/office/products' || /\/(?:canvas|cart|budgets)$/.test(path)), '商品详情无需加载楼层数据或项目预算')
+
   await page.getByRole('link', { name: '返回商品库' }).click()
   await page.getByLabel('搜索商品名称或编码').fill('不存在的商品')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选' }).click()
   await page.getByLabel('筛选商品状态').selectOption('active')
+  await productCards().nth(14).waitFor()
   assert.equal(await productCards().count(), 15)
   await page.getByLabel('筛选商品状态').selectOption('')
 
@@ -584,7 +613,10 @@ try {
   assert.equal(page.url(), designUrl)
 
   await page.getByRole('navigation', { name: '工作区导航' }).getByRole('link', { name: '商品库', exact: true }).click()
-  await page.getByRole('link', { name: '去 RSDP 管理商品' }).waitFor()
+  const localProductsLink = page.getByRole('link', { name: '本地商品', exact: true })
+  await localProductsLink.waitFor()
+  assert.equal(await localProductsLink.getAttribute('href'), '/products/local')
+  assert.equal(await page.getByRole('link', { name: '去 RSDP 管理商品', exact: true }).count(), 0)
   assert.equal(await page.getByRole('link', { name: '手工录入' }).count(), 0)
   assert.equal(await page.getByRole('link', { name: '批量导入' }).count(), 0)
 
