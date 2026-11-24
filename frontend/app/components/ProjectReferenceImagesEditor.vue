@@ -5,7 +5,9 @@ const props = withDefaults(defineProps<{
   images: ProjectReferenceImage[]
   disabled?: boolean
   max?: number
-}>(), { disabled: false, max: 10 })
+  heading?: string
+  hint?: string
+}>(), { disabled: false, max: 10, heading: '参考图片', hint: '' })
 
 const emit = defineEmits<{ 'update:images': [ProjectReferenceImage[]] }>()
 
@@ -25,7 +27,7 @@ async function pickFiles(event: Event) {
   if (!files.length || props.disabled) return
   error.value = ''
   if (props.images.length + files.length > props.max) {
-    error.value = `项目参考图片不能超过 ${props.max} 张`
+    error.value = `参考图片不能超过 ${props.max} 张`
     return
   }
   uploading.value = true
@@ -51,8 +53,8 @@ function removeImage(index: number) {
 <template>
   <section class="grid gap-3" data-testid="reference-images-editor">
     <div>
-      <h3 class="text-sm font-semibold">参考图片</h3>
-      <p class="mt-1 text-xs text-muted">项目级参考资料（风格、现场照片等），最多 {{ max }} 张，随项目保存。</p>
+      <h3 class="text-sm font-semibold">{{ heading }}</h3>
+      <p class="mt-1 text-xs text-muted">{{ hint || `项目级参考资料（风格、现场照片等），最多 ${max} 张，随项目保存。` }}</p>
     </div>
     <div v-if="images.length" class="grid grid-cols-3 gap-3">
       <figure v-for="(image, index) in images" :key="image.url" data-testid="reference-image"

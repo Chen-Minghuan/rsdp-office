@@ -4,7 +4,7 @@ import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { money } from '~/utils/helpers'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
-import type { CartItem, FurnitureObject, Product, ZoneObject } from '~/types/office'
+import type { CartItem, FurnitureObject, Product, ProjectQuotationRecord, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
 import type { ProposalConfirmation } from '~/types/productScheme'
 import { proposalFurnitureSelectionRoute } from '~/utils/proposalFurnitureGate'
@@ -57,6 +57,8 @@ const selectedDetail = ref<Detail | null>(null)
 const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
 const demoConfirmed = ref(false)
 const savedConfirmation = ref<ProposalConfirmation | null>(null)
+// 最新已确认报价：最终报价取该快照中当前楼层行的小计之和，与报价页同一数据源
+const latestQuotation = ref<ProjectQuotationRecord | null>(null)
 const checkingCatalog = ref(false)
 const catalogApi = useOfficeApi()
 const notice = ref('')
@@ -84,6 +86,17 @@ watch([previewMode, () => store.initialized, () => store.workspaceId, () => stor
     if (read === confirmationRead) savedConfirmation.value = result
   } catch { /* Confirmation remains unknown and can be requested again. */ }
 }, { immediate: true })
+// 加载项目最新已确认报价；无确认记录或读取失败时保持空值，最终报价显示占位
+let quotationRead = 0
+watch([previewMode, () => store.initialized, () => store.workspaceId, () => workspace.currentProjectId], async ([preview, ready, floorId, projectId]) => {
+  const read = ++quotationRead
+  latestQuotation.value = null
+  if (preview || !ready || !floorId || !projectId || !store.apiReady) return
+  try {
+    const result = await catalogApi.latestProjectQuotation(projectId)
+    if (read === quotationRead) latestQuotation.value = result
+  } catch { /* Quotation remains unknown and the final quote stays as a placeholder. */ }
+}, { immediate: true })
 const projectPermissions = computed(() => projectPermissionsFor(workspace.currentProject, user.value?.userId))
 const canEdit = computed(() => previewMode.value || !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EDIT'))
 const canExport = computed(() => !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EXPORT_PROJECT'))
@@ -108,6 +121,17 @@ function findProduct(id: string) {
 
 function moduleTotal(module: ProposalModule) {
   return (module.product?.price || 0) * module.qty
+}
+
+// 与报价页 amount(grandTotal) 一致的金额格式
+function amount(n: number | null | undefined) {
+  if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—'
+  return `¥${Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// 与报价页 quotes.vue 一致的两位小数取整
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
 function dimensionText(product: Product | null) {
@@ -262,6 +286,15 @@ const groups = computed<ProposalGroup[]>(() => {
 
 const totalModules = computed(() => spaces.value.reduce((sum, space) => sum + space.modules.reduce((subtotal, module) => subtotal + module.qty, 0), 0))
 const totalPrice = computed(() => spaces.value.reduce((sum, space) => sum + space.total, 0))
+// 最终报价：已确认报价快照中当前楼层行的商品小计合计（项目级费用不摊入楼层）
+const floorQuoteTotal = computed(() => {
+  const record = latestQuotation.value
+  const floorId = store.workspaceId
+  if (!record || !floorId) return null
+  const lines = record.lines.filter(line => line.floorId === floorId)
+  if (!lines.length) return null
+  return roundMoney(lines.reduce((sum, line) => sum + (line.subtotal || 0), 0))
+})
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
 const pendingSpaces = computed(() => spaces.value.length - confirmedSpaces.value)
 const confirmedGroups = computed(() => groups.value.filter(group => group.spaces.every(space => space.status === '已确认')).length)
@@ -498,7 +531,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price price-strike">{{ money(totalPrice) }}</strong></div><div class="aside-summary"><span>最终报价</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal) }}</strong></div><div v-if="!previewMode && latestQuotation" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -655,4 +688,8 @@ function detailTitle(detail: Detail | null) {
 .proposal-3d-host{height:min(62dvh,640px);min-height:360px;border:1px solid var(--color-line);border-radius:12px;overflow:hidden;margin-bottom:14px}
 .heading-status.is-confirmed { color: var(--color-green); }
 .heading-status.is-confirmed span { background: var(--color-green); }
+/* 参考金额加删除线，突出下方最终报价 */
+.aside-summary .price-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #b2a79c; color: #a89b8e; font-size: 15px; font-weight: 600; }
+/* 最终报价的数据口径说明 */
+.aside-quote-hint { font-size: 10px; color: #a89b8e; margin: -7px 0 0; text-align: right; }
 </style>

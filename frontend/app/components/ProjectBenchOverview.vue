@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { RenderPreview } from '~/types/renderPreview'
-import type { ProjectBudget, WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, ProjectReferenceImage, WorkspaceProject } from '~/types/workspace'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { drawingMatchesPlan } from '~/utils/drawingContext'
 import { projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
@@ -17,6 +17,24 @@ const retryPreviews = ref(0)
 const loadedBudget = ref<ProjectBudget>()
 const { storageScope } = useAuth()
 const budgetApi = useWorkspaceApi()
+const workspace = useWorkspaceStore()
+const referenceSaveError = ref('')
+
+/** 楼层级参考图：按当前项目与楼层区分，整体替换保存，成功后回写工作区缓存。 */
+const floorReferences = computed(() => props.project.floors.find(floor => floor.floorId === props.floorId)?.referenceImages ?? [])
+
+async function saveFloorReferences(images: ProjectReferenceImage[]) {
+  referenceSaveError.value = ''
+  try {
+    const floor = await budgetApi.updateFloorReferences(props.project.projectId, props.floorId, images)
+    const target = workspace.projects
+      .find(project => project.projectId === props.project.projectId)?.floors
+      .find(item => item.floorId === props.floorId)
+    if (target) target.referenceImages = floor.referenceImages
+  } catch (cause) {
+    referenceSaveError.value = cause instanceof Error ? cause.message : '楼层参考图保存失败'
+  }
+}
 
 watch([() => props.project.projectId, storageScope], async ([projectId], _, onCleanup) => {
   let active = true
@@ -200,6 +218,11 @@ function roomRoute(zoneId: string) {
             </template>
             <p v-else class="text-neutral-600">尚未上传图纸</p>
             <NuxtLink :to="projectDrawingRoute(floorId)" class="inline-block font-semibold text-accent-ink hover:underline">上传或识别图纸</NuxtLink>
+          </div>
+          <div class="text-sm">
+            <ProjectReferenceImagesEditor :images="floorReferences" heading="楼层参考图" hint="仅用于当前楼层，随楼层保存。"
+              data-testid="floor-reference-editor" @update:images="saveFloorReferences" />
+            <p v-if="referenceSaveError" role="alert" class="mt-1 text-xs text-red-700">{{ referenceSaveError }}</p>
           </div>
         </aside>
       </div>

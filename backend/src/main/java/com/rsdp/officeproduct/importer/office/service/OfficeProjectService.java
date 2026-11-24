@@ -359,6 +359,24 @@ public class OfficeProjectService {
         return member.getRole() + ":" + member.getUserId() + "=" + OfficeProjectPermission.assigned(member.getPermissionFlags());
     }
 
+    /** 楼层级参考图：整体替换，复用项目级参考图的地址与数量校验。 */
+    @Transactional
+    public OfficeFloorDto updateFloorReferences(String projectId, String floorId, UpdateProjectReferencesRequest request) {
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
+        requireProject(projectId);
+        OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
+        if (floor == null || !projectId.equals(floor.getProjectId())) {
+            throw new BusinessException("楼层不存在");
+        }
+        if (request == null) {
+            throw new BusinessException("参考图片参数不能为空");
+        }
+        floor.setReferenceImages(writeReferenceImages(validateReferenceImages(request.getReferenceImages())));
+        floor.setUpdatedAt(LocalDateTime.now());
+        floorMapper.updateById(floor);
+        return toFloorDto(floor);
+    }
+
     @Transactional
     public OfficeProjectDto updateReferences(String projectId, UpdateProjectReferencesRequest request) {
         accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
@@ -671,6 +689,7 @@ public class OfficeProjectService {
         dto.setProjectId(floor.getProjectId());
         dto.setName(floor.getName());
         dto.setSortOrder(floor.getSortOrder());
+        dto.setReferenceImages(readReferenceImages(floor.getReferenceImages()));
         dto.setCreatedAt(floor.getCreatedAt());
         dto.setUpdatedAt(floor.getUpdatedAt());
         return dto;

@@ -90,6 +90,12 @@ public class OfficeProjectController {
         return Result.ok(projectService.replaceMembers(projectId, request));
     }
 
+    @PutMapping("/{projectId}/floors/{floorId}/references")
+    public Result<OfficeFloorDto> updateFloorReferences(@PathVariable String projectId, @PathVariable String floorId,
+                                                        @RequestBody UpdateProjectReferencesRequest request) {
+        return Result.ok(projectService.updateFloorReferences(projectId, floorId, request));
+    }
+
     @PatchMapping("/{projectId}/references")
     public Result<OfficeProjectDto> updateReferences(@PathVariable String projectId,
                                                       @RequestBody UpdateProjectReferencesRequest request) {
