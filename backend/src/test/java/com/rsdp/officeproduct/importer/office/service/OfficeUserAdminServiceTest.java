@@ -14,7 +14,6 @@ import com.rsdp.officeproduct.importer.office.entity.OfficeWorkspace;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceMapper;
 import com.rsdp.officeproduct.importer.office.dto.AdminUserDto;
-import com.rsdp.officeproduct.importer.office.dto.CreateOfficeUserRequest;
 import com.rsdp.officeproduct.importer.util.CurrentUserContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -82,11 +81,6 @@ class OfficeUserAdminServiceTest {
                 .filter(user -> !params.contains("active") || "active".equals(user.getStatus()))
                 .toList();
         });
-        when(userMapper.insert(any(OfficeUser.class))).thenAnswer(call -> {
-            OfficeUser user = call.getArgument(0);
-            users.put(user.getUserId(), user);
-            return 1;
-        });
         when(userMapper.updateById(any(OfficeUser.class))).thenAnswer(call -> {
             OfficeUser user = call.getArgument(0);
             users.put(user.getUserId(), user);
@@ -114,6 +108,7 @@ class OfficeUserAdminServiceTest {
         user.setUsername(username);
         user.setDisplayName(username);
         user.setRole(role);
+        user.setIsSystemAdmin("ADMIN".equals(role));
         user.setStatus(status);
         user.setCreatedAt(LocalDateTime.now());
         users.put(user.getUserId(), user);
@@ -140,61 +135,14 @@ class OfficeUserAdminServiceTest {
         members.add(member);
     }
 
-    private CreateOfficeUserRequest createRequest(String username, String displayName, String password, String role) {
-        CreateOfficeUserRequest request = new CreateOfficeUserRequest();
-        request.setUsername(username);
-        request.setDisplayName(displayName);
-        request.setPassword(password);
-        request.setRole(role);
-        return request;
-    }
-
     @Test void nonAdminCannotManageUsers() {
         addUser("root", "ADMIN", "active");
         addUser("bob", "USER", "active");
         loginAs("bob");
         assertEquals("只有系统管理员可以管理用户", assertThrows(AccessDeniedException.class,
             () -> service.listUsers()).getMessage());
-        assertThrows(AccessDeniedException.class,
-            () -> service.createUser(createRequest("carol", "Carol", "secret1", null)));
-
         loginAs("root");
         assertEquals(2, service.listUsers().size());
-    }
-
-    @Test void devModeSkipsAdminCheck() {
-        when(authService.isEnabled()).thenReturn(false);
-        AdminUserDto created = service.createUser(createRequest("carol", "Carol", "secret1", null));
-        assertEquals("USER", created.getRole());
-        assertEquals(1, service.listUsers().size());
-    }
-
-    @Test void createUserValidatesInputAndStoresHashOnly() {
-        addUser("root", "ADMIN", "active");
-        addUser("bob", "USER", "active");
-        loginAs("root");
-        assertEquals("用户名已存在", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("bob", "B", "secret1", null))).getMessage());
-        assertEquals("用户名需为 2-32 位字母、数字或 _ . -", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("坏 名", "B", "secret1", null))).getMessage());
-        assertEquals("显示名称不能为空", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("carol", " ", "secret1", null))).getMessage());
-        assertEquals("初始密码至少 6 位", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("carol", "Carol", "123", null))).getMessage());
-        // 系统管理员唯一：本接口只能创建设计师（普通用户）；经销商主号走工作区创建
-        assertEquals("只能创建设计师账号；经销商主号请通过经销商工作区创建", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("carol", "Carol", "secret1", "SUPER"))).getMessage());
-        assertEquals("只能创建设计师账号；经销商主号请通过经销商工作区创建", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("carol", "Carol", "secret1", "admin"))).getMessage());
-        assertEquals("只能创建设计师账号；经销商主号请通过经销商工作区创建", assertThrows(BusinessException.class,
-            () -> service.createUser(createRequest("carol", "Carol", "secret1", "DEALER"))).getMessage());
-
-        AdminUserDto created = service.createUser(createRequest("carol", "Carol", "secret1", "user"));
-        assertEquals("USER", created.getRole());
-        assertEquals("active", created.getStatus());
-        OfficeUser stored = users.get(created.getUserId());
-        assertNotEquals("secret1", stored.getPasswordHash());
-        assertTrue(PasswordHasher.matches("secret1", stored.getPasswordHash()));
     }
 
     @Test void disableRulesAndSessionInvalidation() {

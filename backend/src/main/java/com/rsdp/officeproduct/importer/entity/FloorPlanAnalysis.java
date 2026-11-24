@@ -55,23 +55,12 @@ public class FloorPlanAnalysis {
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String rawResult;
 
-    /** 人工确认后的空间列表（legacy 兼容）。 */
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String confirmedRooms;
-
     /** 识别质量提示。 */
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String qualityIssues;
 
     /** CAD 原文件对象键（重解析用）。 */
     private String cadObjectKey;
-
-    /** 手画布局草稿 JSON。 */
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String layoutJson;
-
-    /** 手画布局乐观锁版本。 */
-    private Long layoutRevision;
 
     /** 当前业务正式使用的 Revision。 */
     private Integer activeAnalysisRevision;

@@ -104,7 +104,8 @@ public class AuthController {
 
     private UserResponse toResponse(OfficeUser user) {
         OfficeWorkspace workspace = user.getWorkspaceId() == null ? null : workspaces.selectById(user.getWorkspaceId());
-        return new UserResponse(user.getUserId(), user.getUsername(), user.getDisplayName(), user.getRole(),
+        String role = Boolean.TRUE.equals(user.getIsSystemAdmin()) ? "ADMIN" : "DEALER".equals(user.getRole()) ? "DEALER" : "USER";
+        return new UserResponse(user.getUserId(), user.getUsername(), user.getDisplayName(), role,
             workspace == null ? null : workspace.getWorkspaceType());
     }
 

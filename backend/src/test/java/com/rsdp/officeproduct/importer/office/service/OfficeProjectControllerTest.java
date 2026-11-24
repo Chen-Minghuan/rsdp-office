@@ -2,12 +2,15 @@ package com.rsdp.officeproduct.importer.office.service;
 
 import com.rsdp.officeproduct.importer.office.controller.OfficeProjectController;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -17,6 +20,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class OfficeProjectControllerTest {
+    @Test void projectStatusEndpointReturnsThePersistedStage() throws Exception {
+        var service = mock(OfficeProjectService.class);
+        when(service.updateStatus("P1", "DELIVERING")).thenReturn("DELIVERING");
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
+        mvc.perform(patch("/api/v1/office/projects/P1/status").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"DELIVERING\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("DELIVERING"));
+    }
     private final OfficeProjectService projects = mock(OfficeProjectService.class);
     private final org.springframework.test.web.servlet.MockMvc mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(projects)).build();
 
@@ -31,6 +42,8 @@ class OfficeProjectControllerTest {
         project.setRequirementsRevision(1);
         project.setFloors(List.of(floor));
         when(projects.listProjects()).thenReturn(List.of(project));
+        when(projects.listProjects(false)).thenReturn(List.of(project));
+        when(projects.listProjectBudgets()).thenReturn(Map.of("OPRJ-1", new OfficeProjectBudgetDto(BigDecimal.TEN, "COMPLETE")));
         when(projects.createProject(any())).thenReturn(project);
         when(projects.addFloor(eq("OPRJ-1"), any())).thenReturn(floor);
         when(projects.updateRequirements(eq("OPRJ-1"), any())).thenReturn(project);
@@ -39,6 +52,10 @@ class OfficeProjectControllerTest {
 
         mvc.perform(get("/api/v1/office/projects")).andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].floors[0].floorId").value("OFLR-1"));
+        mvc.perform(get("/api/v1/office/projects").param("includeBudget", "false"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].budgetTotal").doesNotExist());
+        mvc.perform(get("/api/v1/office/projects/budgets")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data['OPRJ-1'].budgetTotal").value(10));
         mvc.perform(post("/api/v1/office/projects").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"项目\",\"customerRequirements\":\"需求\",\"floors\":[{\"name\":\"一层\"}]}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.projectId").value("OPRJ-1"));

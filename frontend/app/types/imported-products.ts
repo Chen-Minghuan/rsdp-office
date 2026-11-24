@@ -10,6 +10,8 @@ export interface ImportedProduct {
   rspuCode: string | null
   externalCode: string | null
   productName: string | null
+  categoryPath?: string[] | null
+  colorPrimaryName?: string | null
   primaryImageUrl: string | null
   retailPrice: number | null
   status: string | null
@@ -110,4 +112,12 @@ export interface ProductDetail {
   deletedAt: string | null
   variants: ProductVariant[]
   images: ProductImage[]
+}
+export interface CatalogProductPage {
+  rows: ImportedProduct[]
+  total: number
+  catalogTotal: number
+  activeTotal: number
+  page: number
+  size: number
 }

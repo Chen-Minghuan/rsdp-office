@@ -3,6 +3,7 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.rsdp.officeproduct.importer.auth.AuthService;
+import com.rsdp.officeproduct.importer.config.SchemaInitializer;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeFavoriteFolderMapper;
@@ -11,9 +12,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectFavoriteItemMa
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.jdbc.datasource.init.ScriptUtils;
 
 import java.util.List;
 import java.util.UUID;
@@ -36,13 +35,9 @@ class LocalFavoritePostgresTest {
         }
         try {
             var scoped = new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, username, password);
+            new SchemaInitializer(scoped).init();
             try (var connection = scoped.getConnection(); var statement = connection.createStatement()) {
-                ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261019_user_auth.sql"));
-                statement.execute("alter table office_user add column workspace_id varchar(64), add column source varchar(64)");
-                statement.execute("create table office_design_project(project_id varchar(64) primary key)");
-                statement.execute("insert into office_design_project values ('PROJECT')");
-                ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261122_office_personal_favorites.sql"));
-                ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261123_office_project_favorites.sql"));
+                statement.execute("insert into office_design_project(project_id, name) values ('PROJECT', '验证项目')");
             }
             var configuration = new MybatisConfiguration();
             configuration.setMapUnderscoreToCamelCase(true);

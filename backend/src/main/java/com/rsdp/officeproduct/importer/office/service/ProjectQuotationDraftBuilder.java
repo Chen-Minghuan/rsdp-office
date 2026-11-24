@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** 校验并重算用户编辑的报价，供导出和确认共用。 */
@@ -48,7 +50,9 @@ class ProjectQuotationDraftBuilder {
                 .eq("project_id", project.getProjectId())).stream()
             .collect(Collectors.toMap(OfficeDesignFloor::getFloorId, floor -> floor, (first, second) -> first,
                 LinkedHashMap::new));
-        Map<String, OfficeProductDto> productsById = catalog.loadProducts();
+        Set<String> productIds = request.getLines().stream().filter(Objects::nonNull)
+            .map(ConfirmProjectQuotationRequest.Line::getProductId).filter(StringUtils::hasText).collect(Collectors.toSet());
+        Map<String, OfficeProductDto> productsById = catalog.loadProducts(productIds);
 
         BigDecimal goodsTotal = BigDecimal.ZERO;
         List<OfficeQuotationLine> rows = new ArrayList<>();

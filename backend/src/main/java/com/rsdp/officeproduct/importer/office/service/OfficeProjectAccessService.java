@@ -24,9 +24,8 @@ import java.util.stream.Collectors;
 
 /**
  * 项目级访问校验。认证关闭（开发模式）时全部放行，与 AuthFilter 的开关一致。
- * 认证开启时：项目唯一归属一个工作区——访问者须为该项目成员且账号同属该工作区，
- * 或为该工作区的经销商主号（可读并管理成员，用于指定项目负责人）。
- * workspace_id 为空的历史项目保持 PROJECT-004 的纯成员判定，待补录。
+ * 认证开启时：访问者须为同工作区的已授权项目成员，或为项目所在工作区的主号。
+ * workspace_id 为空的历史项目按其成员授权判断。
  */
 @Service
 @RequiredArgsConstructor
@@ -86,6 +85,20 @@ public class OfficeProjectAccessService {
         }
     }
 
+    public boolean can(String projectId, OfficeProjectPermission permission) {
+        if (!enforcementEnabled()) return true;
+        return can(currentUserOrNull(), requireProject(projectId), permission);
+    }
+
+    public void requirePermission(String projectId, OfficeProjectPermission permission) {
+        if (!can(projectId, permission)) throw new AccessDeniedException("无权执行该项目操作");
+    }
+
+    /** 认证关闭仅用于开发模式；已登录时核验实际工作区归属。 */
+    public boolean ownsProject(String projectId) {
+        return !enforcementEnabled() || isWorkspaceOwner(currentUserOrNull(), requireProject(projectId).getWorkspaceId());
+    }
+
     /**
      * 经销商主号专属入口（项目报价等）：认证开启时要求当前账号是项目所属工作区的主号。
      * 历史无工作区项目没有主号归属，按拒绝处理，避免退化成全员可见。
@@ -102,13 +115,34 @@ public class OfficeProjectAccessService {
         }
     }
 
-    /** 成员管理：项目内负责人（同属工作区），或该工作区的经销商主号。 */
+    /** 成员管理：拥有成员管理权限的项目成员或该工作区的主号。 */
     public void requireLeader(String projectId) {
         if (!enforcementEnabled()) {
             return;
         }
-        if (!canManageMembers(currentUserOrNull(), requireProject(projectId))) {
-            throw new AccessDeniedException("只有项目负责人或经销商主号可以管理成员");
+        if (!can(projectId, OfficeProjectPermission.MANAGE_MEMBERS)) {
+            throw new AccessDeniedException("无权管理项目成员");
+        }
+    }
+
+    /** 项目阶段仅由实际负责人或所属工作区主号维护，不沿用可转授的成员管理权限。 */
+    public boolean canManageStatus(OfficeDesignProject project, List<OfficeProjectMember> members) {
+        if (!enforcementEnabled()) return true;
+        OfficeUser user = currentUserOrNull();
+        if (user == null) return false;
+        if ("DEALER".equalsIgnoreCase(user.getRole()) && isWorkspaceOwner(user, project.getWorkspaceId())) return true;
+        return sameWorkspace(user, project) && members.stream().anyMatch(member ->
+            project.getProjectId().equals(member.getProjectId()) && user.getUserId().equals(member.getUserId())
+                && "LEADER".equals(member.getRole()) && OfficeProjectPermission.READ.granted(member.getPermissionFlags()));
+    }
+
+    public void requireStatusManager(String projectId) {
+        OfficeDesignProject project = requireProject(projectId);
+        if (!enforcementEnabled()) return;
+        List<OfficeProjectMember> members = memberMapper.selectList(
+            new QueryWrapper<OfficeProjectMember>().eq("project_id", projectId).eq("user_id", currentUserId()));
+        if (!canManageStatus(project, members)) {
+            throw new AccessDeniedException("只有项目负责人或所属工作区主号可以修改项目阶段");
         }
     }
 
@@ -117,6 +151,10 @@ public class OfficeProjectAccessService {
      * 先由楼层查证所属项目，再校验成员权限。
      */
     public void requireFloorAccess(String floorId) {
+        requireFloorPermission(floorId, OfficeProjectPermission.READ);
+    }
+
+    public void requireFloorPermission(String floorId, OfficeProjectPermission permission) {
         if (!StringUtils.hasText(floorId)) {
             throw new BusinessException("请先选择项目和楼层");
         }
@@ -127,7 +165,8 @@ public class OfficeProjectAccessService {
         if (floor == null) {
             throw new BusinessException("楼层不存在，请先创建项目和楼层");
         }
-        requireMember(floor.getProjectId());
+        if (permission == OfficeProjectPermission.READ) requireMember(floor.getProjectId());
+        else requirePermission(floor.getProjectId(), permission);
     }
 
     /** 当前用户可访问的项目 ID 集合；认证关闭返回 null 表示不过滤。 */
@@ -149,7 +188,8 @@ public class OfficeProjectAccessService {
                 .stream().collect(Collectors.toMap(OfficeDesignProject::getProjectId, p -> p));
             for (OfficeProjectMember membership : memberships) {
                 OfficeDesignProject project = projectsById.get(membership.getProjectId());
-                if (project != null && sameWorkspace(user, project)) {
+                if (project != null && sameWorkspace(user, project)
+                        && OfficeProjectPermission.READ.granted(membership.getPermissionFlags())) {
                     result.add(membership.getProjectId());
                 }
             }
@@ -164,31 +204,17 @@ public class OfficeProjectAccessService {
     }
 
     private boolean canAccessProject(OfficeUser user, OfficeDesignProject project) {
-        if (user == null) {
-            return false;
-        }
-        if (!StringUtils.hasText(project.getWorkspaceId())) {
-            return isMember(project.getProjectId(), user.getUserId());
-        }
-        if (isWorkspaceOwner(user, project.getWorkspaceId())) {
-            return true;
-        }
-        return sameWorkspace(user, project) && isMember(project.getProjectId(), user.getUserId());
+        return can(user, project, OfficeProjectPermission.READ);
     }
 
-    private boolean canManageMembers(OfficeUser user, OfficeDesignProject project) {
-        if (user == null) {
-            return false;
-        }
-        if (StringUtils.hasText(project.getWorkspaceId()) && isWorkspaceOwner(user, project.getWorkspaceId())) {
-            return true;
-        }
-        if (!sameWorkspace(user, project)) {
-            return false;
-        }
-        return memberMapper.selectCount(new QueryWrapper<OfficeProjectMember>()
-            .eq("project_id", project.getProjectId()).eq("user_id", user.getUserId())
-            .eq("role", OfficeProjectMember.ROLE_LEADER)) > 0;
+    private boolean can(OfficeUser user, OfficeDesignProject project, OfficeProjectPermission permission) {
+        if (user == null) return false;
+        if (isWorkspaceOwner(user, project.getWorkspaceId())) return true;
+        if (!sameWorkspace(user, project)) return false;
+        return memberMapper.selectList(new QueryWrapper<OfficeProjectMember>()
+            .eq("project_id", project.getProjectId()).eq("user_id", user.getUserId())).stream()
+            .anyMatch(member -> project.getProjectId().equals(member.getProjectId())
+                && permission.granted(member.getPermissionFlags()));
     }
 
     /** 历史项目（无工作区）不限制账号归属；有工作区的项目要求账号同属。 */
@@ -200,7 +226,7 @@ public class OfficeProjectAccessService {
     }
 
     private boolean isWorkspaceOwner(OfficeUser user, String workspaceId) {
-        OfficeWorkspace workspace = StringUtils.hasText(workspaceId) ? workspaceMapper.selectById(workspaceId) : null;
+        OfficeWorkspace workspace = user != null && StringUtils.hasText(workspaceId) ? workspaceMapper.selectById(workspaceId) : null;
         return workspace != null && workspace.getOwnerUserId().equals(user.getUserId());
     }
 

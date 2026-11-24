@@ -1,6 +1,8 @@
 package com.rsdp.officeproduct.importer.service;
 
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
+import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.dto.response.CatalogProductPageDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.office.service.OfficeCatalogAccess;
@@ -20,11 +22,25 @@ public class ProductQueryService {
     private final OfficeCatalogAccess access;
 
     public List<ProductListItemDto> listProducts(boolean managed) {
-        var capabilities = access.capabilities();
-        if (managed || !"full".equals(sharedCatalogService.resolveViewMode())) {
-            return capabilities.managed() ? rsdpCatalogGateway.listProducts("managed") : List.of();
+        String view = resolveView(managed);
+        return "none".equals(view) ? List.of() : rsdpCatalogGateway.listProducts(view);
+    }
+
+    public CatalogProductPageDto pageProducts(boolean managed, int page, int size, String search, String status) {
+        if (page < 1 || size < 1 || size > 100 || search.length() > 120
+                || !List.of("", "active", "other").contains(status)) {
+            throw new BusinessException("商品目录分页或筛选参数无效");
         }
-        return rsdpCatalogGateway.listProducts("full");
+        String view = resolveView(managed);
+        return "none".equals(view) ? CatalogProductPageDto.empty(page, size)
+            : rsdpCatalogGateway.pageProducts(view, page, size, search.strip(), status, null);
+    }
+
+    private String resolveView(boolean managed) {
+        if (managed || !"full".equals(sharedCatalogService.resolveViewMode())) {
+            return access.capabilities().managed() ? "managed" : "none";
+        }
+        return "full";
     }
 
     public ProductDetailDto getProduct(String rspuId) {

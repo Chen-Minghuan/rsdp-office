@@ -8,6 +8,7 @@ public class RenderPreviewRequest {
     private String clientChangeId;
     private String zoneId;
     private Integer canvasRevision;
+    private String confirmationId;
     /** Compared with saved server geometry, never trusted as the source of the render. */
     private JsonNode expectedSnapshot;
     private String style;

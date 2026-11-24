@@ -18,7 +18,7 @@ class OfficeProductCatalogTest {
     @Test void listOfficeProductsDelegatesToMainCatalogWithResolvedViewMode() {
         var gateway = mock(RsdpCatalogGateway.class);
         var sharedCatalog = mock(SharedCatalogService.class);
-        var service = new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), mock(OfficeCanvasMapper.class), mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), gateway, sharedCatalog, new ObjectMapper());
+        var service = new OfficeService(mock(OfficeWorkspaceLockMapper.class), mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), mock(OfficeCanvasMapper.class), mock(OfficeCartMapper.class), gateway, sharedCatalog, new ObjectMapper());
         when(sharedCatalog.resolveViewMode()).thenReturn("own");
         var dto = new OfficeProductDto();
         dto.setRspuId("MASTER");
@@ -34,7 +34,7 @@ class OfficeProductCatalogTest {
     }
     @Test void rejectsMultipleDrawingFilesBeforeWritingCanvas() {
         var locks = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
-        var service = new OfficeService(locks, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
+        var service = new OfficeService(locks, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
         var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setMode("overview");
         request.setFiles(List.of(Map.of("name", "first.png"), Map.of("name", "second.pdf")));
         assertEquals("一次只能上传一张图纸，请移除多余文件", assertThrows(BusinessException.class, () -> service.saveCanvas(request)).getMessage());
@@ -42,7 +42,7 @@ class OfficeProductCatalogTest {
     }
     @Test void staleDebouncedCanvasWritesCannotOverwriteNewerModuleSelections() {
         var projects = mock(OfficeWorkspaceLockMapper.class); var canvases = mock(OfficeCanvasMapper.class);
-        var service = new OfficeService(projects, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(OfficeAgentMessageMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
+        var service = new OfficeService(projects, mock(OfficeProjectService.class), mock(OfficeProjectAccessService.class), canvases, mock(OfficeCartMapper.class), mock(RsdpCatalogGateway.class), mock(SharedCatalogService.class), new ObjectMapper());
         var latest = new OfficeCanvas(); latest.setProjectId("P"); latest.setRevision(10); latest.setMode("overview"); latest.setObjectsJson("[]"); latest.setFilesJson("[]");
         when(canvases.selectList(any())).thenReturn(List.of(latest));
         var request = new SaveCanvasRequest(); request.setProjectId("P"); request.setRevision(9); request.setMode("overview"); request.setObjects(List.of());

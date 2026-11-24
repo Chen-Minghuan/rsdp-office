@@ -1,4 +1,4 @@
-import type { AssignableUser, CreateProjectRequest, ProjectBudgetStatus, ProjectReferenceImage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
+import type { AssignableUser, CreateProjectRequest, ProjectBudget, ProjectReferenceImage, WorkspaceFloor, WorkspaceProject } from '~/types/workspace'
 import { apiBase } from '~/utils/apiBase'
 
 interface ApiResponse<T> {
@@ -19,11 +19,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 type FloorDto = Omit<WorkspaceFloor, 'floorName'> & { name: string }
-type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors' | 'budgetTotal' | 'budgetStatus'> & {
+type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors'> & {
   name: string
   floors: FloorDto[]
-  budgetTotal?: number | null
-  budgetStatus?: ProjectBudgetStatus
 }
 
 function floorFromDto(dto: FloorDto): WorkspaceFloor {
@@ -34,12 +32,12 @@ function projectFromDto(dto: ProjectDto): WorkspaceProject {
   return {
     ...dto,
     projectName: dto.name,
+    status: dto.status ?? 'DESIGNING',
+    canManageStatus: dto.canManageStatus ?? false,
     leader: dto.leader ?? null,
     collaborators: dto.collaborators ?? [],
     referenceImages: dto.referenceImages ?? [],
     floors: (dto.floors || []).map(floorFromDto),
-    budgetTotal: typeof dto.budgetTotal === 'number' ? dto.budgetTotal : null,
-    budgetStatus: dto.budgetStatus ?? 'UNAVAILABLE',
   }
 }
 
@@ -56,7 +54,9 @@ export function toRelativeUploadPath(url: string): string {
 
 export function useWorkspaceApi() {
   return {
-    listProjects: async () => (await request<ProjectDto[]>('GET', '/api/v1/office/projects')).map(projectFromDto),
+    listProjects: async () => (await request<ProjectDto[]>('GET', '/api/v1/office/projects?includeBudget=false')).map(projectFromDto),
+    listProjectBudgets: () => request<Record<string, ProjectBudget>>('GET', '/api/v1/office/projects/budgets'),
+    updateProjectStatus: (projectId: string, status: import('~/types/workspace').ProjectStatus) => request<{ status: import('~/types/workspace').ProjectStatus }>('PATCH', `/api/v1/office/projects/${encodeURIComponent(projectId)}/status`, { status }),
     createProject: async (payload: CreateProjectRequest) => projectFromDto(await request<ProjectDto>('POST', '/api/v1/office/projects', {
       name: payload.projectName,
       customerRequirements: payload.customerRequirements,
@@ -71,8 +71,9 @@ export function useWorkspaceApi() {
     updateRequirements: async (projectId: string, customerRequirements: string) => projectFromDto(await request<ProjectDto>('PATCH', `/api/v1/office/projects/${projectId}/requirements`, { customerRequirements })),
     summarizeRequirements: (projectId: string, requirementsRevision: number) => request<WorkspaceRequirementsSummary>('POST', `/api/v1/office/projects/${projectId}/requirements/summary`, { requirementsRevision }),
     listAssignableUsers: async (keyword?: string) => request<AssignableUser[]>('GET', `/api/v1/office/users/assignable${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`),
-    replaceMembers: async (projectId: string, leaderUserId: string, collaboratorUserIds: string[]) =>
-      projectFromDto(await request<ProjectDto>('PUT', `/api/v1/office/projects/${projectId}/members`, { leaderUserId, collaboratorUserIds })),
+    replaceMembers: async (projectId: string, leaderUserId: string, collaboratorUserIds: string[],
+      permissions?: Record<string, import('~/types/workspace').ProjectPermission[]>) =>
+      projectFromDto(await request<ProjectDto>('PUT', `/api/v1/office/projects/${projectId}/members`, { leaderUserId, collaboratorUserIds, permissions })),
     updateReferences: async (projectId: string, referenceImages: ProjectReferenceImage[]) =>
       projectFromDto(await request<ProjectDto>('PATCH', `/api/v1/office/projects/${projectId}/references`, { referenceImages })),
   }

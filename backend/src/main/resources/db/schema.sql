@@ -26,14 +26,15 @@ create table if not exists office_user_session (
 );
 create index if not exists idx_office_user_session_user on office_user_session(user_id);
 
--- Independent concept previews. Snapshots never confirm or overwrite a design scheme.
+-- Concept previews and renders based on already confirmed proposal snapshots.
 create table if not exists office_render_preview (
     preview_id varchar(64) primary key,
     project_id varchar(128) not null,
     zone_id varchar(128) not null,
     zone_name text not null,
     canvas_revision integer not null,
-    purpose varchar(32) not null default 'CONCEPT_PREVIEW' check (purpose = 'CONCEPT_PREVIEW'),
+    purpose varchar(32) not null default 'CONCEPT_PREVIEW',
+    confirmation_id varchar(64),
     model varchar(64) not null,
     style varchar(100) not null,
     view varchar(32) not null,
@@ -51,7 +52,11 @@ create table if not exists office_render_preview (
     error_message text,
     created_at timestamp not null,
     updated_at timestamp not null,
-    unique(project_id, client_change_id)
+    unique(project_id, client_change_id),
+    constraint office_render_preview_purpose_check check (
+        (purpose = 'CONCEPT_PREVIEW' and confirmation_id is null)
+        or (purpose = 'CONFIRMED_SCHEME' and confirmation_id is not null)
+    )
 );
 create index if not exists idx_render_preview_history on office_render_preview(project_id, zone_id, created_at desc);
 
@@ -76,6 +81,8 @@ create table if not exists image_assets (
 create table if not exists office_design_project (
     project_id varchar(64) primary key,
     name varchar(200) not null,
+    status varchar(20) not null default 'DESIGNING'
+        constraint ck_office_project_status check (status in ('DESIGNING', 'DELIVERING', 'COMPLETED')),
     customer_requirements text not null default '',
     requirements_revision integer not null default 1,
     requirements_summary jsonb,
@@ -103,6 +110,7 @@ create table if not exists office_canvas (
     canvas_id bigserial primary key,
     project_id varchar(64) not null,
     revision int default 1,
+    scheme_token varchar(64),
     mode varchar(20) default 'overview',
     design_zone_id varchar(64),
     objects_json jsonb not null,
@@ -122,13 +130,35 @@ create table if not exists office_cart (
     updated_at timestamp default now()
 );
 
-create table if not exists office_agent_message (
-    message_id bigserial primary key,
-    project_id varchar(64) not null,
-    role varchar(20) not null,
-    content text not null,
-    created_at timestamp default now()
+create table if not exists office_room_scheme (
+    floor_id varchar(64) not null references office_design_floor(floor_id),
+    zone_id varchar(64) not null,
+    active_slot varchar(1) not null check (active_slot in ('A', 'B')),
+    inactive_json jsonb not null,
+    primary key (floor_id, zone_id)
 );
+
+create table if not exists office_proposal_confirmation (
+    confirmation_id varchar(64) primary key,
+    floor_id varchar(64) not null references office_design_floor(floor_id),
+    canvas_revision integer not null,
+    fingerprint varchar(64) not null,
+    snapshot_json jsonb not null,
+    confirmed_by varchar(64),
+    confirmed_at timestamp not null,
+    retired boolean not null default false
+);
+create index if not exists idx_office_proposal_confirmation_floor on office_proposal_confirmation(floor_id, confirmed_at desc);
+
+create table if not exists office_product_bundle (
+    bundle_id varchar(64) primary key,
+    user_id varchar(64) not null references office_user(user_id),
+    name varchar(100) not null,
+    items_json jsonb not null,
+    revision integer not null,
+    updated_at timestamp not null
+);
+create index if not exists idx_office_product_bundle_user on office_product_bundle(user_id, updated_at desc);
 
 -- ==================== 户型图 / 无限画布场景（从 RSDP 抽取并简化） ====================
 -- 单位约定：所有坐标/尺寸字段为毫米（mm），面积为平方米（m²），除非另有注释。
@@ -146,11 +176,8 @@ create table if not exists floor_plan_analysis (
     task_id varchar(64),
     scale_ratio decimal(18,8),
     raw_result jsonb,
-    confirmed_rooms jsonb,
     quality_issues jsonb,
     cad_object_key varchar(256),
-    layout_json jsonb,
-    layout_revision bigint default 1,
     active_analysis_revision integer,
     working_analysis_revision integer,
     latest_analysis_revision integer,
@@ -220,47 +247,6 @@ create table if not exists floor_plan_scene_revision (
     primary key (analysis_id, analysis_revision),
     foreign key (analysis_id) references floor_plan_analysis(analysis_id)
 );
-
--- 识别家具候选：按 revision 保存 CAD/视觉识别的家具对象
-create table if not exists floor_plan_furniture (
-    furniture_id varchar(64) primary key,
-    analysis_id varchar(64) not null references floor_plan_analysis(analysis_id),
-    analysis_revision integer not null default 1,
-    source_kind varchar(16), -- INSERT / EXPLODED / MANUAL
-    category varchar(16),
-    semantic_label varchar(128),
-    room_id varchar(64),
-    block_name varchar(255),
-    source_handles jsonb,
-    insert_path jsonb,
-    position jsonb,
-    rotation_deg decimal(9,2),
-    footprint_polygon jsonb,
-    geometry_width_mm integer,
-    geometry_depth_mm integer,
-    annotated_width_mm integer,
-    annotated_depth_mm integer,
-    effective_width_mm integer,
-    effective_depth_mm integer,
-    height_mm integer,
-    dimension_source varchar(32),
-    semantic_source varchar(32),
-    evidence jsonb,
-    quality_flags jsonb,
-    detection_confidence varchar(8),
-    category_confidence varchar(8),
-    confirmation_status varchar(16) not null default 'AUTO', -- AUTO / CONFIRMED / MANUAL_ADDED / MANUAL_EDITED
-    matched_from_object_id varchar(64),
-    derived_from_ids jsonb,
-    sort_order integer not null default 0,
-    created_by varchar(64),
-    created_at timestamp not null default now(),
-    updated_at timestamp,
-    deleted_at timestamp
-);
-
-create index if not exists idx_fpf_analysis_revision on floor_plan_furniture(analysis_id, analysis_revision) where deleted_at is null;
-create index if not exists idx_fpf_analysis_revision_id on floor_plan_furniture(analysis_id, analysis_revision, furniture_id);
 
 -- 项目报价：确认后只增不改，同一项目仅一条 CONFIRMED，历史版本置 SUPERSEDED。
 create table if not exists office_quotation (

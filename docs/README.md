@@ -7,6 +7,13 @@
 | [项目规则](../AGENTS.md) | 修改项目时要遵守哪些约定 |
 | [产品需求与验收](product-requirements.md) | 用户要完成什么，每一步怎样算完成 |
 | [架构与空间数据契约](architecture.md) | 识别、画布、排版、商品和效果图如何对应 |
+| [Office 数据库账号与权限关系](office-database-roles.md) | 系统账号、工作区、项目成员、本地商品录入和 RSDP 审核如何关联 |
+| [闲置图纸识别表清理](tasks/DB-001-retire-unused-floor-plan-storage.md) | 存量核对、24 张默认表的迁移和业务回归 |
+| [旧助手消息清理](tasks/DB-002-retire-unused-agent-messages.md) | 默认库 23 张表、旧助手接口和存量迁移 |
+| [本机 Office 库清理](tasks/DB-003-local-office-cleanup.md) | 本机 24 张业务表、旧排版归档及备份恢复验证 |
+| [Office 读取性能](tasks/PERF-001-office-read-performance.md) | 项目预算异步加载、商品详情去重、选品目录回源合并和实测口径 |
+| [Office 批量查价和商品库分页](tasks/PERF-002-batch-prices-catalog-pagination.md) | 预算冷读、商品库分页、报价和权限验证 |
+| [Office 角色、主号名额与授权设计](tasks/TENANT-004-office-role-model.md) | 表关系、20 个主号上限、主号逐人授权和存量迁移 |
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
@@ -27,16 +34,20 @@
 | [当前图纸进入对应空间](tasks/UPLOAD-002-drawing-canvas-handoff.md) | 上传 ID/识别绑定、后台空间入口、旧底图/模板/家具隔离与空稿恢复 |
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
+| [五入口导航与项目总览](tasks/WORKSPACE-005-project-overview-navigation.md) | 工作台总览、房间进度、图纸和历史概念图、兼容旧上传地址 |
+| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 设计中、交付中、已完成的保存、权限、计数和筛选 |
 | [项目需求 AI 总结](tasks/WORKSPACE-004-project-requirements-ai-summary.md) | 原文/总结双面翻转、事实抽取、版本复核、持久化缓存与真实模型验证 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
 | [工作区账号中心](tasks/TENANT-003-workspace-account-center.md) | 账号行悬停菜单、报价/账号直达与经销商角色隔离；收藏入口由 CAT-010 扩展为全角色 |
 | [项目报价](tasks/QUOTE-001-project-quotation.md) | 主号专属报价入口、系数与毛利率、多项费用、Excel 预览/下载与确认落库 |
 | [商品主档统一](tasks/INTEG-001-product-master-integration.md) | 商品主档归 rsdp、工厂可见性（放行/黑名单）、office 只读投影（跨仓库方案） |
 | [伟豪商品接入](tasks/INTEG-002-weihao-catalog.md) | 主库写入、录入来源、权限、Excel 批次与试点验收 |
+| [Office 本地商品录入与 RSDP 逐商品审核](tasks/INTEG-003-office-product-review.md) | 本地商品表、自动推送、按录入批次生成审核单和逐商品入库 |
 | [新商品确认后直接上架](tasks/CAT-007-publish-on-entry.md) | 手工录入、批量导入、旧审核入口清理及在售状态 |
 | [个人商品收藏](tasks/CAT-008-personal-favorites.md) | 个人默认/自建分组、多选与双表持久化；交互后续由 CAT-009 扩展 |
 | [项目商品收藏](tasks/CAT-009-project-favorites.md) | 悬停双按钮、统一项目/个人页签、成员与项目双重隔离及项目切换回归 |
 | [收藏中心页面](tasks/CAT-010-favorites-center-page.md) | 全角色收藏入口、个人/项目收藏列表接口、收藏夹栏与项目选择器 |
+| [产品库布局重排](tasks/CAT-011-product-catalog-layout.md) | 主库品类和主色筛选、响应式网格、当前目录收藏侧栏 |
 | [历史项目归属与账号隔离](tasks/TENANT-002-project-ownership-session-isolation.md) | 旧项目补录、无项目空状态、登录切换与浏览器缓存按账号隔离 |
 | [任务模板](tasks/README.md) | 每项开发任务如何记录过程和证据 |
 | [本轮文档任务](tasks/DOC-001-project-baseline.md) | 本次需求与规范整理的过程及验证 |
@@ -72,6 +83,7 @@
 | [空间复核确认门禁与一键复核](tasks/FLOW-004-review-gate-and-batch-confirm.md) | 全部空间确认复核才能进入排版、一键复核批量确认、徽标统一 |
 | [空间复核提示规则](tasks/FLOW-002-advisory-space-review.md) | 已被 FLOW-004 取代；未知比例/无效轮廓拦截结论保留 |
 | [方案确认服务端购物车数量复核](tasks/FLOW-006-server-proposal-cart-validation.md) | 方案确认时服务端逐空间复核画布家具、购物车数量及选品关联 |
+| [产品方案和确认效果图](tasks/FLOW-007-product-scheme.md) | 商品组合、房间 Plan A/B、楼层确认与效果图快照 |
 | [工装空间核对工作台](tasks/GEOM-003-space-review-workbench.md) | 原图贴合、毫米编辑、图层对照与进入排版前的复核门禁；本轮实现和模拟验证 |
 | [空间首期文档调整](tasks/DOC-002-spatial-canvas-first-phase.md) | PDF/PNG 识别、画布编辑与保存确认的首期范围和调整证据 |
 | [Spatial 系统架构](../Spatial_Canvas_Engine_空间解析编辑与无限画布系统架构设计_V1.1.md) | PDF/PNG 如何成为可校准、可编辑的无限画布空间 |
@@ -103,14 +115,14 @@ pnpm dev --port 3001
 
 ## 页面与流程
 
-顶部和左侧的「项目工作台」均打开项目列表。创建项目后进入首层上传与识别；已有项目可从列表进入，或在侧栏切换楼层。工作区顶栏统一显示项目和楼层信息及「项目工作台 → 空间总览 → 布局选品 → 预算清单」。顶栏下面的高度留给画布和右侧面板。「空间设计」回到当前楼层的上次设计页面，首次进入时打开空间总览。总览用于选中空间和查看信息，设计用于切换排版空间。
+顶部导航为「项目工作台、产品库、空间设计、产品方案、项目清单」。工作台进入当前项目总览，可返回列表切换项目。创建项目后进入首层上传与识别。侧栏保留项目与楼层树、导入记录和按权限显示的账号操作，窄屏可折叠。
 
 | 步骤 | 页面 | 路由 | 说明 |
 |---|---|---|---|
-| 1 | 项目工作台 | `/workspace/project-bench` 或 `/workspace/project-bench?floorId=…` | 创建项目、查找项目、按楼层上传并识别 CAD/PDF/PNG；图片/PDF 使用后端 Qwen 密钥，PDF 可选页，实际尺度待校准 |
-| 2 | 空间总览 | `/canvas?floorId=…` | 原图与轻透明轮廓、毫米编辑/顶点拖动、自动读尺寸并确认比例/两点校准、图层对照、复核提示、空间模板生成与复用后排版 |
-| 3 | 布局选品 | `/canvas?mode=design&floorId=…&zoneId=…` | 选择单元、Agent 布局、供应链选品、效果图 |
-| 4 | 预算清单 | `/proposal?floorId=…` | 汇总当前楼层的家具配置、数量、报价与 CSV 导出 |
+| 1 | 项目工作台 | `/workspace/project-bench`、`?view=overview&floorId=…`、`?floorId=…` | 分别进入项目列表、当前楼层总览和图纸识别。CAD/PDF/PNG 仍逐层上传，PDF 可选页 |
+| 2 | 空间设计 | `/canvas?floorId=…` | 空间核对、毫米编辑、比例校准、空间模板及排版入口 |
+| 3 | 产品方案 | `/canvas?mode=design&view=products&floorId=…&zoneId=…` | 通过复核门禁后复用设计画布，已确认排版打开款式推荐，其余打开产品选型 |
+| 4 | 项目清单 | `/proposal?floorId=…` | 查看当前楼层的家具配置、数量与报价，核对选品后确认方案 |
 
 旧上传地址 `/` 会跳转到项目工作台的上传界面，保留链接中的楼层 ID。空间总览与布局选品共用 `pages/canvas.vue`，通过 `mode` 查询参数切换工作模式。旧 `/spatial-canvas` 地址转到 `/canvas`。
 
@@ -125,12 +137,14 @@ pnpm dev --port 3001
 
 | 页面 | 路由 | 说明 |
 |---|---|---|
-| 商品库 | `/products` | 紧凑统计、名称/编码搜索、状态筛选、客户端分页、商品详情 |
-| RSDP 商品维护入口 | 商品库中的「去 RSDP 管理商品」 | 使用 RSDP 个人账号录入与维护 |
+| 商品库 | `/products` | 名称/编码搜索、品类/主色/在售状态筛选、分页、商品详情与个人/项目收藏侧栏 |
+| 本地商品 | `/products/local` | 查看本工作区商品，授权成员可录入、编辑和导入 Excel |
 | 商品详情 | `/products/:rspuId` | 查看商品资料、规格和在售状态 |
 | 导入记录 | `/products/import-records` | 当前浏览器最近 30 次导入，支持查看结果与下载失败明细 |
 
-商品列表和详情通过 Office 的 `/api/v1/products` 读取授权主库目录。所有新录入、批次确认、改价和上下架在 RSDP 主项目进行。旧 Office 商品写入接口已封闭。
+商品列表和详情通过 Office 的 `/api/v1/products` 读取授权主库目录。工作区成员可在「本地商品」查看本区录入，主号和获授权成员可单条保存或确认 Excel 导入。启用后台接入后，RSDP 按批次建单并逐商品审核。公共库商品改价和上下架由 RSDP 管理。配置和试点验证见 [INTEG-003](tasks/INTEG-003-office-product-review.md)。
+
+品类和主色筛选来自当前目录的分类路径和商品主色，未标注的商品仍可在全部范围内浏览。右侧收藏栏按当前有权查看的目录展示，窄屏可展开，完整分组和跨项目浏览进入收藏中心。
 
 「Office 历史导入记录」按本人和工作区读取主库保存的旧 Office 批次。当前浏览器早期遗留记录仅供系统管理员核对。新的 Excel 批次在 RSDP 查询。
 
@@ -138,7 +152,7 @@ pnpm dev --port 3001
 
 ## 核心功能
 
-- 分组模块导航 + 仅项目页面显示的四步步骤条
+- 五入口工作区导航、项目总览和按权限展示的侧栏操作
 - 空间核对：选择、平移/滚轮缩放、矩形毫米尺寸和异形顶点编辑、撤销、本地草稿恢复、原图/设计轮廓/原始识别/尺寸图层对照
 - 空间核对 → 家具排版：逐个确认或使用「一键复核」完成全部空间复核后，点击「进入家具排版」；直接 URL 和 store 动作也受同一门禁约束
 - 设计模式 Agent 对话与按区域商品推荐（演示数据，未接真实服务）

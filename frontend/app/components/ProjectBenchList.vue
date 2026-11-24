@@ -1,8 +1,36 @@
 <script setup lang="ts">
-import type { WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, ProjectStatus, WorkspaceProject } from '~/types/workspace'
+import { projectOverviewRoute } from '~/utils/projectBenchRoutes'
+import { projectStatusOptions, type ProjectStatusFilter } from '~/utils/projectStatus'
 
-// 项目列表与侧栏项目树同源：useWorkspaceStore 由 app.vue 挂载时 init() 拉取，组件不重复请求。
+const props = withDefaults(defineProps<{ statusFilter?: ProjectStatusFilter }>(), { statusFilter: 'ALL' })
+
+// 项目树由应用外壳加载，只有本列表展示时才单独读取预算。
 const workspace = useWorkspaceStore()
+const { storageScope } = useAuth()
+const api = useWorkspaceApi()
+const budgetByProject = ref<Record<string, ProjectBudget>>({})
+const budgetsLoading = ref(false)
+const updatingStatus = ref<Record<string, boolean>>({})
+const statusError = ref('')
+const projectKeys = computed(() => workspace.projects.map(project => project.projectId).join(','))
+
+watch([projectKeys, storageScope], async ([projects, scope], _previous, onCleanup) => {
+  budgetByProject.value = {}
+  budgetsLoading.value = !!projects
+  if (!projects) return
+
+  let current = true
+  onCleanup(() => { current = false })
+  try {
+    const budgets = await api.listProjectBudgets()
+    if (current && scope === storageScope.value) budgetByProject.value = budgets ?? {}
+  } catch {
+    // An unavailable budget must not hide projects or prevent opening them.
+  } finally {
+    if (current && scope === storageScope.value) budgetsLoading.value = false
+  }
+}, { immediate: true })
 
 const search = ref('')
 const sortKey = ref<'name' | 'floors'>('name')
@@ -19,16 +47,38 @@ function leaderName(project: WorkspaceProject) {
 async function openProject(project: WorkspaceProject) {
   const firstFloor = [...project.floors].sort((a, b) => a.sortOrder - b.sortOrder)[0]
   if (!firstFloor || workspace.switching) return
-  await workspace.activateFloor(firstFloor.floorId, true)
+  await navigateTo(projectOverviewRoute(firstFloor.floorId))
+}
+
+async function changeStatus(project: WorkspaceProject, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const previous = project.status
+  const scope = storageScope.value
+  const next = select.value as ProjectStatus
+  if (updatingStatus.value[project.projectId] || next === previous) return
+  updatingStatus.value[project.projectId] = true
+  statusError.value = ''
+  try {
+    await workspace.updateProjectStatus(project.projectId, next)
+  } catch (error) {
+    if (scope === storageScope.value) {
+      select.value = previous
+      statusError.value = error instanceof Error ? error.message : '项目阶段保存失败，请重试'
+    }
+  } finally {
+    updatingStatus.value[project.projectId] = false
+  }
 }
 
 const visibleProjects = computed(() => {
   const keyword = search.value.trim().toLowerCase()
+  const categoryProjects = props.statusFilter === 'ALL'
+    ? workspace.projects : workspace.projects.filter(project => project.status === props.statusFilter)
   const filtered = keyword
-    ? workspace.projects.filter(p =>
+    ? categoryProjects.filter(p =>
         p.projectName.toLowerCase().includes(keyword)
         || leaderName(p).toLowerCase().includes(keyword))
-    : [...workspace.projects]
+    : [...categoryProjects]
   const by: Record<typeof sortKey.value, (a: WorkspaceProject, b: WorkspaceProject) => number> = {
     name: (a, b) => a.projectName.localeCompare(b.projectName, 'zh'),
     floors: (a, b) => b.floors.length - a.floors.length,
@@ -61,17 +111,20 @@ const visibleProjects = computed(() => {
       </div>
     </div>
 
+    <p v-if="statusError" role="alert" class="border-t border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{{ statusError }}</p>
+
     <p v-if="workspace.error" role="alert" class="border-t border-line px-5 py-6 text-sm text-red-700">{{ workspace.error }}</p>
     <p v-else-if="!workspace.initialized" class="border-t border-line px-5 py-8 text-center text-sm text-muted">正在加载项目…</p>
     <p v-else-if="!workspace.projects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">当前账号暂无可访问项目</p>
-    <p v-else-if="!visibleProjects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">没有匹配的项目，换个关键词试试。</p>
-    <div v-else class="overflow-x-auto border-t border-line">
+    <p v-else-if="!visibleProjects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">{{ search.trim() ? '没有匹配的项目，换个关键词试试。' : '当前分类暂无项目。' }}</p>
+    <div v-else class="relative overflow-x-auto border-t border-line">
       <table class="w-full min-w-[600px] border-collapse text-left">
         <thead class="bg-bg">
           <tr class="text-xs text-muted">
             <th scope="col" class="px-5 py-2.5 text-left font-normal">项目名</th>
             <th scope="col" class="px-4 py-2.5 font-normal">负责人</th>
             <th scope="col" class="px-4 py-2.5 font-normal">楼层数</th>
+            <th scope="col" class="px-4 py-2.5 font-normal">项目阶段</th>
             <th scope="col" class="px-5 py-2.5 font-normal">项目预算</th>
             <th scope="col" class="w-12 px-3 py-2.5"><span class="sr-only">进入项目</span></th>
           </tr>
@@ -80,12 +133,11 @@ const visibleProjects = computed(() => {
           <tr
             v-for="project in visibleProjects"
             :key="project.projectId"
-            class="group cursor-pointer border-t border-line transition hover:bg-[#f8f3ef]"
-            @click="openProject(project)"
+            class="group border-t border-line transition hover:bg-neutral-50"
           >
             <td class="relative px-5 py-3.5 text-left">
               <span class="absolute left-0 top-0 h-full w-0.5 bg-bronze opacity-0 transition group-hover:opacity-100" aria-hidden="true" />
-              <button type="button" class="flex w-full min-w-0 items-center gap-2 text-left hover:text-bronze-dark" :aria-label="`进入项目 ${project.projectName}`">
+              <button type="button" class="flex w-full min-w-0 items-center gap-2 text-left hover:text-[#693299] disabled:opacity-50" :aria-label="`进入项目 ${project.projectName}`" :disabled="!project.floors.length || workspace.switching" @click="openProject(project)">
                 <span class="truncate text-sm font-semibold">{{ project.projectName }}</span>
                 <span v-if="project.projectId === workspace.currentProjectId" class="flex-none border border-bronze/40 px-1.5 py-px text-[11px] leading-4 text-bronze-dark">
                   当前
@@ -98,22 +150,20 @@ const visibleProjects = computed(() => {
               <span v-else class="text-muted">—</span>
             </td>
             <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
+            <td class="px-4 py-3.5 text-sm" @click.stop @keydown.stop>
+              <select v-if="project.canManageStatus" :value="project.status" :disabled="updatingStatus[project.projectId]"
+                :aria-label="`${project.projectName}的项目阶段`" class="border border-line bg-white px-2 py-1.5 text-sm outline-bronze disabled:opacity-50" @change="changeStatus(project, $event)">
+                <option v-for="option in projectStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+              <span v-else>{{ projectStatusOptions.find(option => option.value === project.status)?.label }}</span>
+            </td>
             <td class="px-5 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
-              <template v-if="project.budgetTotal !== null && project.budgetStatus !== 'UNAVAILABLE'">
-                <span>{{ money(project.budgetTotal) }}</span>
-                <span v-if="project.budgetStatus === 'PENDING_PRICING'" class="ml-1 text-xs text-bronze-dark">待补价</span>
+              <span v-if="budgetsLoading" class="text-xs text-muted">加载中…</span>
+              <template v-else-if="budgetByProject[project.projectId]?.budgetTotal != null && budgetByProject[project.projectId]?.budgetStatus !== 'UNAVAILABLE'">
+                <span>{{ money(budgetByProject[project.projectId].budgetTotal) }}</span>
+                <span v-if="budgetByProject[project.projectId]?.budgetStatus === 'PENDING_PRICING'" class="ml-1 text-xs text-bronze-dark">待补价</span>
               </template>
               <span v-else class="text-muted">—</span>
-            </td>
-            <td class="px-3 py-3.5">
-              <button
-                type="button"
-                class="inline-flex h-7 w-7 items-center justify-center text-lg leading-none text-muted transition hover:bg-cream hover:text-bronze-dark disabled:cursor-not-allowed disabled:opacity-40"
-                :aria-label="`进入项目 ${project.projectName}`"
-                :disabled="!project.floors.length || workspace.switching"
-              >
-                &gt;
-              </button>
             </td>
           </tr>
         </tbody>

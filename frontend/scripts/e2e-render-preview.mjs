@@ -12,6 +12,9 @@ await new Promise(resolve => reservation.close(resolve))
 const baseUrl = `http://127.0.0.1:${port}`
 const app = spawn(process.execPath, ['.output/server/index.mjs'], { cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' }, stdio: 'ignore' })
 const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV1sAAAAASUVORK5CYII=', 'base64')
+const floorId = 'OFLR-RENDER'
+const projectId = 'OPRJ-RENDER'
+const storageKey = 'rsdp-office-v01:MOCK-USER:' + floorId
 const zone = { id: 'ROOM-X', kind: 'zone', x: -6000, y: -4000, w: 6000, h: 4000, name: '效果预览办公室', zoneType: 'OPEN_OFFICE', seats: 4, note: '', tone: 'sand', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', polygon: [[-6000, -4000], [0, -4000], [0, -2000], [-2000, -2000], [-2000, 0], [-6000, 0]] }
 const furniture = { id: 'F1', kind: 'furniture', zoneId: zone.id, x: -5500, y: -3500, w: 1200, h: 600, rotation: 90, productId: '', label: '职员直线桌', furnitureTemplateId: 'desk-straight', layoutConfirmed: false }
 let saved = { revision: 3, mode: 'design', designZoneId: zone.id, objects: [zone, furniture], files: [], blank: false }
@@ -32,11 +35,11 @@ try {
   await context.route('**/api/v1/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname
     const respond = (data, code = 200, message = 'success') => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code, message, data }) })
+    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '效果图测试', leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] }, floors: [{ projectId, floorId, name: '1F' }] }])
     if (path.endsWith('/canvas')) {
       if (req.method() === 'PUT') saved = req.postDataJSON()
       return respond(saved)
     }
-    if (path.endsWith('/OFFICE-PROJECT-001')) return respond({ projectName: '效果图测试', style: '现代简约' })
     if (path.endsWith('/render-previews')) {
       if (req.method() === 'GET') return respond(jobs)
       const body = req.postDataJSON()
@@ -79,7 +82,7 @@ try {
     await page.getByRole('button', { name: 'AI 效果图', exact: true }).click()
     await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor()
   }
-  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X', { waitUntil: 'networkidle' })
+  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X&floorId=' + floorId, { waitUntil: 'networkidle' })
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   await open()
@@ -99,19 +102,18 @@ try {
   // Close/reload while pending, then edit this room before the late result arrives.
   await page.getByRole('button', { name: '关闭效果预览' }).click()
   saved = JSON.parse(JSON.stringify(saved)); saved.revision++; saved.objects[1].x += 200
-  await page.evaluate(data => {
-    const local = JSON.parse(localStorage.getItem('rsdp-office-v01') || '{}')
-    local.project = { name: '效果图测试', area: 0, headcount: 4, budget: 0, style: '现代简约', description: '' }
+  await page.evaluate(({ data, key }) => {
+    const local = JSON.parse(localStorage.getItem(key) || '{}')
     local.canvasMode = 'design'; local.designZoneId = 'ROOM-X'
     local.objects = data.objects; local.canvasRevision = data.revision
-    localStorage.setItem('rsdp-office-v01', JSON.stringify(local))
-  }, saved)
+    localStorage.setItem(key, JSON.stringify(local))
+  }, { data: saved, key: storageKey })
   mode = 'SUCCEEDED'
   await page.reload({ waitUntil: 'networkidle' })
   await open()
   await page.getByAltText(zone.name + '概念效果图').waitFor()
   await page.getByText('布局已变化，需重新生成', { exact: true }).waitFor()
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')).objects.find(item => item.id === 'F1').x), -5300)
+  assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).objects.find(item => item.id === 'F1').x, storageKey), -5300)
   assert.equal(submissions.length, 1, '恢复查询不得再次提交生图')
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: '下载图片', exact: true }).click()

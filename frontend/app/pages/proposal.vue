@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { authEnabled, useAuth } from '~/composables/useAuth'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { money } from '~/utils/helpers'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
 import type { CartItem, FurnitureObject, Product, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
+import type { ProposalConfirmation } from '~/types/productScheme'
+import { proposalFurnitureSelectionRoute } from '~/utils/proposalFurnitureGate'
 
 
 type ProposalModule = {
@@ -45,23 +49,44 @@ type Detail =
 
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
+const { user } = useAuth()
 const route = useRoute()
 const router = useRouter()
 const selectedDetail = ref<Detail | null>(null)
-// 效果图详情页签：3D 交互 / AI 概念图 / 2D 布局（RENDER-004）
+// 效果图详情页签：3D 交互、AI 效果图与 2D 布局。
 const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
-const confirmed = ref(false)
+const demoConfirmed = ref(false)
+const savedConfirmation = ref<ProposalConfirmation | null>(null)
 const checkingCatalog = ref(false)
 const catalogApi = useOfficeApi()
 const notice = ref('')
 const collapsedGroups = ref<Set<string>>(new Set())
-const activeSpaceIds = ref<Record<string, string>>({})
+const expandedSpaceIds = ref<Record<string, string | null>>({})
+const roomDetailIdPrefix = useId()
 const confirmedSpaceIds = ref<Record<string, boolean>>({})
 const renderJobs = ref<Record<string, RenderPreview[]>>({})
 const loadedRenderZones = new Set<string>()
 const renderApi = useRenderPreviewApi()
 
 const previewMode = computed(() => route.query.preview === '1')
+const selectionIssues = computed(() => previewMode.value ? [] : store.proposalFurnitureCartMismatches)
+const confirmed = computed(() => previewMode.value ? demoConfirmed.value
+  : !!savedConfirmation.value?.current && savedConfirmation.value.canvasRevision === store.canvasRevision)
+const cartSignature = computed(() => JSON.stringify(store.cart.map(item => [item.id, item.zoneId, item.productId, item.qty])))
+let confirmationRead = 0
+watch([previewMode, () => store.initialized, () => store.workspaceId, () => store.canvasRevision, cartSignature], async ([preview, ready, floorId]) => {
+  const read = ++confirmationRead
+  savedConfirmation.value = null
+  demoConfirmed.value = false
+  if (preview || !ready || !floorId || !store.apiReady) return
+  try {
+    const result = await catalogApi.loadProposalConfirmation(floorId)
+    if (read === confirmationRead) savedConfirmation.value = result
+  } catch { /* Confirmation remains unknown and can be requested again. */ }
+}, { immediate: true })
+const projectPermissions = computed(() => projectPermissionsFor(workspace.currentProject, user.value?.userId))
+const canEdit = computed(() => previewMode.value || !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EDIT'))
+const canExport = computed(() => !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EXPORT_PROJECT'))
 const overviewRoute = computed(() => ({ path: '/canvas', query: { floorId: workspace.currentFloorId } }))
 const products = computed(() => previewMode.value ? (store.products.length ? store.products : PRODUCTS) : store.products)
 const assetBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
@@ -198,18 +223,30 @@ function rotateTransform(item: { rotation: number; x: number; y: number; w: numb
 
 async function loadRenderPreviews() {
   if (previewMode.value || !store.initialized) return
+  const floor = store.workspaceId
   const ids = spaces.value.map(space => space.zoneId).filter(id => !id.startsWith('cart-') && !loadedRenderZones.has(id))
   if (!ids.length) return
   ids.forEach(id => loadedRenderZones.add(id))
   const results = await Promise.allSettled(ids.map(async id => ({ id, jobs: await renderApi.list(id) })))
+  if (floor !== store.workspaceId) return
   const next = { ...renderJobs.value }
   for (const result of results) {
-    if (result.status === 'fulfilled') next[result.value.id] = result.value.jobs || []
+    if (result.status === 'fulfilled') next[result.value.id] = (result.value.jobs || []).slice().sort((left, right) => {
+      const rank = (job: RenderPreview) => job.purpose === 'CONFIRMED_SCHEME' && !job.stale ? 0 : job.stale ? 2 : 1
+      return rank(left) - rank(right)
+    })
   }
   renderJobs.value = next
 }
 
-watch(() => [store.initialized, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
+watch(() => store.workspaceId, () => {
+  loadedRenderZones.clear()
+  renderJobs.value = {}
+  confirmedSpaceIds.value = {}
+  expandedSpaceIds.value = {}
+  selectedDetail.value = null
+})
+watch(() => [store.initialized, store.workspaceId, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
 
 const groups = computed<ProposalGroup[]>(() => {
   const floor = floorLabel()
@@ -239,8 +276,24 @@ function groupArea(group: ProposalGroup) {
 function groupModules(group: ProposalGroup) { return group.spaces.reduce((sum, space) => sum + space.modules.reduce((subtotal, module) => subtotal + module.qty, 0), 0) }
 function isGroupOpen(group: ProposalGroup) { return !collapsedGroups.value.has(group.id) }
 function toggleGroup(group: ProposalGroup) { const next = new Set(collapsedGroups.value); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); collapsedGroups.value = next }
-function activeSpace(group: ProposalGroup) { const id = activeSpaceIds.value[group.id] || group.spaces[0]?.zoneId; return group.spaces.find(space => space.zoneId === id) || group.spaces[0] }
-function chooseSpace(group: ProposalGroup, space: ProposalSpace) { activeSpaceIds.value = { ...activeSpaceIds.value, [group.id]: space.zoneId } }
+function isSpaceOpen(group: ProposalGroup, space: ProposalSpace) {
+  const expanded = expandedSpaceIds.value[group.id]
+  return space.zoneId === (expanded === undefined ? group.spaces[0]?.zoneId : expanded)
+}
+
+async function toggleSpace(group: ProposalGroup, space: ProposalSpace, event: MouseEvent) {
+  const opening = !isSpaceOpen(group, space)
+  const row = event.currentTarget as HTMLButtonElement
+  expandedSpaceIds.value[group.id] = opening ? space.zoneId : null
+  if (opening) {
+    await nextTick()
+    row.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+function roomDetailId(space: ProposalSpace) {
+  return `${roomDetailIdPrefix}-${encodeURIComponent(space.zoneId)}`
+}
 function openDetail(detail: Detail) { selectedDetail.value = detail; renderTab.value = 'ai' }
 function closeDetail() { selectedDetail.value = null }
 
@@ -303,17 +356,34 @@ function confirmGroup(group: ProposalGroup) {
 }
 
 async function confirmProposal() {
-  if (checkingCatalog.value) return
+  if (!canEdit.value || checkingCatalog.value || selectionIssues.value.length) return
+  if (previewMode.value) {
+    demoConfirmed.value = true
+    setNotice('已在演示中确认')
+    return
+  }
+  const floorId = store.workspaceId
   checkingCatalog.value = true
-  confirmed.value = false
   try {
-    if (spaces.value.some(space => !space.preview)) await catalogApi.checkProposalCatalog()
-    confirmed.value = true
-    setNotice('商品目录已核验，方案确认状态已更新（当前为界面预览）')
+    const version = await store.flushSchemeCanvas(floorId)
+    const result = await catalogApi.confirmProposal(floorId, version)
+    if (store.workspaceId !== floorId || store.canvasRevision !== version.revision) return
+    if (!result?.current) throw new Error('服务端未返回有效的方案确认')
+    confirmationRead++
+    savedConfirmation.value = result
+    setNotice('楼层方案已确认，可以在产品方案页生成效果图。')
   } catch (e) {
-    setNotice(e instanceof Error ? e.message : '商品目录核验失败，请稍后重试')
+    if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案确认失败，请稍后重试')
   } finally {
     checkingCatalog.value = false
+  }
+}
+
+async function exportProposal() {
+  try {
+    await store.exportCsv()
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : '方案导出失败')
   }
 }
 
@@ -330,70 +400,105 @@ function detailTitle(detail: Detail | null) {
 
 <template>
   <div class="proposal-page">
-    <header class="proposal-heading"><div><div class="proposal-eyebrow">{{ previewMode ? '方案演示' : `${workspace.currentProjectName} / ${workspace.currentFloorName}` }}</div><div class="proposal-title-line"><h1>整体方案与清单</h1><span class="proposal-file">{{ store.drawingName }}</span></div><p>按楼层、空间类别和具体空间逐级核对方案，确认后进入正式交付。</p></div><span class="heading-status"><span></span>待最终确认</span></header>
+    <header class="proposal-heading"><div><div class="proposal-eyebrow">{{ previewMode ? '方案演示' : `${workspace.currentProjectName} / ${workspace.currentFloorName}` }}</div><div class="proposal-title-line"><h1>整体方案与清单</h1><span class="proposal-file">{{ store.drawingName }}</span></div><p>按楼层、空间类别和具体空间逐级核对方案，确认后进入正式交付。</p></div><span class="heading-status" :class="{ 'is-confirmed': confirmed }"><span></span>{{ confirmed ? '已确认' : '待最终确认' }}</span></header>
     <div v-if="previewMode" class="preview-banner"><AppIcon name="info" size="3.5" /><span>界面预览数据：同一张演示户型图归入 {{ floorLabel() }}，下面按空间类别分组，不会写入项目草稿。</span></div>
+
+    <details v-if="selectionIssues.length" class="proposal-selection" data-testid="proposal-selection-issues">
+      <summary>{{ selectionIssues.length }} 个空间待核对选品</summary>
+      <ul class="proposal-selection-list">
+        <li v-for="issue in selectionIssues" :key="issue.zoneId">
+          <div>
+            <strong>{{ issue.zoneName }}</strong>
+            <div>家具 {{ issue.furnitureCount }} 件 · 清单 {{ issue.cartQuantity }} 件</div>
+            <ul v-if="issue.missing.length" class="mt-1">
+              <li v-for="item in issue.missing" :key="JSON.stringify([item.name, item.widthMm, item.depthMm])">
+                {{ item.name }} · {{ item.widthMm.toLocaleString() }} × {{ item.depthMm.toLocaleString() }} mm · 缺 {{ item.quantity }} 件
+              </li>
+            </ul>
+            <p v-if="issue.cartExcessQuantity">清单多出 {{ issue.cartExcessQuantity }} 件</p>
+          </div>
+          <NuxtLink :to="proposalFurnitureSelectionRoute(workspace.currentFloorId, issue.zoneId, store.canEnterLayout)" class="text-accent-ink font-semibold hover:underline">
+            {{ store.canEnterLayout ? '去选品' : '去复核空间' }}
+          </NuxtLink>
+        </li>
+      </ul>
+    </details>
 
     <div v-if="!spaces.length" class="proposal-empty"><div class="proposal-empty-icon"><AppIcon name="table" size="7" /></div><h2>还没有可确认的空间方案</h2><p>请先完成空间确认、家具排版和商品选择，再进入方案确认页。</p><NuxtLink :to="overviewRoute" class="proposal-primary">返回空间总览 <AppIcon name="arrowRight" size="3.5" /></NuxtLink></div>
 
     <div v-else class="proposal-layout">
-      <main class="proposal-main">
+      <section class="proposal-main" aria-label="按空间查看清单">
         <section class="group-list"><div class="group-list-heading"><div><span class="section-kicker">FLOOR &amp; SPACE GROUPS</span><h2>空间分组</h2></div><span>{{ floorLabel() }} · {{ groups.length }} 个类别</span></div>
           <article v-for="group in groups" :key="group.id" class="group-card" :class="{ collapsed: !isGroupOpen(group) }">
             <div class="group-header-row">
               <button type="button" class="group-header" @click="toggleGroup(group)"><span class="floor-badge" :title="group.floorLabel"><span class="w-full truncate px-0.5 text-center">{{ group.floorLabel }}</span></span><span class="group-name">{{ group.name }}</span><span class="group-chevron">{{ isGroupOpen(group) ? '▼' : '▶' }}</span><span class="group-meta">面积：{{ groupArea(group) }} <i>|</i> 金额：{{ money(groupTotal(group)) }} <i>|</i> {{ groupModules(group) }} 件商品</span><span class="group-status" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'"><span></span>{{ group.spaces.every(space => space.status === '已确认') ? '已确认' : '待确认' }}</span></button>
-              <button type="button" class="group-confirm-button" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'" :disabled="group.spaces.every(space => space.status === '已确认')" @click="confirmGroup(group)"><AppIcon name="check" size="3" />{{ group.spaces.every(space => space.status === '已确认') ? '区域已确认' : '确认区域' }}</button>
+              <button v-if="canEdit" type="button" class="group-confirm-button" :class="group.spaces.every(space => space.status === '已确认') ? 'is-confirmed' : 'is-pending'" :disabled="group.spaces.every(space => space.status === '已确认')" @click="confirmGroup(group)"><AppIcon name="check" size="3" />{{ group.spaces.every(space => space.status === '已确认') ? '区域已确认' : '确认区域' }}</button>
             </div>
             <div v-if="isGroupOpen(group)" class="group-body">
-              <div class="space-rows"><button v-for="space in group.spaces" :key="space.zoneId" type="button" class="space-row" :class="{ active: activeSpace(group)?.zoneId === space.zoneId }" @click="chooseSpace(group, space)"><span class="space-row-chevron">{{ activeSpace(group)?.zoneId === space.zoneId ? '▼' : '▶' }}</span><strong>{{ space.name }}</strong><span>{{ areaText(space.zone, space.preview) }}</span><span>{{ money(space.total) }}</span><span>{{ space.modules.reduce((sum, module) => sum + module.qty, 0) }} 件商品</span><span class="space-row-status" :class="space.status === '已确认' ? 'is-confirmed' : 'is-pending'"><span></span>{{ space.status }}</span></button></div>
-              <div v-if="activeSpace(group)" class="space-detail-board">
-                <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ activeSpace(group)?.name }}</h3><p>{{ areaText(activeSpace(group)?.zone || null, activeSpace(group)?.preview) }} · {{ activeSpace(group)?.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="activeSpace(group)?.zone && !activeSpace(group)?.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(activeSpace(group)!, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: activeSpace(group)! })"><span></span>{{ activeSpace(group)?.status }} · 查看需求</button><button type="button" class="space-confirm-button" :disabled="activeSpace(group)?.status === '已确认'" @click="confirmSpace(activeSpace(group)!)"><AppIcon name="check" size="3" />{{ activeSpace(group)?.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
-                <div class="space-modules preset-space-board">
-                  <button type="button" class="preset-panel requirement-panel" @click="openDetail({ kind: 'requirement', space: activeSpace(group)! })">
-                    <div class="preset-panel-title"><span>需求描述</span><AppIcon name="arrowRight" size="3" /></div>
-                    <div class="requirement-copy"><strong>{{ activeSpace(group)?.name }}</strong><p>{{ activeSpace(group)?.note }}</p></div>
-                    <div class="requirement-scroll"><span>需求描述框跟随滚动</span><i></i></div>
-                    <div class="preset-panel-foot"><span>{{ activeSpace(group)?.zone?.seats || '—' }} 个座位</span><small>查看空间需求</small></div>
+              <div class="space-rows">
+                <div v-for="space in group.spaces" :key="space.zoneId">
+                  <button type="button" class="space-row" :class="{ active: isSpaceOpen(group, space) }"
+                    :aria-expanded="isSpaceOpen(group, space)"
+                    :aria-controls="isSpaceOpen(group, space) ? roomDetailId(space) : undefined"
+                    @click="toggleSpace(group, space, $event)">
+                    <span class="space-row-chevron" aria-hidden="true">{{ isSpaceOpen(group, space) ? '▼' : '▶' }}</span>
+                    <strong>{{ space.name }}</strong>
+                    <span>{{ areaText(space.zone, space.preview) }}</span>
+                    <span>{{ money(space.total) }}</span>
+                    <span>{{ space.modules.reduce((sum, module) => sum + module.qty, 0) }} 件商品</span>
+                    <span class="space-row-status" :class="space.status === '已确认' ? 'is-confirmed' : 'is-pending'"><span></span>{{ space.status }}</span>
                   </button>
-                  <button type="button" class="preset-panel layout-panel" @click="openDetail({ kind: 'layout', space: activeSpace(group)! })">
-                    <div class="preset-panel-title"><span>排版平面效果</span><AppIcon name="arrowRight" size="3" /></div>
-                    <div class="layout-thumb preset-layout-thumb"><OfficeCanvasLayoutPlanPreview :zone="activeSpace(group)!.zone" :furniture="activeSpace(group)!.layoutObjects" :products="products" /></div>
-                    <div class="layout-room-label"><strong>{{ activeSpace(group)?.name }}</strong><span>× {{ activeSpace(group)?.layoutObjects.length || 0 }} 件家具</span></div>
-                    <div class="layout-note-box"><span>备注信息</span><p>{{ activeSpace(group)?.note || '暂无布局备注' }}</p></div>
-                  </button>
-                  <div class="preset-panel products-panel">
-                    <div class="preset-panel-title"><span>商品清单</span><AppIcon name="arrowRight" size="3" /></div>
-                    <div v-if="activeSpace(group)?.modules.length" class="product-grid">
-                      <button v-for="module in activeSpace(group)?.modules" :key="module.key" type="button" class="product-tile" @click="openDetail({ kind: 'module', space: activeSpace(group)!, module })">
-                        <span class="product-image-tile"><ProductImagePreview v-if="module.product?.imageUrl" :src="productImageUrl(module.product)" :alt="module.label" size="small" /><span v-else class="product-no-image">暂无图片</span></span>
-                        <span class="product-tile-caption"><strong>{{ module.label }}</strong><span>× {{ module.qty }}</span></span>
+                  <section v-if="isSpaceOpen(group, space)" :id="roomDetailId(space)" class="space-detail-board" :aria-label="space.name + '详情'">
+                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" v-if="canEdit" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
+                    <div class="space-modules preset-space-board">
+                      <button type="button" class="preset-panel requirement-panel" @click="openDetail({ kind: 'requirement', space: space })">
+                        <div class="preset-panel-title"><span>需求描述</span><AppIcon name="arrowRight" size="3" /></div>
+                        <div class="requirement-copy"><strong>{{ space.name }}</strong><p>{{ space.note }}</p></div>
+                        <div class="requirement-scroll"><span>需求描述框跟随滚动</span><i></i></div>
+                        <div class="preset-panel-foot"><span>{{ space.zone?.seats || '—' }} 个座位</span><small>查看空间需求</small></div>
+                      </button>
+                      <button type="button" class="preset-panel layout-panel" @click="openDetail({ kind: 'layout', space: space })">
+                        <div class="preset-panel-title"><span>排版平面效果</span><AppIcon name="arrowRight" size="3" /></div>
+                        <div class="layout-thumb preset-layout-thumb"><OfficeCanvasLayoutPlanPreview :zone="space.zone" :furniture="space.layoutObjects" :products="products" /></div>
+                        <div class="layout-room-label"><strong>{{ space.name }}</strong><span>× {{ space.layoutObjects.length || 0 }} 件家具</span></div>
+                        <div class="layout-note-box"><span>备注信息</span><p>{{ space.note || '暂无布局备注' }}</p></div>
+                      </button>
+                      <div class="preset-panel products-panel">
+                        <div class="preset-panel-title"><span>商品清单</span><AppIcon name="arrowRight" size="3" /></div>
+                        <div v-if="space.modules.length" class="product-grid">
+                          <button v-for="module in space.modules" :key="module.key" type="button" class="product-tile" @click="openDetail({ kind: 'module', space: space, module })">
+                            <span class="product-image-tile"><ProductImagePreview v-if="module.product?.imageUrl" :src="productImageUrl(module.product)" :alt="module.label" size="small" /><span v-else class="product-no-image">暂无图片</span></span>
+                            <span class="product-tile-caption"><strong>{{ module.label }}</strong><span>× {{ module.qty }}</span></span>
+                          </button>
+                        </div>
+                        <div v-else class="product-grid-empty">当前空间还没有绑定商品</div>
+                        <div class="preset-panel-foot"><span>{{ space.modules.reduce((sum, item) => sum + item.qty, 0) }} 件 · {{ money(space.total || 0) }}</span><small>点击商品查看详情</small></div>
+                      </div>
+                      <div v-if="renderJobsFor(space).length" class="preset-panel render-panel">
+                        <div class="preset-panel-title"><span>效果图</span><AppIcon name="arrowRight" size="3" /></div>
+                        <div class="render-stack">
+                          <button v-for="(job, index) in renderJobsFor(space)" :key="job.previewId" type="button" class="render-slot" @click="openDetail({ kind: 'render', space: space })">
+                            <img v-if="job.status === 'SUCCEEDED' && job.imageUrl" :src="assetUrl(job.imageUrl)" :alt="space.name + '效果图' + (index + 1)">
+                            <span v-else>效果图{{ index + 1 }}<small>{{ renderStatus(job) }}</small></span>
+                          </button>
+                        </div>
+                        <div class="preset-panel-foot"><span>{{ renderJobsFor(space).length }} 条效果图记录</span><small>查看生成状态</small></div>
+                      </div>
+                      <button type="button" class="preset-panel comment-module comment-panel" @click="openDetail({ kind: 'comment', space: space })">
+                        <div class="preset-panel-title"><span>客户批注</span><AppIcon name="arrowRight" size="3" /></div>
+                        <div class="comment-copy"><p>{{ space.note || '暂无客户批注' }}</p></div>
+                        <div class="preset-panel-foot"><span>批注与空间一起保存</span><small>点击编辑批注</small></div>
                       </button>
                     </div>
-                    <div v-else class="product-grid-empty">当前空间还没有绑定商品</div>
-                    <div class="preset-panel-foot"><span>{{ activeSpace(group)?.modules.reduce((sum, item) => sum + item.qty, 0) }} 件 · {{ money(activeSpace(group)?.total || 0) }}</span><small>点击商品查看详情</small></div>
-                  </div>
-                  <div v-if="renderJobsFor(activeSpace(group)!).length" class="preset-panel render-panel">
-                    <div class="preset-panel-title"><span>效果图</span><AppIcon name="arrowRight" size="3" /></div>
-                    <div class="render-stack">
-                      <button v-for="(job, index) in renderJobsFor(activeSpace(group)!)" :key="job.previewId" type="button" class="render-slot" @click="openDetail({ kind: 'render', space: activeSpace(group)! })">
-                        <img v-if="job.status === 'SUCCEEDED' && job.imageUrl" :src="assetUrl(job.imageUrl)" :alt="activeSpace(group)?.name + '效果图' + (index + 1)">
-                        <span v-else>效果图{{ index + 1 }}<small>{{ renderStatus(job) }}</small></span>
-                      </button>
-                    </div>
-                    <div class="preset-panel-foot"><span>{{ renderJobsFor(activeSpace(group)!).length }} 张真实效果图</span><small>查看生成状态</small></div>
-                  </div>
-                  <button type="button" class="preset-panel comment-module comment-panel" @click="openDetail({ kind: 'comment', space: activeSpace(group)! })">
-                    <div class="preset-panel-title"><span>客户批注</span><AppIcon name="arrowRight" size="3" /></div>
-                    <div class="comment-copy"><p>{{ activeSpace(group)?.note || '暂无客户批注' }}</p></div>
-                    <div class="preset-panel-foot"><span>批注与空间一起保存</span><small>点击编辑批注</small></div>
-                  </button>
+                  </section>
                 </div>
               </div>
             </div>
           </article>
         </section>
-      </main>
+      </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项查看空间分组和具体空间。' }}</p></div></div><button type="button" class="proposal-primary full" :disabled="checkingCatalog" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -405,7 +510,7 @@ function detailTitle(detail: Detail | null) {
       <template v-else-if="selectedDetail.kind === 'render'">
         <div class="render-tabs" data-testid="proposal-render-tabs">
           <button type="button" :class="{ active: renderTab === 'model' }" data-testid="proposal-render-tab-model" @click="renderTab = 'model'">3D 交互</button>
-          <button type="button" :class="{ active: renderTab === 'ai' }" data-testid="proposal-render-tab-ai" @click="renderTab = 'ai'">AI 概念图</button>
+          <button type="button" :class="{ active: renderTab === 'ai' }" data-testid="proposal-render-tab-ai" @click="renderTab = 'ai'">AI 效果图</button>
           <button type="button" :class="{ active: renderTab === 'layout' }" data-testid="proposal-render-tab-layout" @click="renderTab = 'layout'">2D 布局</button>
         </div>
         <template v-if="renderTab === 'model'">
@@ -424,16 +529,59 @@ function detailTitle(detail: Detail | null) {
         </template>
         <button type="button" class="proposal-primary full" @click="closeDetail">返回方案确认</button>
       </template>
-      <template v-else><label class="comment-editor">客户批注<textarea :value="selectedDetail.space.note" rows="6" placeholder="记录客户对空间、材质或预算的补充要求"></textarea></label><p class="drawer-hint">批注会和空间一起进入方案快照，便于后续复核。</p><button type="button" class="proposal-primary full" @click="closeDetail">保存批注</button></template>
+      <template v-else><label class="comment-editor">客户批注<textarea :value="selectedDetail.space.note" rows="6" placeholder="记录客户对空间、材质或预算的补充要求"></textarea></label><p class="drawer-hint">批注会和空间一起进入方案快照，便于后续复核。</p><button v-if="canEdit" type="button" class="proposal-primary full" @click="closeDetail">保存批注</button></template>
     </aside></div>
   </div>
 </template>
 
 <style scoped>
-.proposal-page{display:flex;flex-direction:column;gap:0;min-height:100%;color:#332f2a}.proposal-heading{display:flex;justify-content:space-between;gap:24px;align-items:flex-end}.proposal-eyebrow{font-size:11px;color:#9b8d7d;margin-bottom:7px}.proposal-title-line{display:flex;align-items:center;gap:9px}.proposal-heading h1{font-size:24px;font-weight:800;letter-spacing:-.04em}.proposal-heading p{font-size:12px;color:#958d84;margin-top:6px}.proposal-file{font-size:11px;color:#8d7c68;background:#f2ece4;border:1px solid #eadfd2;border-radius:6px;padding:5px 9px}.heading-status{display:flex;align-items:center;gap:7px;color:#a47745;font-size:11px;font-weight:700}.heading-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.preview-banner{display:flex;gap:8px;align-items:center;padding:10px 13px;border:1px solid #e4d4bc;background:#fbf5ec;color:#8e704f;border-radius:10px;font-size:11px}.proposal-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:0;align-items:start}.proposal-main{min-width:0;display:flex;flex-direction:column;gap:0}.proposal-overview-card,.group-list,.aside-card{background:#fff;border:1px solid #e7e0d7;border-radius:16px;box-shadow:0 12px 30px rgba(82,58,35,.045)}.proposal-overview-card{padding:20px}.section-title-row,.group-list-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.section-kicker{display:block;color:#aa7d50;letter-spacing:.16em;font-size:9px;font-weight:800;margin-bottom:4px}.section-title-row h2,.group-list-heading h2{font-size:18px;font-weight:800;letter-spacing:-.02em}.section-help{font-size:11px;color:#958d84;line-height:1.7;margin-top:7px}.prototype-tag{display:flex;gap:5px;align-items:center;color:#5a8eb8;background:#edf6ff;border-radius:5px;padding:5px 8px;font-size:10px;white-space:nowrap}.overview-metrics{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:10px;margin-top:18px}.overview-metrics>div{background:#faf8f5;border-radius:11px;padding:13px 15px}.overview-metrics span,.overview-metrics small{display:block;color:#948b82;font-size:10px}.overview-metrics strong{display:block;font-size:23px;line-height:1.15;margin:8px 0 5px;letter-spacing:-.04em}.overview-metrics .accent strong{color:#a07146}.group-list{padding:20px}.group-list-heading{align-items:end;margin-bottom:12px}.group-list-heading>span{font-size:11px;color:#9b9289}.group-card{border:1px solid #e2d9cf;border-radius:12px;overflow:hidden;margin-top:12px;background:#fff}.group-card.collapsed{background:#fcfaf7}.group-header{display:grid;grid-template-columns:38px auto 20px minmax(0,1fr) auto;align-items:center;gap:9px;width:100%;padding:13px 15px;text-align:left;background:#f8f5f1}.group-header:hover{background:#f5eee6}.floor-badge{display:grid;place-items:center;width:30px;height:30px;border-radius:6px;background:#f04428;color:#fff;font-size:11px;font-weight:800}.group-name{display:inline-flex;align-items:center;min-width:100px;padding:6px 14px;border-radius:8px;background:#d7d7d7;color:#3f3b36;font-size:13px;font-weight:800}.group-chevron{color:#8f877e;font-size:11px}.group-meta{font-size:11px;color:#6d6258}.group-meta i{font-style:normal;color:#b2a79c;margin:0 5px}.group-status,.space-row-status,.space-detail-status{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:800;white-space:nowrap}.group-status>span,.space-row-status>span,.space-detail-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.is-confirmed{color:#438064}.is-confirmed>span{background:#65b38b}.is-pending{color:#a3783d}.group-body{padding:0 12px 12px}.space-rows{display:flex;flex-direction:column;gap:5px;padding:10px 0 8px;border-bottom:1px solid #eee7df}.space-row{display:grid;grid-template-columns:20px minmax(130px,1.4fr) .8fr .9fr .8fr auto;align-items:center;gap:10px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;text-align:left;font-size:11px;color:#6e655d}.space-row:hover,.space-row.active{background:#fbf5ed;border-color:#ead8c4}.space-row strong{font-size:12px;color:#403932}.space-row-chevron{color:#aa7b4a}.space-row-status{justify-self:end}.space-detail-board{padding:15px 4px 2px}.space-detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:0 5px 12px}.space-detail-heading h3{font-size:16px;font-weight:800}.space-detail-heading p{font-size:10px;color:#968c82;margin-top:4px}.space-detail-status{padding:7px 10px;border-radius:8px;border:1px solid #e5dbcf;background:#fff}.space-modules{display:grid;grid-template-columns:1.05fr 1.15fr 1.15fr 1fr .9fr;gap:0;border-top:1px solid #eee6dc;border-bottom:1px solid #eee6dc}.space-module{min-width:0;text-align:left;padding:12px 10px;border-right:1px solid #eee6dc;transition:background .16s,transform .16s}.space-module:last-child{border-right:0}.space-module:hover{background:#fcf8f3;transform:translateY(-1px)}.module-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#5b5148}.module-label>span:nth-child(2){flex:1}.module-label>svg{color:#ad9a89}.module-icon{width:24px;height:24px;border-radius:7px;display:grid;place-items:center}.module-icon.blue{background:#e4f0fb;color:#4d83b4}.module-icon.sand{background:#f4eadc;color:#a87542}.module-icon.green{background:#e4f1e9;color:#4e8a6c}.module-icon.purple{background:#eee7f7;color:#8167ad}.module-icon.yellow{background:#fbf0ce;color:#ad8330}.space-module p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:10px;line-height:1.65;color:#877d73;margin-top:10px;min-height:48px}.space-module small,.module-foot small{display:block;color:#ad9f93;font-size:9px;margin-top:8px}.layout-thumb{height:76px;margin-top:10px;border-radius:8px;overflow:hidden;background:#f7f2ea}.layout-thumb img{display:block;width:100%;height:100%;object-fit:contain}.layout-thumb svg{display:block;width:100%;height:100%}.layout-empty{height:100%;display:grid;place-items:center;color:#a3988d;font-size:10px}.module-foot{display:flex;justify-content:space-between;gap:5px;align-items:end;margin-top:8px;font-size:10px;color:#6d6258}.module-foot small{margin:0;white-space:nowrap}.product-strip{display:flex;gap:5px;margin-top:16px;min-height:34px;align-items:center}.product-thumb{display:grid;place-items:center;width:31px;height:31px;border-radius:7px;background:#f1e9df;color:#ae9172;overflow:hidden}.product-thumb :deep(svg){width:23px;height:23px}.product-thumb :deep(.relative){width:100%;height:100%}.product-no-image{font-size:9px;color:#a89b8e;white-space:nowrap}.product-more{font-size:10px;color:#9b8d80}.render-thumb{height:76px;margin-top:10px;border-radius:8px;background:linear-gradient(135deg,#e4d9cc,#a8866b 52%,#413d39);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;letter-spacing:.12em;text-shadow:0 1px 2px #0008;overflow:hidden}.render-thumb img{display:block;width:100%;height:100%;object-fit:cover}.render-thumb span{font-size:10px}.render-thumb b{font-size:18px;margin-top:4px}.comment-module{background:#fffbeb}.proposal-aside{min-width:0}.sticky-card{position:sticky;top:0;padding:18px;display:flex;flex-direction:column;gap:11px}.aside-title{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:800}.aside-title.small{font-size:12px}.aside-summary{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#8d8379;padding:4px 0}.aside-summary strong{font-size:12px;color:#4e4741}.aside-summary .price{font-size:18px;color:#a07146}.aside-divider{height:1px;background:#eee7df;margin:3px 0}.confirm-state{display:flex;gap:9px;padding:11px;border-radius:10px;background:#fbf5ec}.confirm-state.confirmed{background:#eef8f1}.state-dot{width:9px;height:9px;border-radius:50%;background:#dda94a;margin-top:4px;flex:none}.confirm-state.confirmed .state-dot{background:#58a87d}.confirm-state strong{font-size:11px}.confirm-state p{font-size:10px;color:#91867c;margin-top:4px;line-height:1.5}.proposal-primary,.proposal-secondary{display:flex;justify-content:center;align-items:center;gap:6px;border-radius:8px;padding:10px 12px;font-size:11px;font-weight:700;transition:background .16s,transform .16s}.proposal-primary{background:#a77b51;color:#fff}.proposal-primary:hover{background:#8f633e;transform:translateY(-1px)}.proposal-secondary{border:1px solid #e4ddd4;color:#72675c;background:#fff}.proposal-secondary:hover{background:#faf7f3}.proposal-primary.full,.proposal-secondary.full{width:100%}.aside-note{display:flex;gap:6px;color:#a39a91;font-size:10px;line-height:1.6;margin-top:7px}.proposal-empty{flex:1;min-height:430px;display:grid;place-items:center;text-align:center;background:#fff;border:1px solid #e7e0d7;border-radius:16px;padding:40px}.proposal-empty-icon{width:60px;height:60px;display:grid;place-items:center;background:#f3ece3;color:#a77b51;border-radius:16px;margin:0 auto 14px}.proposal-empty h2{font-size:18px;font-weight:800}.proposal-empty p{font-size:12px;color:#958d84;margin:8px 0 18px}.proposal-toast{position:fixed;right:26px;bottom:26px;z-index:100;background:#382f28;color:#fff;border-radius:9px;padding:11px 15px;font-size:11px;box-shadow:0 12px 28px #0002}.detail-backdrop{position:fixed;inset:0;z-index:90;background:#2c241c55;display:flex;justify-content:flex-end}.detail-drawer{width:min(520px,94vw);height:100%;overflow:auto;background:#fff;padding:24px;box-shadow:-18px 0 45px #0002}.detail-header{display:flex;justify-content:space-between;gap:15px;margin-bottom:24px}.detail-header h2{font-size:21px;font-weight:800}.detail-close{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:#81776c}.detail-close:hover{background:#f6f1eb}.detail-hero{display:flex;gap:12px;align-items:center;padding:16px;border-radius:12px}.detail-hero.blue{background:#edf5fc;color:#467eae}.detail-hero strong,.detail-hero span{display:block}.detail-hero strong{font-size:14px;color:#4d433b}.detail-hero span{font-size:11px;color:#8c8177;margin-top:5px}.detail-list{display:flex;flex-direction:column;margin-top:18px}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;border-bottom:1px solid #eee7df;padding:13px 0;font-size:12px}.detail-list dt{color:#968b81}.detail-list dd{color:#514943;line-height:1.7}.drawer-layout{background:#faf7f2;border-radius:12px;padding:10px}.drawer-layout img,.drawer-layout svg{display:block;width:100%;max-height:520px;height:auto;object-fit:contain}.detail-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.detail-stat-grid>div{background:#faf8f5;border-radius:10px;padding:13px}.detail-stat-grid span{display:block;color:#948b82;font-size:10px}.detail-stat-grid strong{display:block;font-size:18px;margin-top:7px}.drawer-product-list{display:flex;flex-direction:column;gap:8px}.drawer-product{width:100%;display:flex;align-items:center;gap:9px;padding:10px;border:1px solid #eee6dc;border-radius:10px;text-align:left}.drawer-product:hover{background:#faf7f2;border-color:#d8c4ad}.drawer-product-art{width:38px;height:38px;border-radius:8px;background:#f1e9df;display:grid;place-items:center;overflow:hidden}.drawer-product-art :deep(svg){width:27px;height:27px}.drawer-product-art :deep(.relative){width:100%;height:100%}.drawer-product-copy{flex:1;min-width:0}.drawer-product-copy strong,.drawer-product-copy small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.drawer-product-copy strong{font-size:11px}.drawer-product-copy small{font-size:10px;color:#958b82;margin-top:4px}.drawer-product-qty{font-size:11px;color:#887c70}.drawer-total{display:flex;justify-content:space-between;border-top:1px solid #ece5dc;margin-top:16px;padding-top:14px;font-size:12px}.drawer-total strong,.detail-price{color:#a07146;font-size:17px;font-weight:800}.detail-product-hero{display:flex;gap:13px;padding:14px;background:#faf7f2;border-radius:12px}.large-product-art{width:58px;height:58px;display:grid;place-items:center;background:#f0e5d7;border-radius:10px;overflow:hidden}.large-product-art :deep(svg){width:42px;height:42px}.large-product-art :deep(.relative){width:100%;height:100%}.detail-product-hero h3{font-size:16px;font-weight:800}.detail-product-hero p{font-size:11px;color:#8f857b;line-height:1.6;margin-top:5px}.qty-control{display:flex;align-items:center;gap:12px}.qty-control button{width:26px;height:26px;border:1px solid #e3dbd1;border-radius:6px;color:#9a704c}.drawer-render{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:14px;background:linear-gradient(135deg,#ece0d2,#a48268 55%,#363331);color:#fff;padding:30px}.drawer-render img{display:block;width:100%;max-height:430px;object-fit:contain;border-radius:10px}.drawer-render-image{gap:12px}.drawer-render span{font-size:10px;letter-spacing:.2em}.drawer-render strong{font-size:21px;margin-top:13px}.drawer-render p{max-width:280px;font-size:11px;line-height:1.7;color:#f0e6db;margin-top:10px}.comment-editor{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:700}.comment-editor textarea{width:100%;resize:vertical;border:1px solid #e1d9cf;border-radius:9px;padding:11px;font:inherit;font-size:12px;font-weight:400;line-height:1.7}.drawer-hint{font-size:11px;color:#968c82;line-height:1.7;margin:12px 0 18px}@media(max-width:1100px){.proposal-heading{align-items:flex-start;flex-direction:column}.proposal-layout{grid-template-columns:minmax(0,1fr)}.proposal-aside{order:-1}.sticky-card{position:static}.group-header{grid-template-columns:34px auto 18px 1fr auto}.group-meta{font-size:10px}.space-modules{grid-template-columns:repeat(2,minmax(0,1fr))}.space-module:nth-child(2n){border-right:0}.space-module:nth-child(n+3){border-top:1px solid #eee6dc}}@media(max-width:700px){.proposal-page{gap:0}.proposal-heading h1{font-size:21px}.group-header{grid-template-columns:30px 1fr 16px auto}.group-meta{grid-column:2 / -1}.space-row{grid-template-columns:18px 1fr auto}.space-row>span:nth-child(3),.space-row>span:nth-child(4),.space-row>span:nth-child(5){display:none}.space-modules{grid-template-columns:1fr}.space-module{border-right:0;border-bottom:1px solid #eee6dc}.space-module:last-child{border-bottom:0}.space-module:nth-child(n+3){border-top:0}.detail-drawer{padding:18px}}
+.space-row + .space-detail-board {
+  margin-bottom: .5rem;
+  border: 1px solid var(--color-accent-line);
+  border-top: 0;
+}
+
+.proposal-selection {
+  margin: 0 0 12px;
+  border: 1px solid var(--color-accent-line);
+  background: var(--color-accent-tint);
+  color: var(--color-ink);
+}
+
+.proposal-selection summary {
+  padding: 10px 14px;
+  color: var(--color-accent-ink);
+  font-size: .85rem;
+  font-weight: 650;
+}
+
+.proposal-selection-list {
+  display: grid;
+  gap: 1px;
+  background: var(--color-line);
+  border-top: 1px solid var(--color-line);
+}
+
+.proposal-selection-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .5rem 1rem;
+  padding: 10px 14px;
+  background: white;
+  color: var(--color-muted);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+.proposal-selection-list strong {
+  color: var(--color-ink);
+}
+
+.proposal-page{display:flex;flex-direction:column;gap:0;min-height:100%;color:#332f2a}.proposal-heading{display:flex;justify-content:space-between;gap:24px;align-items:flex-end}.proposal-eyebrow{font-size:11px;color:#9b8d7d;margin-bottom:7px}.proposal-title-line{display:flex;align-items:center;gap:9px}.proposal-heading h1{font-size:24px;font-weight:800;letter-spacing:-.04em}.proposal-heading p{font-size:12px;color:#958d84;margin-top:6px}.proposal-file{font-size:11px;color:#8d7c68;background:var(--color-accent-tint);border:1px solid var(--color-line);border-radius:6px;padding:5px 9px}.heading-status{display:flex;align-items:center;gap:7px;color:#a47745;font-size:11px;font-weight:700}.heading-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.preview-banner{display:flex;gap:8px;align-items:center;padding:10px 13px;border:1px solid #e4d4bc;background:#fbf5ec;color:#8e704f;border-radius:10px;font-size:11px}.proposal-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:0;align-items:start}.proposal-main{min-width:0;display:flex;flex-direction:column;gap:0}.proposal-overview-card,.group-list,.aside-card{background:#fff;border:1px solid var(--color-line);border-radius:16px;box-shadow:0 12px 30px rgba(82,58,35,.045)}.proposal-overview-card{padding:20px}.section-title-row,.group-list-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.section-kicker{display:block;color:#aa7d50;letter-spacing:.16em;font-size:9px;font-weight:800;margin-bottom:4px}.section-title-row h2,.group-list-heading h2{font-size:18px;font-weight:800;letter-spacing:-.02em}.section-help{font-size:11px;color:#958d84;line-height:1.7;margin-top:7px}.prototype-tag{display:flex;gap:5px;align-items:center;color:#5a8eb8;background:#edf6ff;border-radius:5px;padding:5px 8px;font-size:10px;white-space:nowrap}.overview-metrics{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:10px;margin-top:18px}.overview-metrics>div{background:#faf8f5;border-radius:11px;padding:13px 15px}.overview-metrics span,.overview-metrics small{display:block;color:#948b82;font-size:10px}.overview-metrics strong{display:block;font-size:23px;line-height:1.15;margin:8px 0 5px;letter-spacing:-.04em}.overview-metrics .accent strong{color:var(--color-accent-ink)}.group-list{padding:20px}.group-list-heading{align-items:end;margin-bottom:12px}.group-list-heading>span{font-size:11px;color:#9b9289}.group-card{border:1px solid var(--color-line);border-radius:12px;overflow:hidden;margin-top:12px;background:#fff}.group-card.collapsed{background:var(--color-bg)}.group-header{display:grid;grid-template-columns:38px auto 20px minmax(0,1fr) auto;align-items:center;gap:9px;width:100%;padding:13px 15px;text-align:left;background:var(--color-bg)}.group-header:hover{background:var(--color-accent-tint)}.floor-badge{display:grid;place-items:center;width:30px;height:30px;border-radius:6px;background:var(--color-accent);color:#fff;font-size:11px;font-weight:800}.group-name{display:inline-flex;align-items:center;min-width:100px;padding:6px 14px;border-radius:8px;background:#d7d7d7;color:#3f3b36;font-size:13px;font-weight:800}.group-chevron{color:#8f877e;font-size:11px}.group-meta{font-size:11px;color:#6d6258}.group-meta i{font-style:normal;color:#b2a79c;margin:0 5px}.group-status,.space-row-status,.space-detail-status{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:800;white-space:nowrap}.group-status>span,.space-row-status>span,.space-detail-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.is-confirmed{color:#438064}.is-confirmed>span{background:#65b38b}.is-pending{color:#a3783d}.group-body{padding:0 12px 12px}.space-rows{display:flex;flex-direction:column;gap:5px;padding:10px 0 8px;border-bottom:1px solid var(--color-line)}.space-row{display:grid;grid-template-columns:20px minmax(130px,1.4fr) .8fr .9fr .8fr auto;align-items:center;gap:10px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;text-align:left;font-size:11px;color:#6e655d}.space-row:hover,.space-row.active{background:var(--color-accent-tint);border-color:var(--color-accent-line)}.space-row strong{font-size:12px;color:#403932}.space-row-chevron{color:var(--color-accent-ink)}.space-row-status{justify-self:end}.space-detail-board{padding:15px 4px 2px}.space-detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:0 5px 12px}.space-detail-heading h3{font-size:16px;font-weight:800}.space-detail-heading p{font-size:10px;color:#968c82;margin-top:4px}.space-detail-status{padding:7px 10px;border-radius:8px;border:1px solid var(--color-line);background:#fff}.space-modules{display:grid;grid-template-columns:1.05fr 1.15fr 1.15fr 1fr .9fr;gap:0;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line)}.space-module{min-width:0;text-align:left;padding:12px 10px;border-right:1px solid var(--color-line);transition:background .16s,transform .16s}.space-module:last-child{border-right:0}.space-module:hover{background:var(--color-bg);transform:translateY(-1px)}.module-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#5b5148}.module-label>span:nth-child(2){flex:1}.module-label>svg{color:#ad9a89}.module-icon{width:24px;height:24px;border-radius:7px;display:grid;place-items:center}.module-icon.blue{background:#e4f0fb;color:#4d83b4}.module-icon.sand{background:#f4eadc;color:#a87542}.module-icon.green{background:#e4f1e9;color:#4e8a6c}.module-icon.purple{background:#eee7f7;color:#8167ad}.module-icon.yellow{background:#fbf0ce;color:#ad8330}.space-module p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:10px;line-height:1.65;color:#877d73;margin-top:10px;min-height:48px}.space-module small,.module-foot small{display:block;color:#ad9f93;font-size:9px;margin-top:8px}.layout-thumb{height:76px;margin-top:10px;border-radius:8px;overflow:hidden;background:#f7f2ea}.layout-thumb img{display:block;width:100%;height:100%;object-fit:contain}.layout-thumb svg{display:block;width:100%;height:100%}.layout-empty{height:100%;display:grid;place-items:center;color:#a3988d;font-size:10px}.module-foot{display:flex;justify-content:space-between;gap:5px;align-items:end;margin-top:8px;font-size:10px;color:#6d6258}.module-foot small{margin:0;white-space:nowrap}.product-strip{display:flex;gap:5px;margin-top:16px;min-height:34px;align-items:center}.product-thumb{display:grid;place-items:center;width:31px;height:31px;border-radius:7px;background:#f1e9df;color:#ae9172;overflow:hidden}.product-thumb :deep(svg){width:23px;height:23px}.product-thumb :deep(.relative){width:100%;height:100%}.product-no-image{font-size:9px;color:#a89b8e;white-space:nowrap}.product-more{font-size:10px;color:#9b8d80}.render-thumb{height:76px;margin-top:10px;border-radius:8px;background:linear-gradient(135deg,#e4d9cc,#a8866b 52%,#413d39);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;letter-spacing:.12em;text-shadow:0 1px 2px #0008;overflow:hidden}.render-thumb img{display:block;width:100%;height:100%;object-fit:cover}.render-thumb span{font-size:10px}.render-thumb b{font-size:18px;margin-top:4px}.comment-module{background:#fffbeb}.proposal-aside{min-width:0}.sticky-card{position:sticky;top:0;padding:18px;display:flex;flex-direction:column;gap:11px}.aside-title{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:800}.aside-title.small{font-size:12px}.aside-summary{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#8d8379;padding:4px 0}.aside-summary strong{font-size:12px;color:#4e4741}.aside-summary .price{font-size:18px;color:var(--color-accent-ink)}.aside-divider{height:1px;background:var(--color-line);margin:3px 0}.confirm-state{display:flex;gap:9px;padding:11px;border-radius:10px;background:#fbf5ec}.confirm-state.confirmed{background:#eef8f1}.state-dot{width:9px;height:9px;border-radius:50%;background:#dda94a;margin-top:4px;flex:none}.confirm-state.confirmed .state-dot{background:#58a87d}.confirm-state strong{font-size:11px}.confirm-state p{font-size:10px;color:#91867c;margin-top:4px;line-height:1.5}.proposal-primary,.proposal-secondary{display:flex;justify-content:center;align-items:center;gap:6px;border-radius:8px;padding:10px 12px;font-size:11px;font-weight:700;transition:background .16s,transform .16s}.proposal-primary{background:var(--color-accent);color:#fff}.proposal-primary:hover{background:var(--color-accent-ink);transform:translateY(-1px)}.proposal-secondary{border:1px solid var(--color-line);color:#72675c;background:#fff}.proposal-secondary:hover{background:var(--color-bg)}.proposal-primary.full,.proposal-secondary.full{width:100%}.aside-note{display:flex;gap:6px;color:#a39a91;font-size:10px;line-height:1.6;margin-top:7px}.proposal-empty{flex:1;min-height:430px;display:grid;place-items:center;text-align:center;background:#fff;border:1px solid var(--color-line);border-radius:16px;padding:40px}.proposal-empty-icon{width:60px;height:60px;display:grid;place-items:center;background:var(--color-accent-tint);color:var(--color-accent);border-radius:16px;margin:0 auto 14px}.proposal-empty h2{font-size:18px;font-weight:800}.proposal-empty p{font-size:12px;color:#958d84;margin:8px 0 18px}.proposal-toast{position:fixed;right:26px;bottom:26px;z-index:100;background:#382f28;color:#fff;border-radius:9px;padding:11px 15px;font-size:11px;box-shadow:0 12px 28px #0002}.detail-backdrop{position:fixed;inset:0;z-index:90;background:#2c241c55;display:flex;justify-content:flex-end}.detail-drawer{width:min(520px,94vw);height:100%;overflow:auto;background:#fff;padding:24px;box-shadow:-18px 0 45px #0002}.detail-header{display:flex;justify-content:space-between;gap:15px;margin-bottom:24px}.detail-header h2{font-size:21px;font-weight:800}.detail-close{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:#81776c}.detail-close:hover{background:#f6f1eb}.detail-hero{display:flex;gap:12px;align-items:center;padding:16px;border-radius:12px}.detail-hero.blue{background:#edf5fc;color:#467eae}.detail-hero strong,.detail-hero span{display:block}.detail-hero strong{font-size:14px;color:#4d433b}.detail-hero span{font-size:11px;color:#8c8177;margin-top:5px}.detail-list{display:flex;flex-direction:column;margin-top:18px}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;border-bottom:1px solid var(--color-line);padding:13px 0;font-size:12px}.detail-list dt{color:#968b81}.detail-list dd{color:#514943;line-height:1.7}.drawer-layout{background:#faf7f2;border-radius:12px;padding:10px}.drawer-layout img,.drawer-layout svg{display:block;width:100%;max-height:520px;height:auto;object-fit:contain}.detail-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.detail-stat-grid>div{background:#faf8f5;border-radius:10px;padding:13px}.detail-stat-grid span{display:block;color:#948b82;font-size:10px}.detail-stat-grid strong{display:block;font-size:18px;margin-top:7px}.drawer-product-list{display:flex;flex-direction:column;gap:8px}.drawer-product{width:100%;display:flex;align-items:center;gap:9px;padding:10px;border:1px solid var(--color-line);border-radius:10px;text-align:left}.drawer-product:hover{background:#faf7f2;border-color:#d8c4ad}.drawer-product-art{width:38px;height:38px;border-radius:8px;background:#f1e9df;display:grid;place-items:center;overflow:hidden}.drawer-product-art :deep(svg){width:27px;height:27px}.drawer-product-art :deep(.relative){width:100%;height:100%}.drawer-product-copy{flex:1;min-width:0}.drawer-product-copy strong,.drawer-product-copy small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.drawer-product-copy strong{font-size:11px}.drawer-product-copy small{font-size:10px;color:#958b82;margin-top:4px}.drawer-product-qty{font-size:11px;color:#887c70}.drawer-total{display:flex;justify-content:space-between;border-top:1px solid #ece5dc;margin-top:16px;padding-top:14px;font-size:12px}.drawer-total strong,.detail-price{color:var(--color-accent-ink);font-size:17px;font-weight:800}.detail-product-hero{display:flex;gap:13px;padding:14px;background:#faf7f2;border-radius:12px}.large-product-art{width:58px;height:58px;display:grid;place-items:center;background:#f0e5d7;border-radius:10px;overflow:hidden}.large-product-art :deep(svg){width:42px;height:42px}.large-product-art :deep(.relative){width:100%;height:100%}.detail-product-hero h3{font-size:16px;font-weight:800}.detail-product-hero p{font-size:11px;color:#8f857b;line-height:1.6;margin-top:5px}.qty-control{display:flex;align-items:center;gap:12px}.qty-control button{width:26px;height:26px;border:1px solid #e3dbd1;border-radius:6px;color:#9a704c}.drawer-render{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:14px;background:linear-gradient(135deg,#ece0d2,#a48268 55%,#363331);color:#fff;padding:30px}.drawer-render img{display:block;width:100%;max-height:430px;object-fit:contain;border-radius:10px}.drawer-render-image{gap:12px}.drawer-render span{font-size:10px;letter-spacing:.2em}.drawer-render strong{font-size:21px;margin-top:13px}.drawer-render p{max-width:280px;font-size:11px;line-height:1.7;color:#f0e6db;margin-top:10px}.comment-editor{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:700}.comment-editor textarea{width:100%;resize:vertical;border:1px solid #e1d9cf;border-radius:9px;padding:11px;font:inherit;font-size:12px;font-weight:400;line-height:1.7}.drawer-hint{font-size:11px;color:#968c82;line-height:1.7;margin:12px 0 18px}@media(max-width:1100px){.proposal-heading{align-items:flex-start;flex-direction:column}.proposal-layout{grid-template-columns:minmax(0,1fr)}.proposal-aside{order:-1}.sticky-card{position:static}.group-header{grid-template-columns:34px auto 18px 1fr auto}.group-meta{font-size:10px}.space-modules{grid-template-columns:repeat(2,minmax(0,1fr))}.space-module:nth-child(2n){border-right:0}.space-module:nth-child(n+3){border-top:1px solid var(--color-line)}}@media(max-width:700px){.proposal-page{gap:0}.proposal-heading h1{font-size:21px}.group-header{grid-template-columns:30px 1fr 16px auto}.group-meta{grid-column:2 / -1}.space-row{grid-template-columns:18px 1fr auto}.space-row>span:nth-child(3),.space-row>span:nth-child(4),.space-row>span:nth-child(5){display:none}.space-modules{grid-template-columns:1fr}.space-module{border-right:0;border-bottom:1px solid var(--color-line)}.space-module:last-child{border-bottom:0}.space-module:nth-child(n+3){border-top:0}.detail-drawer{padding:18px}}
 /* Preset confirmation board: five columns matching the reference layout. */
-.preset-space-board{display:grid;grid-template-columns:minmax(135px,1.05fr) minmax(150px,1.1fr) minmax(245px,1.9fr) minmax(130px,1fr) minmax(110px,.9fr);min-height:430px;border-top:1px solid #eee6dc;border-bottom:1px solid #eee6dc;overflow:hidden}
-.preset-panel{position:relative;display:flex;flex-direction:column;min-width:0;min-height:430px;padding:14px 12px;border:0;border-right:1px solid #eee6dc;text-align:left;font:inherit;color:inherit;overflow:hidden}
+.preset-space-board{display:grid;grid-template-columns:minmax(135px,1.05fr) minmax(150px,1.1fr) minmax(245px,1.9fr) minmax(130px,1fr) minmax(110px,.9fr);min-height:430px;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line);overflow:hidden}
+.preset-panel{position:relative;display:flex;flex-direction:column;min-width:0;min-height:430px;padding:14px 12px;border:0;border-right:1px solid var(--color-line);text-align:left;font:inherit;color:inherit;overflow:hidden}
 .preset-panel:last-child{border-right:0}
 .preset-panel-title{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;font-weight:800;line-height:1.3}
 .preset-panel-title svg{flex:none;color:currentColor;opacity:.7}
@@ -478,15 +626,15 @@ function detailTitle(detail: Detail | null) {
 .comment-copy{flex:1;min-height:280px;margin-top:18px}
 .comment-copy p{font-size:11px;line-height:1.8;white-space:pre-wrap}
 @media(max-width:1100px){.preset-space-board{grid-template-columns:repeat(5,minmax(220px,1fr));overflow-x:auto;overflow-y:hidden}.preset-panel{min-height:410px}.product-grid{grid-template-columns:repeat(4,minmax(42px,1fr))}}
-@media(max-width:700px){.preset-space-board{grid-template-columns:1fr;overflow:visible}.preset-panel{min-height:270px;border-right:0;border-bottom:1px solid #eee6dc}.preset-panel:last-child{border-bottom:0}.requirement-scroll{min-height:110px}.comment-copy{min-height:120px}.preset-layout-thumb{height:180px}}
+@media(max-width:700px){.preset-space-board{grid-template-columns:1fr;overflow:visible}.preset-panel{min-height:270px;border-right:0;border-bottom:1px solid var(--color-line)}.preset-panel:last-child{border-bottom:0}.requirement-scroll{min-height:110px}.comment-copy{min-height:120px}.preset-layout-thumb{height:180px}}
 /* Confirmation controls and compact detail modal. */
-.group-header-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;border-bottom:1px solid #eee6dc;background:#f8f5f1}
+.group-header-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;border-bottom:1px solid var(--color-line);background:var(--color-bg)}
 .group-header-row .group-header{border:0;border-radius:0}
-.group-confirm-button,.space-confirm-button{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid #e5dbcf;border-radius:8px;background:#fff;color:#a3783d;font-size:10px;font-weight:800;white-space:nowrap;cursor:pointer}
+.group-confirm-button,.space-confirm-button{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid var(--color-line);border-radius:8px;background:#fff;color:#a3783d;font-size:10px;font-weight:800;white-space:nowrap;cursor:pointer}
 .group-confirm-button{align-self:center;margin:0 12px 0 4px;padding:7px 10px}
 .space-detail-actions{display:flex;align-items:center;gap:7px}
-.space-confirm-button{padding:7px 10px;background:#a77b51;border-color:#a77b51;color:#fff}
-.group-confirm-button:hover,.space-confirm-button:hover{background:#8f633e;border-color:#8f633e;color:#fff}
+.space-confirm-button{padding:7px 10px;background:var(--color-accent);border-color:var(--color-accent);color:#fff}
+.group-confirm-button:hover,.space-confirm-button:hover{background:var(--color-accent-ink);border-color:var(--color-accent-ink);color:#fff}
 .group-confirm-button.is-confirmed,.space-confirm-button:disabled{background:#eef8f1;border-color:#cfe6d8;color:#438064;cursor:default}
 .group-confirm-button:disabled{opacity:1}
 .detail-backdrop{align-items:center;justify-content:center;padding:24px;background:rgba(44,36,28,.38);backdrop-filter:blur(2px)}
@@ -498,11 +646,13 @@ function detailTitle(detail: Detail | null) {
 .large-product-art :deep(svg){width:58px;height:58px}
 .detail-product-hero{gap:16px;padding:16px}
 .layout-detail-dialog{width:min(1100px,calc(100vw - 48px))}
-.layout-plan-detail{height:min(65dvh,700px);min-height:240px;border:1px solid #e7e0d7;border-radius:12px;overflow:hidden}
+.layout-plan-detail{height:min(65dvh,700px);min-height:240px;border:1px solid var(--color-line);border-radius:12px;overflow:hidden}
 .layout-detail-hint{font-size:12px;color:#968c82;margin-bottom:12px}
 /* 效果图详情三页签：3D 交互 / AI 概念图 / 2D 布局 */
-.render-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #eee6dc;padding-bottom:10px}
-.render-tabs button{border:1px solid #e4ddd4;border-radius:8px;background:#fff;color:#72675c;font-size:11px;font-weight:700;padding:7px 14px}
-.render-tabs button.active{background:#a77b51;border-color:#a77b51;color:#fff}
-.proposal-3d-host{height:min(62dvh,640px);min-height:360px;border:1px solid #e7e0d7;border-radius:12px;overflow:hidden;margin-bottom:14px}
+.render-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--color-line);padding-bottom:10px}
+.render-tabs button{border:1px solid var(--color-line);border-radius:8px;background:#fff;color:#72675c;font-size:11px;font-weight:700;padding:7px 14px}
+.render-tabs button.active{background:var(--color-accent);border-color:var(--color-accent);color:#fff}
+.proposal-3d-host{height:min(62dvh,640px);min-height:360px;border:1px solid var(--color-line);border-radius:12px;overflow:hidden;margin-bottom:14px}
+.heading-status.is-confirmed { color: var(--color-green); }
+.heading-status.is-confirmed span { background: var(--color-green); }
 </style>

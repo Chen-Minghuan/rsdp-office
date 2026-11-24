@@ -84,7 +84,10 @@ async function submit() {
           <label class="grid gap-2 text-sm font-semibold">客户需求 <span class="text-xs font-normal text-muted">全流程备注，可在过程中修改</span>
             <textarea v-model="customerRequirements" maxlength="4000" rows="4" class="resize-none rounded-xl border border-line px-4 py-3 text-sm font-normal leading-6 outline-none focus:border-bronze" placeholder="记录客户偏好、工位数量、预算或其他需要持续提醒的事项" />
           </label>
-          <ProjectMemberEditor v-model:leader="leader" v-model:collaborators="collaborators" :leader-optional="!authEnabled" />
+          <div>
+            <ProjectMemberEditor v-model:leader="leader" v-model:collaborators="collaborators" :leader-optional="!authEnabled" />
+            <p v-if="authEnabled" class="mt-2 text-xs text-muted">项目创建后，在「编辑 → 项目成员」中为成员勾选权限。</p>
+          </div>
           <ProjectReferenceImagesEditor v-model:images="referenceImages" />
           <section class="grid gap-3">
             <div><h3 class="text-sm font-semibold">楼层规划</h3><p class="mt-1 text-xs text-muted">支持 1F、B1F 等名称；连续楼层可输入 7~9F，多个楼层用逗号分隔。</p></div>

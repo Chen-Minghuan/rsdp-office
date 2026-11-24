@@ -5,7 +5,7 @@ import { createUuid } from '~/utils/uuid'
 
 const show = defineModel<boolean>('show', { default: false })
 /** 从 3D 白模进入时携带的当前视角截图（RENDER-006）；为空则使用空间立体引导图。 */
-const props = withDefaults(defineProps<{ viewImage?: string }>(), { viewImage: '' })
+const props = withDefaults(defineProps<{ viewImage?: string; formal?: boolean; confirmationId?: string; initialStyle?: string; initialPreviewId?: string }>(), { viewImage: '' })
 const dialogElement = ref<HTMLElement | null>(null)
 const store = useOfficeStore()
 const auth = useAuth()
@@ -21,8 +21,9 @@ const jobs = ref<RenderPreview[]>([])
 const selectedId = ref('')
 const selected = computed(() => jobs.value.find(item => item.previewId === selectedId.value) || jobs.value[0])
 const loading = ref(false), submitting = ref(false), error = ref(''), notice = ref('')
-const ready = computed(() => snapshot.value?.zone.reviewUnit === 'mm' && (snapshot.value?.furniture.length || 0) > 0)
-const activeCurrent = computed(() => jobs.value.some(item => renderPreviewActive(item.status) && renderSnapshotKey(item.snapshot) === currentKey.value))
+const ready = computed(() => snapshot.value?.zone.reviewUnit === 'mm' && (snapshot.value?.furniture.length || 0) > 0 && (!props.formal || !!props.confirmationId))
+const activeCurrent = computed(() => jobs.value.some(item => renderPreviewActive(item.status) && !stale(item)
+  && (props.formal ? item.confirmationId === props.confirmationId : item.purpose === 'CONCEPT_PREVIEW')))
 const stale = (job: RenderPreview) => job.stale || renderSnapshotKey(job.snapshot) !== currentKey.value
 const statusText = (status: string) => ({ SUBMITTING: '正在提交', PENDING: '排队中', RUNNING: '生成中', SUCCEEDED: '已生成', FAILED: '生成失败' }[status] || status)
 const message = (failure: any) => failure?.data?.message || failure?.message || '请求失败，请重试'
@@ -30,7 +31,7 @@ const time = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12
 let sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 // Persist an uncertain submission's ID across reopening/reload. Retrying it cannot create a second billed task.
-const pendingStorageKey = () => 'rsdp-render-request:' + auth.storageScope.value + ':' + useOfficeApi().projectId + ':' + zoneId.value
+const pendingStorageKey = () => 'rsdp-render-request:' + auth.storageScope.value + ':' + store.workspaceId + ':' + zoneId.value + (props.formal ? ':formal' : '')
 let pending: RenderPreviewRequest | null = null
 
 function remember(value: RenderPreviewRequest | null, key = pendingStorageKey()) {
@@ -39,7 +40,8 @@ function remember(value: RenderPreviewRequest | null, key = pendingStorageKey())
 }
 
 function merge(job: RenderPreview) {
-  if (!job?.previewId || !job.snapshot || job.purpose !== 'CONCEPT_PREVIEW') throw new Error('效果预览接口返回无效，请启动最新后端')
+  if (!job?.previewId || !job.snapshot || !['CONCEPT_PREVIEW', 'CONFIRMED_SCHEME'].includes(job.purpose)) throw new Error('效果预览接口返回无效，请启动最新后端')
+  if (props.formal && job.purpose !== 'CONFIRMED_SCHEME') return
   jobs.value = [job, ...jobs.value.filter(item => item.previewId !== job.previewId)]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.previewId.localeCompare(a.previewId)).slice(0, 30)
 }
@@ -76,7 +78,7 @@ async function load() {
     if (ticket !== sequence || !show.value) return
     if (!Array.isArray(response)) throw new Error('效果预览接口尚未就绪，请启动最新后端')
     response.forEach(merge)
-    selectedId.value = jobs.value[0]?.previewId || ''
+    selectedId.value = jobs.value.find(job => job.previewId === props.initialPreviewId)?.previewId || jobs.value[0]?.previewId || ''
     await poll(ticket)
   } catch (failure) { if (ticket === sequence) error.value = message(failure) }
   finally { if (ticket === sequence) loading.value = false }
@@ -87,7 +89,8 @@ async function generate() {
   const ticket = sequence, expectedKey = currentKey.value, storageKey = pendingStorageKey()
   const revision = store.canvasRevision
   const expectedSnapshot = JSON.parse(JSON.stringify(snapshot.value))
-  const options = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: view.value, instructions: instructions.value.trim(), viewImage: props.viewImage || undefined }
+  const options = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: view.value, instructions: instructions.value.trim(), viewImage: props.viewImage || undefined,
+    ...(props.formal ? { confirmationId: props.confirmationId } : {}) }
   if (!pending || renderSnapshotKey({ ...pending, clientChangeId: '', canvasRevision: 0 }) !== renderSnapshotKey({ ...options, clientChangeId: '', canvasRevision: 0 })) {
     remember({ ...options, clientChangeId: createUuid() })
   } else remember({ ...pending, canvasRevision: revision })
@@ -116,16 +119,21 @@ async function download(job: RenderPreview) {
     if (!response.ok) throw new Error('图片下载失败，请重试')
     const url = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a')
-    anchor.href = url; anchor.download = `${job.zoneName}-概念效果图-${job.previewId}.png`; anchor.click()
+    anchor.href = url; anchor.download = `${job.zoneName}-${job.purpose === 'CONFIRMED_SCHEME' ? '方案效果图' : '概念效果图'}-${job.previewId}.png`; anchor.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch (failure) { error.value = message(failure) }
 }
 
-watch([show, zoneId], ([open]) => {
+watch([show, zoneId, () => store.workspaceId, () => props.formal, () => props.confirmationId], ([open]) => {
   sequence++; clearTimeout(timer)
   if (open && zoneId.value) load()
 }, { immediate: true })
-watch(show, async open => { if (open) { await nextTick(); dialogElement.value?.focus() } })
+watch(show, async open => {
+  if (!open) return
+  if (props.initialStyle) style.value = props.initialStyle
+  await nextTick()
+  dialogElement.value?.focus()
+})
 function trapFocus(event: KeyboardEvent) {
   const controls = Array.from(dialogElement.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary') || [])
     .filter(element => element.getClientRects().length)
@@ -144,10 +152,10 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
   <Teleport to="body">
     <div v-if="show" class="render-backdrop" @click.self="show = false" @keydown.esc="show = false">
       <section ref="dialogElement" role="dialog" aria-modal="true" aria-labelledby="render-preview-title" tabindex="-1" class="render-dialog" data-testid="render-preview-dialog" @keydown.tab="trapFocus">
-        <header><div><h2 id="render-preview-title">单空间效果预览</h2><p>{{ snapshot?.zone.name || '当前空间' }} · Qwen-Image-3.0 · 二维图片</p></div><button aria-label="关闭效果预览" @click="show = false">✕</button></header>
+        <header><div><h2 id="render-preview-title">{{ props.formal ? '方案效果图' : '单空间效果预览' }}</h2><p>{{ snapshot?.zone.name || '当前空间' }} · Qwen-Image-3.0 · 二维图片</p></div><button aria-label="关闭效果预览" @click="show = false">✕</button></header>
         <div class="render-content">
           <aside class="render-settings">
-            <div class="render-concept">概念效果图：用于查看空间氛围，家具数量、位置和款式需对照排版核对。</div>
+            <div class="render-concept">{{ props.formal ? '生成绑定所确认的方案版本，请对照排版和商品核对图片。' : '概念效果图，用于查看空间氛围，家具数量、位置和款式需对照排版核对。' }}</div>
             <p v-if="snapshot?.zone.evidenceKind === 'DEMO'" class="render-hint">当前为演示空间，生成结果也保留演示来源。</p>
             <label>装修风格<input v-model="style" aria-label="效果图风格" maxlength="100" :disabled="submitting" placeholder="例如：现代简约，浅木色与暖白色"></label>
             <label v-if="!props.viewImage">观察视角<select v-model="view" aria-label="效果图视角" :disabled="submitting"><option value="ISOMETRIC">45° 鸟瞰 · 查看整体布局</option><option value="INTERIOR">室内透视 · 查看空间氛围</option></select></label>
@@ -156,10 +164,10 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
               <img :src="props.viewImage" alt="生成结构参考：3D 白模当前视角截图" data-testid="render-view-image">
             </div>
             <label>补充偏好<textarea v-model="instructions" aria-label="效果图补充偏好" maxlength="500" rows="3" :disabled="submitting" placeholder="例如：灰色地毯、柔和自然光"></textarea></label>
-            <p class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成，无需先绑定商品。未提供的层高、门窗和材质由模型作概念补充。<template v-if="props.viewImage">本次以 3D 白模当前视角截图为结构参考（图1），视角与布局由截图锁定。</template></p>
+            <p class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成。未提供的层高、门窗和材质由模型作概念补充。<template v-if="props.viewImage">本次以 3D 白模当前视角截图为结构参考（图1），视角与布局由截图锁定。</template></p>
             <p v-if="selectedProductCount" class="render-hint" data-testid="render-selected-products">已绑定 {{ selectedProductCount }} 款商品，将使用主图及可用辅助图参考外观，单款最多 4 个不同视角。</p>
-            <button class="render-primary" :disabled="!ready || submitting || activeCurrent || !style.trim()" @click="generate">{{ submitting ? '正在保存并提交…' : activeCurrent ? '当前布局正在生成…' : '生成效果预览' }}</button>
-            <p v-if="!ready" class="render-hint">请先校准当前空间，并摆放家具。</p>
+            <button class="render-primary" :disabled="!ready || submitting || activeCurrent || !style.trim()" @click="generate">{{ submitting ? '正在保存并提交…' : activeCurrent ? '当前布局正在生成…' : props.formal ? '生成方案效果图' : '生成效果预览' }}</button>
+            <p v-if="!ready" class="render-hint">{{ props.formal && !props.confirmationId ? '请到项目清单确认当前楼层方案。' : '请先校准当前空间，并摆放家具。' }}</p>
             <p v-if="pending && !submitting" class="render-hint">上次提交结果可能未知。保持参数重试会查询同一生成请求；改动参数会创建新任务。</p>
             <div class="render-history-heading"><strong>生成记录</strong><button :disabled="loading || submitting" @click="load">刷新记录</button></div>
             <p v-if="loading" role="status" class="render-hint">正在读取记录…</p>
@@ -178,7 +186,7 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
               <p v-if="selected.productImagesUsed" class="render-hint" data-testid="render-product-images-used">已使用 {{ selected.productReferences?.items.length || 0 }} 款所选商品、{{ selected.productReferences?.items.reduce((sum, item) => sum + (item.usedImageCount || 1), 0) || 0 }} 张图片作为外观参考。</p>
               <p v-for="item in selected.productReferences?.items.filter(item => item.warnings?.length)" :key="item.productId" class="render-hint">{{ item.name }}：部分图片不可读，已使用其余可用图片。</p>
               <p v-if="stale(selected)" class="render-outdated" role="status">此图绑定生成时的布局快照，仅作为历史预览。</p>
-              <img v-if="selected.status === 'SUCCEEDED' && selected.imageUrl" class="render-image" :src="api.imageUrl(selected.imageUrl)" :alt="selected.zoneName + '概念效果图'">
+              <img v-if="selected.status === 'SUCCEEDED' && selected.imageUrl" class="render-image" :src="api.imageUrl(selected.imageUrl)" :alt="selected.zoneName + (selected.purpose === 'CONFIRMED_SCHEME' ? '方案效果图' : '概念效果图')">
               <div v-else-if="renderPreviewActive(selected.status)" class="render-wait" role="status"><div class="render-spinner"></div><strong>{{ statusText(selected.status) }}，请稍候</strong><p>可关闭窗口继续排版，稍后打开查看。</p></div>
               <div v-else class="render-wait"><strong>本次生成未完成</strong><p>{{ selected.errorMessage || '请重试生成' }}</p><button class="render-primary" :disabled="submitting || !ready || activeCurrent" @click="generate">按当前布局重试生成</button></div>
               <div v-if="selected.status === 'SUCCEEDED'" class="render-actions"><span>AI 生成 · 概念预览 · {{ selected.model }}</span><button @click="download(selected)">下载图片</button></div>

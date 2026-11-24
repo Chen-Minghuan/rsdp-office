@@ -3,6 +3,7 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
@@ -11,7 +12,7 @@ import com.rsdp.officeproduct.importer.office.dto.AssignableUserDto;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
-import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectMemberDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
@@ -71,35 +72,57 @@ public class OfficeProjectService {
     private final SharedCatalogService sharedCatalogService;
 
     public List<OfficeProjectDto> listProjects() {
-        List<OfficeDesignProject> projects = projectMapper.selectList(
-            new QueryWrapper<OfficeDesignProject>().orderByAsc("created_at").orderByAsc("project_id"));
-        Set<String> accessible = accessService.accessibleProjectIds();
-        if (accessible != null) {
-            projects = projects.stream().filter(project -> accessible.contains(project.getProjectId())).toList();
-        }
-        if (projects.isEmpty()) {
-            return List.of();
-        }
+        return listProjects(true);
+    }
+
+    public List<OfficeProjectDto> listProjects(boolean includeBudget) {
+        List<OfficeDesignProject> projects = visibleProjects();
+        if (projects.isEmpty()) return List.of();
+
         List<String> projectIds = projects.stream().map(OfficeDesignProject::getProjectId).toList();
-        List<OfficeDesignFloor> floors = floorMapper.selectList(new QueryWrapper<OfficeDesignFloor>()
-            .in("project_id", projectIds).orderByAsc("sort_order").orderByAsc("created_at").orderByAsc("floor_id"));
+        List<OfficeDesignFloor> floors = floorsByProjectIds(projectIds);
         Map<String, List<OfficeDesignFloor>> floorsByProject = floors.stream()
             .collect(Collectors.groupingBy(OfficeDesignFloor::getProjectId));
         Map<String, List<OfficeProjectMember>> membersByProject = membersByProject(projectIds);
         Map<String, OfficeUser> usersById = usersById(membersByProject);
-        Map<String, ProjectBudget> budgetsByProject = budgetsByProject(projectIds, floors);
+        Map<String, ProjectBudget> budgets = includeBudget ? budgetsByProject(projectIds, floors) : Map.of();
         return projects.stream()
             .map(project -> {
                 OfficeProjectDto dto = toProjectDto(project,
                     floorsByProject.getOrDefault(project.getProjectId(), List.of()),
-                    membersByProject.getOrDefault(project.getProjectId(), List.of()),
-                    usersById);
-                ProjectBudget budget = budgetsByProject.getOrDefault(project.getProjectId(), ProjectBudget.complete());
-                dto.setBudgetTotal(budget.total());
-                dto.setBudgetStatus(budget.status());
+                    membersByProject.getOrDefault(project.getProjectId(), List.of()), usersById);
+                ProjectBudget budget = budgets.get(project.getProjectId());
+                if (budget != null) {
+                    dto.setBudgetTotal(budget.total());
+                    dto.setBudgetStatus(budget.status());
+                }
                 return dto;
             })
             .toList();
+    }
+
+    public Map<String, OfficeProjectBudgetDto> listProjectBudgets() {
+        List<String> projectIds = visibleProjects().stream().map(OfficeDesignProject::getProjectId).toList();
+        if (projectIds.isEmpty()) return Map.of();
+
+        return budgetsByProject(projectIds, floorsByProjectIds(projectIds)).entrySet().stream()
+            .collect(Collectors.toMap(Map.Entry::getKey,
+                entry -> new OfficeProjectBudgetDto(entry.getValue().total(), entry.getValue().status())));
+    }
+
+    private List<OfficeDesignProject> visibleProjects() {
+        Set<String> accessible = accessService.accessibleProjectIds();
+        if (accessible != null && accessible.isEmpty()) return List.of();
+
+        List<OfficeDesignProject> projects = projectMapper.selectList(new QueryWrapper<OfficeDesignProject>()
+            .in(accessible != null, "project_id", accessible).orderByAsc("created_at").orderByAsc("project_id"));
+        return accessible == null ? projects : projects.stream()
+            .filter(project -> accessible.contains(project.getProjectId())).toList();
+    }
+
+    private List<OfficeDesignFloor> floorsByProjectIds(List<String> projectIds) {
+        return floorMapper.selectList(new QueryWrapper<OfficeDesignFloor>()
+            .in("project_id", projectIds).orderByAsc("sort_order").orderByAsc("created_at").orderByAsc("floor_id"));
     }
 
     private Map<String, ProjectBudget> budgetsByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {
@@ -121,20 +144,17 @@ public class OfficeProjectService {
             .filter(Objects::nonNull)
             .collect(Collectors.toSet());
         try {
-            Map<String, BigDecimal> priceByVariantId = new HashMap<>();
-            for (OfficeProductDto product : catalogGateway.listOfficeProducts(sharedCatalogService.resolveViewMode())) {
-                if (StringUtils.hasText(product.getId()) && product.getPrice() != null
-                    && product.getPrice().compareTo(BigDecimal.ZERO) > 0) {
-                    priceByVariantId.put(product.getId(), product.getPrice());
-                }
-            }
+            Set<String> usedVariantIds = carts.stream()
+                .filter(cart -> cart.getQty() != null && cart.getQty() > 0)
+                .map(OfficeCart::getProductId).filter(StringUtils::hasText).collect(Collectors.toSet());
+            Map<String, BigDecimal> priceByVariantId = catalogGateway.retailPrices(sharedCatalogService.resolveViewMode(), usedVariantIds);
 
             for (OfficeCart cart : carts) {
                 String projectId = projectIdByFloorId.get(cart.getProjectId());
                 if (projectId == null || cart.getQty() == null || cart.getQty() <= 0) {
                     continue;
                 }
-                BigDecimal price = priceByVariantId.get(cart.getProductId());
+                BigDecimal price = cart.getProductId() == null ? null : priceByVariantId.get(cart.getProductId());
                 if (price == null) {
                     budgets.computeIfPresent(projectId, (ignored, budget) -> budget.pendingPricing());
                     continue;
@@ -142,7 +162,7 @@ public class OfficeProjectService {
                 budgets.computeIfPresent(projectId, (ignored, budget) -> budget.add(price.multiply(BigDecimal.valueOf(cart.getQty()))));
             }
         } catch (RuntimeException catalogUnavailable) {
-            log.warn("项目列表预算读取商品目录失败，将展示为不可用: {}", catalogUnavailable.getMessage());
+            log.warn("项目预算批量查价失败，将展示为不可用: {}", catalogUnavailable.getMessage());
             projectIdsWithCart.forEach(projectId -> budgets.put(projectId, ProjectBudget.unavailable()));
         }
         return budgets;
@@ -184,6 +204,7 @@ public class OfficeProjectService {
         OfficeDesignProject project = new OfficeDesignProject();
         project.setProjectId(IdGenerator.spatialId("OPRJ"));
         project.setName(projectName);
+        project.setStatus("DESIGNING");
         project.setCustomerRequirements(request.getCustomerRequirements() == null ? "" : request.getCustomerRequirements());
         project.setRequirementsRevision(1);
         project.setWorkspaceId(workspaceId);
@@ -200,14 +221,14 @@ public class OfficeProjectService {
         }
         List<OfficeProjectMember> members = new ArrayList<>();
         if (leaderUserId != null) {
-            members = insertMembers(project.getProjectId(), leaderUserId, collaboratorIds, now);
+            members = insertMembers(project.getProjectId(), leaderUserId, collaboratorIds, now, Map.of());
         }
         return toProjectDto(project, floors, members, usersById(members));
     }
 
     @Transactional
     public OfficeFloorDto addFloor(String projectId, CreateOfficeFloorRequest request) {
-        accessService.requireMember(projectId);
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
         requireProject(projectId);
         if (request == null) {
             throw new BusinessException("楼层参数不能为空");
@@ -226,7 +247,7 @@ public class OfficeProjectService {
 
     @Transactional
     public OfficeProjectDto updateProject(String projectId, UpdateOfficeProjectRequest request) {
-        accessService.requireMember(projectId);
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
         OfficeDesignProject project = requireProject(projectId);
         if (request == null) {
             throw new BusinessException("项目参数不能为空");
@@ -238,8 +259,22 @@ public class OfficeProjectService {
     }
 
     @Transactional
+    public String updateStatus(String projectId, String status) {
+        accessService.requireStatusManager(projectId);
+        requireProject(projectId);
+        if (status == null || !Set.of("DESIGNING", "DELIVERING", "COMPLETED").contains(status)) {
+            throw new BusinessException("项目阶段必须为设计中、交付中或已完成");
+        }
+        if (projectMapper.updateStatus(projectId, status, LocalDateTime.now()) != 1) {
+            throw new BusinessException("项目不存在，请刷新项目列表");
+        }
+        auditService.record("PROJECT_STATUS_CHANGED", "PROJECT", projectId, "status=" + status);
+        return status;
+    }
+
+    @Transactional
     public OfficeFloorDto updateFloor(String projectId, String floorId, CreateOfficeFloorRequest request) {
-        accessService.requireMember(projectId);
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
         requireProject(projectId);
         OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
         if (floor == null || !projectId.equals(floor.getProjectId())) {
@@ -262,7 +297,7 @@ public class OfficeProjectService {
 
     @Transactional
     public OfficeProjectDto updateRequirements(String projectId, UpdateOfficeRequirementsRequest request) {
-        accessService.requireMember(projectId);
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
         requireProject(projectId);
         if (request == null || request.getCustomerRequirements() == null) {
             throw new BusinessException("客户需求不能为空");
@@ -287,6 +322,7 @@ public class OfficeProjectService {
      */
     @Transactional
     public OfficeProjectDto replaceMembers(String projectId, UpdateProjectMembersRequest request) {
+        memberMapper.lockProjectMembers(projectId);
         accessService.requireLeader(projectId);
         OfficeDesignProject project = requireProject(projectId);
         if (request == null) {
@@ -294,20 +330,38 @@ public class OfficeProjectService {
         }
         List<String> collaboratorIds = validateMemberSet(
             project.getWorkspaceId(), request.getLeaderUserId(), request.getCollaboratorUserIds());
-        List<String> before = members(projectId).stream()
-            .map(member -> member.getRole() + ":" + member.getUserId()).toList();
+        List<OfficeProjectMember> previous = members(projectId);
+        String leaderId = request.getLeaderUserId().trim();
+        if (!accessService.ownsProject(projectId) && (request.getPermissions() != null || previous.stream().noneMatch(member ->
+                OfficeProjectMember.ROLE_LEADER.equals(member.getRole()) && leaderId.equals(member.getUserId())))) {
+            throw new AccessDeniedException("只有工作区主号可以授权或更换负责人");
+        }
+        var grants = new HashMap<String, Integer>();
+        previous.forEach(member -> grants.put(member.getUserId(), member.getPermissionFlags() == null ? 0 : member.getPermissionFlags()));
+        if (request.getPermissions() != null) {
+            request.getPermissions().forEach((userId, permissions) -> {
+                if (!leaderId.equals(userId) && !collaboratorIds.contains(userId)) {
+                    throw new BusinessException("授权对象必须是本项目成员");
+                }
+                grants.put(userId, OfficeProjectPermission.encode(permissions));
+            });
+        }
+        List<String> before = previous.stream().map(this::memberAuditText).toList();
         memberMapper.delete(new QueryWrapper<OfficeProjectMember>().eq("project_id", projectId));
-        List<OfficeProjectMember> members = insertMembers(projectId, request.getLeaderUserId().trim(), collaboratorIds, LocalDateTime.now());
-        List<String> after = members.stream()
-            .map(member -> member.getRole() + ":" + member.getUserId()).toList();
+        List<OfficeProjectMember> members = insertMembers(projectId, leaderId, collaboratorIds, LocalDateTime.now(), grants);
+        List<String> after = members.stream().map(this::memberAuditText).toList();
         auditService.record("MEMBERS_REPLACED", "PROJECT", projectId,
             "before=" + before + "; after=" + after);
         return toProjectDto(project, floors(projectId), members, usersById(members));
     }
 
+    private String memberAuditText(OfficeProjectMember member) {
+        return member.getRole() + ":" + member.getUserId() + "=" + OfficeProjectPermission.assigned(member.getPermissionFlags());
+    }
+
     @Transactional
     public OfficeProjectDto updateReferences(String projectId, UpdateProjectReferencesRequest request) {
-        accessService.requireMember(projectId);
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
         OfficeDesignProject project = requireProject(projectId);
         if (request == null) {
             throw new BusinessException("参考图片参数不能为空");
@@ -403,9 +457,10 @@ public class OfficeProjectService {
     }
 
     private List<OfficeProjectMember> insertMembers(String projectId, String leaderUserId,
-                                                    List<String> collaboratorIds, LocalDateTime now) {
+                                                    List<String> collaboratorIds, LocalDateTime now, Map<String, Integer> grants) {
         List<OfficeProjectMember> members = new ArrayList<>();
         OfficeProjectMember leader = newMember(projectId, leaderUserId, OfficeProjectMember.ROLE_LEADER, now);
+        leader.setPermissionFlags(grants.getOrDefault(leaderUserId, 0));
         try {
             memberMapper.insert(leader);
         } catch (DuplicateKeyException e) {
@@ -414,6 +469,7 @@ public class OfficeProjectService {
         members.add(leader);
         for (String userId : collaboratorIds) {
             OfficeProjectMember collaborator = newMember(projectId, userId, OfficeProjectMember.ROLE_COLLABORATOR, now);
+            collaborator.setPermissionFlags(grants.getOrDefault(userId, 0));
             memberMapper.insert(collaborator);
             members.add(collaborator);
         }
@@ -554,6 +610,8 @@ public class OfficeProjectService {
         OfficeProjectDto dto = new OfficeProjectDto();
         dto.setProjectId(project.getProjectId());
         dto.setName(project.getName());
+        dto.setStatus(project.getStatus() == null ? "DESIGNING" : project.getStatus());
+        dto.setCanManageStatus(accessService.canManageStatus(project, members));
         dto.setCustomerRequirements(project.getCustomerRequirements());
         dto.setRequirementsRevision(project.getRequirementsRevision());
         dto.setReferenceImages(readReferenceImages(project.getReferenceImages()));
@@ -603,6 +661,7 @@ public class OfficeProjectService {
         dto.setUsername(user != null ? user.getUsername() : "");
         dto.setDisplayName(user != null ? user.getDisplayName() : "");
         dto.setRole(member.getRole());
+        dto.setPermissions(OfficeProjectPermission.assigned(member.getPermissionFlags()));
         return dto;
     }
 

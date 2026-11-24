@@ -7,6 +7,7 @@ import com.rsdp.officeproduct.importer.dto.request.FloorPlanConfirmRequest;
 import com.rsdp.officeproduct.importer.entity.*;
 import com.rsdp.officeproduct.importer.mapper.*;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectService;
 import com.rsdp.officeproduct.importer.service.spatial.SpatialGeometryService;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +49,7 @@ class FloorPlanProgressPersistenceTest {
     @Test void authenticatedUploadRejectsMissingOrUnauthorizedFloorBeforeCreatingTask() {
         when(projectAccess.enforcementEnabled()).thenReturn(true);
         doThrow(new AccessDeniedException("无权访问该项目"))
-            .when(projectAccess).requireFloorAccess("OFFICE-PROJECT-001");
+            .when(projectAccess).requireFloorPermission("OFFICE-PROJECT-001", OfficeProjectPermission.EDIT);
         var image = new MockMultipartFile("image", "plan.png", "image/png", new byte[]{1});
 
         assertEquals("请先选择项目和楼层，再识别图纸", assertThrows(BusinessException.class,

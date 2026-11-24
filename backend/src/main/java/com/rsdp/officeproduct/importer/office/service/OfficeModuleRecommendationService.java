@@ -33,13 +33,22 @@ public class OfficeModuleRecommendationService {
         JsonNode array = json.valueToTree(canvas.getObjects());
         OfficeCanvasReviewPolicy.requireLayoutReady(array, request.getZoneId());
         List<JsonNode> objects = new ArrayList<>(); array.forEach(objects::add);
-        List<JsonNode> modules = objects.stream().filter(item -> "furniture".equals(item.path("kind").asText()) && request.getZoneId().equals(item.path("zoneId").asText())).toList();
-        Set<String> ids = new HashSet<>();
-        if (modules.isEmpty() || modules.stream().anyMatch(item -> !item.path("layoutConfirmed").asBoolean() || item.path("id").asText().isBlank() || !ids.add(item.path("id").asText()))) throw new BusinessException("请先确认当前空间的全部排版");
+        List<JsonNode> modules = confirmedModules(objects, request.getZoneId());
         JsonNode module = modules.stream().filter(item -> request.getModuleId().equals(item.path("id").asText())).findFirst().orElseThrow(() -> new BusinessException("当前空间不存在此单位模块"));
         if (OfficeProductMatching.positive(module.get("w")) == null || OfficeProductMatching.positive(module.get("h")) == null) throw new BusinessException("单位模块的毫米尺寸无效");
         List<JsonNode> same = modules.stream().filter(item -> sameModule(module, item)).toList();
         return new Context(canvas, objects, module, same);
+    }
+
+    private List<JsonNode> confirmedModules(List<JsonNode> objects, String zoneId) {
+        List<JsonNode> modules = objects.stream().filter(item -> "furniture".equals(item.path("kind").asText())
+            && zoneId.equals(item.path("zoneId").asText())).toList();
+        Set<String> ids = new HashSet<>();
+        if (modules.isEmpty() || modules.stream().anyMatch(item -> !item.path("layoutConfirmed").asBoolean()
+            || item.path("id").asText().isBlank() || !ids.add(item.path("id").asText()))) {
+            throw new BusinessException("请先确认当前空间的全部排版");
+        }
+        return modules;
     }
 
     private boolean sameModule(JsonNode a, JsonNode b) {
@@ -90,6 +99,9 @@ public class OfficeModuleRecommendationService {
     public ModuleRecommendationDto.Selection select(String projectId, ModuleRecommendationRequest request) {
         workspaceLocks.lockWorkspace(projectId);
         Context context = context(projectId, request);
+        if (!Objects.equals(context.canvas().getSchemeToken(), request.getSchemeToken())) {
+            throw new BusinessException("房间方案已变化，请刷新选品后重试");
+        }
         var result = recommendations(context, request);
         var match = result.getCandidates().stream().filter(candidate -> Objects.equals(candidate.getProduct().getId(), request.getProductId())).findFirst()
             .orElseThrow(() -> new BusinessException("商品已不可用，或品类、尺寸与当前模块不匹配，请重新选择"));
@@ -111,27 +123,153 @@ public class OfficeModuleRecommendationService {
         List<CartItemDto> lines = new ArrayList<>();
         String zoneName = context.objects().stream().filter(item -> request.getZoneId().equals(item.path("id").asText()) && "zone".equals(item.path("kind").asText())).findFirst().orElseThrow().path("name").asText();
         for (JsonNode target : targets) {
-            String lineId = "module-" + UUID.nameUUIDFromBytes((projectId + ":" + target.path("id").asText()).getBytes(StandardCharsets.UTF_8));
-            OfficeCart line = carts.selectById(lineId);
-            boolean exists = line != null;
-            if (!exists) { line = new OfficeCart(); line.setLineId(lineId); line.setCreatedAt(LocalDateTime.now()); }
-            line.setProjectId(projectId); line.setZoneId(request.getZoneId()); line.setZoneName(zoneName);
-            line.setProductId(match.getProduct().getId()); line.setQty(1); line.setUpdatedAt(LocalDateTime.now());
-            if (exists) carts.updateById(line); else carts.insert(line);
-            ObjectNode object = (ObjectNode) target;
-            object.put("productId", match.getProduct().getId());
-            ObjectNode selection = json.valueToTree(match);
-            selection.put("cartLineId", lineId); selection.put("sourceCanvasRevision", context.canvas().getRevision());
-            object.set("productSelection", selection);
-            CartItemDto dto = new CartItemDto(); dto.setLineId(lineId); dto.setProjectId(projectId); dto.setZoneId(request.getZoneId());
-            dto.setZoneName(zoneName); dto.setProductId(line.getProductId()); dto.setQty(1); lines.add(dto);
+            lines.add(bind(projectId, request.getZoneId(), zoneName, target, match, context.canvas().getRevision()));
         }
-        SaveCanvasRequest save = new SaveCanvasRequest();
-        save.setProjectId(projectId); save.setRevision(context.canvas().getRevision() + 1);
-        save.setMode(context.canvas().getMode()); save.setDesignZoneId(context.canvas().getDesignZoneId());
-        save.setObjects(new ArrayList<Object>(context.objects())); save.setFiles(context.canvas().getFiles()); save.setBlank(context.canvas().getBlank());
         ModuleRecommendationDto.Selection selection = new ModuleRecommendationDto.Selection();
-        selection.setCanvas(office.saveCanvas(save)); selection.setCartItems(lines); selection.setMatch(match);
+        selection.setCanvas(office.saveCanvas(nextCanvas(context.canvas(), context.objects())));
+        selection.setCartItems(lines); selection.setMatch(match);
         return selection;
+    }
+
+    @Transactional
+    public OfficeSchemeDtos.Result applyRoomProducts(String floorId, OfficeProductBundleDtos.Apply request) {
+        if (request == null || request.zoneId() == null || request.revision() == null) throw new BusinessException("请选择当前空间");
+        workspaceLocks.lockWorkspace(floorId);
+        CanvasDto canvas = office.getCanvas(floorId);
+        if (canvas == null || !Objects.equals(canvas.getRevision(), request.revision())
+            || !Objects.equals(canvas.getSchemeToken(), request.schemeToken())) throw new BusinessException("房间方案已变化，请刷新后重试");
+        JsonNode array = json.valueToTree(canvas.getObjects());
+        OfficeCanvasReviewPolicy.requireSpacesReviewConfirmed(array);
+        OfficeCanvasReviewPolicy.requireLayoutReady(array, request.zoneId());
+        List<JsonNode> objects = new ArrayList<>();
+        array.forEach(objects::add);
+        JsonNode zone = objects.stream().filter(item -> "zone".equals(item.path("kind").asText())
+            && request.zoneId().equals(item.path("id").asText())).findFirst().orElseThrow();
+        if ("DEMO".equals(zone.path("evidenceKind").asText())) throw new BusinessException("演示空间不能批量绑定正式商品");
+        List<JsonNode> available = confirmedModules(objects, request.zoneId()).stream()
+            .filter(item -> item.path("productId").asText().isBlank() && !item.hasNonNull("productSelection")).toList();
+        if (available.isEmpty()) throw new BusinessException("当前房间没有待选品家具");
+        var matches = request.automatic() ? automaticMatches(available) : explicitMatches(available, request.items());
+        for (var entry : matches.entrySet()) {
+            bind(floorId, request.zoneId(), zone.path("name").asText(), entry.getKey(), entry.getValue(), canvas.getRevision());
+        }
+        CanvasDto saved = office.replaceSchemeCanvas(nextCanvas(canvas, objects));
+        return new OfficeSchemeDtos.Result(saved, office.listCart(floorId), null);
+    }
+
+    private Map<JsonNode, ModuleRecommendationDto.Candidate> automaticMatches(List<JsonNode> modules) {
+        var catalog = office.listOfficeProducts();
+        Map<List<String>, Optional<OfficeProductDto>> current = new HashMap<>();
+        Map<JsonNode, ModuleRecommendationDto.Candidate> result = new LinkedHashMap<>();
+        for (JsonNode module : modules) {
+            var matches = catalog.stream().filter(product -> product.getRspuId() != null && product.getId() != null)
+                .map(product -> candidate(module, product)).filter(Objects::nonNull)
+                .sorted(Comparator.comparing(ModuleRecommendationDto.Candidate::getRelevanceScore).reversed()
+                    .thenComparing(match -> match.getProduct().getId())).toList();
+            for (var match : matches) {
+                var product = match.getProduct();
+                var live = current.computeIfAbsent(List.of(product.getRspuId(), product.getId()),
+                    key -> Optional.ofNullable(office.currentProductVariant(key.get(0), key.get(1))));
+                var verified = live.map(item -> candidate(module, item)).orElse(null);
+                if (verified != null) {
+                    result.put(module, verified);
+                    break;
+                }
+            }
+        }
+        if (result.isEmpty()) throw new BusinessException("没有找到规格匹配且已报价的商品");
+        return result;
+    }
+
+    private Map<JsonNode, ModuleRecommendationDto.Candidate> explicitMatches(List<JsonNode> modules, List<OfficeProductBundleDtos.Item> items) {
+        OfficeProductBundleService.validateItems(items, false);
+        if (items.stream().mapToInt(OfficeProductBundleDtos.Item::quantity).sum() > modules.size()) {
+            throw new BusinessException("组合商品数量超过当前房间的待选品家具数量");
+        }
+        List<List<ModuleRecommendationDto.Candidate>> choices = new ArrayList<>();
+        for (var item : items) {
+            var product = office.currentProductVariant(item.rspuId(), item.variantId());
+            if (product == null) throw new BusinessException("有商品变体已不可用，请调整后重试");
+            var candidates = modules.stream().map(module -> candidate(module, product)).toList();
+            for (int copy = 0; copy < item.quantity(); copy++) choices.add(candidates);
+        }
+        int[] owners = new int[modules.size()];
+        Arrays.fill(owners, -1);
+        for (int index = 0; index < choices.size(); index++) {
+            if (!assign(index, choices, owners, new boolean[owners.length])) throw new BusinessException("待选品家具的品类或尺寸无法容纳全部商品");
+        }
+        Map<JsonNode, ModuleRecommendationDto.Candidate> result = new LinkedHashMap<>();
+        for (int index = 0; index < owners.length; index++) {
+            if (owners[index] >= 0) result.put(modules.get(index), choices.get(owners[index]).get(index));
+        }
+        return result;
+    }
+
+    private boolean assign(int item, List<List<ModuleRecommendationDto.Candidate>> choices, int[] owners, boolean[] visited) {
+        for (int module = 0; module < owners.length; module++) {
+            if (visited[module] || choices.get(item).get(module) == null) continue;
+            visited[module] = true;
+            if (owners[module] < 0 || assign(owners[module], choices, owners, visited)) {
+                owners[module] = item;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ModuleRecommendationDto.Candidate candidate(JsonNode module, OfficeProductDto product) {
+        var target = OfficeFurnitureRelevance.target(module);
+        var width = OfficeProductMatching.positive(module.get("w"));
+        var depth = OfficeProductMatching.positive(module.get("h"));
+        if (target == null || width == null || depth == null || product.getPrice() == null || product.getPrice().signum() <= 0) return null;
+        var relevance = OfficeFurnitureRelevance.match(target, product);
+        var match = OfficeProductMatching.match(product, width, depth, true);
+        if (relevance == null || match == null) return null;
+        match.setMatchReason(relevance.reason());
+        match.setRelevanceScore(BigDecimal.valueOf(relevance.points()).add(match.getFitRatio().multiply(BigDecimal.valueOf(15))));
+        return match;
+    }
+
+    private CartItemDto bind(String projectId, String zoneId, String zoneName, JsonNode target, ModuleRecommendationDto.Candidate match, int revision) {
+        String lineId = "module-" + UUID.nameUUIDFromBytes((projectId + ":" + target.path("id").asText()).getBytes(StandardCharsets.UTF_8));
+        OfficeCart line = carts.selectById(lineId);
+        boolean exists = line != null;
+        if (!exists) {
+            line = new OfficeCart();
+            line.setLineId(lineId);
+            line.setCreatedAt(LocalDateTime.now());
+        } else if (!projectId.equals(line.getProjectId())) {
+            throw new BusinessException("选品清单行归属与当前楼层不一致");
+        }
+        line.setProjectId(projectId);
+        line.setZoneId(zoneId);
+        line.setZoneName(zoneName);
+        line.setProductId(match.getProduct().getId());
+        line.setQty(1);
+        line.setUpdatedAt(LocalDateTime.now());
+        if (exists) carts.updateById(line); else carts.insert(line);
+        ObjectNode object = (ObjectNode) target;
+        object.put("productId", match.getProduct().getId());
+        ObjectNode selection = json.valueToTree(match);
+        selection.put("cartLineId", lineId);
+        selection.put("sourceCanvasRevision", revision);
+        object.set("productSelection", selection);
+        CartItemDto dto = new CartItemDto();
+        dto.setLineId(lineId);
+        dto.setProjectId(projectId);
+        dto.setZoneId(zoneId);
+        dto.setZoneName(zoneName);
+        dto.setProductId(line.getProductId());
+        dto.setQty(1);
+        return dto;
+    }
+
+    private SaveCanvasRequest nextCanvas(CanvasDto canvas, List<JsonNode> objects) {
+        SaveCanvasRequest save = new SaveCanvasRequest();
+        save.setProjectId(canvas.getProjectId()); save.setRevision(canvas.getRevision() + 1);
+        save.setSchemeToken(canvas.getSchemeToken());
+        save.setMode(canvas.getMode()); save.setDesignZoneId(canvas.getDesignZoneId());
+        save.setObjects(new ArrayList<Object>(objects)); save.setFiles(canvas.getFiles()); save.setBlank(canvas.getBlank());
+        return save;
     }
 }

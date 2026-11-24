@@ -10,6 +10,7 @@ import com.rsdp.officeproduct.importer.entity.FloorPlanSceneRevision;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
 import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectAccessService;
+import com.rsdp.officeproduct.importer.office.service.OfficeProjectPermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -29,7 +30,7 @@ public class FloorPlanDimensionService {
     private final ObjectMapper json;
 
     public DimensionCalibrationReport recognize(String analysisId, int revision) {
-        FloorPlanSceneRevision scene = current(analysisId, revision);
+        FloorPlanSceneRevision scene = current(analysisId, revision, true);
         ObjectNode raw = raw(scene);
         requirePixelSource(raw);
         JsonNode preview = raw.path("preview");
@@ -37,7 +38,7 @@ public class FloorPlanDimensionService {
             preview.path("width").asInt(), preview.path("height").asInt(),
             raw.path("pageNumber").asInt(1), raw.path("pageCount").asInt(1), raw.path("imageSha256").asText(null));
         JsonNode result = qwen.recognizeDimensions(image);
-        current(analysisId, revision);
+        current(analysisId, revision, true);
         raw.set("dimensionModelOutput", result.path("dimensionModelOutput"));
         raw.set("dimensionOriginalModelOutput", result.path("dimensionOriginalModelOutput"));
         raw.set("dimensionCalibration", result.path("dimensionCalibration"));
@@ -50,11 +51,11 @@ public class FloorPlanDimensionService {
     }
 
     public DimensionCalibrationReport get(String analysisId, int revision, String assumedUnit) {
-        return report(raw(current(analysisId, revision)), analysisId, revision, assumedUnit);
+        return report(raw(current(analysisId, revision, false)), analysisId, revision, assumedUnit);
     }
 
     public DimensionCalibrationReport confirm(String analysisId, int revision, String reportId, String assumedUnit) {
-        FloorPlanSceneRevision scene = current(analysisId, revision);
+        FloorPlanSceneRevision scene = current(analysisId, revision, true);
         ObjectNode raw = raw(scene);
         requirePixelSource(raw);
         DimensionCalibrationReport report = report(raw, analysisId, revision, assumedUnit);
@@ -64,7 +65,7 @@ public class FloorPlanDimensionService {
         ObjectNode confirmation = raw.putObject("dimensionCalibrationConfirmation");
         confirmation.put("reportId", reportId).put("assumedUnit", assumedUnit).put("imageSha256", report.getImageSha256())
             .put("mmPerPixel", report.getMmPerPixel()).put("confirmationId", "DCAL-" + UUID.randomUUID()).put("confirmedAt", Instant.now().toString());
-        current(analysisId, revision);
+        current(analysisId, revision, true);
         persist(scene, raw);
         return report(raw, analysisId, revision, assumedUnit);
     }
@@ -75,10 +76,11 @@ public class FloorPlanDimensionService {
         }
     }
 
-    private FloorPlanSceneRevision current(String id, int revision) {
+    private FloorPlanSceneRevision current(String id, int revision, boolean edit) {
         FloorPlanAnalysis analysis = analysisMapper.selectById(id);
         if (analysis == null) throw new BusinessException("分析批次不存在");
-        projectAccess.requireFloorAccess(analysis.getProjectId());
+        if (edit) projectAccess.requireFloorPermission(analysis.getProjectId(), OfficeProjectPermission.EDIT);
+        else projectAccess.requireFloorAccess(analysis.getProjectId());
         if (FloorPlanAnalysis.STATUS_ANALYZING.equals(analysis.getStatus())) throw new BusinessException("空间识别尚未完成，请稍后校准尺寸");
         if ("cad".equals(analysis.getInputMode())) throw new BusinessException("CAD 请使用文件单位与已有比例校准，图片尺寸自动读取仅支持 PNG/JPG/PDF");
         int active = analysis.getWorkingAnalysisRevision() != null ? analysis.getWorkingAnalysisRevision()

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { authEnabled } from '~/composables/useAuth'
 import { workspaceOwnerLabel } from '~/utils/workspaceType'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 
 const auth = useAuth()
 const { user } = auth
@@ -25,6 +26,8 @@ let favoriteLoading = false
 let sidebarObserver: ResizeObserver | null = null
 
 const showDealerEntries = computed(() => !authEnabled || user.value?.role === 'DEALER')
+const showQuoteEntry = computed(() => showDealerEntries.value || workspace.projects.some(project =>
+  projectPermissionsFor(project, user.value?.userId).includes('QUOTE_READ')))
 const displayName = computed(() => user.value?.displayName || user.value?.username || (authEnabled ? '' : '本地开发'))
 const roleLabel = computed(() => {
   const account = user.value
@@ -36,7 +39,7 @@ const roleLabel = computed(() => {
   const project = workspace.currentProject
   if (project?.leader?.userId === account.userId) return '项目负责人'
   if (project?.collaborators.some(member => member.userId === account.userId)) return '项目协作者'
-  return workspace.projects.length ? '普通账号' : '设计师'
+  return ''
 })
 const avatarChar = computed(() => (displayName.value.trim()[0] || '').toUpperCase())
 const quoteProject = computed(() => workspace.currentProject || workspace.projects[0] || null)
@@ -229,7 +232,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="root"
-    class="relative flex items-center gap-2 border-t border-line px-1 py-3 text-sm text-[#615b55]"
+    class="relative flex items-center gap-2 border-t border-line px-1 py-3 text-sm text-muted"
     data-testid="user-session"
     @pointerenter="handlePointerEnter"
     @pointerleave="handlePointerLeave"
@@ -245,7 +248,7 @@ onBeforeUnmount(() => {
       data-testid="workspace-center-trigger"
       @click="togglePanel"
     >
-      <span v-if="avatarChar" class="grid h-8 w-8 flex-none place-items-center rounded-full bg-[#e8ddd0] text-xs font-semibold text-[#886a4a]" aria-hidden="true">{{ avatarChar }}</span>
+      <span v-if="avatarChar" class="grid h-8 w-8 flex-none place-items-center rounded-full bg-accent-tint text-xs font-semibold text-accent-ink" aria-hidden="true">{{ avatarChar }}</span>
       <span class="min-w-0 flex-1">
         <span class="block truncate text-xs">{{ displayName }}</span>
         <span v-if="roleLabel" class="mt-0.5 block text-[10px] text-muted" data-testid="user-session-role">{{ roleLabel }}</span>
@@ -266,12 +269,12 @@ onBeforeUnmount(() => {
         @mouseenter="clearCloseTimer"
         @pointerleave="handlePointerLeave"
       >
-        <aside class="bg-[#fbfaf8] p-2.5">
+        <aside class="bg-bg p-2.5">
           <div class="px-2.5 pb-2 pt-1 text-[10px] tracking-[0.12em] text-muted">工作区中心</div>
           <NuxtLink
             to="/favorites"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
-            :class="route.path === '/favorites' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"
+            :class="route.path === '/favorites' ? 'bg-accent-tint font-semibold text-bronze-dark' : 'text-muted hover:bg-accent-tint'"
             @click="closePanel()"
           >
             <AppIcon name="heartSolid" size="4" />
@@ -279,10 +282,10 @@ onBeforeUnmount(() => {
             <span v-if="favoriteCount" class="ml-auto rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-medium text-bronze-dark">{{ favoriteCount }}</span>
           </NuxtLink>
           <NuxtLink
-            v-if="showDealerEntries"
+            v-if="showQuoteEntry"
             to="/workspace/quotes"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
-            :class="route.path === '/workspace/quotes' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"
+            :class="route.path === '/workspace/quotes' ? 'bg-accent-tint font-semibold text-bronze-dark' : 'text-muted hover:bg-accent-tint'"
             @click="closePanel()"
           >
             <AppIcon name="documentText" size="4" />
@@ -293,7 +296,7 @@ onBeforeUnmount(() => {
             v-if="showDealerEntries"
             to="/workspace/users"
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition"
-            :class="route.path === '/workspace/users' ? 'bg-[#f1e7db] font-semibold text-bronze-dark' : 'text-[#615b55] hover:bg-[#f5efe8]'"
+            :class="route.path === '/workspace/users' ? 'bg-accent-tint font-semibold text-bronze-dark' : 'text-muted hover:bg-accent-tint'"
             @click="closePanel()"
           >
             <AppIcon name="user" size="4" />

@@ -12,6 +12,7 @@ public class RenderPreview {
     private String zoneName;
     private Integer canvasRevision;
     private String purpose = "CONCEPT_PREVIEW";
+    private String confirmationId;
     private String model;
     private String style;
     private String view;
