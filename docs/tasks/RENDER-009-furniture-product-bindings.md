@@ -1,8 +1,8 @@
 # RENDER-009 家具与商品参考绑定
 
-状态：已编码并完成本地模拟验证，真实模型视觉验收待执行  
-更新日期：2026-11-20  
-基线/交付版本：`fix/render-furniture-product-binding` 工作区  
+状态：已编码并完成本地模拟验证，真实模型视觉验收待执行
+更新日期：2026-11-20
+基线/交付版本：`fix/render-furniture-product-binding` 工作区
 关联：RENDER-003 商品图片、RENDER-004 多视角与空间引导、RENDER-005 实际空间约束、RENDER-006 白模入口
 
 ## 目标与范围
