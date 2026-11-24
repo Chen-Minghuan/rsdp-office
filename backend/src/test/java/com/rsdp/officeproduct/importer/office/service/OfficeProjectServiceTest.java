@@ -201,46 +201,79 @@ class OfficeProjectServiceTest {
         verifyNoInteractions(catalogGateway);
     }
 
-    @Test void classifiesProjectsByConfirmedQuotationLinesAcrossAllFloors() {
-        var designing = service.createProject(request("设计中", List.of("一层", "二层")));
-        var confirmedEmpty = service.createProject(request("确认无明细", List.of("一层")));
+    @Test void marksDeliveringOnlyWhenEveryFloorCartMatchesConfirmedSnapshot() {
         var delivering = service.createProject(request("交付中", List.of("一层", "二层")));
-        var partial = service.createProject(request("部分明细", List.of("一层", "二层")));
-        quotation("Q-D", designing.getProjectId(), "SUPERSEDED");
-        quotation("Q-E", confirmedEmpty.getProjectId(), "CONFIRMED");
+        var changed = service.createProject(request("购物车已改", List.of("一层")));
+        var unpriced = service.createProject(request("商品下架", List.of("一层")));
+        var noQuotation = service.createProject(request("无报价", List.of("一层")));
+        var noCart = service.createProject(request("空购物车", List.of("一层")));
         quotation("Q-L", delivering.getProjectId(), "CONFIRMED");
-        quotation("Q-P", partial.getProjectId(), "CONFIRMED");
-        quotationLines.add(line("Q-D", "OLD-FLOOR-1"));
-        quotationLines.add(line("Q-D", "OLD-FLOOR-2"));
-        quotationLines.add(line("Q-L", delivering.getFloors().get(0).getFloorId()));
-        quotationLines.add(line("Q-L", delivering.getFloors().get(0).getFloorId()));
-        quotationLines.add(line("Q-L", delivering.getFloors().get(1).getFloorId()));
-        quotationLines.add(line("Q-P", partial.getFloors().get(0).getFloorId()));
+        quotation("Q-C", changed.getProjectId(), "CONFIRMED");
+        quotation("Q-U", unpriced.getProjectId(), "CONFIRMED");
+        quotation("Q-N", noCart.getProjectId(), "CONFIRMED");
+
+        String deliveringFloorA = delivering.getFloors().get(0).getFloorId();
+        String deliveringFloorB = delivering.getFloors().get(1).getFloorId();
+        quotationLines.add(line("Q-L", deliveringFloorA, "ZONE-A", "P-1", 2, "100"));
+        quotationLines.add(line("Q-L", deliveringFloorB, null, "P-2", 1, "50"));
+        cartLines.add(cart(deliveringFloorA, "ZONE-A", "P-1", 2));
+        cartLines.add(cart(deliveringFloorB, null, "P-2", 1));
+
+        String changedFloor = changed.getFloors().get(0).getFloorId();
+        quotationLines.add(line("Q-C", changedFloor, "ZONE-A", "P-1", 2, "100"));
+        cartLines.add(cart(changedFloor, "ZONE-A", "P-1", 3));
+
+        String unpricedFloor = unpriced.getFloors().get(0).getFloorId();
+        quotationLines.add(line("Q-U", unpricedFloor, "ZONE-A", "P-9", 1, "100"));
+        cartLines.add(cart(unpricedFloor, "ZONE-A", "P-9", 1));
+
+        String noCartFloor = noCart.getFloors().get(0).getFloorId();
+        quotationLines.add(line("Q-N", noCartFloor, "ZONE-A", "P-1", 1, "100"));
+
+        when(catalogGateway.listOfficeProducts("full")).thenReturn(List.of(
+            product("P-1", "100"), product("P-2", "50")));
 
         var result = service.listProjects();
 
-        assertEquals("DESIGNING", project(result, designing.getProjectId()).getStage());
-        assertEquals("DESIGNING", project(result, confirmedEmpty.getProjectId()).getStage());
-        assertEquals("DELIVERING", project(result, delivering.getProjectId()).getStage());
-        assertEquals("DESIGNING", project(result, partial.getProjectId()).getStage());
+        var deliveringDto = project(result, delivering.getProjectId());
+        assertEquals("DELIVERING", deliveringDto.getStage());
+        assertTrue(deliveringDto.getFloors().stream().allMatch(floor -> Boolean.TRUE.equals(floor.getProposalConfirmed())));
+        assertEquals("DESIGNING", project(result, changed.getProjectId()).getStage());
+        assertEquals("DESIGNING", project(result, unpriced.getProjectId()).getStage());
+        assertEquals("DESIGNING", project(result, noQuotation.getProjectId()).getStage());
+        assertEquals("DESIGNING", project(result, noCart.getProjectId()).getStage());
+        assertFalse(project(result, changed.getProjectId()).getFloors().get(0).getProposalConfirmed());
     }
 
-    @Test void ignoresQuotationLinesReferencingForeignOrRemovedFloors() {
-        var foreign = service.createProject(request("外来楼层", List.of("一层", "二层")));
-        var removed = service.createProject(request("含已删楼层", List.of("一层", "二层")));
-        quotation("Q-F", foreign.getProjectId(), "CONFIRMED");
-        quotation("Q-R", removed.getProjectId(), "CONFIRMED");
-        quotationLines.add(line("Q-F", "EXTERNAL-FLOOR-1"));
-        quotationLines.add(line("Q-F", "EXTERNAL-FLOOR-1"));
-        quotationLines.add(line("Q-F", "EXTERNAL-FLOOR-2"));
-        quotationLines.add(line("Q-R", removed.getFloors().get(0).getFloorId()));
-        quotationLines.add(line("Q-R", removed.getFloors().get(1).getFloorId()));
-        quotationLines.add(line("Q-R", "REMOVED-FLOOR"));
+    @Test void marksDesigningWhenCatalogUnavailableForStageCheck() {
+        var created = service.createProject(request("目录不可用", List.of("一层")));
+        String floorId = created.getFloors().get(0).getFloorId();
+        quotation("Q-X", created.getProjectId(), "CONFIRMED");
+        quotationLines.add(line("Q-X", floorId, "ZONE-A", "P-1", 1, "100"));
+        cartLines.add(cart(floorId, "ZONE-A", "P-1", 1));
+        when(catalogGateway.listOfficeProducts("full")).thenThrow(new BusinessException("商品目录不可用"));
 
-        var result = service.listProjects();
+        var project = project(service.listProjects(), created.getProjectId());
 
-        assertEquals("DESIGNING", project(result, foreign.getProjectId()).getStage());
-        assertEquals("DELIVERING", project(result, removed.getProjectId()).getStage());
+        assertEquals("DESIGNING", project.getStage());
+        assertFalse(project.getFloors().get(0).getProposalConfirmed());
+    }
+
+    @Test void matchesSnapshotUsingLatestConfirmedQuotationOnly() {
+        var project = service.createProject(request("多版本", List.of("一层")));
+        String floorId = project.getFloors().get(0).getFloorId();
+        var old = quotation("Q-OLD", project.getProjectId(), "SUPERSEDED");
+        old.setRevision(1);
+        var latest = quotation("Q-NEW", project.getProjectId(), "CONFIRMED");
+        latest.setRevision(2);
+        quotationLines.add(line("Q-OLD", floorId, "ZONE-A", "P-1", 9, "10"));
+        quotationLines.add(line("Q-NEW", floorId, "ZONE-A", "P-1", 1, "100"));
+        cartLines.add(cart(floorId, "ZONE-A", "P-1", 1));
+        when(catalogGateway.listOfficeProducts("full")).thenReturn(List.of(product("P-1", "100")));
+
+        var dto = project(service.listProjects(), project.getProjectId());
+
+        assertEquals("DELIVERING", dto.getStage());
     }
 
     private OfficeQuotation quotation(String id, String projectId, String status) {
@@ -257,6 +290,15 @@ class OfficeProjectServiceTest {
         var line = new OfficeQuotationLine();
         line.setQuotationId(quotationId);
         line.setFloorId(floorId);
+        return line;
+    }
+
+    private OfficeQuotationLine line(String quotationId, String floorId, String zoneId, String productId, int qty, String unitPrice) {
+        var line = line(quotationId, floorId);
+        line.setZoneId(zoneId);
+        line.setProductId(productId);
+        line.setQty(qty);
+        line.setUnitPrice(new BigDecimal(unitPrice));
         return line;
     }
 
@@ -582,6 +624,12 @@ class OfficeProjectServiceTest {
         cart.setProjectId(floorId);
         cart.setProductId(productId);
         cart.setQty(qty);
+        return cart;
+    }
+
+    private OfficeCart cart(String floorId, String zoneId, String productId, int qty) {
+        var cart = cart(floorId, productId, qty);
+        cart.setZoneId(zoneId);
         return cart;
     }
 

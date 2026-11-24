@@ -115,6 +115,10 @@ function statusFor(zone: ZoneObject | null, preview = false): ProposalSpace['sta
 }
 
 function floorLabel() {
+  const floorName = workspace.currentFloor?.floorName || ''
+  const floorMatch = floorName.match(/^\s*(B)?\s*(\d{1,3})\s*(?:F|楼层|层|楼)\s*$/i)
+  if (floorMatch) return `${floorMatch[1] ? 'B' : ''}${floorMatch[2]}楼`
+  if (floorName) return floorName
   const source = store.drawingName || ''
   const match = source.match(/(?:^|[\s_-])(\d{1,3})\s*(?:F|楼层|楼)(?:$|[\s_-])/i)
   return match ? `${match[1]}楼` : '1楼'

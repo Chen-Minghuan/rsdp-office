@@ -18,7 +18,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return response.data
 }
 
-type FloorDto = Omit<WorkspaceFloor, 'floorName'> & { name: string }
+type FloorDto = Omit<WorkspaceFloor, 'floorName'> & { name: string; proposalConfirmed?: boolean }
 type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors' | 'budgetTotal' | 'budgetStatus' | 'stage'> & {
   name: string
   floors: FloorDto[]
@@ -28,7 +28,7 @@ type ProjectDto = Omit<WorkspaceProject, 'projectName' | 'floors' | 'budgetTotal
 }
 
 function floorFromDto(dto: FloorDto): WorkspaceFloor {
-  return { ...dto, floorName: dto.name }
+  return { ...dto, floorName: dto.name, proposalConfirmed: dto.proposalConfirmed ?? false }
 }
 
 function projectFromDto(dto: ProjectDto): WorkspaceProject {

@@ -40,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -94,7 +95,7 @@ public class OfficeProjectService {
         Map<String, List<OfficeProjectMember>> membersByProject = membersByProject(projectIds);
         Map<String, OfficeUser> usersById = usersById(membersByProject);
         Map<String, ProjectBudget> budgetsByProject = budgetsByProject(projectIds, floors);
-        Map<String, String> stagesByProject = stagesByProject(projectIds, floors);
+        Map<String, Map<String, Boolean>> floorConfirmation = floorConfirmationByProject(projectIds, floors);
         return projects.stream()
             .map(project -> {
                 OfficeProjectDto dto = toProjectDto(project,
@@ -104,52 +105,163 @@ public class OfficeProjectService {
                 ProjectBudget budget = budgetsByProject.getOrDefault(project.getProjectId(), ProjectBudget.complete());
                 dto.setBudgetTotal(budget.total());
                 dto.setBudgetStatus(budget.status());
-                dto.setStage(stagesByProject.getOrDefault(project.getProjectId(), "DESIGNING"));
+                Map<String, Boolean> confirmedByFloor = floorConfirmation.getOrDefault(project.getProjectId(), Map.of());
+                List<OfficeDesignFloor> projectFloors = floorsByProject.getOrDefault(project.getProjectId(), List.of());
+                dto.getFloors().forEach(floor -> floor.setProposalConfirmed(
+                    confirmedByFloor.getOrDefault(floor.getFloorId(), false)));
+                boolean delivering = !projectFloors.isEmpty()
+                    && projectFloors.stream().allMatch(floor -> confirmedByFloor.getOrDefault(floor.getFloorId(), false));
+                dto.setStage(delivering ? "DELIVERING" : "DESIGNING");
                 return dto;
             })
             .toList();
     }
 
-    private Map<String, String> stagesByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {
-        Map<String, String> stages = projectIds.stream()
-            .collect(Collectors.toMap(Function.identity(), ignored -> "DESIGNING"));
-        if (projectIds.isEmpty()) {
-            return stages;
-        }
-        Map<String, Set<String>> realFloorIdsByProject = floors.stream()
+    /**
+     * 逐楼层判定方案是否仍处于已确认状态，口径与方案页「确认方案」按钮一致：
+     * 当前购物车明细（按 productId × zoneId × unitPrice 展开）必须与最新已确认快照
+     * 中该楼层的行严格一致。商品目录不可用时一律按未确认处理，不阻断列表返回。
+     */
+    private Map<String, Map<String, Boolean>> floorConfirmationByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {
+        Map<String, Map<String, Boolean>> result = new HashMap<>();
+        Map<String, List<OfficeDesignFloor>> floorsByProject = floors.stream()
             .filter(floor -> StringUtils.hasText(floor.getFloorId()))
-            .collect(Collectors.groupingBy(OfficeDesignFloor::getProjectId,
-                Collectors.mapping(OfficeDesignFloor::getFloorId, Collectors.toSet())));
+            .collect(Collectors.groupingBy(OfficeDesignFloor::getProjectId));
+        for (String projectId : projectIds) {
+            Map<String, Boolean> confirmed = new HashMap<>();
+            for (OfficeDesignFloor floor : floorsByProject.getOrDefault(projectId, List.of())) {
+                confirmed.put(floor.getFloorId(), false);
+            }
+            result.put(projectId, confirmed);
+        }
+        if (projectIds.isEmpty()) {
+            return result;
+        }
 
         List<OfficeQuotation> confirmed = quotationMapper.selectList(new QueryWrapper<OfficeQuotation>()
             .in("project_id", projectIds).eq("status", "CONFIRMED")
             .orderByDesc("revision").orderByDesc("created_at"));
-        Map<String, OfficeQuotation> quotationByProject = confirmed.stream()
-            .collect(Collectors.toMap(OfficeQuotation::getProjectId, Function.identity(), (first, ignored) -> first));
+        Map<String, OfficeQuotation> quotationByProject = new HashMap<>();
+        for (OfficeQuotation quotation : confirmed) {
+            quotationByProject.merge(quotation.getProjectId(), quotation, (current, candidate) -> {
+                int currentRevision = current.getRevision() == null ? 0 : current.getRevision();
+                int candidateRevision = candidate.getRevision() == null ? 0 : candidate.getRevision();
+                if (candidateRevision != currentRevision) {
+                    return candidateRevision > currentRevision ? candidate : current;
+                }
+                java.time.LocalDateTime currentAt = current.getCreatedAt();
+                java.time.LocalDateTime candidateAt = candidate.getCreatedAt();
+                if (candidateAt == null) {
+                    return current;
+                }
+                if (currentAt == null || candidateAt.isAfter(currentAt)) {
+                    return candidate;
+                }
+                return current;
+            });
+        }
         if (quotationByProject.isEmpty()) {
-            return stages;
+            return result;
         }
 
-        Map<String, Set<String>> floorsByQuotation = new HashMap<>();
+        Map<String, List<OfficeQuotationLine>> linesByQuotation = new HashMap<>();
         List<String> quotationIds = quotationByProject.values().stream()
             .map(OfficeQuotation::getQuotationId).filter(StringUtils::hasText).toList();
         if (!quotationIds.isEmpty()) {
             for (OfficeQuotationLine line : quotationLineMapper.findByQuotationIds(quotationIds)) {
-                if (StringUtils.hasText(line.getFloorId())) {
-                    floorsByQuotation.computeIfAbsent(line.getQuotationId(), ignored -> new HashSet<>()).add(line.getFloorId());
-                }
+                linesByQuotation.computeIfAbsent(line.getQuotationId(), ignored -> new ArrayList<>()).add(line);
             }
         }
+
+        // office_cart.project_id 实际存放楼层 ID（见 budgetsByProject），按楼层集合查询。
+        List<String> floorIds = floors.stream().map(OfficeDesignFloor::getFloorId).filter(StringUtils::hasText).toList();
+        if (floorIds.isEmpty()) {
+            return result;
+        }
+        List<OfficeCart> carts = cartMapper.selectList(new QueryWrapper<OfficeCart>().in("project_id", floorIds));
+        Map<String, List<OfficeCart>> cartsByFloor = carts.stream()
+            .filter(cart -> StringUtils.hasText(cart.getProjectId()))
+            .collect(Collectors.groupingBy(OfficeCart::getProjectId));
+
+        Map<String, BigDecimal> currentPriceByProduct;
+        try {
+            currentPriceByProduct = new HashMap<>();
+            for (OfficeProductDto product : catalogGateway.listOfficeProducts(sharedCatalogService.resolveViewMode())) {
+                if (StringUtils.hasText(product.getId()) && product.getPrice() != null
+                    && product.getPrice().compareTo(BigDecimal.ZERO) > 0) {
+                    currentPriceByProduct.put(product.getId(), product.getPrice());
+                }
+            }
+        } catch (RuntimeException catalogUnavailable) {
+            log.warn("项目列表方案确认状态读取商品目录失败，全部按设计中处理: {}", catalogUnavailable.getMessage());
+            return result;
+        }
+
         for (Map.Entry<String, OfficeQuotation> entry : quotationByProject.entrySet()) {
             String projectId = entry.getKey();
             OfficeQuotation quotation = entry.getValue();
-            Set<String> realFloorIds = realFloorIdsByProject.getOrDefault(projectId, Set.of());
-            Set<String> quotedFloors = floorsByQuotation.getOrDefault(quotation.getQuotationId(), Set.of());
-            if (!realFloorIds.isEmpty() && quotedFloors.containsAll(realFloorIds)) {
-                stages.put(projectId, "DELIVERING");
+            if (!StringUtils.hasText(quotation.getQuotationId())) {
+                continue;
+            }
+            List<OfficeQuotationLine> lines = linesByQuotation.getOrDefault(quotation.getQuotationId(), List.of());
+            Map<String, List<OfficeQuotationLine>> linesByFloor = lines.stream()
+                .filter(line -> StringUtils.hasText(line.getFloorId()))
+                .collect(Collectors.groupingBy(OfficeQuotationLine::getFloorId));
+            Map<String, Boolean> floorStates = result.get(projectId);
+            if (floorStates == null) {
+                continue;
+            }
+            for (String floorId : floorStates.keySet()) {
+                List<OfficeQuotationLine> floorLines = linesByFloor.getOrDefault(floorId, List.of());
+                if (floorLines.isEmpty()) {
+                    continue;
+                }
+                Map<String, Integer> expected = expandQuotationLines(floorLines);
+                if (expected.isEmpty()) {
+                    continue;
+                }
+                List<OfficeCart> floorCarts = cartsByFloor.getOrDefault(floorId, List.of());
+                Map<String, Integer> actual = expandCartLines(floorCarts, currentPriceByProduct);
+                if (actual != null && expected.equals(actual)) {
+                    floorStates.put(floorId, true);
+                }
             }
         }
-        return stages;
+        return result;
+    }
+
+    private Map<String, Integer> expandQuotationLines(List<OfficeQuotationLine> lines) {
+        Map<String, Integer> counts = new HashMap<>();
+        for (OfficeQuotationLine line : lines) {
+            String key = proposalLineKey(line.getProductId(), line.getZoneId(), line.getUnitPrice());
+            int qty = line.getQty() == null ? 0 : Math.max(line.getQty(), 0);
+            counts.merge(key, qty, Integer::sum);
+        }
+        return counts;
+    }
+
+    private Map<String, Integer> expandCartLines(List<OfficeCart> carts, Map<String, BigDecimal> currentPriceByProduct) {
+        Map<String, Integer> counts = new HashMap<>();
+        for (OfficeCart cart : carts) {
+            BigDecimal price = currentPriceByProduct.get(cart.getProductId());
+            if (price == null) {
+                return null;
+            }
+            String key = proposalLineKey(cart.getProductId(), cart.getZoneId(), price);
+            int qty = cart.getQty() == null ? 0 : Math.max(cart.getQty(), 0);
+            counts.merge(key, qty, Integer::sum);
+        }
+        return counts;
+    }
+
+    /** 与前端 expandProposalLines 一致：unitPrice 为空按空串，否则按数值字符串（保留两位有效精度）。 */
+    private String proposalLineKey(String productId, String zoneId, BigDecimal unitPrice) {
+        String pricePart = "";
+        if (unitPrice != null) {
+            BigDecimal normalized = unitPrice.setScale(2, RoundingMode.HALF_UP).stripTrailingZeros();
+            pricePart = normalized.toPlainString();
+        }
+        return (productId == null ? "" : productId) + "|" + (zoneId == null ? "" : zoneId) + "|" + pricePart;
     }
 
     private Map<String, ProjectBudget> budgetsByProject(List<String> projectIds, List<OfficeDesignFloor> floors) {

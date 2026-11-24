@@ -1,5 +1,7 @@
 # 开发进度与下一步
 
+2026-11-24 项目工作台「设计中/交付中」改为按楼层方案确认状态判定：`OfficeProjectService` 不再仅凭最新已确认报价单覆盖楼层数标记 `DELIVERING`，而是逐楼层比对当前购物车明细（productId × zoneId × unitPrice 展开，价格取当前商品目录价）与最新已确认快照，全部楼层严格一致才为交付中；任一楼层改动、商品下架/改价或无报价均回到设计中。楼层 DTO 新增 `proposalConfirmed` 供前端逐层读取。修复查询购物车时发现 `office_cart.project_id` 存放楼层 ID，按楼层集合查询。`OfficeProjectServiceTest` 重写 stage 分类用例并补充目录不可用、多版本快照场景；`mvn -f backend/pom.xml test`（JDK 21）346 项、0 失败、4 跳过；`pnpm build` 通过。未运行 e2e，未部署。
+
 2026-11-23 [FLOW-003](tasks/FLOW-003-proposal-confirmation-workbench.md#2026-11-23-多楼层方案确认状态隔离) 修复同项目跨楼层确认互相覆盖：方案页改用 `FLOOR` 范围确认，后端在新的项目报价版本中仅替换当前楼层行并复制其他楼层已确认快照，保留旧商品/价格/图片/异常信息及既有项目级费用和定价口径。一楼确认 → 二楼确认 → 返回一楼的 Playwright 回归、前端构建和模拟工作流通过；后端回归已补充，但本机仅 Java 17、项目要求 Java 21，`mvn -f backend/pom.xml test` 在编译阶段阻塞，未声称后端测试通过。
 
 2026-11-23 修复 Java 回归中 3 项预算测试失败：`OfficeProjectService` 新增报价 Mapper 依赖后，`OfficeProjectServiceTest.budgetService()` 仍反射查找旧 10 参构造器触发 `NoSuchMethodException`。删除该反射辅助方法，三处调用改用 `setup()` 已注入完整依赖的 `service`。使用 `E:\software\jdk21\jdk-21` 运行 `mvn -f backend/pom.xml test`：304 项、0 失败、0 错误、3 跳过。此前 FLOW-003 记录的「本机无 Java 21 编译阻塞」已通过该 JDK 解除。

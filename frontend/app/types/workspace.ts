@@ -3,6 +3,8 @@ export interface WorkspaceFloor {
   projectId: string
   floorName: string
   sortOrder: number
+  /** 当前购物车方案是否与最新已确认快照一致，由项目列表接口返回。 */
+  proposalConfirmed?: boolean
 }
 
 export interface WorkspaceMember {
