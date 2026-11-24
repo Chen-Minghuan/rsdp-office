@@ -81,6 +81,8 @@ create table if not exists image_assets (
 create table if not exists office_design_project (
     project_id varchar(64) primary key,
     name varchar(200) not null,
+    status varchar(20) not null default 'DESIGNING'
+        constraint ck_office_project_status check (status in ('DESIGNING', 'DELIVERING', 'COMPLETED')),
     customer_requirements text not null default '',
     requirements_revision integer not null default 1,
     requirements_summary jsonb,

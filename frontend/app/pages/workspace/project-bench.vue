@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { projectBenchPath, projectOverviewRoute } from '~/utils/projectBenchRoutes'
 
+import { projectStatusOptions, type ProjectStatusFilter } from '~/utils/projectStatus'
+
 const workspace = useWorkspaceStore()
 const { canCreateProject } = useAuth()
 const { isProjectDrawing, isProjectOverview } = useWorkspaceNavigation()
 const showCreate = ref(false)
+const activeStatus = ref<ProjectStatusFilter>('ALL')
+const statusCards = computed(() => [
+  { value: 'ALL' as const, label: '全部项目', count: workspace.projects.length },
+  ...projectStatusOptions.map(option => ({ ...option, count: workspace.projects.filter(project => project.status === option.value).length })),
+])
 </script>
 
 <template>
@@ -18,12 +25,21 @@ const showCreate = ref(false)
       </div>
     </header>
 
+    <section v-if="!isProjectDrawing && !isProjectOverview" class="grid flex-none grid-cols-2 gap-3 md:grid-cols-4" aria-label="项目阶段筛选">
+      <button v-for="card in statusCards" :key="card.value" type="button" class="border p-4 text-left transition focus-visible:outline-accent sm:p-5"
+        :class="activeStatus === card.value ? 'border-accent bg-accent-tint text-accent-ink' : 'border-line bg-white hover:border-accent-line'"
+        :aria-pressed="activeStatus === card.value" @click="activeStatus = card.value">
+        <span class="block text-sm">{{ card.label }}</span>
+        <span class="mt-2 block text-3xl font-bold tabular-nums">{{ workspace.initialized && !workspace.error ? card.count : '—' }}</span>
+      </button>
+    </section>
+
     <ProjectEmptyState v-if="!workspace.projects.length" />
     <div v-else-if="isProjectDrawing && workspace.currentFloorId" class="min-h-0 flex-1">
       <ProjectDrawingRecognition :key="workspace.currentFloorId" />
     </div>
     <ProjectBenchOverview v-else-if="isProjectOverview && workspace.currentProject && workspace.currentFloorId" :project="workspace.currentProject" :floor-id="workspace.currentFloorId" />
-    <ProjectBenchList v-else />
+    <ProjectBenchList v-else :status-filter="activeStatus" />
 
     <ProjectCreateDialog v-if="showCreate && canCreateProject" @close="showCreate = false" />
   </div>

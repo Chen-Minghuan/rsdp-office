@@ -204,6 +204,7 @@ public class OfficeProjectService {
         OfficeDesignProject project = new OfficeDesignProject();
         project.setProjectId(IdGenerator.spatialId("OPRJ"));
         project.setName(projectName);
+        project.setStatus("DESIGNING");
         project.setCustomerRequirements(request.getCustomerRequirements() == null ? "" : request.getCustomerRequirements());
         project.setRequirementsRevision(1);
         project.setWorkspaceId(workspaceId);
@@ -255,6 +256,20 @@ public class OfficeProjectService {
         project.setUpdatedAt(LocalDateTime.now());
         projectMapper.updateById(project);
         return toProjectDto(project, floors(projectId), members(projectId), usersById(members(projectId)));
+    }
+
+    @Transactional
+    public String updateStatus(String projectId, String status) {
+        accessService.requireStatusManager(projectId);
+        requireProject(projectId);
+        if (status == null || !Set.of("DESIGNING", "DELIVERING", "COMPLETED").contains(status)) {
+            throw new BusinessException("项目阶段必须为设计中、交付中或已完成");
+        }
+        if (projectMapper.updateStatus(projectId, status, LocalDateTime.now()) != 1) {
+            throw new BusinessException("项目不存在，请刷新项目列表");
+        }
+        auditService.record("PROJECT_STATUS_CHANGED", "PROJECT", projectId, "status=" + status);
+        return status;
     }
 
     @Transactional
@@ -595,6 +610,8 @@ public class OfficeProjectService {
         OfficeProjectDto dto = new OfficeProjectDto();
         dto.setProjectId(project.getProjectId());
         dto.setName(project.getName());
+        dto.setStatus(project.getStatus() == null ? "DESIGNING" : project.getStatus());
+        dto.setCanManageStatus(accessService.canManageStatus(project, members));
         dto.setCustomerRequirements(project.getCustomerRequirements());
         dto.setRequirementsRevision(project.getRequirementsRevision());
         dto.setReferenceImages(readReferenceImages(project.getReferenceImages()));

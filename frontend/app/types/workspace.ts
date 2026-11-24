@@ -36,6 +36,8 @@ export interface AssignableUser {
 export interface WorkspaceProject {
   projectId: string
   projectName: string
+  status: ProjectStatus
+  canManageStatus: boolean
   customerRequirements: string
   requirementsRevision: number
   leader: WorkspaceMember | null
@@ -43,6 +45,8 @@ export interface WorkspaceProject {
   referenceImages: ProjectReferenceImage[]
   floors: WorkspaceFloor[]
 }
+
+export type ProjectStatus = 'DESIGNING' | 'DELIVERING' | 'COMPLETED'
 
 export interface WorkspaceRequirementsSummary {
   keyPoints: string[]
