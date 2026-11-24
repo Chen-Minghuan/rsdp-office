@@ -8,8 +8,6 @@ import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.office.dto.OfficeComboDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeComboItemDto;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCombo;
-import com.rsdp.officeproduct.importer.office.entity.OfficeComboItem;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeComboItemMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeComboMapper;
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
 import lombok.RequiredArgsConstructor;
@@ -36,20 +34,16 @@ public class OfficeComboService {
     private final CurrentUserService currentUserService;
     private final ProductQueryService productQueryService;
     private final OfficeComboMapper comboMapper;
-    private final OfficeComboItemMapper itemMapper;
 
     public List<OfficeComboDto> listCombos() {
         String userId = requireUserId();
         List<OfficeCombo> combos = comboMapper.selectList(new QueryWrapper<OfficeCombo>()
             .eq("user_id", userId).orderByAsc("created_at", "combo_id"));
-        Map<String, List<OfficeComboItem>> itemsByCombo = itemMapper.findByUserId(userId).stream()
-            .collect(Collectors.groupingBy(OfficeComboItem::getComboId));
         Map<String, ProductListItemDto> products = productQueryService.listProducts(false).stream()
             .collect(Collectors.toMap(ProductListItemDto::getRspuId, product -> product, (a, b) -> a));
         return combos.stream().map(combo -> new OfficeComboDto(combo.getComboId(), combo.getName(),
-            itemsByCombo.getOrDefault(combo.getComboId(), List.of()).stream()
-                .map(item -> toItemDto(item, products.get(item.getRspuId())))
-                .toList())).toList();
+            comboRspuIds(combo).stream().map(rspuId -> toItemDto(rspuId, products.get(rspuId))).toList()))
+            .toList();
     }
 
     @Transactional
@@ -66,6 +60,7 @@ public class OfficeComboService {
         combo.setComboId(newComboId());
         combo.setUserId(userId);
         combo.setName(normalizedName);
+        combo.setRspuIds(List.of());
         combo.setCreatedAt(LocalDateTime.now());
         combo.setUpdatedAt(LocalDateTime.now());
         try {
@@ -90,42 +85,59 @@ public class OfficeComboService {
     }
 
     @Transactional
-    public void saveComboItems(String comboId, List<String> rspuIds) {
+    public void addComboItems(String comboId, List<String> rspuIds) {
         String userId = requireUserId();
-        requireOwnedCombo(userId, comboId);
         if (rspuIds == null) {
             throw new BusinessException("组合商品不能为空");
         }
-        LinkedHashSet<String> selected = new LinkedHashSet<>();
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
         for (String rspuId : rspuIds) {
             if (!StringUtils.hasText(rspuId)) {
                 throw new BusinessException("商品不能为空");
             }
-            selected.add(rspuId.trim());
+            requested.add(rspuId.trim());
         }
-        if (selected.size() > MAX_ITEMS_PER_COMBO) {
+        // 锁内重读最新数组再追加，连续添加不会基于旧列表互相覆盖。
+        comboMapper.lockCombo(userId, comboId);
+        OfficeCombo combo = requireOwnedCombo(userId, comboId);
+        List<String> current = comboRspuIds(combo);
+        List<String> additions = requested.stream().filter(rspuId -> !current.contains(rspuId)).toList();
+        if (current.size() + additions.size() > MAX_ITEMS_PER_COMBO) {
             throw new BusinessException("每个组合最多" + MAX_ITEMS_PER_COMBO + "个商品");
         }
-        List<String> requested = new ArrayList<>(selected);
-        for (String rspuId : requested) {
+        // 只校验本次新加入的商品；组内已失效的旧条目保留并标注，不影响其他商品编辑。
+        for (String rspuId : additions) {
             productQueryService.getProduct(rspuId);
         }
-        itemMapper.lockCombo(userId, comboId);
-        itemMapper.deleteByComboId(comboId);
-        for (int index = 0; index < requested.size(); index++) {
-            OfficeComboItem item = new OfficeComboItem();
-            item.setComboId(comboId);
-            item.setRspuId(requested.get(index));
-            item.setSortOrder(index);
-            itemMapper.insert(item);
+        if (additions.isEmpty()) {
+            return;
         }
+        List<String> updated = new ArrayList<>(current);
+        updated.addAll(additions);
+        combo.setRspuIds(updated);
+        combo.setUpdatedAt(LocalDateTime.now());
+        comboMapper.updateById(combo);
+    }
+
+    @Transactional
+    public void removeComboItem(String comboId, String rspuId) {
+        String userId = requireUserId();
+        if (!StringUtils.hasText(rspuId)) {
+            throw new BusinessException("商品不能为空");
+        }
+        comboMapper.lockCombo(userId, comboId);
+        OfficeCombo combo = requireOwnedCombo(userId, comboId);
+        List<String> updated = comboRspuIds(combo).stream()
+            .filter(item -> !item.equals(rspuId.trim())).collect(Collectors.toList());
+        combo.setRspuIds(updated);
+        combo.setUpdatedAt(LocalDateTime.now());
+        comboMapper.updateById(combo);
     }
 
     @Transactional
     public void deleteCombo(String comboId) {
         String userId = requireUserId();
         requireOwnedCombo(userId, comboId);
-        itemMapper.deleteByComboId(comboId);
         comboMapper.deleteById(comboId);
     }
 
@@ -143,6 +155,10 @@ public class OfficeComboService {
         return combo;
     }
 
+    private List<String> comboRspuIds(OfficeCombo combo) {
+        return combo.getRspuIds() == null ? List.of() : combo.getRspuIds();
+    }
+
     private String normalizeName(String name) {
         String normalizedName = name == null ? "" : name.trim();
         if (normalizedName.isEmpty()) {
@@ -154,9 +170,9 @@ public class OfficeComboService {
         return normalizedName;
     }
 
-    private OfficeComboItemDto toItemDto(OfficeComboItem item, ProductListItemDto product) {
+    private OfficeComboItemDto toItemDto(String rspuId, ProductListItemDto product) {
         boolean available = product != null && "active".equalsIgnoreCase(product.getStatus());
-        return new OfficeComboItemDto(item.getRspuId(),
+        return new OfficeComboItemDto(rspuId,
             product == null ? null : product.getProductName(),
             product == null ? null : product.getPrimaryImageUrl(),
             product == null ? null : product.getRetailPrice(),

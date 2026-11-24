@@ -8,8 +8,6 @@ import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.office.dto.OfficeComboDto;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCombo;
-import com.rsdp.officeproduct.importer.office.entity.OfficeComboItem;
-import com.rsdp.officeproduct.importer.office.mapper.OfficeComboItemMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeComboMapper;
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
 import org.junit.jupiter.api.Test;
@@ -17,6 +15,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -28,15 +27,14 @@ class OfficeComboServiceTest {
     private final CurrentUserService currentUserService = mock(CurrentUserService.class);
     private final ProductQueryService productQueryService = mock(ProductQueryService.class);
     private final OfficeComboMapper comboMapper = mock(OfficeComboMapper.class);
-    private final OfficeComboItemMapper itemMapper = mock(OfficeComboItemMapper.class);
     private final OfficeComboService service = new OfficeComboService(
-        currentUserService, productQueryService, comboMapper, itemMapper);
+        currentUserService, productQueryService, comboMapper);
 
     @Test
     void listCombosReturnsItemsWithProductInfoAndAvailability() {
         authenticate("U1");
-        when(comboMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(combo("C1", "U1", "会议组合")));
-        when(itemMapper.findByUserId("U1")).thenReturn(List.of(item("C1", "P1", 0), item("C1", "P2", 1)));
+        when(comboMapper.selectList(any(QueryWrapper.class)))
+            .thenReturn(List.of(combo("C1", "U1", "会议组合", "P1", "P2")));
         when(productQueryService.listProducts(false)).thenReturn(List.of(product("P1", "active"), product("P2", "archived")));
 
         List<OfficeComboDto> result = service.listCombos();
@@ -52,8 +50,8 @@ class OfficeComboServiceTest {
     @Test
     void listCombosMarksMissingProductAsUnavailable() {
         authenticate("U1");
-        when(comboMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(combo("C1", "U1", "会议组合")));
-        when(itemMapper.findByUserId("U1")).thenReturn(List.of(item("C1", "P-GONE", 0)));
+        when(comboMapper.selectList(any(QueryWrapper.class)))
+            .thenReturn(List.of(combo("C1", "U1", "会议组合", "P-GONE")));
         when(productQueryService.listProducts(false)).thenReturn(List.of());
 
         List<OfficeComboDto> result = service.listCombos();
@@ -75,6 +73,7 @@ class OfficeComboServiceTest {
         verify(comboMapper).insert(captor.capture());
         assertEquals("会议组合", captor.getValue().getName());
         assertEquals("U1", captor.getValue().getUserId());
+        assertTrue(captor.getValue().getRspuIds().isEmpty());
         assertTrue(result.getItems().isEmpty());
     }
 
@@ -140,77 +139,127 @@ class OfficeComboServiceTest {
     }
 
     @Test
-    void saveItemsReplacesItemsInRequestedOrder() {
+    void addItemsLocksThenAppendsNewIdsInOrder() {
         authenticate("U1");
-        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合"));
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合", "P1"));
         when(productQueryService.getProduct(anyString())).thenReturn(new ProductDetailDto());
 
-        service.saveComboItems("C1", List.of("P2", "P1"));
+        service.addComboItems("C1", List.of("P2", "P1", "P3"));
 
-        org.mockito.InOrder order = inOrder(itemMapper);
-        order.verify(itemMapper).lockCombo("U1", "C1");
-        order.verify(itemMapper).deleteByComboId("C1");
-        ArgumentCaptor<OfficeComboItem> captor = ArgumentCaptor.forClass(OfficeComboItem.class);
-        verify(itemMapper, times(2)).insert(captor.capture());
-        assertEquals("P2", captor.getAllValues().get(0).getRspuId());
-        assertEquals(0, captor.getAllValues().get(0).getSortOrder());
-        assertEquals("P1", captor.getAllValues().get(1).getRspuId());
-        assertEquals(1, captor.getAllValues().get(1).getSortOrder());
+        org.mockito.InOrder order = inOrder(comboMapper);
+        order.verify(comboMapper).lockCombo("U1", "C1");
+        order.verify(comboMapper).selectById("C1");
+        order.verify(comboMapper).updateById(any(OfficeCombo.class));
+        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
+        verify(comboMapper).updateById(captor.capture());
+        assertEquals(List.of("P1", "P2", "P3"), captor.getValue().getRspuIds());
+        // 已在组内的 P1 不属于本次新增，不重复校验也不重复保存
+        verify(productQueryService).getProduct("P2");
+        verify(productQueryService).getProduct("P3");
+        verify(productQueryService, never()).getProduct("P1");
     }
 
     @Test
-    void saveItemsRejectsMoreThanFiveProducts() {
+    void addItemsKeepsInvalidExistingItemsAndValidatesOnlyNewOnes() {
         authenticate("U1");
-        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合"));
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合", "P-GONE"));
+        when(productQueryService.getProduct("P2")).thenReturn(new ProductDetailDto());
 
-        assertThrows(BusinessException.class,
-            () -> service.saveComboItems("C1", List.of("P1", "P2", "P3", "P4", "P5", "P6")));
-        verify(itemMapper, never()).insert(any(OfficeComboItem.class));
-        verify(itemMapper, never()).deleteByComboId(anyString());
+        service.addComboItems("C1", List.of("P2"));
+
+        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
+        verify(comboMapper).updateById(captor.capture());
+        assertEquals(List.of("P-GONE", "P2"), captor.getValue().getRspuIds());
+        verify(productQueryService, never()).getProduct("P-GONE");
     }
 
     @Test
-    void saveItemsDeduplicatesBeforeApplyingLimit() {
+    void consecutiveAddsBothKeepItems() {
         authenticate("U1");
-        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合"));
+        OfficeCombo stored = combo("C1", "U1", "会议组合", "P1");
+        when(comboMapper.selectById("C1")).thenReturn(stored);
         when(productQueryService.getProduct(anyString())).thenReturn(new ProductDetailDto());
 
-        service.saveComboItems("C1", List.of("P1", "P1", "P2", "P2", "P3"));
+        service.addComboItems("C1", List.of("P2"));
+        service.addComboItems("C1", List.of("P3"));
 
-        ArgumentCaptor<OfficeComboItem> captor = ArgumentCaptor.forClass(OfficeComboItem.class);
-        verify(itemMapper, times(3)).insert(captor.capture());
-        assertEquals(List.of("P1", "P2", "P3"),
-            captor.getAllValues().stream().map(OfficeComboItem::getRspuId).toList());
+        assertEquals(List.of("P1", "P2", "P3"), stored.getRspuIds());
+        verify(comboMapper, times(2)).updateById(stored);
     }
 
     @Test
-    void saveItemsRejectsBlankProductId() {
+    void addItemsRejectsMoreThanFiveProducts() {
         authenticate("U1");
-        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合"));
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合", "P1", "P2", "P3", "P4"));
 
-        assertThrows(BusinessException.class, () -> service.saveComboItems("C1", List.of(" ")));
-        verify(itemMapper, never()).insert(any(OfficeComboItem.class));
+        assertThrows(BusinessException.class, () -> service.addComboItems("C1", List.of("P5", "P6")));
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
     }
 
     @Test
-    void saveItemsRejectsComboOwnedByAnotherUser() {
+    void addItemsRejectsBlankProductId() {
+        authenticate("U1");
+        assertThrows(BusinessException.class, () -> service.addComboItems("C1", List.of(" ")));
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
+    }
+
+    @Test
+    void addItemsRejectsNullProductList() {
+        authenticate("U1");
+        assertThrows(BusinessException.class, () -> service.addComboItems("C1", null));
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
+    }
+
+    @Test
+    void addItemsRejectsComboOwnedByAnotherUser() {
         authenticate("U1");
         when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U2", "他人组合"));
 
-        assertThrows(AccessDeniedException.class, () -> service.saveComboItems("C1", List.of("P1")));
-        verify(itemMapper, never()).insert(any(OfficeComboItem.class));
+        assertThrows(AccessDeniedException.class, () -> service.addComboItems("C1", List.of("P1")));
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
     }
 
     @Test
-    void deleteComboRemovesItemsThenCombo() {
+    void addItemsSkipsWriteWhenNothingNew() {
+        authenticate("U1");
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合", "P1"));
+
+        service.addComboItems("C1", List.of("P1"));
+
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
+        verify(productQueryService, never()).getProduct(anyString());
+    }
+
+    @Test
+    void removeItemFiltersWithoutProductValidation() {
+        authenticate("U1");
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合", "P1", "P-GONE", "P2"));
+
+        service.removeComboItem("C1", "P2");
+
+        ArgumentCaptor<OfficeCombo> captor = ArgumentCaptor.forClass(OfficeCombo.class);
+        verify(comboMapper).updateById(captor.capture());
+        assertEquals(List.of("P1", "P-GONE"), captor.getValue().getRspuIds());
+        verify(productQueryService, never()).getProduct(anyString());
+    }
+
+    @Test
+    void removeItemRejectsComboOwnedByAnotherUser() {
+        authenticate("U1");
+        when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U2", "他人组合"));
+
+        assertThrows(AccessDeniedException.class, () -> service.removeComboItem("C1", "P1"));
+        verify(comboMapper, never()).updateById(any(OfficeCombo.class));
+    }
+
+    @Test
+    void deleteComboRemovesRow() {
         authenticate("U1");
         when(comboMapper.selectById("C1")).thenReturn(combo("C1", "U1", "会议组合"));
 
         service.deleteCombo("C1");
 
-        org.mockito.InOrder order = inOrder(itemMapper, comboMapper);
-        order.verify(itemMapper).deleteByComboId("C1");
-        order.verify(comboMapper).deleteById("C1");
+        verify(comboMapper).deleteById("C1");
     }
 
     @Test
@@ -229,20 +278,13 @@ class OfficeComboServiceTest {
         when(currentUserService.currentUser()).thenReturn(user);
     }
 
-    private OfficeCombo combo(String comboId, String userId, String name) {
+    private OfficeCombo combo(String comboId, String userId, String name, String... rspuIds) {
         OfficeCombo combo = new OfficeCombo();
         combo.setComboId(comboId);
         combo.setUserId(userId);
         combo.setName(name);
+        combo.setRspuIds(new ArrayList<>(List.of(rspuIds)));
         return combo;
-    }
-
-    private OfficeComboItem item(String comboId, String rspuId, int sortOrder) {
-        OfficeComboItem item = new OfficeComboItem();
-        item.setComboId(comboId);
-        item.setRspuId(rspuId);
-        item.setSortOrder(sortOrder);
-        return item;
     }
 
     private ProductListItemDto product(String rspuId, String status) {

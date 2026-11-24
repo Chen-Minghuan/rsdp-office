@@ -354,8 +354,12 @@ export function useOfficeApi() {
     await request<void>('PATCH', `/api/v1/office/combos/${encodeURIComponent(comboId)}`, { name })
   }
 
-  async function saveComboItems(comboId: string, rspuIds: string[]): Promise<void> {
-    await request<void>('PUT', `/api/v1/office/combos/${encodeURIComponent(comboId)}/items`, { rspuIds })
+  async function addComboItems(comboId: string, rspuIds: string[]): Promise<void> {
+    await request<void>('POST', `/api/v1/office/combos/${encodeURIComponent(comboId)}/items`, { rspuIds })
+  }
+
+  async function removeComboItem(comboId: string, rspuId: string): Promise<void> {
+    await request<void>('DELETE', `/api/v1/office/combos/${encodeURIComponent(comboId)}/items/${encodeURIComponent(rspuId)}`)
   }
 
   async function deleteCombo(comboId: string): Promise<void> {
@@ -513,7 +517,8 @@ export function useOfficeApi() {
     loadCombos,
     createCombo,
     renameCombo,
-    saveComboItems,
+    addComboItems,
+    removeComboItem,
     deleteCombo,
     loadFavoriteItems,
     loadProjectFavoriteProductIds,

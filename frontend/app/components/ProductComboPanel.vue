@@ -62,11 +62,6 @@ function formatPrice(price: number | null) {
   return price == null ? '—' : `¥ ${price.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-async function saveItems(combo: ProductCombo, rspuIds: string[]) {
-  await api.saveComboItems(combo.comboId, rspuIds)
-  await loadCombos()
-}
-
 async function onDrop(combo: ProductCombo, event: DragEvent) {
   const rspuId = event.dataTransfer?.getData('text/plain')
   if (!rspuId) return
@@ -77,7 +72,8 @@ async function onDrop(combo: ProductCombo, event: DragEvent) {
     return
   }
   try {
-    await saveItems(combo, [...combo.items.map(item => item.rspuId), rspuId])
+    await api.addComboItems(combo.comboId, [rspuId])
+    await loadCombos()
   } catch (error) {
     panelError.value = error instanceof Error ? error.message : '加入组合失败'
   }
@@ -86,7 +82,8 @@ async function onDrop(combo: ProductCombo, event: DragEvent) {
 async function removeItem(combo: ProductCombo, rspuId: string) {
   panelError.value = null
   try {
-    await saveItems(combo, combo.items.filter(item => item.rspuId !== rspuId).map(item => item.rspuId))
+    await api.removeComboItem(combo.comboId, rspuId)
+    await loadCombos()
   } catch (error) {
     panelError.value = error instanceof Error ? error.message : '移除商品失败'
   }
@@ -194,8 +191,8 @@ async function confirmPicker() {
   pickerSaving.value = true
   pickerError.value = null
   try {
-    const existing = combo.items.map(item => item.rspuId)
-    await saveItems(combo, [...existing, ...pickerSelection.value])
+    await api.addComboItems(combo.comboId, [...pickerSelection.value])
+    await loadCombos()
     pickerDialog.value?.close()
   } catch (error) {
     pickerError.value = error instanceof Error ? error.message : '加入组合失败'

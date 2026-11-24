@@ -11,4 +11,7 @@ public interface OfficeComboMapper extends BaseMapper<OfficeCombo> {
 
     @Select("select pg_advisory_xact_lock(hashtext('office_combo'), hashtext(#{userId}))::text")
     String lockUser(@Param("userId") String userId);
+
+    @Select("select pg_advisory_xact_lock(hashtext(#{userId}), hashtext(#{comboId}))::text")
+    String lockCombo(@Param("userId") String userId, @Param("comboId") String comboId);
 }

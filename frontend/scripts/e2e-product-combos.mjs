@@ -34,7 +34,7 @@ function comboDto(combo) {
 
 async function openPage(initialCombos = []) {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
-  const state = { combos: initialCombos, saves: [], renames: [], deleted: [] }
+  const state = { combos: initialCombos, saves: [], removes: [], renames: [], deleted: [] }
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: dealerUser } }))
   await context.route('**/api/v1/**', async route => {
     const request = route.request()
@@ -54,25 +54,36 @@ async function openPage(initialCombos = []) {
       state.combos.push(combo)
       return respond(comboDto(combo))
     }
-    const comboMatch = path.match(/^\/api\/v1\/office\/combos\/([^/]+)(\/items)?$/)
+    const comboMatch = path.match(/^\/api\/v1\/office\/combos\/([^/]+)$/)
+    const itemsMatch = path.match(/^\/api\/v1\/office\/combos\/([^/]+)\/items$/)
+    const itemMatch = path.match(/^\/api\/v1\/office\/combos\/([^/]+)\/items\/([^/]+)$/)
+    if (itemsMatch && request.method() === 'POST') {
+      const combo = state.combos.find(item => item.comboId === itemsMatch[1])
+      if (!combo) return reject('组合不存在')
+      const additions = (request.postDataJSON().rspuIds || []).filter(id => !combo.rspuIds.includes(id))
+      if (combo.rspuIds.length + additions.length > 5) return reject('每个组合最多5个商品')
+      state.saves.push({ comboId: combo.comboId, rspuIds: additions })
+      combo.rspuIds = [...combo.rspuIds, ...additions]
+      return respond(null)
+    }
+    if (itemMatch && request.method() === 'DELETE') {
+      const combo = state.combos.find(item => item.comboId === itemMatch[1])
+      if (!combo) return reject('组合不存在')
+      state.removes.push({ comboId: combo.comboId, rspuId: itemMatch[2] })
+      combo.rspuIds = combo.rspuIds.filter(id => id !== itemMatch[2])
+      return respond(null)
+    }
     if (comboMatch) {
       const combo = state.combos.find(item => item.comboId === comboMatch[1])
       if (!combo) return reject('组合不存在')
-      if (comboMatch[2] && request.method() === 'PUT') {
-        const rspuIds = request.postDataJSON().rspuIds || []
-        if (rspuIds.length > 5) return reject('每个组合最多5个商品')
-        state.saves.push({ comboId: combo.comboId, rspuIds })
-        combo.rspuIds = rspuIds
-        return respond(null)
-      }
-      if (!comboMatch[2] && request.method() === 'PATCH') {
+      if (request.method() === 'PATCH') {
         const name = (request.postDataJSON().name || '').trim()
         if (!name) return reject('组合名称不能为空')
         state.renames.push({ comboId: combo.comboId, name })
         combo.name = name
         return respond(null)
       }
-      if (!comboMatch[2] && request.method() === 'DELETE') {
+      if (request.method() === 'DELETE') {
         state.deleted.push(combo.comboId)
         state.combos = state.combos.filter(item => item.comboId !== combo.comboId)
         return respond(null)
@@ -131,27 +142,25 @@ try {
   await card.getByRole('button', { name: '收起商品' }).click()
   await itemList.waitFor({ state: 'hidden' })
 
-  // 拖拽商品卡到组合卡
-  await page.getByTestId(`product-card-${'P4'}`).dragTo(card)
+  // 连续拖入两件商品：增量保存，两件都保留
+  await page.getByTestId('product-card-P4').dragTo(card)
   await page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('4/5'))
-  assert.deepEqual(state.saves.at(-1), { comboId: 'CB-1', rspuIds: ['P1', 'P2', 'P3', 'P4'] })
+  await page.getByTestId('product-card-P5').dragTo(card)
+  await page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('5/5'))
+  assert.deepEqual(state.saves.at(-2), { comboId: 'CB-1', rspuIds: ['P4'] })
+  assert.deepEqual(state.saves.at(-1), { comboId: 'CB-1', rspuIds: ['P5'] })
 
   // 刷新后组合仍在（后端持久化）
   await page.reload({ waitUntil: 'networkidle' })
   const reloadedCard = page.getByTestId('combo-card').first()
   await reloadedCard.waitFor({ state: 'visible' })
-  assert.match(await reloadedCard.innerText(), /4\/5/)
+  assert.match(await reloadedCard.innerText(), /5\/5/)
 
-  // 超过 5 个：后端拒绝并提示
-  await reloadedCard.getByRole('button', { name: '添加商品', exact: true }).click()
-  const picker2 = page.getByRole('dialog', { name: '选择商品' })
-  await picker2.getByRole('checkbox', { name: products.P5.productName, exact: true }).check()
-  await picker2.getByRole('checkbox', { name: products.P6.productName, exact: true }).check()
-  await picker2.getByRole('button', { name: '确认加入', exact: true }).click()
+  // 超过 5 个：拦截并提示，组合内容不变（后端上限由 Java 用例覆盖）
+  await page.getByTestId('product-card-P6').dragTo(reloadedCard)
   await page.getByText('每个组合最多5个商品', { exact: false }).first().waitFor({ state: 'visible' })
-  assert.match(await reloadedCard.innerText(), /4\/5/, '超限后组合内容不变')
-  await picker2.getByRole('button', { name: '取消', exact: true }).click()
-  await picker2.waitFor({ state: 'hidden' })
+  assert.match(await reloadedCard.innerText(), /5\/5/, '超限后组合内容不变')
+  assert.equal(state.saves.filter(save => save.rspuIds.includes('P6')).length, 0, '超限商品不会提交保存')
 
   // 改名
   await reloadedCard.getByRole('button', { name: '重命名', exact: true }).click()
@@ -173,6 +182,24 @@ try {
 
   assert.deepEqual(errors, [], '页面不能有未捕获异常')
   await context.close()
+
+  // 组内含失效商品：仍可添加其他商品，也可移除失效条目
+  const invalid = await openPage([{ comboId: 'CB-1', name: '含失效商品组合', rspuIds: ['P-GONE'] }])
+  const invCard = invalid.page.getByTestId('combo-card').first()
+  await invCard.waitFor({ state: 'visible' })
+  assert.match(await invCard.innerText(), /已失效/)
+  await invCard.getByRole('button', { name: '添加商品', exact: true }).click()
+  const invPicker = invalid.page.getByRole('dialog', { name: '选择商品' })
+  await invPicker.getByRole('checkbox', { name: products.P1.productName, exact: true }).check()
+  await invPicker.getByRole('button', { name: '确认加入', exact: true }).click()
+  await invPicker.waitFor({ state: 'hidden' })
+  assert.match(await invCard.innerText(), /2\/5/)
+  await invCard.getByRole('button', { name: '展开商品' }).click()
+  await invCard.getByRole('button', { name: '移除P-GONE', exact: true }).click()
+  await invalid.page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('1/5'))
+  assert.deepEqual(invalid.state.removes, [{ comboId: 'CB-1', rspuId: 'P-GONE' }])
+  assert.deepEqual(invalid.errors, [])
+  await invalid.context.close()
 
   // 每账号最多 10 个组合：达到上限后创建入口禁用
   const full = await openPage(Array.from({ length: 10 }, (_, index) => ({
