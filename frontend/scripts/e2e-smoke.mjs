@@ -199,6 +199,35 @@ await shot('04-design-with-cart')
 // 5. 整体方案
 console.log('Step 5: proposal')
 await page.click('text=生成整体方案')
+if (process.env.MOCK_API === '1' && !addButtons.length) {
+  // 空商品库仍可查看真实清单，缺品在页内提示。随后单独验证演示清单。
+  await page.waitForURL(url => url.pathname === '/proposal')
+  await page.getByTestId('proposal-selection-issues').waitFor({ timeout: 10000 })
+  if (await page.getByRole('dialog').count()) throw new Error('项目清单入口不应弹窗')
+  const previewUrl = new URL('/proposal', baseUrl)
+  previewUrl.searchParams.set('preview', '1')
+  const floorId = new URL(page.url()).searchParams.get('floorId')
+  if (floorId) previewUrl.searchParams.set('floorId', floorId)
+  await page.goto(previewUrl.toString(), { waitUntil: 'networkidle' })
+  await page.getByText('方案演示', { exact: true }).waitFor()
+  const firstRoom = page.getByRole('button', { name: /^总裁办公室/ })
+  const secondRoom = page.getByRole('button', { name: /^开放办公区/ })
+  const firstDetail = page.getByRole('region', { name: '总裁办公室详情' })
+  const secondDetail = page.getByRole('region', { name: '开放办公区详情' })
+  await firstDetail.waitFor()
+  if (!await firstRoom.evaluate(row => row.nextElementSibling?.id === row.getAttribute('aria-controls'))) {
+    throw new Error('首个房间的详情必须紧跟房间行')
+  }
+  await secondRoom.click()
+  await secondDetail.waitFor()
+  await firstDetail.waitFor({ state: 'hidden' })
+  if (!await secondRoom.evaluate(row => row.nextElementSibling?.id === row.getAttribute('aria-controls'))) {
+    throw new Error('切换后的详情必须紧跟新的房间行')
+  }
+  await secondRoom.click()
+  await secondDetail.waitFor({ state: 'hidden' })
+  console.log('  empty mock catalog shows missing selections on the list page; demo list rendered separately')
+}
 await page.waitForURL(url => url.pathname === '/proposal', { timeout: 10000 })
 await page.waitForSelector('h1:has-text("整体方案与清单")', { timeout: 10000 })
 await shot('05-proposal')

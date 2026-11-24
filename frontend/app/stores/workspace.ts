@@ -79,16 +79,17 @@ export const useWorkspaceStore = defineStore('workspace', {
       await this.init()
       await useOfficeStore().init()
     },
-    async activateFloor(floorId: string, openDrawing = false, syncRoute = true) {
+    async activateFloor(floorId: string, openDrawing = false) {
       const floor = this.projects.flatMap(project => project.floors).find(item => item.floorId === floorId)
       if (!floor) return
       const router = useRouter()
+      const sourceRoute = router.currentRoute.value
       const office = useOfficeStore()
       if (floorId === this.currentFloorId && office.initialized && office.workspaceId === floorId) {
         if (openDrawing) await router.push(projectDrawingRoute(floorId))
         return
       }
-      // 地址 watcher 与 proposal 守卫可能同时请求同一楼层；后者必须等待前者完成，不能用旧楼层放行。
+      // 同一楼层的重复请求等待当前加载结束，避免同时切换画布和清单。
       if (this.switching) {
         if (activeFloorTransition?.floorId === floorId) await activeFloorTransition.completion
         if (openDrawing && floorId === this.currentFloorId && office.initialized && office.workspaceId === floorId) await router.push(projectDrawingRoute(floorId))
@@ -97,7 +98,6 @@ export const useWorkspaceStore = defineStore('workspace', {
       let finishTransition!: () => void
       const completion = new Promise<void>(resolve => { finishTransition = resolve })
       activeFloorTransition = { floorId, completion }
-      if (!syncRoute) this.routeFloorActivationId = floorId
       this.switching = true
       this.error = ''
       try {
@@ -106,7 +106,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         this.rememberSelection()
         await office.activateFloor(floor.floorId)
         if (openDrawing) await router.push(projectDrawingRoute(floorId))
-        else if (syncRoute && router.currentRoute.value.query.floorId !== floorId) {
+        else if (router.currentRoute.value === sourceRoute && sourceRoute.query.floorId !== floorId) {
           const { path, query } = router.currentRoute.value
           // 楼层数据就绪后同步地址。
           const overview = path === projectBenchPath && query.view === 'overview'
@@ -118,15 +118,11 @@ export const useWorkspaceStore = defineStore('workspace', {
         }
       } catch (error) {
         this.error = error instanceof Error ? error.message : '楼层切换失败'
-        if (!syncRoute) this.releaseRouteFloorActivation(floorId)
       } finally {
         this.switching = false
         finishTransition()
         if (activeFloorTransition?.completion === completion) activeFloorTransition = null
       }
-    },
-    releaseRouteFloorActivation(floorId: string) {
-      if (this.routeFloorActivationId === floorId) this.routeFloorActivationId = ''
     },
     toggleProject(projectId: string) {
       this.collapsedProjectIds = this.collapsedProjectIds.includes(projectId)
