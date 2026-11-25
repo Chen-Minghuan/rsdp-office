@@ -29,13 +29,6 @@ export const useWorkspaceStore = defineStore('workspace', {
     currentFloorName(): string { return this.currentFloor?.floorName || '未选择楼层' },
   },
   actions: {
-    async updateProjectStatus(projectId: string, status: import('~/types/workspace').ProjectStatus) {
-      const scope = useAuth().storageScope.value
-      const updated = await useWorkspaceApi().updateProjectStatus(projectId, status)
-      if (scope !== useAuth().storageScope.value) return
-      const project = this.projects.find(item => item.projectId === projectId)
-      if (project) project.status = updated.status
-    },
     rememberSelection() {
       if (import.meta.client) localStorage.setItem(selectionStorageKey(), JSON.stringify({ projectId: this.currentProjectId, floorId: this.currentFloorId, collapsed: this.collapsedProjectIds, collapsedFloors: this.collapsedFloorIds }))
     },
@@ -78,6 +71,23 @@ export const useWorkspaceStore = defineStore('workspace', {
           this.restoreSelection()
           this.loading = false
         }
+      }
+    },
+    // 派生字段（阶段、区域进度）只能由列表接口给出；进入工作台列表时静默重取，
+    // 保留现有数据避免闪烁，不触碰 office 画布状态。首次加载仍由 init() 负责。
+    async refreshProjects() {
+      if (!this.initialized || this.loading) return
+      this.loading = true
+      const scope = useAuth().storageScope.value
+      try {
+        const projects = await useWorkspaceApi().listProjects()
+        if (scope !== useAuth().storageScope.value) return
+        this.projects = projects
+        this.error = ''
+      } catch (error) {
+        if (scope === useAuth().storageScope.value) this.error = error instanceof Error ? error.message : '项目列表暂时不可用'
+      } finally {
+        if (scope === useAuth().storageScope.value) this.loading = false
       }
     },
     async refresh(loadFloor: boolean) {

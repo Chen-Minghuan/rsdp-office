@@ -34,7 +34,7 @@ class RenderLayoutContextTest {
         String example=System.getProperty("rsdp.render.layoutExample");
         if(example!=null) java.nio.file.Files.write(java.nio.file.Path.of(example),RenderSceneGuide.png(scene,"ISOMETRIC"));
         var prepared=context.prepare("PROJECT",scene);
-        assertTrue(prepared.prompt().contains("926mm"));assertTrue(prepared.prompt().contains("600mm"));
+        assertTrue(prepared.prompt().contains("空间长宽比例、凹凸轮廓、家具离墙关系、组间距离"));assertFalse(prepared.prompt().contains("926mm"));assertFalse(prepared.prompt().contains("600mm"));assertEquals(926,prepared.facts().path("wallClearancesMm").path("left").asInt());assertEquals(600,prepared.facts().path("groupGaps").get(0).path("distanceMm").asInt());
         assertFalse(prepared.prompt().contains("42177"));
         String prompt=RenderPreviewScene.prompt(scene,"现代","ISOMETRIC","");
         assertFalse(prompt.contains("x="));assertFalse(prompt.contains("42177"));

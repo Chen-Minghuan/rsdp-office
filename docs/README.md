@@ -13,10 +13,13 @@
 | [本机 Office 库清理](tasks/DB-003-local-office-cleanup.md) | 本机 24 张业务表、旧排版归档及备份恢复验证 |
 | [Office 读取性能](tasks/PERF-001-office-read-performance.md) | 项目预算异步加载、商品详情去重、选品目录回源合并和实测口径 |
 | [Office 批量查价和商品库分页](tasks/PERF-002-batch-prices-catalog-pagination.md) | 预算冷读、商品库分页、报价和权限验证 |
+| [款式推荐加载与本地运行恢复](tasks/PERF-003-recommendation-loading.md) | 运行 JAR 隔离、画布重复保存合并及超时重试 |
 | [Office 角色、主号名额与授权设计](tasks/TENANT-004-office-role-model.md) | 表关系、20 个主号上限、主号逐人授权和存量迁移 |
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
+| [提示词 A/B/C/D 实验](tasks/RENDER-012-prompt-ab-experiment.md) | 完整/精简提示词、平面图贡献与 Prompt Extend 的对照实验 |
+| [三图空间控制与几何审核](tasks/RENDER-011-spatial-layout-control.md) | F/P三图、地面坐标、两排直线描述与位置审核的实验边界 |
 | [底图先行与后台并行识别](tasks/RECOG-007-progressive-recognition.md) | 预览先到、模型并行、真实进度和标准图缓存 |
 | [原图墙线约束](tasks/RECOG-004-local-wall-contours.md) | 原图墙线与封闭区域校正、来源坐标映射和异常保留 |
 | [房名定位与同图轮廓继承](tasks/RECOG-005-label-grounding-and-correction-reuse.md) | 棋牌室位置校正、开放分区人工边界继承及真实/模拟验证范围 |
@@ -35,7 +38,7 @@
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
 | [五入口导航与项目总览](tasks/WORKSPACE-005-project-overview-navigation.md) | 工作台总览、房间进度、图纸和历史概念图、兼容旧上传地址 |
-| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 设计中、交付中、已完成的保存、权限、计数和筛选 |
+| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 阶段按方案确认派生、只读展示：设计中/交付中计数、筛选与进度列（人工修改已移除） |
 | [项目需求 AI 总结](tasks/WORKSPACE-004-project-requirements-ai-summary.md) | 原文/总结双面翻转、事实抽取、版本复核、持久化缓存与真实模型验证 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
 | [工作区账号中心](tasks/TENANT-003-workspace-account-center.md) | 账号行悬停菜单、报价/账号直达与经销商角色隔离；收藏入口由 CAT-010 扩展为全角色 |
@@ -137,14 +140,15 @@ pnpm dev --port 3001
 
 | 页面 | 路由 | 说明 |
 |---|---|---|
-| 商品库 | `/products` | 名称/编码搜索、品类/主色/在售状态筛选、分页、商品详情与个人/项目收藏侧栏 |
-| 本地商品 | `/products/local` | 查看本工作区商品，授权成员可录入、编辑和导入 Excel |
-| 商品详情 | `/products/:rspuId` | 查看商品资料、规格和在售状态 |
+| 商品库 | `/products` | 同一列表浏览、搜索和分页。公共库开启时混排 RSDP 商品和本地商品，关闭后显示本工作区的本地商品 |
+| 本地商品 | `/products/local` | 卡片浏览，支持按名称和厂内型号搜索。主号与获授权成员可录入和导入 Excel |
+| 本地商品详情 | `/products/local/:productId` | 查看主图、基础信息和规格。主号与获授权成员可进入编辑 |
+| RSDP 商品详情 | `/products/:rspuId` | 查看商品资料、规格和在售状态 |
 | 导入记录 | `/products/import-records` | 当前浏览器最近 30 次导入，支持查看结果与下载失败明细 |
 
-商品列表和详情通过 Office 的 `/api/v1/products` 读取授权主库目录。工作区成员可在「本地商品」查看本区录入，主号和获授权成员可单条保存或确认 Excel 导入。启用后台接入后，RSDP 按批次建单并逐商品审核。公共库商品改价和上下架由 RSDP 管理。配置和试点验证见 [INTEG-003](tasks/INTEG-003-office-product-review.md)。
+商品库通过 Office 的 `/api/v1/products/browse` 获取当前工作区可见的两类商品。公共库开关对工作区全员生效，本地商品照常显示。主号可在「工作区账号」授予员工商品录入与编辑权限。主号与获授权员工可编辑、单条保存或确认 Excel 导入。启用后台接入后，RSDP 按批次建单并逐商品审核。公共库商品改价和上下架由 RSDP 管理。配置和验证见 [INTEG-003](tasks/INTEG-003-office-product-review.md)。
 
-品类和主色筛选来自当前目录的分类路径和商品主色，未标注的商品仍可在全部范围内浏览。右侧收藏栏按当前有权查看的目录展示，窄屏可展开，完整分组和跨项目浏览进入收藏中心。
+品类按目录分类路径或本地分类编码筛选。颜色筛选使用公共商品主色和本地商品有效规格颜色，未标注的商品仍可在全部范围内浏览。右侧收藏栏按当前有权查看的公共库目录展示，窄屏可展开，完整分组和跨项目浏览进入收藏中心。
 
 「Office 历史导入记录」按本人和工作区读取主库保存的旧 Office 批次。当前浏览器早期遗留记录仅供系统管理员核对。新的 Excel 批次在 RSDP 查询。
 
