@@ -104,18 +104,37 @@ public class QwenVisionClient {
             if(image==null || image.length<100 || image.length>20_000_000) throw new BusinessException("商品理解图片无效");
             content.addObject().put("type","image_url").putObject("image_url").put("url","data:image/png;base64,"+Base64.getEncoder().encodeToString(image));
         }
+        return requestProductJson(payload, "商品理解", "商品理解暂时不可用，将使用静态规则");
+    }
+
+    public JsonNode suggestProductImport(String instructions, JsonNode data) {
+        if (!StringUtils.hasText(properties.getApiKey()) || !StringUtils.hasText(properties.getBaseUrl())
+                || !StringUtils.hasText(properties.getModel())) {
+            throw new BusinessException("Excel 智能识别未配置，可手工核对");
+        }
+        var payload = objectMapper.createObjectNode();
+        payload.put("model", properties.getModel()).put("stream", false).put("enable_thinking", false)
+            .put("temperature", 0).put("max_tokens", 2400);
+        payload.putObject("response_format").put("type", "json_object");
+        var messages = payload.putArray("messages");
+        messages.addObject().put("role", "system").put("content", instructions);
+        messages.addObject().put("role", "user").put("content", data.toString());
+        return requestProductJson(payload, "Excel 智能识别", "Excel 智能识别暂不可用，可手工核对或重试");
+    }
+
+    private JsonNode requestProductJson(ObjectNode payload, String action, String unavailable) {
         HttpHeaders headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.setBearerAuth(properties.getApiKey().trim());
         String endpoint=properties.getBaseUrl().trim().replaceAll("/+$","")+"/chat/completions";
         try {
             String body=restTemplate.postForObject(endpoint,new HttpEntity<>(payload.toString(),headers),String.class);
             JsonNode response=objectMapper.readTree(body==null?"":body),choice=response.path("choices").path(0);
-            if(!"stop".equals(choice.path("finish_reason").asText())) throw new BusinessException("商品理解响应不完整");
-            JsonNode text=choice.path("message").path("content");if(!text.isTextual()) throw new BusinessException("商品理解没有返回文字结果");
+            if(!"stop".equals(choice.path("finish_reason").asText())) throw new BusinessException(action + "响应不完整");
+            JsonNode text=choice.path("message").path("content");if(!text.isTextual()) throw new BusinessException(action + "没有返回文字结果");
             JsonNode parsed=objectMapper.readTree(stripFence(text.asText()));
-            if(parsed==null || !parsed.isObject()) throw new BusinessException("商品理解没有返回有效对象");
+            if(parsed==null || !parsed.isObject()) throw new BusinessException(action + "没有返回有效对象");
             ((ObjectNode)parsed).put("providerRequestId",response.path("id").asText("")).put("model",response.path("model").asText(properties.getModel()));return parsed;
         } catch(BusinessException e) { throw e; }
-        catch(RestClientException | java.io.IOException e) { throw new BusinessException("商品理解暂时不可用，将使用静态规则"); }
+        catch(RestClientException | java.io.IOException e) { throw new BusinessException(unavailable); }
     }
     public JsonNode recognizeDimensions(VisionImagePreparer.PreparedImage image) {
         validateConfiguration();

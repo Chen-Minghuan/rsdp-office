@@ -9,6 +9,17 @@
 # 开发进度与下一步
 
 2026-11-25 [WORKSPACE-006 恢复人工维护阶段](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 项目阶段由"按方案确认读时派生"改回负责人/所属工作区主号人工维护：恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`canManageStatus` 权限字段与前端阶段下拉（设计中/交付中/已完成），其他成员只读；删除 `derivedStatus`，`office_design_project.status` 恢复为唯一事实来源；区域进度（zoneTotal/zoneDelivered）保留按方案确认派生。工作台"已完成"看板由占位改为真实计数并参与筛选。`e2e-project-status` 恢复手动维护断言，`e2e-project-refresh` 改为阶段不随确认自动变化、进度仍派生的断言。实际执行（2026-11-25 本机）：`mvn -f backend/pom.xml test` 422 项、0 失败、0 错误、10 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；dev server（3001）上 `e2e:project-status`、`e2e:workflows`、`MOCK_API=1 e2e:smoke` 与自起服务的 `e2e:project-refresh` 均通过（均拦截 API）；`git diff --check` 通过。未做真实后端联调与真实角色页面验收。
+2026-11-25 [商品库混合展示](tasks/INTEG-003-office-product-review.md#商品库混合展示) 公共库与本工作区商品在同一网格搜索和分页。隔离数据库、浏览器和 RSDP 测试替身验证 56 件跨六页混排，关闭后普通员工只看到本地商品，重新开启恢复混排。Java、前端构建、模拟工作流和冒烟通过，本机前后端已更新。
+
+2026-11-25 [本地商品卡片与编辑权限](tasks/INTEG-003-office-product-review.md#本地商品卡片与编辑权限) 本地与公共库共用商品卡片和详情布局。本地浏览支持名称与型号搜索。真实隔离环境验证普通员工只读、授权后保存、撤权后拒绝写入和跨工作区隔离。Java、前端构建、模拟工作流和模拟冒烟通过，本机前后端已更新。
+
+2026-11-25 [关闭公共库时的本地商品](tasks/INTEG-003-office-product-review.md#关闭公共库时的本地商品) 商品库默认显示本工作区已保存的商品。隔离 Office 和 PostgreSQL 验证 RSDP 离线时普通员工仍可打开本地商品详情并查看尺寸、材质和图片，第二工作区无法读取。前端构建、模拟工作流和模拟冒烟通过，本机前端已更新。
+
+2026-11-24 [PERF-003 推荐加载恢复](tasks/PERF-003-recommendation-loading.md) 修复运行 JAR 被打包覆盖造成的后端无响应，真实目录 185 规格冷读 2.658 秒、热读 23 毫秒。二维/三维推荐合并同稿保存并增加 15 秒超时重试；前端构建、两项模拟 UI、Java 专项 26 项及文档检查通过。本地 3001/8082 已更新并返回 HTTP 200；真实推荐端到端待已确认布局样本，未发布远程。
+
+2026-11-24 [RENDER-014 家具模块净距](tasks/RENDER-014-furniture-spacing-tool.md) 将后端保存排版的逐件轮廓净距接入生图和生成前查询。本机 20 件任务快照回算为 5 排、每排 4 件，同排净距 0 mm，前后净距 1000 mm。Java、前端构建和效果图模拟回归通过，真实重新生图待试。
+
+2026-11-24 [RENDER-013 房间装修预览](tasks/RENDER-013-room-decor-preview.md) 在现有 3D 白模内增加浅灰商务、暖木自然两套只读装修预设及俯视、人眼镜头。前端构建、20 桌模拟白模回归与既有效果图模拟回归通过，隔离本地预览可试用。
 
 2026-11-25 工作台项目列表刷新修复 项目阶段与区域进度由列表接口读时派生，但 `workspace.projects` 此前只在应用初始化时拉取一次，方案确认、确认失效（画布保存/清单变化）和新增楼层后返回工作台仍显示旧值。新增 `workspace.refreshProjects()`：进入工作台项目列表视图时静默重取（保留旧数据、不重置 office 画布状态，首次加载仍由 `init()` 负责），刷新契约记录在 [架构文档](architecture.md)。新增 `pnpm e2e:project-refresh` 动态回归（自起 `.output` 服务、可变 mock 状态），覆盖确认方案后阶段/进度前进、清单修改致确认失效后回退、已交付项目新增未确认楼层后回退、重取期间不清空列表。实际执行（2026-11-25 本机）：`pnpm build` 通过；`e2e:project-refresh`、`e2e:product-scheme`、`e2e:project-floors`（自起服务）与 dev server（3001）上 `e2e:project-status`、`e2e:workflows` 均通过（均拦截 API）；未做真实后端联调。同步清理 WORKSPACE-006 人工修改阶段的过时描述（标注为历史决策）。
 
@@ -27,6 +38,18 @@
 2026-11-24 [WORKSPACE-005](tasks/WORKSPACE-005-project-overview-navigation.md) 已实现五入口导航和当前楼层项目总览，保留旧上传地址与选品门禁，移除旧四步顶栏、重复侧栏入口及固定海报。前端构建、工作流、项目楼层、账号隔离、识别进度、账号中心和模拟冒烟通过。浏览器核对了桌面与窄屏总览，真实服务联调和业务验收待执行。
 
 2026-11-24 [WORKSPACE-006 项目阶段](tasks/WORKSPACE-006-project-status.md) 工作台恢复全部项目、设计中、交付中、已完成统计和筛选。项目阶段持久保存，新增及历史项目默认设计中；所属工作区主号或有查看权的实际负责人可修改，其他成员只读，后端独立核验并审计。构建、阶段/项目楼层/工作流模拟 UI 回归及 Java 363 项（0 失败、7 跳过）通过，隔离 PostgreSQL 验证迁移幂等、保存和改名不覆盖阶段。本地 3001/8082 已更新，健康检查正常；真实角色端到端修改待验收，未发布远程。（同日已被阶段派生化决策取代，见上方 WORKSPACE-006 阶段派生化条目）
+
+2026-11-24 [Office 供应商原表导入](tasks/INTEG-003-office-product-review.md#供应商原表预览) 支持重复表头、左右并排区块、合并同型号规格、锚定图和 WPS 内嵌图。隔离环境用普通员工账号验证「3格致」识别 42 件商品、41 张不同图片。38 件分 4 批保存，4 件留待补尺寸。确认回读和待发送记录通过，待发布到测试环境。
+
+2026-11-24 [Office Excel 智能辅助](tasks/INTEG-003-office-product-review.md#qwen-辅助字段与品类) 增加单一和混合品类预览及陌生表头字段映射。隔离浏览器、Office API 和模拟 Qwen 验证权限、候选约束、手工回退及真实样表确认保存。前端构建、工作流、冒烟和后端测试通过，待测试环境验证在线识别。
+
+2026-11-25 [Office 工厂工作区归属](tasks/INTEG-003-office-product-review.md#工厂工作区归属) 本地商品界面、Excel 预览和模板统一省去供应厂字段。隔离浏览器、数据库和模拟接收端验证 `B001` 自动送审和未绑定工作区本地保存。前端构建、模拟工作流、冒烟及后端测试通过，本机 Office 已更新。
+
+2026-11-25 [Office Excel 导入界面](tasks/INTEG-003-office-product-review.md#excel-导入界面) 品类名称和编码同显，新增拖放和重试、商品搜索筛选、并排核对和固定批次操作。桌面及窄屏浏览器模拟验证通过，前端构建、工作流和冒烟通过，本机前端已更新。
+
+2026-11-25 [Office Excel 材质来源](tasks/INTEG-003-office-product-review.md#excel-材质来源) 支持材质列与说明提取、合并说明溯源和 Qwen 辅助核对。真实「宋韵」茶台及模拟模型通过隔离浏览器验证，前端构建、工作流、冒烟和后端测试通过。
+
+2026-11-25 [Office Excel 大文件](tasks/INTEG-003-office-product-review.md#大文件分页与自动分批) 支持分页跳转、跨页选择、显示源文件大小和一次确认自动分批。108.23 MB 真表预览 211 件、106.15 MB 去重图片，隔离数据库验证另一个样表保存 38 件及丢失回执后的幂等重试。前端构建、模拟工作流和冒烟、后端测试通过。
 
 2026-11-24 [Office 本地商品 Excel 上传](tasks/INTEG-003-office-product-review.md#验证记录) 工作簿上限从 10 MB 提高到 150 MB，Office 代理和后端请求体上限对齐为 160 MB。隔离浏览器验证超过 10 MB 的含图工作簿可预览，真实接口确认与重试后仍为 6 件商品、6 张图和 1 条待发送批次。Java、前端构建、模拟工作流和冒烟、Nginx 配置检查通过。当前运行环境待更新。
 
