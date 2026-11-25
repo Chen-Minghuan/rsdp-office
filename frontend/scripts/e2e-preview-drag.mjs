@@ -34,14 +34,19 @@ try {
     rooms: [{ roomId: 'DRAG-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0, 0], [16000, 0], [16000, 10000], [0, 10000]] }],
   }
   let floorPlanRequests = 0
+  let recognizeCalls = 0
+  let recognizeRelease = null
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
-  await context.route('**/api/v1/**', route => {
+  await context.route('**/api/v1/**', async route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/layout-reference/source')) return route.fulfill({ contentType: 'image/svg+xml', body: decodeURIComponent(source.previewUrl.split(',')[1]) })
     if (path.endsWith('/layout-reference/recognize')) {
       assert.equal(route.request().method(), 'POST')
+      recognizeCalls++
+      // 首次识别挂起，模拟用户离开期间仍在进行/完成的识别任务。
+      if (recognizeCalls === 1) await new Promise(resolve => { recognizeRelease = resolve })
       return route.fulfill({ json: { code: 200, data: [
         { templateId: 'desk-straight', categoryId: 'workstation', group: 'office', x: 0.12, y: 0.22, width: 0.16, depth: 0.11, rotation: 0, confidence: 'high' },
         { templateId: 'chair-office', categoryId: 'workstation', group: 'office', x: 0.165, y: 0.35, width: 0.04, depth: 0.05, rotation: 0, confidence: 'low' },
@@ -49,7 +54,7 @@ try {
       ] } })
     }
     if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
-      const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
+      const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['EDIT'] }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
     }
     const data = path.endsWith('/floor-plan/PREVIEW-DRAG') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
@@ -164,6 +169,50 @@ try {
   assert.equal(await page.getByRole('dialog', { name: '参考原图摆位' }).count(), 0)
   const referenceLayer = page.getByTestId('reference-canvas-layer')
   await referenceLayer.waitFor()
+
+  // 画布已有家具时拦截识别，不发起请求。
+  await page.getByTestId('reference-recognize').click()
+  await page.getByText('请清除当前画布上的家具', { exact: true }).waitFor()
+  assert.equal(recognizeCalls, 0, '画布有家具时不发起识别请求')
+
+  // 清空画布后发起识别；切换标签页不中断任务，回来仍显示正在识别。
+  await page.getByRole('button', { name: '返回组合布局', exact: true }).click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('auto-clear-layout').click()
+  await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
+  await page.getByTestId('reference-recognize').click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…')
+  assert.equal(await page.getByTestId('reference-recognize').isDisabled(), true, '识别进行中按钮禁用')
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…', null, { timeout: 10000 })
+  assert.equal(await page.getByTestId('reference-recognize').isDisabled(), true, '切换标签页后识别继续进行')
+
+  // 离开期间识别完成：结果保留，回到自动布局时面板自动重开并展示标记。
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  recognizeRelease()
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByText('识别到 3 个家具标记，请核对图例、方向和分组', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 3, '离开期间完成的识别结果恢复到画布')
+
+  // 结果已展示并显式关闭后不再自动重开。
+  await page.getByRole('button', { name: '返回组合布局', exact: true }).click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('tab-auto-layout').click()
+  await page.waitForTimeout(300)
+  assert.equal(await page.getByTestId('layout-reference-panel').count(), 0, '已展示并关闭的识别结果不再自动重开')
+
+  // 重新打开面板继续既有识别流程（第二次识别请求立即返回）。
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
   await page.getByTestId('reference-recognize').click()
   const suggestedDesk = referenceLayer.locator('[data-reference-index="0"]')
   await suggestedDesk.locator('svg[data-furniture-template="desk-straight"]').waitFor()
@@ -277,7 +326,7 @@ try {
   assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
 
   assert.deepEqual(errors, [], '页面无脚本错误')
-  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入。')
+  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入；画布占用拦截识别、识别任务跨标签页保留与结果恢复。')
 } finally {
   if (browser) await browser.close()
   app.kill()

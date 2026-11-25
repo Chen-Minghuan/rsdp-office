@@ -6,6 +6,7 @@ import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { confirmedLayoutProblem, defaultLayoutPreferences } from '~/utils/layoutPlanning'
 import { mixedPlacementProblem, planMixedLayout, referenceLayoutSnapshot, MIXED_LAYOUT_CATEGORIES, MIXED_CATEGORY_IDS } from '~/utils/mixedLayout'
 import { AREA_PER_SEAT_HINT_M2, zoneNetAreaMm2 } from '~/utils/layoutWarnings'
+import { cloneReferenceEditing, layoutReferenceTaskKey } from '~/utils/layoutReference'
 
 const props = defineProps<{ categoryIds: string[]; currentPreview?: LayoutPreview | null }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
@@ -20,6 +21,19 @@ const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEd
 const reference = ref<LayoutReference | null>(null)
 const referenceMessage = ref('')
 const plan = computed(() => store.floorPlan)
+const referenceTasks = useLayoutReferenceStore()
+referenceTasks.ensureHydrated()
+const referenceTask = computed(() => zone.value && plan.value
+  ? referenceTasks.taskFor(zone.value.id, plan.value.analysisId, plan.value.analysisRevision || 1)
+  : null)
+// 跨页面保留的识别任务：进行中或结果未展示时自动重开参考面板。
+// 任务记录在 store 内原地更新（引用不变），以 updatedAt 为变化信号；不监听 referenceEditing，
+// 因此用户主动隐藏（Escape/切工具）不被打断，仅在任务状态推进时重开。显式「返回组合布局」才是放弃。
+watch([() => referenceTask.value?.updatedAt, () => referenceTask.value && layoutReferenceTaskKey(referenceTask.value.zoneId, referenceTask.value.analysisId, referenceTask.value.revision)], () => {
+  const record = referenceTask.value
+  if (!record || record.dismissed || referenceEditing.value) return
+  if (record.status === 'running' || !record.consumed) referenceEditing.value = cloneReferenceEditing(record.editing)
+}, { immediate: true })
 const hasSource = computed(() => !!(plan.value && (plan.value.previewUrl || plan.value.referenceImageUrl || plan.value.imageUrl)
   && (plan.value.previewBounds || plan.value.drawingBounds) && zone.value?.mmPerSourceUnit && zone.value.reviewUnit === 'mm'))
 const categoryLabels = computed(() => props.categoryIds.map(id => MIXED_LAYOUT_CATEGORIES[MIXED_CATEGORY_IDS.indexOf(id)]?.label).filter(Boolean))
@@ -68,7 +82,11 @@ onUnmounted(() => {
 function openReference() {
   if (!zone.value) return
   referenceMessage.value = ''
-  referenceEditing.value = { zoneId: zone.value.id, crop: null, marks: [], selected: null, placement: null }
+  // 有待处理的识别任务时从快照恢复（保留此前编辑），否则全新开始。
+  const record = referenceTask.value
+  referenceEditing.value = record && !record.dismissed && (record.status === 'running' || !record.consumed)
+    ? cloneReferenceEditing(record.editing)
+    : { zoneId: zone.value.id, crop: null, marks: [], selected: null, placement: null }
 }
 function generate() {
   previewReady.value = true
@@ -92,6 +110,7 @@ async function applyReference(value: LayoutReference) {
   }
   reference.value = value
   referenceEditing.value = null
+  referenceTasks.clear(layoutReferenceTaskKey(room.id, value.analysisId, value.revision))
   previewReady.value = false
   await nextTick()
   applicationMessage.value = `已应用当前方案，共 ${snapshot.furniture.length} 件参考家具`
