@@ -25,7 +25,7 @@ import { useCanvasSpacePan } from '~/composables/useCanvasSpacePan'
 
 const store = useOfficeStore()
 const props = defineProps<{ updatingScheme?: boolean }>()
-const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean]; editSize: [id: string] }>()
+const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean]; editSize: [id: string, anchor?: HTMLElement] }>()
 const layoutPreview = defineModel<LayoutPreview | null>('layoutPreview', { default: null })
 const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { default: null })
@@ -1080,11 +1080,11 @@ function finishViewportPan(pointerId?: number) {
   if (current.pointerId !== undefined && viewport?.hasPointerCapture(current.pointerId)) viewport.releasePointerCapture(current.pointerId)
 }
 
-function onFurnitureContextMenu(f: FurnitureObject) {
+function onFurnitureContextMenu(f: FurnitureObject, event: MouseEvent) {
   if (mode.value !== 'design') return
   selectedId.value = f.id
   selectedFurnitureIds.value = [f.id]
-  emit('editSize', f.id)
+  emit('editSize', f.id, event.currentTarget as HTMLElement | undefined)
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -2269,7 +2269,7 @@ function furnitureProduct(o: FurnitureObject) {
           ]"
           :style="{ ...furnitureStyle(dragFurnitureItem(f)), outline: drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined }"
           @pointerdown.stop="onPointerDown"
-          @contextmenu.prevent="onFurnitureContextMenu(f)"
+          @contextmenu.prevent="onFurnitureContextMenu(f, $event)"
         >
           <OfficeCanvasFurniturePreview v-if="officeFurnitureTemplateId(f, furnitureProduct(f))"
             :template-id="officeFurnitureTemplateId(f, furnitureProduct(f))!" :width-mm="f.w" :depth-mm="f.h"

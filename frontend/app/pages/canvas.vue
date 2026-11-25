@@ -2,11 +2,13 @@
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanning'
 import type { FurnitureObject } from '~/types/office'
+import type { OfficeModuleTemplate } from '~/types/officeModule'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 import { ringProblem, zoneMeasurements } from '~/utils/spatial/review'
 import { money } from '~/utils/helpers'
+import { furnitureById } from '~/utils/manualFurniture'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const route = useRoute()
@@ -34,7 +36,22 @@ function openRenderPreview(viewImage = '', previewId?: string) {
   selectedRenderId.value = previewId
   showRenderPreview.value = true
 }
+function isAutoLayoutPrimary(f: FurnitureObject): boolean {
+  if (f.layoutRole !== 'primary' || !f.layoutSettings) return false
+  const templateId = f.furnitureTemplateId || f.moduleSnapshot?.glyphTemplateId
+  if (!templateId) return false
+  return templateId.startsWith('table-conference-') || templateId.startsWith('table-meeting-')
+}
+
 function openSizeDialog(item: FurnitureObject, ids: string[], anchor?: HTMLElement) {
+  if (isAutoLayoutPrimary(item)) {
+    const templateId = item.furnitureTemplateId || item.moduleSnapshot?.glyphTemplateId
+    const template = templateId ? furnitureById.get(templateId) : undefined
+    if (template) {
+      workflowRef.value?.selectModule(template, [Math.round(item.w), Math.round(item.h)])
+      return
+    }
+  }
   sizeDialogItem.value = item
   sizeDialogItemIds.value = ids
   sizeDialogAnchor.value = anchor || null
@@ -79,7 +96,7 @@ const showDimensions = ref(true)
 const snapEnabled = ref(true)
 const showUnderlay = ref(true)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
-const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void; openRecommendations: () => void } | null>(null)
+const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void; openRecommendations: () => void; selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void } | null>(null)
 function pickSchemeSource(source: 'auto' | 'project' | 'personal') {
   schemeSource.value = source
   if (store.designZoneId && store.layoutConfirmedForZone(store.designZoneId)) workflowRef.value?.openRecommendations()
@@ -264,7 +281,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" @edit-size="id => openSizeDialog(store.objects.find(o => o.id === id) as FurnitureObject, [id])" />
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" @edit-size="(id, anchor) => openSizeDialog(store.objects.find(o => o.id === id) as FurnitureObject, [id], anchor)" />
         <OfficeCanvasFurnitureStrip v-if="mode === 'design' && !isProductScheme" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" @edit-size="(item, ids, anchor) => openSizeDialog(item, ids, anchor)" @bulk-replace="(item, ids) => openBulkReplace(item, ids)" />
         <div v-if="isProductScheme" class="scheme-board-footer">
           <span v-if="inspectedProduct"><strong>{{ inspectedProduct.name }}</strong> · {{ inspectedProduct.variant }} · {{ money(inspectedProduct.price) }}</span>

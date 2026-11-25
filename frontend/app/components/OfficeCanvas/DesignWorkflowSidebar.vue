@@ -23,7 +23,7 @@ function openFurniture(id: string, fromGroup: boolean) {
   if (activePage.value !== 'recommendations') activePage.value = 'products'
   collapsed.value = false
 }
-defineExpose({ openFurniture, openRecommendations: () => openPage('recommendations') })
+defineExpose({ openFurniture, openRecommendations: () => openPage('recommendations'), selectModule })
 const collapsed = ref(false), autoLayout = ref<AutoLayoutPanel | null>(null), actionMessage = ref('')
 const pages: Array<{ id: WorkflowPage; label: string; testId: string }> = [
   { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },

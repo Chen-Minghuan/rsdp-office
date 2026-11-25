@@ -10,10 +10,22 @@ type FurnitureDisplayGroup = { representative: FurnitureObject; items: Furniture
 
 const zoneId = computed(() => store.designZoneId)
 const items = computed(() => zoneId.value ? store.furnitureForZone(zoneId.value) : [])
+function groupKey(item: FurnitureObject) {
+  return [
+    item.label,
+    item.w,
+    item.h,
+    item.furnitureTemplateId || '',
+    item.heightMm ?? '',
+    JSON.stringify(item.moduleSnapshot || null),
+  ].join('\u0000')
+}
+
 const groups = computed<FurnitureDisplayGroup[]>(() => {
   const result: FurnitureDisplayGroup[] = []
   for (const item of items.value) {
-    const group = result.find(entry => entry.representative.label === item.label && entry.representative.w === item.w && entry.representative.h === item.h)
+    const key = groupKey(item)
+    const group = result.find(entry => groupKey(entry.representative) === key)
     if (group) group.items.push(item)
     else result.push({ representative: item, items: [item] })
   }
@@ -63,7 +75,7 @@ function glyph(item: FurnitureObject) {
     <div class="flex items-center gap-3 overflow-x-auto pb-1">
       <div
         v-for="group in groups"
-        :key="group.representative.label + '-' + group.representative.w + '-' + group.representative.h"
+        :key="groupKey(group.representative)"
         :data-testid="'furniture-strip-item-' + group.representative.id"
         :class="[
           'group relative flex-shrink-0 flex cursor-pointer flex-col items-center rounded-none border bg-white p-2 transition hover:bg-[#f7f3ef]',
