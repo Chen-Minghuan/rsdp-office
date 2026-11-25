@@ -42,3 +42,21 @@
 
 - 使用真实项目、楼层、空间、购物车和已选商品验证门禁拦截、缺失内容与跳转定位。
 - 与 FLOW-006 的服务端复核一并确认：前端拦截不能成为方案确认的唯一防线。
+
+## 2026-11-25 门禁恢复
+
+9cbcb1c 在恢复独立清单页时移除了路由中间件、弹窗与共享状态，本日按当前架构重新实现：
+
+- 新中间件 `frontend/app/middleware/proposalSelectionGate.global.ts`：跳转 `/proposal` 前确保目标楼层数据就绪并读取 `store.proposalFurnitureCartMismatches`；不一致时写入共享状态并 `abortNavigation()`；`?preview=1` 演示模式与无楼层时放行。
+- 跨楼层校验先 `workspace.selectFloorContext(floorId)` 再 `store.activateFloor`（`office.init` 始终读取 `currentFloorId`，旧实现直接切 store 导致校验数据串楼层、门禁失效）；中止跳转前把楼层上下文与画布数据还原到来路楼层，避免停留页卡在加载遮罩。
+- 直达/刷新（`from.matched` 为空）放行并叠加弹窗，方案页行内差异提示保留兜底。
+- 新弹窗 `ProposalSelectionGateDialog.vue`（Teleport + role=dialog + Escape/遮罩关闭），点击区域经 `proposalFurnitureSelectionRoute` 跳回画布（可排版时 `mode=design&view=products`，否则退回复核）；共享状态在 `composables/useProposalSelectionGate.ts`，弹窗挂载于 `app.vue`。
+- `e2e-project-floors` 三段用例更新为新语义：楼层树切到不一致楼层被拦截并弹窗、直达另一楼层不一致被拦截且只显示目标楼层、补齐后放行；该测试使用 `.output` 预构建产物，改动后须先 `pnpm build`。
+
+### 验证记录（2026-11-25）
+
+| 命令 | 结果 | 未覆盖项 |
+| --- | --- | --- |
+| `pnpm build` | 通过 | 无独立 lint/typecheck |
+| `MOCK_API=1 pnpm e2e:project-floors` | 通过，含门禁拦截/还原/放行三段 | API 全部模拟，未验证真实后端 |
+| `MOCK_API=1 pnpm e2e:smoke`、`pnpm e2e:workflows`、`e2e:proposal-3d`、`e2e:product-scheme`、`e2e:project-status` | 通过 | 真实联调与业务验收待执行 |

@@ -49,5 +49,6 @@ watch([() => route.value.path, isProjectWorkflow], () => { void initializeWorksp
         <NuxtPage v-else :key="pageKey" />
       </main>
     </div>
+    <ProposalSelectionGateDialog />
   </div>
 </template>

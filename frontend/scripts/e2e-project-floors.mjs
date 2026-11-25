@@ -549,31 +549,37 @@ try {
   await roomRow.waitFor()
   await verifyProjectSteps(first, second)
 
-  // 楼层树在清单内切换时，页面只显示目标楼层的选品核对结果。
+  // 楼层树在清单内切换到选品不一致的楼层时，全局门禁中止跳转并弹出差异弹窗。
   scopedCarts.set(floorTreeTarget.floorId, [{ lineId: `cart-${floorTreeTarget.floorId}`, projectId: floorTreeTarget.floorId, zoneId: floorTreeTarget.zoneId, zoneName: floorTreeTarget.name, productId: 'SAMPLE-OF-03', qty: floorTreeTarget.qty + 1 }])
-  await projectTree.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^2F/ }).click()
-  await page.waitForURL(url => url.pathname === '/proposal' && url.searchParams.get('floorId') === floorTreeTarget.floorId)
   const selectionIssues = page.getByTestId('proposal-selection-issues')
-  await selectionIssues.locator('summary').click()
-  await selectionIssues.getByText(floorTreeTarget.name, { exact: true }).waitFor()
-  await selectionIssues.getByText('家具 1 件 · 清单 2 件', { exact: true }).waitFor()
-  assert.equal(await selectionIssues.getByText(first.name, { exact: true }).count(), 0, '不能显示来源楼层的核对结果')
-  assert.equal(await page.getByRole('button', { name: '确认方案', exact: true }).isDisabled(), true)
-  assert.equal(await page.getByRole('dialog').count(), 0)
+  const gateDialog = page.getByTestId('proposal-gate-dialog')
+  await projectTree.getByTitle('单击切换楼层，双击修改楼层名称').filter({ hasText: /^2F/ }).click()
+  await gateDialog.waitFor()
+  await gateDialog.getByText('1 个区域商品数量与画布不一致', { exact: true }).waitFor()
+  await gateDialog.getByText(floorTreeTarget.name, { exact: true }).waitFor()
+  await gateDialog.getByText('家具 1 件 · 清单 2 件', { exact: true }).waitFor()
+  assert.equal(await gateDialog.getByText(first.name, { exact: true }).count(), 0, '不能显示来源楼层的核对结果')
+  assert.equal(new URL(page.url()).searchParams.get('floorId'), first.floorId, '门禁拦截后地址仍停留在来源楼层')
+  // 点击弹窗中的区域跳回画布选品。
+  await gateDialog.getByTestId(`proposal-gate-zone-${floorTreeTarget.zoneId}`).click()
+  await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('zoneId') === floorTreeTarget.zoneId && url.searchParams.get('view') === 'products')
+  assert.equal(await page.getByTestId('proposal-gate-dialog').count(), 0)
   scopedCarts.set(floorTreeTarget.floorId, [{ lineId: `cart-${floorTreeTarget.floorId}`, projectId: floorTreeTarget.floorId, zoneId: floorTreeTarget.zoneId, zoneName: floorTreeTarget.name, productId: 'SAMPLE-OF-03', qty: floorTreeTarget.qty }])
 
-  // 已配齐来源楼层时，直达另一楼层仍应只展示目标的核对结果。
+  // 已配齐来源楼层时，直达另一楼层的不一致仍被门禁拦截，弹窗只显示目标楼层。
   await page.evaluate(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/canvas', query: { floorId } }), first.floorId)
   await page.waitForURL(url => url.pathname === '/canvas' && url.searchParams.get('floorId') === first.floorId)
   await page.waitForFunction(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').workspaceId === floorId, first.floorId)
   scopedCarts.set(second.floorId, [{ lineId: `cart-${second.floorId}`, projectId: second.floorId, zoneId: second.zoneId, zoneName: second.name, productId: 'SAMPLE-OF-03', qty: second.qty + 1 }])
   await page.evaluate(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$router.push({ path: '/proposal', query: { floorId } }), second.floorId)
-  await page.waitForURL(url => url.pathname === '/proposal' && url.searchParams.get('floorId') === second.floorId)
-  await selectionIssues.locator('summary').click()
-  await selectionIssues.getByText(second.name, { exact: true }).waitFor()
-  await selectionIssues.getByText('家具 7 件 · 清单 8 件', { exact: true }).waitFor()
-  assert.equal(await selectionIssues.getByText(first.name, { exact: true }).count(), 0, '不能显示旧楼层的核对结果')
-  assert.equal(await page.getByRole('dialog').count(), 0)
+  await gateDialog.waitFor()
+  await gateDialog.getByText(second.name, { exact: true }).waitFor()
+  await gateDialog.getByText('家具 7 件 · 清单 8 件', { exact: true }).waitFor()
+  assert.equal(await gateDialog.getByText(first.name, { exact: true }).count(), 0, '不能显示旧楼层的核对结果')
+  await gateDialog.getByRole('button', { name: '知道了', exact: true }).click()
+  assert.equal(await page.getByTestId('proposal-gate-dialog').count(), 0)
+  await page.waitForFunction(floorId => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').workspaceId === floorId, first.floorId)
+  assert.equal(new URL(page.url()).pathname, '/canvas', '门禁拦截后停留在画布页')
 
   // 目标楼层补齐同一购物车行后，应当允许进入 proposal，不能被旧楼层状态误拦截。
   scopedCarts.set(second.floorId, [{ lineId: `cart-${second.floorId}`, projectId: second.floorId, zoneId: second.zoneId, zoneName: second.name, productId: 'SAMPLE-OF-03', qty: second.qty }])
