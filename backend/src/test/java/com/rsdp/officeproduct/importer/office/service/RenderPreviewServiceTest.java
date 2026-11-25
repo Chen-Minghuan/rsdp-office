@@ -10,6 +10,8 @@ import com.rsdp.officeproduct.importer.office.mapper.*;
 import com.rsdp.officeproduct.importer.service.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 import javax.imageio.ImageIO;
 import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;
@@ -32,12 +34,14 @@ class RenderPreviewServiceTest {
     private final RenderProperties properties=new RenderProperties();
     private final Map<String,RenderPreview> records=new HashMap<>();
     private final OfficeProposalConfirmationService confirmations=mock(OfficeProposalConfirmationService.class);
+    private final TransactionOperations transactions=mock(TransactionOperations.class);
     private final RenderPreviewService service=new RenderPreviewService(office,products,productAudit,geometryAudit,physicalContext,projects,mapper,provider,files,properties,json,
-        confirmations,mock(OfficeProjectAccessService.class));
+        confirmations,mock(OfficeProjectAccessService.class),transactions);
     private CanvasDto canvas;
     private ArrayNode objects;
 
     @BeforeEach void setup() throws Exception {
+        when(transactions.execute(any())).thenAnswer(call->((TransactionCallback<Object>)call.getArgument(0)).doInTransaction(null));
         objects=(ArrayNode)json.readTree("""
             [{"id":"ROOM","kind":"zone","name":"L形办公室","reviewUnit":"mm","evidenceKind":"MANUAL",
               "polygon":[[-6000,-4000],[0,-4000],[0,-2000],[-2000,-2000],[-2000,0],[-6000,0]]},
@@ -75,6 +79,44 @@ class RenderPreviewServiceTest {
         assertEquals(6,first.path("snapshot").path("zone").path("polygon").size());
         verify(provider,times(1)).submit(anyList(),argThat(prompt->!prompt.contains("图3为带P编号")),any());
         var changed=request(); changed.setStyle("工业风"); assertThrows(BusinessException.class,()->service.create("PROJECT",changed));
+    }
+
+    @Test void legacyHashRetryRecoversOriginalTaskWithoutSubmittingAgain() throws Exception {
+        var first=service.create("PROJECT",request());
+        var record=records.get(first.path("previewId").asText());
+        record.setContentHash(legacyHash(request(),null,true));
+        clearInvocations(provider);
+
+        var recovered=service.create("PROJECT",request());
+        assertEquals(first.path("previewId"),recovered.path("previewId"));
+        verify(provider,never()).submit(anyList(),anyString(),any());
+
+        var changed=request();changed.setStyle("工业风");
+        assertThrows(BusinessException.class,()->service.create("PROJECT",changed));
+        verify(provider,never()).submit(anyList(),anyString(),any());
+    }
+
+    @Test void legacyWhiteModelHashRetryRecoversWithoutReopeningScreenshotGeneration() throws Exception {
+        byte[] screenshot=viewPng(800,600);
+        var guided=guidedRequest(screenshot);
+        var first=service.create("PROJECT",request());
+        records.get(first.path("previewId").asText()).setContentHash(legacyHash(guided,screenshot,true));
+        clearInvocations(provider);
+
+        var recovered=service.create("PROJECT",guided);
+        assertEquals(first.path("previewId"),recovered.path("previewId"));
+        verify(provider,never()).submit(anyList(),anyString(),any());
+        var fresh=guidedRequest(viewPng(800,600));fresh.setClientChangeId("CHANGE-NEW");
+        assertThrows(BusinessException.class,()->service.create("PROJECT",fresh));
+    }
+
+    private String legacyHash(RenderPreviewRequest request,byte[] viewImage,boolean includeViewImage) throws Exception {
+        Map<String,Object> content=new LinkedHashMap<>();content.put("snapshot",RenderPreviewScene.canonical(request.getExpectedSnapshot()));
+        content.put("style",request.getStyle());content.put("view",request.getView());content.put("instructions",request.getInstructions());content.put("model",properties.getModel());
+        if(includeViewImage)content.put("viewImage",viewImage==null?"":VisionImagePreparer.sha256(viewImage));
+        if(request.getConfirmationId()!=null)content.put("confirmationId",request.getConfirmationId());
+        String canonical=json.writeValueAsString(RenderPreviewScene.canonical(json.valueToTree(content)));
+        return VisionImagePreparer.sha256(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Test void formalRenderRequiresCurrentConfirmationAndKeepsExpiredResultsHistorical() {
@@ -116,7 +158,7 @@ class RenderPreviewServiceTest {
     @Test void missingSelectedProductPhotoStopsBeforeBilling() {
         when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenThrow(new BusinessException("所选商品图片缺失"));
         assertThrows(BusinessException.class,()->service.create("PROJECT",request()));
-        verifyNoInteractions(provider); verify(mapper,never()).insert(any());
+        verify(provider).requireConfigured(); verify(provider,never()).submit(anyList(),anyString(),any()); verify(mapper,never()).insert(any());
     }
     @Test void rejectsOutdatedOrForgedSnapshotsAndUncalibratedGeometryBeforeCallingProvider() {
         var old=request(); old.setCanvasRevision(2); assertThrows(BusinessException.class,()->service.create("PROJECT",old));
@@ -125,6 +167,27 @@ class RenderPreviewServiceTest {
         ((ObjectNode)objects.get(0)).put("reviewUnit","source"); sync();
         assertThrows(BusinessException.class,()->service.create("PROJECT",request())); verifyNoInteractions(provider);
     }
+    @Test void historicalPendingAndRunningSnapshotsWithoutProductReferencesContinuePolling() throws Exception {
+        when(provider.poll(anyString(),anyString())).thenReturn(json.readTree("""
+            {"output":{"task_status":"SUCCEEDED","choices":[{"message":{"content":[{"image":"https://result.oss-cn-beijing.aliyuncs.com/image.png"}]}}]}}
+            """));
+        for(String historicalStatus:List.of("PENDING","RUNNING")) {
+            var historicalRequest=request();historicalRequest.setClientChangeId("CHANGE-"+historicalStatus);
+            String id=service.create("PROJECT",historicalRequest).path("previewId").asText();
+            var record=records.get(id);record.setStatus(historicalStatus);
+            ObjectNode snapshot=(ObjectNode)json.readTree(record.getSnapshotJson());snapshot.remove("renderProductReferences");
+            record.setSnapshotJson(json.writeValueAsString(snapshot));
+
+            var done=service.get("PROJECT",id);
+            assertEquals("SUCCEEDED",done.path("status").asText());
+            assertEquals("/uploads/render-previews/result.png",done.path("imageUrl").asText());
+            assertFalse(done.has("qualityAudit"));assertFalse(done.has("geometryAudit"));assertFalse(done.has("generationTiming"));
+        }
+        verify(files,times(2)).download(anyString(),anyString());
+        verify(productAudit,never()).audit(any(),any(),anyList(),any(),any(),any());
+        verify(geometryAudit,never()).audit(any(),any(),any(),any());
+    }
+
     @Test void oldAsyncResultsStayBoundToTheirSnapshotWhenCurrentRoomChanges() throws Exception {
         String id=service.create("PROJECT",request()).path("previewId").asText();
         ((ObjectNode)objects.get(1)).put("x",-5100); canvas.setRevision(4); sync();
@@ -235,5 +298,54 @@ class RenderPreviewServiceTest {
         var malformed=request();malformed.setViewImage("data:image/png;base64,%%%not-base64%%%");
         assertThrows(BusinessException.class,()->service.create("PROJECT",malformed));
         verifyNoInteractions(provider);verify(mapper,never()).insert(any());
+    }
+    @Test void invalidGenerationConfigurationStopsBeforeProductUnderstanding() {
+        doThrow(new BusinessException("生图配置无效")).when(provider).requireConfigured();
+        assertThrows(BusinessException.class,()->service.create("PROJECT",request()));
+        verifyNoInteractions(products);verify(provider,never()).submit(anyList(),anyString(),any());verify(mapper,never()).insert(any());
+    }
+
+    @Test void productUnderstandingRechecksRevisionBeforeReservationAndBilling() {
+        when(products.prepare(any(),any(RenderFurnitureBindings.Prepared.class))).thenAnswer(call->{
+            canvas.setRevision(4);
+            return RenderProductReferences.Prepared.empty();
+        });
+        assertThrows(BusinessException.class,()->service.create("PROJECT",request()));
+        verify(provider).requireConfigured();verify(provider,never()).submit(anyList(),anyString(),any());verify(mapper,never()).insert(any());
+    }
+
+    @Test void reservedSubmissionWithoutProviderTaskIsNotFailedOrSubmittedAgain() {
+        String id=service.create("PROJECT",request()).path("previewId").asText();
+        RenderPreview reserved=records.get(id);reserved.setStatus("SUBMITTING");reserved.setProviderTaskId(null);
+        var recovered=service.get("PROJECT",id);
+        assertEquals("SUBMITTING",recovered.path("status").asText());
+        verify(provider,never()).poll(anyString(),anyString());verify(provider,times(1)).submit(anyList(),anyString(),any());
+    }
+
+    @Test void remoteGenerationPollingDownloadAndAuditsRunOutsideTransactions() throws Exception {
+        boolean[] inTransaction={false};
+        doAnswer(call->{
+            inTransaction[0]=true;
+            try { return ((TransactionCallback<Object>)call.getArgument(0)).doInTransaction(null); }
+            finally { inTransaction[0]=false; }
+        }).when(transactions).execute(any());
+        doAnswer(call->{assertFalse(inTransaction[0],"商品理解不能持有工作区事务锁");return RenderProductReferences.Prepared.empty();})
+            .when(products).prepare(any(),any(RenderFurnitureBindings.Prepared.class));
+        doAnswer(call->{assertFalse(inTransaction[0],"生图提交不能持有数据库事务锁");return json.readTree("{\"output\":{\"task_id\":\"task-1\"},\"request_id\":\"req-1\"}");})
+            .when(provider).submit(anyList(),anyString(),any());
+        String id=service.create("PROJECT",request()).path("previewId").asText();
+        doAnswer(call->{assertFalse(inTransaction[0],"轮询不能持有预览行锁");return json.readTree("{\"output\":{\"task_status\":\"SUCCEEDED\",\"choices\":[{\"message\":{\"content\":[{\"image\":\"https://example.com/result.png\"}]}}]}}");})
+            .when(provider).poll(anyString(),anyString());
+        doAnswer(call->{assertFalse(inTransaction[0],"图片下载不能持有预览行锁");return "/uploads/render-previews/result.png";})
+            .when(files).download(anyString(),anyString());
+        doAnswer(call->{
+            assertFalse(inTransaction[0],"商品审核不能持有预览行锁");
+            assertEquals("SUCCEEDED",records.get(id).getStatus(),"成功图片必须先保存再审核");
+            assertNotNull(records.get(id).getImageUrl());return json.createObjectNode().put("status","PASS");
+        }).when(productAudit).audit(any(),any(),anyList(),any(),any(),any());
+        doAnswer(call->{assertFalse(inTransaction[0],"几何审核不能持有预览行锁");return json.createObjectNode().put("status","PASS");})
+            .when(geometryAudit).audit(any(),any(),any(),any());
+        assertEquals("SUCCEEDED",service.get("PROJECT",id).path("status").asText());
+        verify(productAudit).audit(any(),any(),anyList(),any(),any(),any());verify(geometryAudit).audit(any(),any(),any(),any());
     }
 }

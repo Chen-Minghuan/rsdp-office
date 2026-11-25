@@ -34,7 +34,7 @@ const ready = computed(() => snapshot.value?.zone.reviewUnit === 'mm' && (snapsh
 const activeCurrent = computed(() => jobs.value.some(item => renderPreviewActive(item.status) && !stale(item)
   && (props.formal ? item.confirmationId === props.confirmationId : item.purpose === 'CONCEPT_PREVIEW')))
 const stale = (job: RenderPreview) => job.stale || renderSnapshotKey(job.snapshot) !== currentKey.value
-const statusText = (status: string) => ({ SUBMITTING: '正在提交', PENDING: '排队中', RUNNING: '生成中', SUCCEEDED: '已生成', FAILED: '生成失败' }[status] || status)
+const statusText = (status: string) => ({ SUBMITTING: '正在提交', PENDING: '排队中', POLLING: '正在查询', RUNNING: '生成中', SUCCEEDED: '已生成', FAILED: '生成失败' }[status] || status)
 const qualityStatus = (job: RenderPreview) => {
   const product = job.qualityAudit?.status || 'UNAVAILABLE'
   if (!job.productReferences?.spatialControl) return product
