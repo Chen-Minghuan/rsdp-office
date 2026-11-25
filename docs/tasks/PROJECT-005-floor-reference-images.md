@@ -44,6 +44,7 @@
 | 2026-11-25 | 前端保存用按 `projectId/floorId` 的单调序号防乱序，请求前固定 ID | 5e5402c 修复响应乱序覆盖与切楼层串写 | e2e 场景 2 固化该回归 |
 | 2026-11-25 | 最终报价仅在报价行与页面商品严格一致时展示；缺价行不计入合计但计入提示 | c15356b/128b78a；防止报价后改商品仍显示旧价 | e2e-proposal-quote 场景 5 固化 |
 | 2026-11-25 | 既有 e2e-proposal-quote 报价行（P1/P2/P3）与页面商品（仅 P1）不一致，严格一致性判定下无法通过 | 按 productId 汇总比较，种类数不同即不一致 | 修正各场景页面商品集合后通过 |
+| 2026-11-25 | 楼层改名与参考图保存改为按列定点更新（`updateName`/`updateReferenceImages`），不再整行 `updateById` | 两条写路径都是读整行→改单字段→整行写回，并发交错时后写者用旧快照覆盖先写者的列；反向验证（临时改回整行写）两个并发用例确定性失败 | 沿用 `OfficeDesignProjectMapper.updateRequirements` 先例；项目级改名/参考图同类风险记为后续观察项 |
 
 ## 验证记录
 
@@ -56,10 +57,12 @@
 | 2026-11-25 | 工作区 | `MOCK_API=1 pnpm e2e:smoke` | 通过 | UI 为模拟 API |
 | 2026-11-25 | 工作区 | `pnpm e2e:workflows` | 通过 | UI 为模拟 API |
 | 2026-11-25 | 工作区 | `git diff --check` | 通过（仅 LF/CRLF 提示） | - |
+| 2026-11-25 | 工作区 | `mvn -f backend/pom.xml test` | 通过：433 运行 / 0 失败 / 11 跳过；新增保存回归 4 用例（连续参考图编辑重读、连续改名+交错编辑重读、并发改名与参考图保留、按列写契约）与 `OfficeFloorSavePostgresTest` 交错读写集成测试；反向验证：临时改回整行 `updateById` 后并发与契约两用例确定性失败，恢复后全绿 | 11 项跳过为 Postgres 门控测试（无 RSDP_TEST_POSTGRES_URL），含新增 `OfficeFloorSavePostgresTest` 未真实执行 |
 
 ## 交付与下一步
 
 - 后端：`20261124_office_floor_reference_images.sql` 迁移、`OfficeDesignFloor.referenceImages`、`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references`、`OfficeFloorDto.referenceImages`。
 - 前端：`useWorkspaceApi.updateFloorReferences`、`ProjectReferenceImagesEditor` 可配置化（heading/listMode/disabled）、项目总览页楼层参考图编辑器（权限门控 + 乱序防护）、画布工具栏参考图弹层、方案页最终报价展示。
 - 测试：`OfficeProjectServiceTest`/`OfficeProjectControllerTest` 新增用例；`e2e-floor-references.mjs`（注册 `pnpm e2e:floor-references`）；`e2e-proposal-quote.mjs` 修正数据并新增一致性场景。
-- 下一步：真实后端 + 数据库的楼层参考图读写联调；认证开启下只读成员的真实链路验收；报价与正式方案快照的失效联动仍属 QUOTE-001 待办。
+- 保存回归（2026-11-25 补充）：`OfficeDesignFloorMapper.updateName`/`updateReferenceImages` 按列定点更新替代整行写；`OfficeProjectServiceTest` 新增连续编辑重读、并发保留、按列写契约 4 用例；`OfficeFloorSavePostgresTest`（RSDP_TEST_POSTGRES_URL 门控）固化真实数据库交错读写两列保留。
+- 下一步：真实后端 + 数据库的楼层参考图读写联调（含 `OfficeFloorSavePostgresTest` 实际执行）；认证开启下只读成员的真实链路验收；报价与正式方案快照的失效联动仍属 QUOTE-001 待办；项目级改名与项目参考图的同类整行写风险待评估。

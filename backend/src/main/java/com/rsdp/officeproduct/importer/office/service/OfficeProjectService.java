@@ -300,7 +300,8 @@ public class OfficeProjectService {
         floor.setName(name);
         floor.setUpdatedAt(LocalDateTime.now());
         try {
-            floorMapper.updateById(floor);
+            // 只写名称列：与参考图等其它列的并发保存互不覆盖（整行 updateById 会用旧快照覆盖对方）。
+            floorMapper.updateName(floorId, floor.getName(), floor.getUpdatedAt());
         } catch (DuplicateKeyException e) {
             throw new BusinessException("楼层名称不能重复");
         }
@@ -388,7 +389,8 @@ public class OfficeProjectService {
         }
         floor.setReferenceImages(writeReferenceImages(validateReferenceImages(request.getReferenceImages())));
         floor.setUpdatedAt(LocalDateTime.now());
-        floorMapper.updateById(floor);
+        // 只写参考图列：与改名等其它列的并发保存互不覆盖（整行 updateById 会用旧快照覆盖对方）。
+        floorMapper.updateReferenceImages(floorId, floor.getReferenceImages(), floor.getUpdatedAt());
         return toFloorDto(floor);
     }
 

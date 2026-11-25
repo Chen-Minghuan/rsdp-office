@@ -8,6 +8,8 @@
 
 # 开发进度与下一步
 
+2026-11-25 [PROJECT-005 保存回归](tasks/PROJECT-005-floor-reference-images.md#验证记录) 补两组楼层保存回归：连续编辑后重新读取保留最后一次修改；参考图保存与楼层改名并发时两边都保留。并发组暴露出真实丢失更新——改名与参考图两条写路径均为读整行→改单字段→整行 `updateById` 写回，交错时用旧快照互覆盖；已按 `updateRequirements` 先例改为 `OfficeDesignFloorMapper.updateName`/`updateReferenceImages` 按列定点更新。`OfficeProjectServiceTest` 新增 4 用例（连续参考图重读、连续改名+交错重读、栅栏模拟并发交错保留、按列写契约），反向验证临时改回整行写后并发与契约两用例确定性失败；新增 `OfficeFloorSavePostgresTest`（RSDP_TEST_POSTGRES_URL 门控）固化真实库交错读写。Java 全量 433 运行/0 失败/11 跳过（跳过均为 Postgres 门控，含本次新增集成测试未真实执行）。项目级改名与项目参考图存在同类整行写风险，列为后续观察项。
+
 2026-11-25 工作台项目列表刷新修复 项目阶段与区域进度由列表接口读时派生，但 `workspace.projects` 此前只在应用初始化时拉取一次，方案确认、确认失效（画布保存/清单变化）和新增楼层后返回工作台仍显示旧值。新增 `workspace.refreshProjects()`：进入工作台项目列表视图时静默重取（保留旧数据、不重置 office 画布状态，首次加载仍由 `init()` 负责），刷新契约记录在 [架构文档](architecture.md)。新增 `pnpm e2e:project-refresh` 动态回归（自起 `.output` 服务、可变 mock 状态），覆盖确认方案后阶段/进度前进、清单修改致确认失效后回退、已交付项目新增未确认楼层后回退、重取期间不清空列表。实际执行（2026-11-25 本机）：`pnpm build` 通过；`e2e:project-refresh`、`e2e:product-scheme`、`e2e:project-floors`（自起服务）与 dev server（3001）上 `e2e:project-status`、`e2e:workflows` 均通过（均拦截 API）；未做真实后端联调。同步清理 WORKSPACE-006 人工修改阶段的过时描述（标注为历史决策）。
 
 2026-11-25 项目列表进度列 项目工作台列表新增"进度"列：交付中区域/全部区域的百分比，交付中口径与项目阶段派生一致（所在楼层方案存在未失效确认），且该区域购物车数量合计 > 0 才计入分子，购物车为 0 的区域视为设计中。列表接口新增 `zoneTotal`/`zoneDelivered` 返回（每楼层取最新画布 `objects_json` 中 `kind=zone` 对象计数，无画布或解析失败按 0 计），前端按 `zoneDelivered/zoneTotal` 取整展示，无区域显示占位。前端构建、项目阶段与主流程模拟 UI 回归、模拟冒烟通过；Java 测试因本机仅 JDK 17（工程要求 21）未能执行，真实后端联调与 Java 测试待补验。

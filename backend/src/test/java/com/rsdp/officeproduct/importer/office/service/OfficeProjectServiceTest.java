@@ -7,6 +7,7 @@ import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
 import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
+import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
@@ -40,6 +41,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class OfficeProjectServiceTest {
@@ -102,6 +105,21 @@ class OfficeProjectServiceTest {
         when(floorMapper.insert(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });
         when(floorMapper.selectById(anyString())).thenAnswer(call -> floors.get(call.getArgument(0)));
         when(floorMapper.updateById(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });
+        // 定点列更新：只把本列写回存储实体，与生产 SQL 的单列 UPDATE 语义一致。
+        when(floorMapper.updateName(anyString(), anyString(), any())).thenAnswer(call -> {
+            OfficeDesignFloor floor = floors.get(call.getArgument(0));
+            if (floor == null) return 0;
+            floor.setName(call.getArgument(1));
+            floor.setUpdatedAt(call.getArgument(2));
+            return 1;
+        });
+        when(floorMapper.updateReferenceImages(anyString(), anyString(), any())).thenAnswer(call -> {
+            OfficeDesignFloor floor = floors.get(call.getArgument(0));
+            if (floor == null) return 0;
+            floor.setReferenceImages(call.getArgument(1));
+            floor.setUpdatedAt(call.getArgument(2));
+            return 1;
+        });
         when(floorMapper.selectList(any())).thenAnswer(call -> floors.values().stream()
             .filter(floor -> scopeIds(call.getArgument(0)).contains(floor.getProjectId())).toList());
         when(floorMapper.nextSortOrder(anyString())).thenAnswer(call -> floors.values().stream()
@@ -644,7 +662,7 @@ class OfficeProjectServiceTest {
         var update = referencesRequest(referenceImage("/uploads/images/a.png", "图"));
         assertEquals("楼层不存在", assertThrows(BusinessException.class,
             () -> service.updateFloorReferences(fixture.projectId(), "OFLR-UNKNOWN", update)).getMessage());
-        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+        verify(floorMapper, never()).updateReferenceImages(any(), any(), any());
     }
 
     @Test void updateFloorReferencesRejectsFloorFromAnotherProject() {
@@ -660,14 +678,14 @@ class OfficeProjectServiceTest {
         assertEquals("楼层不存在", assertThrows(BusinessException.class,
             () -> service.updateFloorReferences(fixture.projectId(), otherFloorId, update)).getMessage());
         assertEquals(baseline, floors.get(otherFloorId).getReferenceImages());
-        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+        verify(floorMapper, never()).updateReferenceImages(any(), any(), any());
     }
 
     @Test void updateFloorReferencesRejectsNullRequest() {
         var fixture = projectWithFloor();
         assertEquals("参考图片参数不能为空", assertThrows(BusinessException.class,
             () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(), null)).getMessage());
-        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+        verify(floorMapper, never()).updateReferenceImages(any(), any(), any());
     }
 
     @Test void updateFloorReferencesRejectsInvalidUrls() {
@@ -725,7 +743,126 @@ class OfficeProjectServiceTest {
             () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
                 referencesRequest(referenceImage("/uploads/images/a.png", "图"))));
         assertNull(floors.get(fixture.floorId()).getReferenceImages());
+        verify(floorMapper, never()).updateReferenceImages(any(), any(), any());
+    }
+
+    @Test void consecutiveFloorReferenceEditsKeepLastWriteAfterReread() {
+        var fixture = projectWithFloor();
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/first.png", "第一次")));
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/second.png", "第二次"),
+            referenceImage("/uploads/images/second-b.png", "第二次补")));
+        var last = service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/third.png", "第三次")));
+        assertEquals(1, last.getReferenceImages().size());
+
+        // 重新读取（服务端读路径），确认只保留最后一次修改。
+        var reread = rereadFloor(fixture.projectId(), fixture.floorId());
+        assertEquals(1, reread.getReferenceImages().size());
+        assertEquals("/uploads/images/third.png", reread.getReferenceImages().get(0).getUrl());
+        assertEquals("第三次", reread.getReferenceImages().get(0).getName());
+        String stored = floors.get(fixture.floorId()).getReferenceImages();
+        assertFalse(stored.contains("first.png"));
+        assertFalse(stored.contains("second.png"));
+    }
+
+    @Test void consecutiveFloorRenamesKeepLastWriteAfterReread() {
+        var fixture = projectWithFloor();
+        var rename = new CreateOfficeFloorRequest();
+        rename.setName("首层");
+        service.updateFloor(fixture.projectId(), fixture.floorId(), rename);
+        rename.setName("大堂层");
+        var renamed = service.updateFloor(fixture.projectId(), fixture.floorId(), rename);
+        assertEquals("大堂层", renamed.getName());
+        assertEquals("大堂层", rereadFloor(fixture.projectId(), fixture.floorId()).getName());
+
+        // 与参考图编辑交错：两类编辑重新读取后各自保留最后一次。
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/ref-1.png", "第一版")));
+        rename.setName("最终层");
+        service.updateFloor(fixture.projectId(), fixture.floorId(), rename);
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/ref-2.png", "第二版")));
+
+        var reread = rereadFloor(fixture.projectId(), fixture.floorId());
+        assertEquals("最终层", reread.getName());
+        assertEquals(1, reread.getReferenceImages().size());
+        assertEquals("/uploads/images/ref-2.png", reread.getReferenceImages().get(0).getUrl());
+        String stored = floors.get(fixture.floorId()).getReferenceImages();
+        assertFalse(stored.contains("ref-1.png"));
+    }
+
+    @Test void concurrentFloorRenameAndReferenceSaveBothSurvive() throws Exception {
+        var fixture = projectWithFloor();
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/base.png", "基线")));
+
+        // 模拟两个并发事务交错：双方都在对方写入前读到同一行的独立快照（深拷贝），随后各自写回。
+        // 定点列更新下两列互不覆盖；旧的整行 updateById 语义会让后写者用旧快照覆盖先写者的列。
+        var readBarrier = new java.util.concurrent.CyclicBarrier(2);
+        when(floorMapper.selectById(anyString())).thenAnswer(call -> {
+            OfficeDesignFloor snapshot = copyFloor(floors.get(call.getArgument(0)));
+            if (snapshot != null && fixture.floorId().equals(snapshot.getFloorId())) {
+                try {
+                    readBarrier.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception barrierFailure) {
+                    throw new AssertionError("并发读取栅栏失败", barrierFailure);
+                }
+            }
+            return snapshot;
+        });
+        var rename = new CreateOfficeFloorRequest();
+        rename.setName("并发改名");
+        var referencesUpdate = referencesRequest(referenceImage("/uploads/images/concurrent.png", "并发图"));
+
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var renamed = pool.submit(() -> service.updateFloor(fixture.projectId(), fixture.floorId(), rename));
+            var saved = pool.submit(() -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesUpdate));
+            renamed.get(15, java.util.concurrent.TimeUnit.SECONDS);
+            saved.get(15, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        var reread = rereadFloor(fixture.projectId(), fixture.floorId());
+        assertEquals("并发改名", reread.getName());
+        assertEquals(1, reread.getReferenceImages().size());
+        assertEquals("/uploads/images/concurrent.png", reread.getReferenceImages().get(0).getUrl());
+        assertEquals("并发图", reread.getReferenceImages().get(0).getName());
+    }
+
+    @Test void floorRenameAndReferenceSaveWriteOnlyTheirOwnColumns() {
+        var fixture = projectWithFloor();
+        var rename = new CreateOfficeFloorRequest();
+        rename.setName("只写名称列");
+        service.updateFloor(fixture.projectId(), fixture.floorId(), rename);
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/column.png", "列语义")));
+
+        verify(floorMapper).updateName(eq(fixture.floorId()), eq("只写名称列"), any());
+        verify(floorMapper).updateReferenceImages(eq(fixture.floorId()), contains("/uploads/images/column.png"), any());
+        // 防止回退到整行写：整行 updateById 会在并发交错时用旧快照覆盖另一列。
         verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+    }
+
+    private OfficeFloorDto rereadFloor(String projectId, String floorId) {
+        return project(service.listProjects(), projectId).getFloors().stream()
+            .filter(floor -> floorId.equals(floor.getFloorId())).findFirst().orElseThrow();
+    }
+
+    private OfficeDesignFloor copyFloor(OfficeDesignFloor floor) {
+        if (floor == null) return null;
+        var copy = new OfficeDesignFloor();
+        copy.setFloorId(floor.getFloorId());
+        copy.setProjectId(floor.getProjectId());
+        copy.setName(floor.getName());
+        copy.setSortOrder(floor.getSortOrder());
+        copy.setReferenceImages(floor.getReferenceImages());
+        copy.setCreatedAt(floor.getCreatedAt());
+        copy.setUpdatedAt(floor.getUpdatedAt());
+        return copy;
     }
 
     @Test void listProjectsFiltersToAccessibleProjectsWhenEnforced() {
