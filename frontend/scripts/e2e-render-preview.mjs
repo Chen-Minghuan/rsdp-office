@@ -108,7 +108,7 @@ try {
     await page.getByRole('button', { name: 'AI 效果图', exact: true }).click()
     await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor()
   }
-  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X&renderExperiment=1&floorId=' + floorId, { waitUntil: 'networkidle' })
+  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-X&floorId=' + floorId + '&renderExperiment=1', { waitUntil: 'networkidle' })
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   await open()

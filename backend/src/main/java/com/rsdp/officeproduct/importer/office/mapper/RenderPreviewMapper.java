@@ -17,7 +17,8 @@ public interface RenderPreviewMapper {
 
     @Update("""
         UPDATE office_render_preview SET status=#{status}, image_url=#{imageUrl}, error_message=#{errorMessage},
-        provider_task_id=#{providerTaskId}, provider_request_id=#{providerRequestId}, updated_at=#{updatedAt}
+        provider_task_id=#{providerTaskId}, provider_request_id=#{providerRequestId},
+        snapshot_json=CAST(#{snapshotJson} AS jsonb), updated_at=#{updatedAt}
         WHERE preview_id=#{previewId} AND project_id=#{projectId}
         """)
     int update(RenderPreview preview);

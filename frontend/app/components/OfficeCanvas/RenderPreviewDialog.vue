@@ -4,8 +4,7 @@ import { renderPreviewSnapshot, renderSnapshotKey, renderPreviewActive } from '~
 import { createUuid } from '~/utils/uuid'
 
 const show = defineModel<boolean>('show', { default: false })
-/** 保留旧入口参数；新生成统一使用后端结构图，并可绑定正式方案确认版本。 */
-const props = withDefaults(defineProps<{ viewImage?: string; formal?: boolean; confirmationId?: string; initialStyle?: string; initialPreviewId?: string }>(), { viewImage: '' })
+const props = defineProps<{ formal?: boolean; confirmationId?: string; initialStyle?: string; initialPreviewId?: string }>()
 const dialogElement = ref<HTMLElement | null>(null)
 const store = useOfficeStore()
 const auth = useAuth()
@@ -64,7 +63,7 @@ async function measureSpacing() {
 const activeCurrent = computed(() => jobs.value.some(item => renderPreviewActive(item.status) && !stale(item)
   && (props.formal ? item.confirmationId === props.confirmationId : item.purpose === 'CONCEPT_PREVIEW')))
 const stale = (job: RenderPreview) => job.stale || renderSnapshotKey(job.snapshot) !== currentKey.value
-const statusText = (status: string) => ({ SUBMITTING: '正在提交', PENDING: '排队中', RUNNING: '生成中', SUCCEEDED: '已生成', FAILED: '生成失败' }[status] || status)
+const statusText = (status: string) => ({ SUBMITTING: '正在提交', PENDING: '排队中', POLLING: '正在查询', RUNNING: '生成中', SUCCEEDED: '已生成', FAILED: '生成失败' }[status] || status)
 const qualityStatus = (job: RenderPreview) => {
   const product = job.qualityAudit?.status || 'UNAVAILABLE'
   if (!job.productReferences?.spatialControl) return product
@@ -183,7 +182,8 @@ async function generate() {
   const ticket = sequence, expectedKey = currentKey.value, storageKey = pendingStorageKey()
   const revision = store.canvasRevision
   const expectedSnapshot = JSON.parse(JSON.stringify(snapshot.value))
-  const options: Omit<RenderPreviewRequest, 'clientChangeId'> = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: 'ISOMETRIC', instructions: instructions.value.trim(), ...experimentRequestOptions(), ...(props.formal ? { confirmationId: props.confirmationId } : {}) }
+  const options: Omit<RenderPreviewRequest, 'clientChangeId'> = { zoneId: zoneId.value, canvasRevision: revision, expectedSnapshot, style: style.value.trim(), view: 'ISOMETRIC', instructions: instructions.value.trim(), ...experimentRequestOptions(),
+    ...(props.formal ? { confirmationId: props.confirmationId } : {}) }
   if (!pending || renderSnapshotKey({ ...pending, clientChangeId: '', canvasRevision: 0 }) !== renderSnapshotKey({ ...options, clientChangeId: '', canvasRevision: 0 })) {
     remember({ ...options, clientChangeId: createUuid() })
   } else remember({ ...pending, canvasRevision: revision })
@@ -221,7 +221,15 @@ watch([show, zoneId, () => store.workspaceId, () => props.formal, () => props.co
   sequence++; clearTimeout(timer)
   if (open && zoneId.value) load()
 }, { immediate: true })
-watch(show, async open => { clearInterval(clockTimer); if (open) { if (props.initialStyle) style.value = props.initialStyle; clock.value = Date.now(); clockTimer = setInterval(() => { clock.value = Date.now() }, 1000); await nextTick(); dialogElement.value?.focus() } })
+watch(show, async open => {
+  clearInterval(clockTimer)
+  if (!open) return
+  if (props.initialStyle) style.value = props.initialStyle
+  clock.value = Date.now()
+  clockTimer = setInterval(() => { clock.value = Date.now() }, 1000)
+  await nextTick()
+  dialogElement.value?.focus()
+})
 onUnmounted(() => clearInterval(clockTimer))
 function trapFocus(event: KeyboardEvent) {
   const controls = Array.from(dialogElement.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary') || [])

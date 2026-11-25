@@ -65,43 +65,77 @@ public class RenderProductAuditService {
     ObjectNode normalize(JsonNode raw,RenderFurnitureBindings.Prepared bindings,JsonNode layoutFacts) {
         if(raw==null || !raw.isObject()) throw new BusinessException("效果图检查没有返回有效对象");
         ObjectNode result=JsonNodeFactory.instance.objectNode();
+        List<String> statuses=new ArrayList<>();
+
         ObjectNode count=result.putObject("furnitureCount");JsonNode rawCount=raw.path("furnitureCount");
-        count.put("expected",bindings.items().size());
-        if(rawCount.path("observed").isInt() && rawCount.path("observed").asInt()>=0 && rawCount.path("observed").asInt()<=100) count.put("observed",rawCount.path("observed").asInt());
-        String countStatus=status(rawCount.path("status").asText());count.put("status",countStatus);
-        ObjectNode layout=result.putObject("layout");String layoutStatus=status(raw.path("layout").path("status").asText());
-        layout.put("status",layoutStatus).put("reason",reason(raw.path("layout").path("reason").asText("")));
-        List<String> statuses=new ArrayList<>(List.of(countStatus,layoutStatus));
-        if(raw.has("composition")) {
-            JsonNode source=raw.path("composition");boolean issue=!source.path("singleScene").asBoolean(true)||source.path("containsReferenceBoard").asBoolean()||source.path("containsPlan").asBoolean()||source.path("containsLabels").asBoolean()||source.path("containsCollage").asBoolean();
-            ObjectNode composition=result.putObject("composition");for(String field:List.of("singleScene","containsReferenceBoard","containsPlan","containsLabels","containsCollage"))composition.put(field,source.path(field).asBoolean(!List.of("containsReferenceBoard","containsPlan","containsLabels","containsCollage").contains(field)));
-            String compositionStatus=issue?"FAIL":status(source.path("status").asText());composition.put("status",compositionStatus).put("reason",reason(source.path("reason").asText("")));statuses.add(compositionStatus);
+        int expected=bindings.items().size();count.put("expected",expected);
+        JsonNode expectedNode=rawCount.get("expected");boolean expectedValid=expectedNode!=null&&expectedNode.isInt()&&expectedNode.asInt()==expected;
+        JsonNode observedNode=rawCount.get("observed");
+        boolean observedValid=observedNode!=null&&observedNode.isInt()&&observedNode.asInt()>=0&&observedNode.asInt()<=100;
+        Integer observed=observedValid?observedNode.asInt():null;
+        if(observed!=null)count.put("observed",observed);else count.putNull("observed");
+        String reportedCountStatus=validStatus(rawCount.path("status"));
+        String countStatus=observed!=null&&observed!=expected?"FAIL":observed==null||!expectedValid||reportedCountStatus==null?"UNCERTAIN":reportedCountStatus;
+        count.put("status",countStatus);statuses.add(countStatus);
+
+        ObjectNode layout=result.putObject("layout");String reportedLayoutStatus=validStatus(raw.path("layout").path("status"));
+        String layoutStatus=reportedLayoutStatus==null?"UNCERTAIN":reportedLayoutStatus;
+        layout.put("status",layoutStatus).put("reason",reason(raw.path("layout").path("reason").asText("")));statuses.add(layoutStatus);
+
+        JsonNode source=raw.path("composition");ObjectNode composition=result.putObject("composition");
+        boolean compositionIssue=false,compositionIncomplete=!source.isObject();
+        for(String field:List.of("singleScene","containsReferenceBoard","containsPlan","containsLabels","containsCollage")) {
+            JsonNode value=source.get(field);boolean healthy="singleScene".equals(field);
+            if(value==null||!value.isBoolean()) { compositionIncomplete=true;composition.putNull(field); }
+            else { composition.put(field,value.asBoolean());if(value.asBoolean()!=healthy)compositionIssue=true; }
         }
+        String reportedCompositionStatus=validStatus(source.path("status"));compositionIncomplete|=reportedCompositionStatus==null;
+        String compositionStatus=compositionIssue?"FAIL":compositionIncomplete?"UNCERTAIN":reportedCompositionStatus;
+        composition.put("status",compositionStatus).put("reason",reason(source.path("reason").asText("")));statuses.add(compositionStatus);
+
         if(layoutFacts!=null) {
-            String architectureStatus=status(raw.path("architecture").path("status").asText());
-            result.putObject("architecture").put("status",architectureStatus).put("reason",reason(raw.path("architecture").path("reason").asText("")));
-            statuses.add(architectureStatus);
+            String reportedArchitectureStatus=validStatus(raw.path("architecture").path("status"));
+            String architectureStatus=reportedArchitectureStatus==null?"UNCERTAIN":reportedArchitectureStatus;
+            result.putObject("architecture").put("status",architectureStatus).put("reason",reason(raw.path("architecture").path("reason").asText("")));statuses.add(architectureStatus);
         }
-        if(raw.has("imageQuality")) {
-            String qualityStatus=status(raw.path("imageQuality").path("status").asText());
-            result.putObject("imageQuality").put("status",qualityStatus).put("reason",reason(raw.path("imageQuality").path("reason").asText("")));
-            statuses.add(qualityStatus);
+        String reportedQualityStatus=validStatus(raw.path("imageQuality").path("status"));
+        String qualityStatus=reportedQualityStatus==null?"UNCERTAIN":reportedQualityStatus;
+        result.putObject("imageQuality").put("status",qualityStatus).put("reason",reason(raw.path("imageQuality").path("reason").asText("")));statuses.add(qualityStatus);
+
+        Map<String,JsonNode> returned=new HashMap<>();boolean itemsIncomplete=!raw.path("items").isArray();
+        Set<String> boundFurniture=new HashSet<>();for(var binding:bindings.items())if(!binding.productId().isBlank())boundFurniture.add(binding.referenceId());
+        if(raw.path("items").isArray())for(JsonNode item:raw.path("items")) {
+            JsonNode furnitureId=item.path("furnitureReferenceId");
+            if(!furnitureId.isTextual()||!boundFurniture.contains(furnitureId.asText())||returned.put(furnitureId.asText(),item)!=null)itemsIncomplete=true;
         }
-        Map<String,JsonNode> returned=new HashMap<>();for(JsonNode item:raw.path("items")) returned.put(item.path("furnitureReferenceId").asText(),item);
         ArrayNode items=result.putArray("items");
         for(var binding:bindings.items()) {
             if(binding.productId().isBlank()) continue;
             JsonNode item=returned.get(binding.referenceId());ObjectNode checked=items.addObject();
             checked.put("furnitureReferenceId",binding.referenceId()).put("productReferenceId",binding.productReferenceId());
-            String itemStatus=item==null?"UNCERTAIN":status(item.path("status").asText());
-            checked.put("status",itemStatus).put("reason",item==null?"模型没有返回该家具的检查结果":reason(item.path("reason").asText("")));
-            statuses.add(itemStatus);
+            String itemStatus;
+            if(item==null) { itemStatus="UNCERTAIN";checked.put("reason","模型没有返回该家具的检查结果"); }
+            else {
+                JsonNode observedProduct=item.get("productReferenceId");
+                if(observedProduct==null||!observedProduct.isTextual()) { itemStatus="UNCERTAIN";checked.putNull("observedProductReferenceId");checked.put("reason","缺少商品编号，无法确认F/P对应关系"); }
+                else {
+                    checked.put("observedProductReferenceId",observedProduct.asText());
+                    if(!binding.productReferenceId().equals(observedProduct.asText())) { itemStatus="FAIL";checked.put("reason","返回商品编号与绑定商品不一致"); }
+                    else {
+                        String reportedItemStatus=validStatus(item.path("status"));itemStatus=reportedItemStatus==null?"UNCERTAIN":reportedItemStatus;
+                        checked.put("reason",reason(item.path("reason").asText("")));
+                    }
+                }
+            }
+            checked.put("status",itemStatus);statuses.add(itemStatus);
         }
+        if(itemsIncomplete)statuses.add("UNCERTAIN");
         String overall=statuses.contains("FAIL")?"FAIL":statuses.contains("UNCERTAIN")?"UNCERTAIN":"PASS";
         result.put("status",overall);result.put("model",raw.path("model").asText(""));
         if(raw.hasNonNull("providerRequestId")) result.put("providerRequestId",raw.path("providerRequestId").asText());
         return result;
     }
+    private static String validStatus(JsonNode value) { return value!=null&&value.isTextual()&&STATUSES.contains(value.asText())?value.asText():null; }
     private static String status(String value) { return STATUSES.contains(value)?value:"UNCERTAIN"; }
     private static String reason(String value) { String clean=value.replaceAll("[\\p{Cntrl}\\r\\n]+"," ").trim();return clean.substring(0,Math.min(500,clean.length())); }
 }

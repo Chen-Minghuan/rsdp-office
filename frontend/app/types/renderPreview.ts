@@ -116,7 +116,7 @@ export interface RenderPreview {
   style: string
   view: 'ISOMETRIC' | 'INTERIOR'
   instructions: string
-  status: 'SUBMITTING' | 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  status: 'SUBMITTING' | 'PENDING' | 'RUNNING' | 'POLLING' | 'SUCCEEDED' | 'FAILED'
   snapshot: RenderPreviewSnapshot
   stale: boolean
   imageUrl?: string

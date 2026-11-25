@@ -17,11 +17,8 @@ const layoutPreview = ref<LayoutPreview | null>(null)
 const referenceEditing = ref<LayoutReferenceEditing | null>(null)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
-/** 从 3D 白模发起 AI 效果图时携带的当前视角截图；工具栏直接发起时为空（RENDER-006）。 */
-const renderViewImage = ref('')
 const selectedRenderId = ref<string>()
-function openRenderPreview(viewImage = '', previewId?: string) {
-  renderViewImage.value = viewImage
+function openRenderPreview(previewId?: string) {
   selectedRenderId.value = previewId
   showRenderPreview.value = true
 }
@@ -288,14 +285,14 @@ watch(() => store.canEnterLayout, (confirmed) => {
       <button v-if="canEditScheme && currentConfirmation" class="scheme-generate" type="button" @click="openRenderPreview()">生成方案效果图</button>
       <NuxtLink v-else-if="canEditScheme" class="scheme-generate" :to="proposalRoute">去项目清单确认</NuxtLink>
       <button type="button" @click="openRenderPreview()">生成记录</button>
-      <button v-for="image in renders" :key="image.previewId" class="scheme-thumbnail" type="button" :aria-label="image.style + '效果图'" @click="openRenderPreview('', image.previewId)">
+      <button v-for="image in renders" :key="image.previewId" class="scheme-thumbnail" type="button" :aria-label="image.style + '效果图'" @click="openRenderPreview(image.previewId)">
         <img :src="renderFiles.imageUrl(image.imageUrl)" :alt="image.style" :class="{ 'opacity-50': image.stale }">
       </button>
     </footer>
 
-    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :view-image="renderViewImage" :formal="isProductScheme"
+    <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :formal="isProductScheme"
       :confirmation-id="canEditScheme ? currentConfirmation : undefined" :initial-style="isProductScheme ? renderStyle : undefined" :initial-preview-id="selectedRenderId" />
-    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" :readonly="isProductScheme && !canEditScheme" @ai-render="openRenderPreview" @locate="onLocateFrom3d" />
+    <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" :readonly="isProductScheme && !canEditScheme" @ai-render="openRenderPreview()" @locate="onLocateFrom3d" />
   </div>
 </template>
 

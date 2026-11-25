@@ -22,7 +22,11 @@
 
 ## 2. 核心数据关系（目标模型）
 
-项目阶段使用 `office_design_project.status`（`DESIGNING / DELIVERING / COMPLETED`），默认设计中，数据库非空和枚举约束由启动迁移保证。列表返回 `status`、`canManageStatus`，`PATCH /api/v1/office/projects/{projectId}/status` 仅更新阶段与更新时间并记录审计；权限限所属工作区主号和有项目查看权的实际负责人，不继承协作者的成员管理权限。普通改名/参考资料更新不回写阶段，避免并发覆盖。管理阶段独立于设计确认快照。详见 [WORKSPACE-005](tasks/WORKSPACE-006-project-status.md)。
+项目阶段由方案确认数据读时派生：项目全部楼层在 `office_proposal_confirmation` 存在未失效（`retired=false`）记录 → `DELIVERING`，否则 → `DESIGNING`（无楼层项目为设计中）。列表接口用一次 `confirmedFloorIds` 批量查询完成派生，前端只读展示，不提供人工修改入口。`office_design_project.status` 列保留但不再读取，新建项目仍写默认值。详见 [WORKSPACE-006](tasks/WORKSPACE-006-project-status.md)。
+
+项目列表接口同时返回区域进度字段 `zoneTotal` / `zoneDelivered`：区域为楼层最新画布 `objects_json` 中 `kind=zone` 的对象（每楼层取 `created_at` 最新一行，无画布按 0 计，解析失败按 0 计）；所在楼层方案已确认（交付中口径同上）**且该区域购物车数量合计 > 0**（`office_cart` 按楼层与 `zone_id` 聚合，未分区行不计入）的区域计入 `zoneDelivered`，购物车为 0 的区域视为设计中；前端按 `zoneDelivered / zoneTotal` 计算进度百分比，`zoneTotal` 为 0 时显示占位。
+
+客户端刷新契约：项目列表由应用外壳 `workspace.init()` 拉取一次，此后不随路由自动重取；派生字段（阶段、区域进度）只能由列表接口给出，因此进入工作台项目列表视图时 `workspace.refreshProjects()` 静默重取（保留旧数据避免闪烁、不重置 office 画布状态，首次加载仍由 `init()` 负责）。方案确认、确认失效（画布保存/清单变化）与新增楼层均不主动失效列表，依赖进入列表时的重取获得最新派生阶段与进度；若未来出现需要实时阶段的其他消费方（如侧栏角标），再引入版本号广播式失效。回归见 `pnpm e2e:project-refresh`。
 
 ```text
 DesignProject（项目资料与客户需求备注）
