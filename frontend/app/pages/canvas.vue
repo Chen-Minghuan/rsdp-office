@@ -9,7 +9,7 @@ import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 import { ringProblem, zoneMeasurements } from '~/utils/spatial/review'
 import { money } from '~/utils/helpers'
 import { furnitureById } from '~/utils/manualFurniture'
-import { officeFurnitureTemplateId } from '~/utils/officeFurniture'
+import { isMeetingAutoLayoutPrimary } from '~/utils/autoLayoutPrimary'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const route = useRoute()
@@ -34,19 +34,6 @@ function openRenderPreview(previewId?: string) {
   selectedRenderId.value = previewId
   showRenderPreview.value = true
 }
-function isAutoLayoutPrimary(f: FurnitureObject): boolean {
-  if (f.layoutRole !== 'primary') return false
-  if (!f.layoutSettings || f.layoutSettings.layoutContext !== 'meeting') return false
-  const zone = store.zones.find(z => z.id === f.zoneId)
-  if (f.layoutGroupId && zone && f.layoutGroupId !== `auto:${zone.id}`) return false
-  const templateId = officeFurnitureTemplateId(f) || f.furnitureTemplateId
-  const template = templateId ? furnitureById.get(templateId) : undefined
-  if (!template?.reference?.code) return false
-  const code = template.reference.code
-  if (code === 'T16' || code === 'S15') return false
-  return true
-}
-
 const sizeMessage = ref('')
 let sizeMessageTimer: ReturnType<typeof setTimeout> | undefined
 /** 改尺寸成功但含复核提示时不关静默丢弃，短暂展示在上方。 */
@@ -57,7 +44,7 @@ function onSizeApplied(message: string) {
 }
 
 function openSizeDialog(item: FurnitureObject, ids: string[], anchor?: HTMLElement) {
-  if (isAutoLayoutPrimary(item)) {
+  if (isMeetingAutoLayoutPrimary(item, store.zones)) {
     const templateId = item.furnitureTemplateId || item.moduleSnapshot?.glyphTemplateId
     const template = templateId ? furnitureById.get(templateId) : undefined
     if (template) {

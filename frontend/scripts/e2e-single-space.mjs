@@ -57,6 +57,7 @@ try {
     }
     if (path.endsWith(`/office/projects/${encodeURIComponent('OFFICE-PROJECT-001')}/module-products`)) {
       const body = await route.request().postDataJSON()
+      await page.evaluate(req => { window.lastModuleProductRequest = req }, body)
       // 回显当前画布，避免绑定动作把测试中的家具清空
       const objects = await page.evaluate(() => {
         const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
@@ -94,16 +95,14 @@ try {
   await page.evaluate(() => {
     const key = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
     const draft = JSON.parse(localStorage.getItem(key))
-    for (const [id, zoneId] of [['F-L','ROOM-L'],['F-B','ROOM-B']]) {
-      const zone = draft.objects.find(zone => zone.id === zoneId)
-      draft.objects.push({ id, zoneId, kind: 'furniture', x: zone.x + 500, y: zone.y + 500, w: 1200, h: 600, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' })
-    }
-    // 底部栏测试用家具：同 label 同尺寸分组、不同 label 同尺寸分组、不同尺寸分组
     const roomL = draft.objects.find(zone => zone.id === 'ROOM-L')
+    const roomB = draft.objects.find(zone => zone.id === 'ROOM-B')
     draft.objects.push(
-      { id: 'F-L2', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 2300, y: roomL.y + 500, w: 1200, h: 600, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
-      { id: 'F-L3', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 500, y: roomL.y + 2500, w: 1200, h: 600, rotation: 0, productId: '', label: '办公桌2', furnitureTemplateId: 'desk-straight' },
-      { id: 'F-L4', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 3500, y: roomL.y + 800, w: 2400, h: 1200, rotation: 0, productId: '', label: '会议桌', furnitureTemplateId: 'table-conference-rect' }
+      { id: 'F-L', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 500, y: roomL.y + 2400, w: 1200, h: 50, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-B', zoneId: 'ROOM-B', kind: 'furniture', x: roomB.x + 500, y: roomB.y + 500, w: 1200, h: 600, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-L2', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 500, y: roomL.y + 3000, w: 1200, h: 50, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-L3', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 4000, y: roomL.y + 2400, w: 800, h: 50, rotation: 0, productId: '', label: '办公桌2', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-L4', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 1000, y: roomL.y + 4000, w: 2400, h: 1200, rotation: 0, productId: '', label: '会议桌', furnitureTemplateId: 'table-conference-rect' }
     )
     draft.objects.push(
       { id: 'GLOBAL-REF', kind: 'reference', x: -17500, y: -7500, caption: '整层参考' },
@@ -148,20 +147,30 @@ try {
   // Pointer coordinates must stay in world mm even with a negative world origin.
   const furniture = canvas().locator('[data-id="F-L"]')
   await furniture.waitFor()
-  await page.waitForTimeout(500)
   const from = await furniture.boundingBox()
   const zoom = from.width / 1200
+  const canvasBox = await canvas().boundingBox()
+  const dragTargetX = from.x + from.width / 2 + 25 - canvasBox.x
+  const dragTargetY = from.y + from.height / 2 + 15 - canvasBox.y
+  const endX = canvasBox.x + dragTargetX
+  const endY = canvasBox.y + dragTargetY
   const startX = from.x + from.width / 2
   const startY = from.y + from.height / 2
-  const endX = startX + 25
-  const endY = startY + 15
-  await page.mouse.move(startX, startY)
-  await page.mouse.down()
-  for (let i = 1; i <= 5; i++) {
-    const t = i / 5
-    await page.mouse.move(startX + (endX - startX) * t, startY + (endY - startY) * t)
-  }
-  await page.mouse.up()
+  await page.evaluate(({ startX, startY, endX, endY }) => {
+    const f = document.querySelector('[data-id="F-L"]')
+    const canvas = document.querySelector('[data-testid="office-design-canvas"]')
+    if (!f || !canvas) throw new Error('missing drag elements')
+    const make = (type, x, y) => new PointerEvent(type, {
+      bubbles: true, cancelable: true, clientX: x, clientY: y,
+      pointerId: 42, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, isPrimary: true,
+    })
+    f.dispatchEvent(make('pointerdown', startX, startY))
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 5
+      canvas.dispatchEvent(make('pointermove', startX + (endX - startX) * t, startY + (endY - startY) * t))
+    }
+    canvas.dispatchEvent(make('pointerup', endX, endY))
+  }, { startX, startY, endX, endY })
   const moved = (await state()).objects.find(object => object.id === 'F-L')
   const original = initial.objects.find(object => object.id === 'F-L')
   assert.ok(Math.abs(moved.x - original.x - 25 / zoom) < 3, JSON.stringify({ moved, original, zoom, from }))
@@ -190,28 +199,47 @@ try {
   assert.ok(collision.result, '组内碰撞必须返回错误')
   assert.deepEqual(collision.after, collision.before, '失败时整批不得修改尺寸')
 
-  // 右键家具可打开尺寸调整 dialog
-  await page.locator('[data-id="F-L4"]').click({ button: 'right' })
+  // 成功软提示：改尺寸后触发座椅侧净空复核警告，弹窗关闭且几何生效；临时家具用后删除，不影响后续确认
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const room = store.objects.find(object => object.id === 'ROOM-L')
+    store.addObject({ id: 'F-SOFT', zoneId: 'ROOM-L', kind: 'furniture', x: room.x + 5000, y: room.y + 5500, w: 600, h: 300, rotation: 0, productId: '', label: '软提示桌', furnitureTemplateId: 'desk-straight' })
+  })
+  await canvas().locator('[data-id="F-SOFT"]').waitFor()
+  await page.locator('[data-id="F-SOFT"]').click({ button: 'right' })
   const sizeDialog = page.getByTestId('furniture-size-dialog')
   await sizeDialog.waitFor()
-  await sizeDialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await sizeDialog.locator('input').first().fill('600')
+  await sizeDialog.locator('input').nth(1).fill('400')
+  await sizeDialog.getByRole('button', { name: '应用尺寸' }).click()
   await sizeDialog.waitFor({ state: 'detached', timeout: 5000 })
-
-  // 为避免额外家具干扰后续确认排版，先移除底部栏测试用的临时家具
+  await page.locator('p[role="status"]').filter({ hasText: '已调整尺寸；请复核' }).waitFor()
+  const resized = (await state()).objects.find(object => object.id === 'F-SOFT')
+  assert.equal(resized.h, 400)
   await page.evaluate(() => {
-    const key = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
-    const draft = JSON.parse(localStorage.getItem(key))
-    draft.objects = draft.objects.filter(o => !['F-L2', 'F-L3', 'F-L4'].includes(o.id))
-    localStorage.setItem(key, JSON.stringify(draft))
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.deleteObject('F-SOFT')
   })
-  await page.reload({ waitUntil: 'networkidle' })
+  await canvas().locator('[data-id="F-SOFT"]').waitFor({ state: 'detached', timeout: 5000 })
 
   const expandButton = page.getByRole('button', { name: '展开侧边栏', exact: true }).first()
   if (await expandButton.count() > 0) await expandButton.click()
   await page.getByTestId('auto-confirm-recommend').click()
   const confirmedFurniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L')
   assert.ok(confirmedFurniture.every(object => object.layoutConfirmed))
-  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 1 件/)
+  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 4 件/)
+
+  // 返回设计模式验证批量换品只提交目标分组 ID
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('canvas-furniture-strip').waitFor()
+  await page.getByTestId('furniture-strip-item-F-L3').dblclick()
+  const productDialog = page.getByTestId('white-model-product-dialog')
+  await productDialog.waitFor()
+  await productDialog.getByRole('button', { name: '批量绑定该商品' }).click()
+  await page.waitForFunction(() => !!window.lastModuleProductRequest, { timeout: 5000 })
+  const bulkRequest = await page.evaluate(() => window.lastModuleProductRequest)
+  assert.deepEqual(bulkRequest.targetIds, ['F-L3'], '批量换品只提交选中分组的家具 ID')
+  await productDialog.waitFor({ state: 'detached', timeout: 5000 })
 
   // Cross-space switch preserves confirmed layouts and does not carry state across rooms.
   const roomLFurniture = confirmedFurniture
@@ -233,14 +261,14 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await assertFit('ROOM-B')
   assert.equal(await spaceSelect.locator('[data-space-id="ROOM-B"]').getAttribute('aria-current'), 'page')
-  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 1 件/)
+  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 4 件/)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.equal(await page.locator('[data-layer="design"]>g').count(), 2)
   assert.equal(await page.locator('[data-layer="underlay"] image').count(), 1)
   const final = await state()
-  assert.equal(final.objects.length, initial.objects.length - 3, '底部栏测试后已移除临时家具')
+  assert.equal(final.objects.length, initial.objects.length)
   assert.deepEqual(final.objects.filter(object => object.kind === 'zone'), initial.objects.filter(object => object.kind === 'zone'))
   assert.deepEqual(final.objects.find(object => object.id === 'F-B'), initial.objects.find(object => object.id === 'F-B'))
   assert.equal(final.floorPlan.previewUrl, source.previewUrl)
