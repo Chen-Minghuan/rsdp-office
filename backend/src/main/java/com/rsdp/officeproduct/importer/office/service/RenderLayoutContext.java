@@ -108,7 +108,10 @@ public class RenderLayoutContext {
             ArrayNode polygon=reservedObstacle.putArray("polygon");for(JsonNode point:outer)polygon.addArray().add(point.get(0).asDouble()).add(-point.get(1).asDouble());
         }
         result.set("reservedAreas",reserved);
-        result.put("openingsKnown",false);
+        var architecturalOpenings=RenderArchitecturalOpenings.from(scene);
+        result.put("openingsKnown",architecturalOpenings.known());
+        result.set("openings",architecturalOpenings.manifest());
+        result.set("unresolvedOpeningIds",architecturalOpenings.unresolved());
         return result;
     }
     private static long rounded(double value){return Math.round(value);}
@@ -117,14 +120,11 @@ public class RenderLayoutContext {
         rects.stream().map(r->x?r.x+r.w/2:r.y+r.h/2).sorted().forEach(value->{if(centers.isEmpty()||Math.abs(centers.get(centers.size()-1)-value)>1)centers.add(value);});return centers.size();
     }
     public static String describe(JsonNode facts) {
-        StringBuilder text=new StringBuilder("\n空间一致性约束（只执行，不把任何数据排成画面文字或边栏）：");
-        text.append("房间横向跨度 ").append(facts.path("widthMm").asText()).append("mm，纵向跨度 ").append(facts.path("depthMm").asText()).append("mm，净面积约 ").append(String.format(Locale.ROOT,"%.2f",facts.path("netAreaM2").asDouble())).append("㎡。保持这个狭长/宽深比例和凹角，不能改成方形大厅。");
-        text.append("主体家具共 ").append(facts.path("primaryCount").asText()).append(" 件，位置带为 ").append(facts.path("rowCount").asText()).append(" 排、").append(facts.path("columnCount").asText()).append(" 列；不同尺寸的混合家具以结构图实际位置为准，不补成整齐矩阵。");
-        var walls=facts.path("wallClearancesMm");text.append("家具外包占地到真实空间边界的最近轴向净距：左 ").append(walls.path("left").asText("未知")).append("mm，右 ").append(walls.path("right").asText("未知")).append("mm，上 ").append(walls.path("top").asText("未知")).append("mm，下 ").append(walls.path("bottom").asText("未知")).append("mm。");
-        for(JsonNode gap:facts.path("groupGaps")) text.append("图纸").append("x".equals(gap.path("axis").asText())?"横向":"纵向").append("组间净距 ").append(gap.path("distanceMm").asText()).append("mm，共 ").append(gap.path("count").asText()).append(" 处；");
-        text.append("组内相接的桌子保持紧贴，不能为了美观均匀拉开；长边沿图纸纵向/横向的关系、镜像和朝向以结构参考为准。已预留的入口/禁放区域保持空白。");
-        text.append("户型识别来源").append("AVAILABLE".equals(facts.path("sourceDrawing").path("status").asText())?"已对应当前空间，使用用户编辑后的设计轮廓；":"不可可靠对应，以当前设计轮廓为准；");
-        text.append("当前没有可靠门窗和层高数据，不把通用整面玻璃窗、门洞或层高假设当成户型事实。不要增加不在布局中的大件家具。最终只有一张完整空间效果照片，没有平面缩略图、规格表、说明栏或文字页脚。\n");
-        return text.toString();
+        StringBuilder prompt=new StringBuilder("\n空间一致性约束：严格保持图1中的空间长宽比例、凹凸轮廓、家具离墙关系、组间距离、排列方式和通道留白，不重新规划布局。组内相接的家具保持紧贴，镜像和朝向以结构参考为准，已预留区域保持空白。");
+        if(facts.path("openingsKnown").asBoolean()) prompt.append("图1已按人工标注画出门窗洞口：必须保留在同一墙面、同一墙内位置和相同数量，不得删除、移动或另增门窗。门窗高度为渲染示意值，不得据此声称实测高度。");
+        else prompt.append("没有可靠依据的门窗和层高不作精确假设。");
+        if(facts.path("unresolvedOpeningIds").size()>0) prompt.append("另有门窗净空标注未能可靠贴墙，不得在任意墙面猜测补洞。");
+        prompt.append("不增加主要家具。\n");
+        return prompt.toString();
     }
 }

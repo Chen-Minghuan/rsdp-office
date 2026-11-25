@@ -11,7 +11,6 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 
 import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -60,12 +59,13 @@ class OfficeProjectStatusPostgresTest {
                 fresh.setName("新项目");
                 projects.insert(fresh);
                 assertEquals("DESIGNING", projects.selectById("NEW").getStatus());
-                projects.updateStatus("OLD", "DELIVERING", LocalDateTime.now());
+                try (var connection = scoped.getConnection(); var statement = connection.createStatement()) {
+                    statement.execute("update office_design_project set status='DELIVERING' where project_id='OLD'");
+                }
+                stale = projects.selectById("OLD");
                 stale.setName("改名不覆盖阶段");
                 projects.updateById(stale);
                 assertEquals("DELIVERING", projects.selectById("OLD").getStatus());
-                projects.updateStatus("OLD", "COMPLETED", LocalDateTime.now());
-                assertEquals("COMPLETED", projects.selectById("OLD").getStatus());
             }
             try (var connection = scoped.getConnection(); var statement = connection.createStatement()) {
                 assertThrows(SQLException.class, () -> statement.execute("update office_design_project set status='INVALID' where project_id='OLD'"));

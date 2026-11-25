@@ -10,8 +10,8 @@ import java.util.List;
 public class OfficeProjectDto {
     private String projectId;
     private String name;
+    /** 由方案确认数据派生：全部楼层存在未失效确认 → DELIVERING，否则 DESIGNING。 */
     private String status;
-    private boolean canManageStatus;
     private String customerRequirements;
     private Integer requirementsRevision;
     private ProjectMemberDto leader;
@@ -24,4 +24,8 @@ public class OfficeProjectDto {
     private BigDecimal budgetTotal;
     /** COMPLETE / PENDING_PRICING / UNAVAILABLE。 */
     private String budgetStatus;
+    /** 所有楼层最新画布中的区域(kind=zone)总数；仅项目列表返回。 */
+    private Integer zoneTotal;
+    /** 所在楼层方案已确认且购物车有量（交付中）的区域数；仅项目列表返回。 */
+    private Integer zoneDelivered;
 }

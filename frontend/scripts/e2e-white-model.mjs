@@ -48,7 +48,7 @@ try {
       renderSubmissions.push(body)
       return respond({ previewId: 'RPRE-WM-' + renderSubmissions.length, zoneId: body.zoneId, zoneName: '白模测试区', canvasRevision: body.canvasRevision,
         purpose: 'CONCEPT_PREVIEW', model: 'qwen-image-3.0', style: body.style, view: body.view, instructions: body.instructions,
-        snapshot: body.expectedSnapshot, status: 'PENDING', stale: false, sourceType: body.viewImage ? 'whiteModelView' : 'spaceGuide',
+        snapshot: body.expectedSnapshot, status: 'PENDING', stale: false, sourceType: 'spaceGuide',
         createdAt: new Date().toISOString() })
     }
     if (path.includes('/render-previews/RPRE-WM-')) {
@@ -56,7 +56,7 @@ try {
       const index = Number(id.replace('RPRE-WM-', '')) - 1
       return respond(renderSubmissions[index] ? { previewId: id, zoneId: 'Z1', zoneName: '白模测试区', canvasRevision: 3, purpose: 'CONCEPT_PREVIEW', model: 'qwen-image-3.0',
         style: renderSubmissions[index].style, view: renderSubmissions[index].view, instructions: '', snapshot: renderSubmissions[index].expectedSnapshot,
-        status: 'PENDING', stale: false, sourceType: renderSubmissions[index].viewImage ? 'whiteModelView' : 'spaceGuide', createdAt: new Date().toISOString() } : null)
+        status: 'PENDING', stale: false, sourceType: 'spaceGuide', createdAt: new Date().toISOString() } : null)
     }
     if (path.endsWith('/module-recommendations') && request.method() === 'POST') {
       const body = request.postDataJSON()
@@ -330,17 +330,19 @@ try {
   await page.screenshot({ path: '/tmp/rsdp-uniform-wall-height.png', animations: 'disabled' })
   await page.screenshot({ path: '/tmp/rsdp-door-low-angle.png', animations: 'disabled' })
 
-  // AI 入口：携带白模当前视角截图作为结构参考（RENDER-006），不再选择视角
+  // AI 入口与工具栏一致：使用后端45°家具定位结构图，不上传白模相机截图
   await page.getByRole('button', { name: 'AI 概念效果图' }).click()
   const renderDialog = page.getByRole('dialog', { name: '单空间效果预览' })
   await renderDialog.waitFor()
-  await page.getByTestId('render-view-image').waitFor()
-  assert.equal(await page.getByLabel('效果图视角').count(), 0, '白模截图引导时不再选择观察视角')
+  await page.getByText('观察视角：45° 斜俯视 · 家具定位结构参考', { exact: true }).waitFor()
+  assert.equal(await page.getByTestId('render-view-image').count(), 0)
+  assert.equal(await page.getByLabel('效果图视角').count(), 0, '统一45°结构参考，不再选择观察视角')
   await page.getByRole('button', { name: '生成效果预览', exact: true }).click()
-  await page.getByTestId('render-source-type').waitFor()
+  await page.getByRole('button', { name: '当前布局正在生成…', exact: true }).waitFor()
+
   assert.equal(renderSubmissions.length, 1)
-  assert.ok(renderSubmissions[0].viewImage?.startsWith('data:image/png;base64,'), '应携带白模当前视角截图作为 viewImage')
-  assert.ok(renderSubmissions[0].viewImage.length > 5000, '截图应为真实 PNG 内容')
+  assert.equal(renderSubmissions[0].viewImage, undefined, '白模入口不应上传相机截图')
+  assert.equal(renderSubmissions[0].view, 'ISOMETRIC')
   assert.equal(renderSubmissions[0].zoneId, 'GROUP')
   await page.keyboard.press('Escape')
   await renderDialog.waitFor({ state: 'hidden' })
