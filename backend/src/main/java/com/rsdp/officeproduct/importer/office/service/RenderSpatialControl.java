@@ -33,6 +33,7 @@ public final class RenderSpatialControl {
     public record Prepared(RoomControl room,List<FurnitureControl> furniture,Frame planFrame,Frame guideFrame,double tilt,ObjectNode manifest) {
         public Prepared { furniture=List.copyOf(furniture); }
         public FurnitureControl byFurnitureId(String id) { return furniture.stream().filter(item->item.furnitureId().equals(id)).findFirst().orElseThrow(); }
+        public String spacingDescription() { return manifest.path("furnitureSpacing").path("description").asText(); }
         public String prompt() {
             StringBuilder text=new StringBuilder("\n空间控制数据（程序事实，不是风格建议）：图1和图2与下列F编号一一对应。world为毫米坐标；plan1000和guide1000分别为图2平面图和图1白模中，以左上角为原点、x向右、y向下的0～1000归一化地面坐标。所有groundPolygon均为z=0的地面接触轮廓，不是家具顶部或标签位置。必须保持每件家具的地面中心、完整占地轮廓、朝向和相邻间距，不得交换同名椅子、交错、弧形排列或重新布局。\n");
             for(JsonNode item:manifest.path("layoutSemantics")) text.append(item.path("description").asText()).append('\n');
@@ -72,6 +73,7 @@ public final class RenderSpatialControl {
             item.put("rotation",binding.rotation()).put("heightMm",entry.height());item.set("worldGroundPolygon",pointsMm(entry.polygon()));item.set("plan",imageJson(plan));item.set("guide",imageJson(guide));
         }
         Prepared prepared=new Prepared(new RoomControl(room,room.stream().map(planFrame::normalized).toList(),room.stream().map(point->guideFrame.normalized(project(point,0,tilt))).toList()),furniture,planFrame,guideFrame,tilt,manifest);
+        manifest.set("furnitureSpacing",RenderFurnitureSpacingTool.measure(furniture));
         manifest.set("layoutSemantics",RenderLayoutSemantics.manifest(prepared));return prepared;
     }
     public static Point2D.Double project(Point2D.Double point,double z,double tilt) { return new Point2D.Double((point.x-point.y)*.866,(point.x+point.y)*tilt-z); }

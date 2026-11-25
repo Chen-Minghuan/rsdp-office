@@ -429,6 +429,10 @@ public class RsdpCatalogGateway {
         return readProducts(viewMode, "full".equals(viewMode), null);
     }
 
+    public List<ProductListItemDto> listSharedCatalogForBrowse() {
+        return readProducts("full", false, null);
+    }
+
     public CatalogProductPageDto pageProducts(String viewMode, int page, int size, String search,
                                                String status, String rspuId) {
         if ("none".equals(viewMode)) return CatalogProductPageDto.empty(page, size);
