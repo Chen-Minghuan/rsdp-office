@@ -12,9 +12,13 @@ page.on('pageerror', error => pageErrors.push(error.message))
 let listMode = 'success'
 let catalogEnabled = true
 let catalogDealer = true
-let catalogManaged = false
+let includeLocalFixture = false
 let rejectCatalogChange = false
 const catalogUpdates = []
+const localProduct = { id: 'LOCAL-TEA-TABLE', revision: 1, name: '本地样品茶几', categoryCode: 'CODE-1', factoryModel: 'LOCAL-001' }
+const localImageId = 'LOCAL-IMAGE'
+let staffCanEditLocalProducts = false
+let catalogPageRequests = 0
 let importRequests = 0
 let legacyAuditDetailRequests = 0
 const favoriteFolders = []
@@ -87,7 +91,22 @@ await context.route('**/api/v1/**', async route => {
     const { budgetStatus, budgetTotal, ...details } = defaultProject
     return respond(details)
   }
-  if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: catalogManaged })
+  if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: true })
+  if (url.pathname === '/api/v1/office/local-products') {
+    const query = (url.searchParams.get('search') || '').toLowerCase()
+    const matches = [localProduct.name, localProduct.factoryModel].some(value => value.toLowerCase().includes(query))
+    return respond({ canWrite: catalogDealer || staffCanEditLocalProducts,
+      products: matches ? [{ ...localProduct, primaryImageId: localImageId }] : [], hasMore: false })
+  }
+  if (url.pathname === `/api/v1/office/local-products/${localProduct.id}`) {
+    return respond({ product: localProduct, variants: [
+      { name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, material: 'PB' },
+    ], images: [{ id: localImageId, mediaType: 'image/png' }], canWrite: catalogDealer || staffCanEditLocalProducts })
+  }
+  if (url.pathname === `/api/v1/office/local-products/images/${localImageId}`) {
+    return route.fulfill({ contentType: 'image/png', body: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9GQAAAAASUVORK5CYII=', 'base64') })
+  }
   if (url.pathname.startsWith('/api/v1/dicts/')) {
     return respond([{ dictCode: 'CODE-1', dictName: '测试字典项' }])
   }
@@ -103,22 +122,41 @@ await context.route('**/api/v1/**', async route => {
     importRequests += 1
     return respond(null, 403)
   }
-  if (url.pathname === '/api/v1/products' && request.method() === 'GET') {
-    if (listMode === 'error') return respond(null, 404)
-    return respond(listMode === 'empty' || !catalogEnabled ? [] : products)
+  if (url.pathname === '/api/v1/products/browse/facets') {
+    return respond({
+      localCategories: includeLocalFixture ? [localProduct.categoryCode] : [],
+      sharedCategories: catalogEnabled ? [...new Set(products.map(product => product.categoryPath?.join(' / ')).filter(Boolean))] : [],
+      colors: catalogEnabled ? [...new Set(products.map(product => product.colorPrimaryName).filter(Boolean))] : [],
+      sharedUnavailable: false,
+    })
   }
-  if (url.pathname === '/api/v1/products/page' && request.method() === 'GET') {
-    if (listMode === 'error') return respond(null, 404)
-    const catalog = listMode === 'empty' || !catalogEnabled ? [] : products
+  if (url.pathname === '/api/v1/products/browse' && request.method() === 'GET') {
+    if (catalogEnabled) catalogPageRequests++
+    const localCatalog = includeLocalFixture ? [{ ...localProduct, primaryImageId: localImageId }] : []
+    const sharedCatalog = listMode === 'success' && catalogEnabled ? products : []
     const page = Number(url.searchParams.get('page'))
     const size = Number(url.searchParams.get('size'))
     const search = (url.searchParams.get('search') || '').toLowerCase()
     const status = url.searchParams.get('status')
-    const matches = catalog.filter(product => (
-      !search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search))
-    ) && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active')))
-    return respond({ page, size, rows: matches.slice((page - 1) * size, page * size), total: matches.length,
-      catalogTotal: catalog.length, activeTotal: catalog.filter(product => product.status === 'active').length })
+    const color = url.searchParams.get('color')
+    const category = url.searchParams.get('category')
+    const sharedMatches = sharedCatalog.filter(product =>
+      (!search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search)))
+      && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active'))
+      && (!category || category === 'shared:' + product.categoryPath?.join(' / '))
+      && (!color || color === product.colorPrimaryName))
+    const localMatches = localCatalog.filter(product =>
+      (!search || [product.name, product.factoryModel].some(value => value.toLowerCase().includes(search)))
+      && !status && !color && (!category || category === 'local:' + product.categoryCode))
+    const matches = []
+    for (let index = 0; index < Math.max(localMatches.length, sharedMatches.length); index++) {
+      if (localMatches[index]) matches.push({ local: localMatches[index], shared: null })
+      if (sharedMatches[index]) matches.push({ local: null, shared: sharedMatches[index] })
+    }
+    return respond({ rows: matches.slice((page - 1) * size, page * size), total: matches.length,
+      localTotal: localCatalog.length, catalogTotal: localCatalog.length + sharedCatalog.length,
+      activeTotal: sharedCatalog.filter(product => product.status === 'active').length,
+      canManageLocal: catalogDealer || staffCanEditLocalProducts, sharedUnavailable: catalogEnabled && listMode === 'error' })
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
@@ -252,16 +290,17 @@ try {
   assert.equal(await gridColumnCount(), 8, '2306px 超宽屏显示八列')
   await page.setViewportSize({ width: 1440, height: 960 })
   const categoryFilter = page.getByRole('combobox', { name: '筛选产品分类' })
-  const colorFilter = page.getByRole('combobox', { name: '筛选商品主色' })
+  const colorFilter = page.getByRole('combobox', { name: '筛选商品颜色' })
   await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products/browse/facets'),
     categoryFilter.focus(),
   ])
-  await categoryFilter.selectOption('办公家具 / 办公椅')
+  await categoryFilter.selectOption({ label: '办公家具 / 办公椅' })
+  await productCards().nth(1).waitFor()
   assert.equal(await productCards().count(), 2)
   await colorFilter.selectOption('深木色')
-  assert.equal(await productCards().count(), 1)
   await productCards().getByText('人体工学椅 3', { exact: true }).waitFor()
+  assert.equal(await productCards().count(), 1)
   await page.getByLabel('搜索商品名称或编码').fill('RSDP-001')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选', exact: true }).click()
@@ -541,21 +580,78 @@ try {
   assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
   assert.equal(await productCards().count(), 20)
   rejectCatalogChange = false
+  includeLocalFixture = true
+  const localCard = page.getByRole('link', { name: `查看${localProduct.name}详情` })
+  const sharedCard = page.getByRole('link', { name: '查看人体工学椅 1详情' })
+  await page.getByRole('button', { name: '刷新商品列表' }).click()
+  await localCard.waitFor()
+  await sharedCard.waitFor()
+  assert.equal(await productCards().count(), 20)
+  await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).searchParams.get('search') === 'local-001'),
+    page.getByLabel('搜索商品名称或编码').fill('local-001'),
+  ])
+  await sharedCard.waitFor({ state: 'hidden' })
+  await localCard.waitFor()
+  assert.equal(await productCards().count(), 1)
+  await page.getByRole('button', { name: '清空条件' }).click()
+  await sharedCard.waitFor()
+
+  const catalogRequestsBeforeClose = catalogPageRequests
   await catalogSwitch.click()
-  await heading('商品库还是空的')
+  await page.getByRole('switch', { name: '公共库', checked: false }).waitFor()
+  await localCard.waitFor()
   assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'false')
+  assert.equal(await productCards().count(), 1)
+  assert.equal(await sharedCard.count(), 0)
+  assert.equal(catalogPageRequests, catalogRequestsBeforeClose)
+  await page.getByRole('link', { name: '管理本地商品' }).waitFor()
+  catalogDealer = false
+  await page.reload({ waitUntil: 'networkidle' })
+  await localCard.waitFor()
+  assert.equal(await catalogSwitch.count(), 0)
+  assert.equal(await page.getByRole('link', { name: '管理本地商品' }).count(), 0)
+  await page.getByLabel('搜索商品名称或编码').fill('无匹配型号')
+  await heading('没有找到匹配的商品')
+  await page.getByLabel('搜索商品名称或编码').fill('local-001')
+  await localCard.waitFor()
+  await localCard.click()
+  await heading(localProduct.name)
+  await page.getByRole('cell', { name: '1200 × 600 × 450 mm', exact: true }).waitFor()
+  assert.equal(await page.getByRole('link', { name: '编辑商品' }).count(), 0)
+  assert.equal(await page.getByLabel('宽（mm）').count(), 0)
+  await page.waitForFunction(name => Array.from(document.images).some(img => img.alt === name && img.naturalWidth > 0), localProduct.name + '图片')
+  assert.equal(catalogPageRequests, catalogRequestsBeforeClose)
+  await page.goto(`${baseUrl}/products/local?edit=${localProduct.id}`)
+  await page.getByRole('alert').filter({ hasText: '当前账号没有商品编辑权限' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '保存', exact: true }).count(), 0)
+  staffCanEditLocalProducts = true
+  await page.goto(`${baseUrl}/products/local/${localProduct.id}?from=catalog`)
+  await page.getByRole('link', { name: '编辑商品' }).click()
+  await heading('编辑商品')
+  assert.equal(await page.getByLabel('宽（mm）').inputValue(), '1200')
+  assert.equal(await page.getByLabel('宽（mm）').isEnabled(), true)
+  await page.getByRole('button', { name: '保存', exact: true }).waitFor()
+  staffCanEditLocalProducts = false
+  await page.goto(`${baseUrl}/products`)
+  await localCard.waitFor()
+  assert.equal(await sharedCard.count(), 0)
+  catalogDealer = true
+  await page.reload({ waitUntil: 'networkidle' })
   await catalogSwitch.click()
-  await page.getByRole('link', { name: '查看人体工学椅 1详情' }).first().waitFor()
+  await sharedCard.waitFor()
+  await localCard.waitFor()
   assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
   assert.deepEqual(catalogUpdates, [false, false, true])
   catalogDealer = false
-  catalogManaged = true
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await catalogSwitch.count(), 0)
+  await localCard.waitFor()
+  await sharedCard.waitFor()
 
   const waitForCatalogPage = (pageNumber, size, search = null) => page.waitForResponse(response => {
     const url = new URL(response.url())
-    return url.pathname === '/api/v1/products/page' && url.searchParams.get('page') === String(pageNumber) &&
+    return url.pathname === '/api/v1/products/browse' && url.searchParams.get('page') === String(pageNumber) &&
       url.searchParams.get('size') === String(size) && url.searchParams.get('search') === search
   })
   await Promise.all([waitForCatalogPage(1, 10), page.getByLabel('每页显示数量').selectOption('10')])
@@ -674,8 +770,9 @@ try {
   assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
   assert.equal(await schemeLink.getAttribute('aria-current'), 'page')
 
+  staffCanEditLocalProducts = true
   await productsLink.click()
-  const localProductsLink = page.getByRole('link', { name: '本地商品', exact: true })
+  const localProductsLink = page.getByRole('link', { name: '管理本地商品', exact: true })
   await localProductsLink.waitFor()
   assert.equal(await localProductsLink.getAttribute('href'), '/products/local')
   assert.equal(await page.getByRole('link', { name: '去 RSDP 管理商品', exact: true }).count(), 0)
@@ -696,6 +793,7 @@ try {
   assert.equal(legacyAuditDetailRequests, 0)
   assert.equal(importRequests, 0)
 
+  includeLocalFixture = false
   listMode = 'error'
   await page.getByRole('button', { name: '刷新商品列表' }).click()
   await heading('商品暂时无法加载')

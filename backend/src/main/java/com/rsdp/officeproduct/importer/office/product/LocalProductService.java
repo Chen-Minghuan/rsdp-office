@@ -43,20 +43,21 @@ public class LocalProductService {
     private final CurrentUserService currentUser;
     private final OfficeCatalogAccess catalogAccess;
     private final WorkbookPreviewCache previewCache;
+    private final LocalCatalogReader catalogReader;
 
-    public Page list(int page) {
+    public Page list(int page, String search) {
         OfficeUser user = requireMember();
+        String keyword = search.strip();
+        if (keyword.length() > 120) throw new BusinessException("搜索关键词最多 120 个字符");
         long offset = Math.max(0L, (long) page - 1) * PAGE_SIZE;
-        List<Summary> rows = jdbc.query("""
-            select * from office_product where workspace_id = ?
-            order by updated_at desc, product_id limit ? offset ?
-            """, SUMMARY, user.getWorkspaceId(), PAGE_SIZE + 1, offset);
+        List<CatalogItem> rows = catalogReader.rows(user.getWorkspaceId(), keyword, "", "", offset, PAGE_SIZE + 1);
         return new Page(canWrite(user), rows.stream().limit(PAGE_SIZE).toList(), rows.size() > PAGE_SIZE);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detail detail(String productId) {
-        String workspace = requireMember().getWorkspaceId();
+        OfficeUser user = requireMember();
+        String workspace = user.getWorkspaceId();
         Summary product = find(workspace, productId);
         List<Variant> variants = jdbc.query("""
             select * from office_product_variant where workspace_id = ? and product_id = ? and active
@@ -66,9 +67,9 @@ public class LocalProductService {
             r.getString("size_text"), r.getString("color_text"), r.getString("material_text")), workspace, productId);
         List<ImageRef> images = jdbc.query("""
             select image_id, media_type from office_product_image
-            where workspace_id = ? and product_id = ? and position is not null order by position
+            where workspace_id = ? and product_id = ? and position is not null order by position, image_id
             """, (r, i) -> new ImageRef(r.getString(1), r.getString(2)), workspace, productId);
-        return new Detail(product, variants, images);
+        return new Detail(product, variants, images, canWrite(user));
     }
 
     public ImageInput image(String id) {
@@ -265,8 +266,9 @@ public class LocalProductService {
         return user;
     }
 
-    private boolean canWrite(OfficeUser user) {
-        return "DEALER".equals(user.getRole()) || Boolean.TRUE.equals(user.getProductEntryEnabled());
+    public static boolean canWrite(OfficeUser user) {
+        return user != null && user.getWorkspaceId() != null
+            && ("DEALER".equals(user.getRole()) || Boolean.TRUE.equals(user.getProductEntryEnabled()));
     }
 
     Input normalize(Input input, String boundFactory) {

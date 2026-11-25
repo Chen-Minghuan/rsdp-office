@@ -1,12 +1,12 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
 import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
 import type {
-  LocalProductInput, LocalProductSummary, LocalProductVariant, LocalProductImage, LocalProductWorkbookPreview,
+  LocalProductInput, LocalProductCatalogItem, LocalProductDetail, LocalProductWorkbookPreview,
   WorkbookCategoryItem, WorkbookFieldColumns, WorkbookMappingSelection,
 } from '~/types/local-products'
 
@@ -402,6 +402,19 @@ export function useOfficeApi() {
     return await request('GET', '/api/v1/products/capabilities')
   }
 
+  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string }) {
+    const { page, size, ...filters } = options
+    const query = new URLSearchParams({ page: String(page), size: String(size) })
+    for (const [name, value] of Object.entries(filters)) {
+      if (value) query.set(name, value)
+    }
+    return request<CatalogBrowsePage>('GET', `/api/v1/products/browse?${query}`)
+  }
+
+  function browseProductFacets() {
+    return request<CatalogBrowseFacets>('GET', '/api/v1/products/browse/facets')
+  }
+
   async function loadFavoriteFolders(rspuId?: string): Promise<FavoriteFolder[]> {
     const query = rspuId ? `?rspuId=${encodeURIComponent(rspuId)}` : ''
     return await request<FavoriteFolder[]>('GET', `/api/v1/office/favorites/folders${query}`)
@@ -524,14 +537,15 @@ export function useOfficeApi() {
   }
 
   const localProductsPath = '/api/v1/office/local-products'
-  const listLocalProducts = (page: number) => request<{ canWrite: boolean, products: LocalProductSummary[], hasMore: boolean }>(
-    'GET', `${localProductsPath}?page=${page}`)
-  const getLocalProduct = (id: string) => request<{
-    product: LocalProductSummary, variants: LocalProductVariant[], images: LocalProductImage[]
-  }>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
+  function listLocalProducts(page: number, search = '') {
+    const query = new URLSearchParams({ page: String(page) })
+    if (search) query.set('search', search)
+    return request<{ canWrite: boolean, products: LocalProductCatalogItem[], hasMore: boolean }>('GET', `${localProductsPath}?${query}`)
+  }
+  const getLocalProduct = (id: string) => request<LocalProductDetail>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
   const saveLocalProducts = (batchId: string, products: LocalProductInput[], previewId?: string | null) => request<{ id: string, name: string, revision: number }[]>(
     'POST', localProductsPath, { batchId, products, previewId })
-  const localProductImageUrl = (id: string) => apiUrl(`${localProductsPath}/images/${encodeURIComponent(id)}`)
+  const localProductImagePath = (id: string) => `${localProductsPath}/images/${encodeURIComponent(id)}`
   const workbookPreviewImageUrl = (id: string, key: string) => apiUrl(`${localProductsPath}/excel-preview/${encodeURIComponent(id)}/images/${encodeURIComponent(key)}`)
   const localProductTemplateUrl = () => apiUrl(`${localProductsPath}/excel-template`)
   const listLocalProductCategories = () => request<{ dictCode: string, dictName: string }[]>('GET', '/api/v1/dicts/category')
@@ -604,6 +618,8 @@ export function useOfficeApi() {
     resetProject,
     loadImportedProducts,
     loadImportedProductPage,
+    browseProductCatalog,
+    browseProductFacets,
     loadCatalogCapabilities,
     loadFavoriteFolders,
     createFavoriteFolder,
@@ -632,7 +648,7 @@ export function useOfficeApi() {
     listLocalProducts,
     getLocalProduct,
     saveLocalProducts,
-    localProductImageUrl,
+    localProductImagePath,
     workbookPreviewImageUrl,
     localProductTemplateUrl,
     listLocalProductCategories,

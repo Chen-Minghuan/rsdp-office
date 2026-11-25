@@ -32,6 +32,15 @@ export type LocalProductSummary = Pick<LocalProductInput, 'name' | 'categoryCode
   factoryCode: string
 }
 
+export type LocalProductCatalogItem = LocalProductSummary & { primaryImageId?: string | null }
+
+export interface LocalProductDetail {
+  product: LocalProductSummary
+  variants: LocalProductVariant[]
+  images: LocalProductImage[]
+  canWrite: boolean
+}
+
 export interface LocalProductWorkbookIssue {
   row: number
   message: string

@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import type { LocalProductSummary, LocalProductImage, LocalProductInput, LocalProductVariant, WorkbookImportProgress, WorkbookMappingSelection } from '~/types/local-products'
+import type { LocalProductCatalogItem, LocalProductImage, LocalProductInput, LocalProductVariant, WorkbookImportProgress, WorkbookMappingSelection } from '~/types/local-products'
+import { withApiBase } from '~/utils/apiBase'
 import { createUuid } from '~/utils/uuid'
 import { splitWorkbookProducts, workbookPreviewPageSize, workbookSize } from '~/utils/localProductImport'
 
 const api = useOfficeApi()
-const rows = ref<LocalProductSummary[]>([])
+const route = useRoute()
+const router = useRouter()
+const rows = ref<LocalProductCatalogItem[]>([])
 const canWrite = ref(false)
 const loading = ref(true)
 const busy = ref(false)
 const page = ref(1)
 const hasMore = ref(false)
+const search = ref('')
 const mode = ref<'list' | 'edit' | 'excel'>('list')
 const error = ref('')
+const listError = ref('')
 const notice = ref('')
 const form = ref<LocalProductInput | null>(null)
 const categories = ref<{ dictCode: string, dictName: string }[]>([])
@@ -24,6 +29,7 @@ const readingWorkbook = ref(false)
 const dragActive = ref(false)
 const categoryLabels = computed(() => new Map(categories.value.map(item => [item.dictCode, item.dictName])))
 let lastSave: { body: string, id: string } | undefined
+let listRequest = 0
 
 const maxWorkbookMb = 150
 const maxWorkbookBytes = maxWorkbookMb * 1024 * 1024
@@ -31,23 +37,37 @@ const control = 'w-full rounded-md border border-line bg-white px-3 py-2 text-sm
 const secondary = 'rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50'
 const primary = 'rounded-lg bg-bronze-dark px-4 py-2 text-sm font-semibold text-white disabled:opacity-50'
 
-onMounted(() => {
-  void load()
+onMounted(async () => {
   void api.listLocalProductCategories().then(data => { categories.value = data }).catch(() => {})
+  await load()
+  const id = route.query.edit
+  if (typeof id === 'string' && id && !listError.value) await openProduct(id)
 })
 
-async function load(next = page.value) {
+watch(search, (_, _old, onCleanup) => {
+  // Invalidate the previous query during the debounce as well.
+  listRequest++
   loading.value = true
+  const timeout = setTimeout(() => { void load(1) }, 180)
+  onCleanup(() => clearTimeout(timeout))
+})
+onBeforeUnmount(() => { listRequest++ })
+
+async function load(next = page.value) {
+  const request = ++listRequest
+  loading.value = true
+  listError.value = ''
   try {
-    const data = await api.listLocalProducts(next)
+    const data = await api.listLocalProducts(next, search.value.trim())
+    if (request !== listRequest) return
     rows.value = data.products
     page.value = next
     hasMore.value = data.hasMore
     canWrite.value = data.canWrite
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '本地商品加载失败'
+    if (request === listRequest) listError.value = cause instanceof Error ? cause.message : '本地商品加载失败'
   } finally {
-    loading.value = false
+    if (request === listRequest) loading.value = false
   }
 }
 
@@ -61,6 +81,10 @@ function categoryLabel(code: string) {
 }
 
 async function openProduct(id?: string) {
+  if (!canWrite.value) {
+    error.value = '当前账号没有商品编辑权限'
+    return
+  }
   error.value = ''
   notice.value = ''
   lastSave = undefined
@@ -68,6 +92,11 @@ async function openProduct(id?: string) {
   try {
     if (id) {
       const detail = await api.getLocalProduct(id)
+      if (detail.canWrite !== true) {
+        canWrite.value = false
+        error.value = '当前账号没有商品编辑权限'
+        return
+      }
       form.value = { ...detail.product, variants: detail.variants, images: detail.images }
     } else {
       form.value = { name: '', categoryCode: '', factoryModel: '', variants: [emptyVariant()], images: [] }
@@ -97,6 +126,9 @@ function showList() {
   workbookName.value = ''
   workbookFile.value = null
   error.value = ''
+  if (route.path === '/products/local' && route.query.edit) {
+    void router.replace({ path: route.path })
+  }
 }
 
 async function addImages(event: Event) {
@@ -132,7 +164,7 @@ async function addImages(event: Event) {
 }
 
 function imageSrc(image: LocalProductImage) {
-  return image.id ? api.localProductImageUrl(image.id) : `data:${image.mediaType};base64,${image.content}`
+  return image.id ? withApiBase(api.localProductImagePath(image.id)) : `data:${image.mediaType};base64,${image.content}`
 }
 
 async function readWorkbook(event: Event) {
@@ -279,21 +311,34 @@ async function importTemplate() {
       <p v-if="notice" role="status" class="rounded-lg bg-green/10 px-4 py-2 text-sm text-green">{{ notice }}</p>
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{{ error }}</p>
 
-      <section v-if="mode === 'list'" class="overflow-x-auto rounded-xl border border-line bg-white">
-        <p v-if="loading" class="p-5 text-sm text-muted">加载中…</p>
-        <p v-else-if="!rows.length && !error" class="p-5 text-sm text-muted">当前工作区暂无本地商品</p>
-        <table v-else-if="rows.length" class="w-full min-w-[560px] text-left text-sm">
-          <thead class="border-b border-line text-muted"><tr>
-            <th class="p-3">名称</th><th class="p-3">分类</th><th class="p-3">厂内型号</th><th class="p-3">操作</th>
-          </tr></thead>
-          <tbody>
-            <tr v-for="row in rows" :key="row.id" class="border-b border-line last:border-0">
-              <td class="p-3 font-medium">{{ row.name }}</td><td class="p-3">{{ categoryLabel(row.categoryCode) }}</td>
-              <td class="p-3">{{ row.factoryModel }}</td>
-              <td class="p-3"><button type="button" class="text-bronze-dark hover:underline" :disabled="busy" @click="openProduct(row.id)">{{ canWrite ? '编辑' : '查看' }}</button></td>
-            </tr>
-          </tbody>
-        </table>
+      <section v-if="mode === 'list'" class="min-w-0" aria-label="本地商品列表">
+        <form class="border-b-[3px] border-accent pb-3" role="search" @submit.prevent>
+          <label class="grid max-w-md gap-1 text-xs font-medium text-neutral-700">
+            搜索商品
+            <span class="relative block">
+              <AppIcon name="search" size="4" class="absolute left-3 top-3 text-muted" />
+              <input v-model="search" type="search" maxlength="120" placeholder="商品名称、厂内型号"
+                class="w-full border border-neutral-300 bg-white py-2.5 pl-9 pr-2 text-sm">
+            </span>
+          </label>
+        </form>
+        <p v-if="loading" role="status" class="p-5 text-sm text-muted">加载中…</p>
+        <div v-else-if="listError" class="flex flex-wrap items-center gap-3 p-5 text-sm" role="alert">
+          <span class="text-red-700">{{ listError }}</span>
+          <button type="button" :class="secondary" @click="load(1)">重新加载</button>
+        </div>
+        <p v-else-if="!rows.length" class="p-5 text-sm text-muted">
+          {{ search.trim() ? '没有找到匹配的本地商品' : '当前工作区暂无本地商品' }}
+        </p>
+        <ProductCatalogGrid v-else>
+          <ProductCatalogTile v-for="row in rows" :key="row.id" :name="row.name" :code="row.factoryModel"
+            :image-url="row.primaryImageId ? api.localProductImagePath(row.primaryImageId) : undefined"
+            :to="{ path: `/products/local/${encodeURIComponent(row.id)}` }">
+            <template #metadata>
+              <span class="truncate text-xs text-neutral-600">{{ categoryLabel(row.categoryCode) }}</span>
+            </template>
+          </ProductCatalogTile>
+        </ProductCatalogGrid>
         <div v-if="page > 1 || hasMore" class="flex items-center gap-3 border-t border-line p-3 text-sm">
           <button type="button" :class="secondary" :disabled="loading || page <= 1" @click="load(page - 1)">上一页</button>
           <span>第 {{ page }} 页</span>
@@ -302,7 +347,7 @@ async function importTemplate() {
       </section>
 
       <form v-else-if="mode === 'edit' && form" class="space-y-4 rounded-xl border border-line bg-white p-5" @submit.prevent="save([form])">
-        <h2 class="text-lg font-semibold">{{ form.id ? '商品详情' : '新增商品' }}</h2>
+        <h2 class="text-lg font-semibold">{{ form.id ? '编辑商品' : '新增商品' }}</h2>
         <fieldset class="space-y-5" :disabled="busy || !canWrite">
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="space-y-1 text-sm"><span>商品名称</span><input v-model.trim="form.name" :class="control" required maxlength="200"></label>

@@ -24,8 +24,10 @@ public final class LocalProductModels {
     }
     public record Saved(String id, int revision, String name) {}
     public record Summary(String id, int revision, String name, String categoryCode, String factoryCode, String factoryModel) {}
-    public record Detail(Summary product, List<Variant> variants, List<ImageRef> images) {}
-    public record Page(boolean canWrite, List<Summary> products, boolean hasMore) {}
+    public record CatalogItem(String id, int revision, String name, String categoryCode, String factoryCode,
+                              String factoryModel, String primaryImageId) {}
+    public record Detail(Summary product, List<Variant> variants, List<ImageRef> images, boolean canWrite) {}
+    public record Page(boolean canWrite, List<CatalogItem> products, boolean hasMore) {}
 
     record Dimensions(BigDecimal w, BigDecimal d, BigDecimal h, String unit) {}
     record SubmittedVariant(String id, String name, Dimensions dimensions, String sizeText, String color, String material) {}

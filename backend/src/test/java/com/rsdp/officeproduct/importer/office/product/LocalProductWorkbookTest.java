@@ -315,6 +315,6 @@ class LocalProductWorkbookTest {
         member.setProductEntryEnabled(true);
         when(users.currentUser()).thenReturn(member);
         return new LocalProductService(mock(JdbcTemplate.class), new ObjectMapper(), users,
-            new OfficeCatalogAccess(users, settings), new WorkbookPreviewCache());
+            new OfficeCatalogAccess(users, settings), new WorkbookPreviewCache(), mock(LocalCatalogReader.class));
     }
 }

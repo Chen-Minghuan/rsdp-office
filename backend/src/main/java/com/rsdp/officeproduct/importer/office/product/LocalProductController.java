@@ -25,8 +25,9 @@ public class LocalProductController {
     private final WorkbookPreviewCache previewCache;
 
     @GetMapping
-    public Result<Page> list(@RequestParam(defaultValue = "1") int page) {
-        return Result.ok(products.list(page));
+    public Result<Page> list(@RequestParam(defaultValue = "1") int page,
+                             @RequestParam(defaultValue = "") String search) {
+        return Result.ok(products.list(page, search));
     }
 
     @GetMapping("/{productId}")
