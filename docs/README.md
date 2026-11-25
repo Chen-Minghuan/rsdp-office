@@ -37,7 +37,7 @@
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
 | [五入口导航与项目总览](tasks/WORKSPACE-005-project-overview-navigation.md) | 工作台总览、房间进度、图纸和历史概念图、兼容旧上传地址 |
-| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 设计中、交付中、已完成的保存、权限、计数和筛选 |
+| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 阶段按方案确认派生、只读展示：设计中/交付中计数、筛选与进度列（人工修改已移除） |
 | [项目需求 AI 总结](tasks/WORKSPACE-004-project-requirements-ai-summary.md) | 原文/总结双面翻转、事实抽取、版本复核、持久化缓存与真实模型验证 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
 | [工作区账号中心](tasks/TENANT-003-workspace-account-center.md) | 账号行悬停菜单、报价/账号直达与经销商角色隔离；收藏入口由 CAT-010 扩展为全角色 |

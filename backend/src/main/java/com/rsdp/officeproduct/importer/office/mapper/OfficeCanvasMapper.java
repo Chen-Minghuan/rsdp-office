@@ -20,6 +20,20 @@ public interface OfficeCanvasMapper extends BaseMapper<OfficeCanvas> {
     @Update("UPDATE office_proposal_confirmation SET retired=true WHERE floor_id=#{floorId} AND NOT retired")
     void retireProposalConfirmations(@Param("floorId") String floorId);
 
+    /**
+     * 每个楼层的最新一条画布（office_canvas.project_id 存楼层 ID），仅取列表统计所需字段。
+     */
+    @Select("""
+        <script>
+        SELECT DISTINCT ON (project_id) project_id, objects_json::text AS objects_json
+        FROM office_canvas
+        WHERE project_id IN
+        <foreach collection="floorIds" item="floorId" open="(" separator="," close=")">#{floorId}</foreach>
+        ORDER BY project_id, created_at DESC, canvas_id DESC
+        </script>
+        """)
+    List<OfficeCanvas> selectLatestByFloorIds(@Param("floorIds") List<String> floorIds);
+
     /** Latest correction per unique label on this exact raster, including older saved analyses. */
     @Select("""
         SELECT DISTINCT ON (regexp_replace(z->>'name', '[[:space:]]', '', 'g'))

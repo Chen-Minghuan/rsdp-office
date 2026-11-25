@@ -11,13 +11,6 @@ import java.time.LocalDateTime;
 @Mapper
 public interface OfficeDesignProjectMapper extends BaseMapper<OfficeDesignProject> {
     @Update("""
-        UPDATE office_design_project SET status = #{status}, updated_at = #{updatedAt}
-        WHERE project_id = #{projectId}
-        """)
-    int updateStatus(@Param("projectId") String projectId, @Param("status") String status,
-                     @Param("updatedAt") LocalDateTime updatedAt);
-
-    @Update("""
         UPDATE office_design_project
         SET customer_requirements = #{customerRequirements},
             requirements_revision = requirements_revision + 1,
