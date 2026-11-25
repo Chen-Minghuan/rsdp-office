@@ -23,15 +23,26 @@ const referenceSaveError = ref('')
 /** 楼层级参考图：按当前项目与楼层区分，整体替换保存，成功后回写工作区缓存。 */
 const floorReferences = computed(() => props.project.floors.find(floor => floor.floorId === props.floorId)?.referenceImages ?? [])
 
+/** 各楼层保存请求的单调序号：同一楼层连续保存时仅最后一次响应生效，避免乱序覆盖。 */
+const referenceSaveSeq = new Map<string, number>()
+
 async function saveFloorReferences(images: ProjectReferenceImage[]) {
+  // 请求前固定 ID：响应可能到达时已切换楼层，结果仍属于发起时的项目与楼层。
+  const projectId = props.project.projectId
+  const floorId = props.floorId
+  const key = `${projectId}/${floorId}`
+  const seq = (referenceSaveSeq.get(key) ?? 0) + 1
+  referenceSaveSeq.set(key, seq)
   referenceSaveError.value = ''
   try {
-    const floor = await budgetApi.updateFloorReferences(props.project.projectId, props.floorId, images)
+    const floor = await budgetApi.updateFloorReferences(projectId, floorId, images)
+    if (referenceSaveSeq.get(key) !== seq) return
     const target = workspace.projects
-      .find(project => project.projectId === props.project.projectId)?.floors
-      .find(item => item.floorId === props.floorId)
+      .find(project => project.projectId === projectId)?.floors
+      .find(item => item.floorId === floorId)
     if (target) target.referenceImages = floor.referenceImages
   } catch (cause) {
+    if (referenceSaveSeq.get(key) !== seq || props.floorId !== floorId) return
     referenceSaveError.value = cause instanceof Error ? cause.message : '楼层参考图保存失败'
   }
 }
