@@ -322,6 +322,19 @@ class RenderPreviewServiceTest {
         verify(provider,never()).poll(anyString(),anyString());verify(provider,times(1)).submit(anyList(),anyString(),any());
     }
 
+    @Test void expiredReservedSubmissionFailsUnknownWithoutRetryingBilling() {
+        String id=service.create("PROJECT",request()).path("previewId").asText();
+        RenderPreview reserved=records.get(id);reserved.setStatus("SUBMITTING");reserved.setProviderTaskId(null);
+        reserved.setUpdatedAt(LocalDateTime.now().minusMinutes(11));
+        var recovered=service.get("PROJECT",id);
+        assertEquals("FAILED",recovered.path("status").asText());
+        assertEquals("提交结果未知，请核对百炼请求记录后重试",recovered.path("errorMessage").asText());
+        assertTrue(recovered.path("generationTiming").path("failedAt").asLong()>0);
+        verify(provider,never()).poll(anyString(),anyString());verify(provider,times(1)).submit(anyList(),anyString(),any());
+        var retry=service.create("PROJECT",request());
+        assertEquals(id,retry.path("previewId").asText());assertEquals("FAILED",retry.path("status").asText());
+        verify(provider,times(1)).submit(anyList(),anyString(),any());
+    }
     @Test void remoteGenerationPollingDownloadAndAuditsRunOutsideTransactions() throws Exception {
         boolean[] inTransaction={false};
         doAnswer(call->{

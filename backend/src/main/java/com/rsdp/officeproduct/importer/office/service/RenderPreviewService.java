@@ -35,6 +35,8 @@ public class RenderPreviewService {
     private final OfficeProposalConfirmationService confirmations;
     private final OfficeProjectAccessService access;
     private final TransactionOperations transactions;
+    /** Leaves margin beyond the five-minute HTTP read timeout without retaining crashed submissions for 23 hours. */
+    private static final java.time.Duration SUBMISSION_LEASE=java.time.Duration.ofMinutes(10);
 
     public ObjectNode create(String projectId, RenderPreviewRequest request) {
         project(projectId);
@@ -220,7 +222,7 @@ public class RenderPreviewService {
         if("POLLING".equals(status)&&entry.getUpdatedAt()!=null&&entry.getUpdatedAt().isAfter(LocalDateTime.now().minusMinutes(2)))return new PollStart(entry,false,null);
         if(entry.getCreatedAt().isBefore(LocalDateTime.now().minusHours(23))) {
             entry.setStatus("FAILED");entry.setErrorMessage("任务已超过可查询时限，请重新生成");updateTiming(entry,timing->timing.put("failedAt",System.currentTimeMillis()));
-        } else if("SUBMITTING".equals(status)&&submissionReserved(entry)) {
+        } else if("SUBMITTING".equals(status)&&submissionReserved(entry)&&submissionLeaseActive(entry)) {
             return new PollStart(entry,false,null);
         } else if(entry.getProviderTaskId()==null) {
             entry.setStatus("FAILED");entry.setErrorMessage("提交结果未知，请核对百炼请求记录后重试");updateTiming(entry,timing->timing.put("failedAt",System.currentTimeMillis()));
@@ -233,6 +235,10 @@ public class RenderPreviewService {
         entry.setUpdatedAt(LocalDateTime.now());previews.update(entry);return new PollStart(entry,false,null);
     }
 
+    private boolean submissionLeaseActive(RenderPreview entry) {
+        LocalDateTime reservedAt=entry.getUpdatedAt()!=null?entry.getUpdatedAt():entry.getCreatedAt();
+        return reservedAt!=null&&reservedAt.isAfter(LocalDateTime.now().minus(SUBMISSION_LEASE));
+    }
     private boolean submissionReserved(RenderPreview entry) {
         JsonNode stored=decode(entry.getSnapshotJson());
         return "SUBMITTING".equals(stored.path("renderProductReferences").path("submissionState").asText());
