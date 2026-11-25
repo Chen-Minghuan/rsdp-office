@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -353,8 +355,50 @@ try {
   await page.keyboard.press('ArrowRight')
   assert.equal(await page.evaluate(() => JSON.stringify(document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').objects)), closedObjects, '关闭 3D 后快捷键不残留')
 
+  // Same 20-desk layout in both themes. The sample uses the provided composition, with illustrative measurements.
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.objects.push({ id: 'DECOR', kind: 'zone', name: '20 桌装修样例', x: 0, y: 0, w: 8050, h: 8650,
+      zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' },
+      polygon: [[550, 0], [8050, 0], [8050, 8650], [0, 8650], [0, 4600], [550, 4600]] })
+    for (let i = 0; i < 20; i++) {
+      store.objects.push({ id: 'D' + i, kind: 'furniture', zoneId: 'DECOR', furnitureTemplateId: 'desk-straight',
+        label: '职员桌', x: 980 + (i % 4) * 1700, y: 520 + Math.floor(i / 4) * 1550,
+        w: 1350, h: 650, rotation: 0, productId: '', layoutConfirmed: true })
+    }
+    store.enterDesign('DECOR')
+  })
+  await page.waitForURL(/zoneId=DECOR/)
+  await page.getByRole('button', { name: '3D 白模', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="white-model-preview"]')?.dataset.ready === 'true')
+  const originalScene = await page.evaluate(() => JSON.stringify(document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').objects))
+  const finish = page.getByRole('combobox', { name: '装修预览风格' })
+  const viewport = page.getByTestId('white-model-viewport')
+  const screenshotDir = process.env.ROOM_DECOR_SCREENSHOT_DIR
+  if (screenshotDir) await mkdir(screenshotDir, { recursive: true })
+  for (const theme of ['slate', 'oak']) {
+    await finish.selectOption(theme)
+    assert.equal(await dialog.getAttribute('data-finish'), theme)
+    assert.equal(await dialog.getAttribute('data-readonly'), 'true')
+    assert.equal(await dialog.getAttribute('data-furniture'), '20')
+    assert.equal(await project('seat:D0'), null, '装修预览仅展示实际排版中存在的桌椅')
+    if (screenshotDir) await viewport.screenshot({ path: join(screenshotDir, theme + '-overview.png'), animations: 'disabled' })
+    await page.getByRole('button', { name: '人眼视角', exact: true }).click()
+    assert.equal(await dialog.getAttribute('data-view'), 'eye')
+    if (screenshotDir) await viewport.screenshot({ path: join(screenshotDir, theme + '-eye.png'), animations: 'disabled' })
+    await page.getByTestId('white-model-select-D0').click()
+    await viewport.locator('canvas').focus()
+    await page.keyboard.press('ArrowRight')
+    assert.equal(await page.evaluate(() => JSON.stringify(document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').objects)), originalScene,
+      '装修切换、镜头切换和键盘操作不改排版、商品或空间数据')
+    await page.mouse.move(1200, 100)
+  }
+  await finish.selectOption('model')
+  assert.equal(await dialog.getAttribute('data-readonly'), null, '切回白模后恢复编辑')
+  assert.ok(await project('seat:D0'), '原始白模继续展示默认示意椅')
+
   assert.deepEqual(errors, [], `不应有未捕获错误：${errors.join('; ')}`)
-  console.log('3D 白模 UI 通过：场景统计、3D 点选/取消、真实链路绑定商品（几何不变）、旋转/替换模块写回、重叠拖动拒绝回退、合法拖动同步 2D、AI 入口保留。API 全部模拟。')
+  console.log('3D 白模 UI 通过：点选、绑定商品、旋转、拖动、AI 入口及 20 桌两套装修与双视角，排版数据保持一致。API 全部模拟。')
 } finally {
   await browser?.close()
   app.kill()
