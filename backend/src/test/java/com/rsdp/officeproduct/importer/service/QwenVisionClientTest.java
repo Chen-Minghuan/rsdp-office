@@ -20,6 +20,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
@@ -579,6 +580,43 @@ class QwenVisionClientTest {
         assertEquals(10, report.path("mmPerPixel").asDouble());
         assertEquals("REJECTED", report.path("references").get(2).path("status").asText());
         server.verify();
+    }
+
+    @Test
+    void renderAuditUsesDeterministicJsonAndAllReferenceImages() throws Exception {
+        server.expect(requestTo(properties.getBaseUrl()+"/chat/completions"))
+            .andExpect(jsonPath("$.temperature").value(0)).andExpect(jsonPath("$.max_tokens").value(4096))
+            .andExpect(jsonPath("$.messages[0].content[0].text").value("核对商品"))
+            .andExpect(jsonPath("$.messages[0].content[1].image_url.url").value(org.hamcrest.Matchers.startsWith("data:image/png;base64,")))
+            .andExpect(jsonPath("$.messages[0].content[2].image_url.url").exists())
+            .andRespond(withSuccess(completion("{\"status\":\"PASS\"}"),MediaType.APPLICATION_JSON));
+        var result=client.auditRender("核对商品",List.of(image().getBytes(),image().getBytes()));
+        assertEquals("PASS",result.path("status").asText());assertEquals("test-request",result.path("providerRequestId").asText());server.verify();
+    }
+
+    @Test
+    void productUnderstandingUsesStructuredVisionRequestAndSeparateImages() throws Exception {
+        server.expect(requestTo(properties.getBaseUrl()+"/chat/completions"))
+            .andExpect(jsonPath("$.temperature").value(0)).andExpect(jsonPath("$.max_tokens").value(6000))
+            .andExpect(jsonPath("$.enable_thinking").value(false)).andExpect(jsonPath("$.response_format.type").value("json_object"))
+            .andExpect(jsonPath("$.messages[0].content[0].text").value("理解商品"))
+            .andExpect(jsonPath("$.messages[0].content[1].image_url.url").value(org.hamcrest.Matchers.startsWith("data:image/png;base64,")))
+            .andExpect(jsonPath("$.messages[0].content[2].image_url.url").exists())
+            .andRespond(withSuccess(completion("{\"productId\":\"SKU1\"}"),MediaType.APPLICATION_JSON));
+        var result=client.understandProduct("理解商品",List.of(image().getBytes(),image().getBytes()));
+        assertEquals("SKU1",result.path("productId").asText());assertEquals("test-request",result.path("providerRequestId").asText());server.verify();
+    }
+    @Test
+    void productUnderstandingSeparatesSystemRoleFromDynamicUserTask() throws Exception {
+        server.expect(requestTo(properties.getBaseUrl()+"/chat/completions"))
+            .andExpect(jsonPath("$.messages[0].role").value("system"))
+            .andExpect(jsonPath("$.messages[0].content").value("固定商品审核职责"))
+            .andExpect(jsonPath("$.messages[1].role").value("user"))
+            .andExpect(jsonPath("$.messages[1].content[0].text").value("动态商品记录"))
+            .andExpect(jsonPath("$.messages[1].content[1].image_url.url").value(org.hamcrest.Matchers.startsWith("data:image/png;base64,")))
+            .andRespond(withSuccess(completion("{\"productId\":\"SKU1\"}"),MediaType.APPLICATION_JSON));
+        var result=client.understandProduct("固定商品审核职责","动态商品记录",List.of(image().getBytes()));
+        assertEquals("SKU1",result.path("productId").asText());server.verify();
     }
 
     @Test

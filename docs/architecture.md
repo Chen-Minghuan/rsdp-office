@@ -269,3 +269,21 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 RENDER-004 更新：RenderProductReferences 按有效商品的 rspuId 从 image_assets 读取公共/当前变体图片，主图优先、内容去重、每款最多 4 个角度；每款参考块合图后仍限制为两板。版本 selected-products-multiview-v2，保存每张来源与摘要及实际使用张数。provider 第一张图片改为 RenderSceneGuide 的无文字立体代理图，原 referencePng 仅供平面核对；实际引导 URL 随任务保存并响应 layoutGuideUrl。正向与负向提示共同限定完整场景，不能将图纸或清单绘入场景。见 [RENDER-004](tasks/RENDER-004-multiview-products-and-scene-guide.md)。
 
 RENDER-005 更新：RenderLayoutContext 从不可变当前设计计算多边形净面积、旋转外包离墙/相邻净距、主模块行列与朝向，并按项目/空间稳定 ID/来源修订/图片摘要关联原识别记录。原始轮廓不覆盖用户几何，来源不可用可降级，门窗未知明确标记。汇总提示替代逐件大坐标清单；RenderSceneGuide 支持 L 型与镜像。测量存于服务端附件、响应 layoutContext，客户端 snapshot 投影包含排版角色/分组/设置及来源比例字段。见 [RENDER-005](tasks/RENDER-005-physical-layout-context.md)。
+
+RENDER-009 更新：RenderFurnitureBindings 从后端校验后的scene统一分配逐件F编号和按productId共享的P编号，方位由旋转外包中心与房间边界计算。RenderSceneGuide 保留45°几何；生图输入使用无文字结构图，内部审核另存带F标签版本。RenderProductReferences 将无P文字参考板按商品组顺序映射到F家具；2D工具栏和3D白模AI入口均只提交ISOMETRIC，不再上传白模相机截图，历史whiteModelView仍可读取。生成PNG后由RenderProductAuditService和QwenVisionClient做一次非权威性视觉核对，qualityAudit写回snapshot_json附件；SUCCEEDED不等于商品精确还原，不自动重新生图。静态提示词实验进一步将通用画质提示与空间数据分离：生图文字不携带毫米尺寸、商品规格或旋转角度，真实数值仍保存在任务附件；固定使用简洁的照片级3D室内效果图品质提示。见 [RENDER-009](tasks/RENDER-009-furniture-product-bindings.md)。
+
+## 生图前商品视觉理解与建筑标注（RENDER-010，实验）
+
+`experiment/render-product-agent` 在不改变 RenderPreview 三个 API 和手动生成方式的前提下，加入商品视觉档案。`ProductVisualUnderstandingService` 只输出经硬校验的商品可见证据；`RenderReferencePlanner` 决定实际选图；`RenderPromptCompiler` 决定哪些外观描述可以进入最终提示词。档案按商品/变体、原图哈希、视觉模型和协议版本缓存，任务快照保存实际档案和选图。失败回退静态 v6，不自动重试生图。
+
+`RenderArchitecturalOpenings` 是后端唯一门窗贴墙计算，`RenderLayoutContext` 的事实、`RenderSceneGuide` 的洞口和生成后建筑审核共同读取它。门窗高度仍是示意估计，未解析门洞不成为生成事实。详见 [RENDER-010](tasks/RENDER-010-product-visual-agent.md)。
+
+RENDER-010 2026-11-24 更新：新生图任务的首图、页面核对和生成后审核统一使用带 F 编号的 RenderSceneGuide，商品参考板绘制 P 编号，提示词逐件携带 F→P；平面图仍仅供人工核对。商品理解升级为 product-visual-profile-v2/reference-understanding-v2-target-audit，system 固定“商品构成→目标识别→参考适用性→目标外观”职责，user 携带动态商品记录。套组必须显式报警；可靠目标框经 RenderSubjectCropper 确定性裁剪后才可进入生图，无法可靠定位时阻断，目标裁剪不等于像素级分割且必须保留人工复核提示。原图与生成图摘要、目标框和隔离方式写入 manifest，缓存按新协议失效，历史快照不回填。详见 [RENDER-010](tasks/RENDER-010-product-visual-agent.md#2026-11-24-fp-显式生图与商品目标隔离跟进)。
+
+## 三图空间控制与位置几何审核（RENDER-011，实验）
+
+v9 曾将带F的图1/图2送入生图；真实样本出现编号和椅子复制后，v10 改为无F编号的45°结构图和平面控制图，带F白模只供审核，图3仍为带P商品板。`RenderSpatialControl` 统一世界毫米、`z=0`地面轮廓和两套`0～1000`投影坐标；`RenderLayoutSemantics` 从坐标生成两排直线、顺序、间距、旋转和头尾关系，视觉智能体不得决定这些事实。`RenderGeometryAuditService` 不再向观测模型提供预期数量或坐标，只要求其从结果图穷举实例；随后由 `RenderGeometryMetrics` 独立进行一对一匹配，计算中心偏移和地面IoU，类别不覆盖几何。所有输入、映射和审核保存在原任务快照，不新增映射表，不自动重试收费生图。详见 [RENDER-011](tasks/RENDER-011-spatial-layout-control.md)。
+
+## 提示词与参考图对照实验（RENDER-012，实验）
+
+RenderGenerationOptions 显式定义 A/B/C/D/E；缺省使用正式 E（完整技术提示词＋Direct）。RenderVisualTaskPrompt 从同一 RenderLayoutSemantics 结构化事实生成无坐标 JSON 的精简任务，Java 仍保存完整空间事实。C 只从生图输入移除平面图，审核继续使用；D/E 使用 prompt_extend=direct，其中 E 保留 A 的完整技术提示词。实验参数、seed、实际图片角色与哈希进入原任务快照并参与幂等，不新增表、不自动批量收费生图。任务快照另存 generationTiming 时间戳，接口计算准备、提交、服务生成和图片下载耗时，页面实时显示等待及最终耗时；Direct 改写包含在服务生成阶段，当前不能单独拆分。详见 [RENDER-012](tasks/RENDER-012-prompt-ab-experiment.md)。

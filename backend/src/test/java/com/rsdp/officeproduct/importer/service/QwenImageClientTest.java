@@ -24,9 +24,11 @@ class QwenImageClientTest {
             .andExpect(jsonPath("$.model").value("qwen-image-3.0"))
             .andExpect(jsonPath("$.input.messages[0].content[0].image").value("data:image/png;base64,AQI="))
             .andExpect(jsonPath("$.input.messages[0].content[1].text").value("布局"))
-            .andExpect(jsonPath("$.parameters.prompt_extend").value(false))
+            .andExpect(jsonPath("$.parameters.prompt_extend").value(true)).andExpect(jsonPath("$.parameters.prompt_extend_mode").value("direct"))
             .andExpect(jsonPath("$.parameters.n").value(1))
-            .andExpect(jsonPath("$.parameters.negative_prompt").value(org.hamcrest.Matchers.containsString("平面布局图")))
+            .andExpect(jsonPath("$.parameters.negative_prompt").value(org.hamcrest.Matchers.containsString("低清晰度")))
+            .andExpect(jsonPath("$.parameters.negative_prompt").value(org.hamcrest.Matchers.containsString("规格表")))
+            .andExpect(jsonPath("$.parameters.negative_prompt").value(org.hamcrest.Matchers.containsString("多视图拼贴")))
             .andRespond(withSuccess("{\"output\":{\"task_id\":\"task-1\",\"task_status\":\"PENDING\"}}",MediaType.APPLICATION_JSON));
         assertEquals("task-1",client.submit(new byte[]{1,2},"布局").path("output").path("task_id").asText());
         assertFalse(properties.toString().contains("test-secret")); server.verify();
@@ -40,7 +42,12 @@ class QwenImageClientTest {
         client.submit(java.util.List.of(new byte[]{1},new byte[]{2}),"商品外观"); server.verify();
         assertThrows(BusinessException.class,()->client.submit(java.util.List.of(new byte[0],new byte[0],new byte[0],new byte[0]),"x"));
     }
-    @Test void pollsSameRegionAndDoesNotResubmit() {
+    @Test void directPromptExtensionAndSeedAreSentForTheExplicitExperiment() {
+        properties.setApiKey("test-secret");var options=com.rsdp.officeproduct.importer.office.service.RenderGenerationOptions.from("CONCISE_V11","GUIDE_PLAN_PRODUCT",true,1101L,1);
+        server.expect(anything()).andExpect(jsonPath("$.parameters.prompt_extend").value(true)).andExpect(jsonPath("$.parameters.prompt_extend_mode").value("direct"))
+            .andExpect(jsonPath("$.parameters.seed").value(1101)).andRespond(withSuccess("{\"output\":{\"task_id\":\"task-direct\"}}",MediaType.APPLICATION_JSON));
+        client.submit(java.util.List.of(new byte[]{1}),"精简",options);server.verify();
+    }    @Test void pollsSameRegionAndDoesNotResubmit() {
         properties.setApiKey("test-secret");
         server.expect(requestTo("https://dashscope.aliyuncs.com/api/v1/tasks/task-1")).andExpect(method(HttpMethod.GET))
             .andRespond(withSuccess("{\"output\":{\"task_status\":\"RUNNING\"}}",MediaType.APPLICATION_JSON));
