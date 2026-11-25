@@ -16,6 +16,7 @@ const emit = defineEmits<{ (event: 'applied', message: string): void }>()
 
 const store = useOfficeStore()
 const api = useOfficeApi()
+const saveRecommendationDraft = useRecommendationDraft()
 
 const result = ref<ModuleRecommendation | null>(null)
 const loading = ref(false), applying = ref(false), error = ref('')
@@ -23,11 +24,12 @@ let sequence = 0
 
 const modules = computed(() => store.furnitureForZone(props.zoneId))
 const allConfirmed = computed(() => modules.value.length > 0 && modules.value.every(item => item.layoutConfirmed))
+const signature = computed(() => JSON.stringify([show.value, store.workspaceId, store.schemeToken, store.canvasRevision, props.zoneId, props.item?.id, allConfirmed.value]))
 const number = (value: number) => Number(value.toFixed(2)).toLocaleString()
 const message = (failure: any) => failure?.data?.message || failure?.message || '请求失败，请重试'
 
 async function refresh() {
-  const ticket = ++sequence
+  const ticket = ++sequence, current = signature.value
   result.value = null; error.value = ''
   const item = props.item
   if (!item || !allConfirmed.value) { loading.value = false; return }
@@ -35,10 +37,10 @@ async function refresh() {
   const revision = store.canvasRevision
   try {
     // 与 2D 款式推荐一致：先冲刷当前草稿，服务端按已保存几何与修订号核验。
-    await api.saveCanvas({ objects: JSON.parse(JSON.stringify(store.objects)), files: store.files, mode: store.canvasMode,
-      designZoneId: store.designZoneId, revision, blank: store.blank })
+    await saveRecommendationDraft()
+    if (ticket !== sequence || current !== signature.value) return
     const response = await api.recommendModule({ zoneId: props.zoneId, moduleId: item.id, canvasRevision: revision, allowRotation: true })
-    if (ticket !== sequence) return
+    if (ticket !== sequence || current !== signature.value) return
     if (!response || response.moduleId !== item.id || response.zoneId !== props.zoneId || response.canvasRevision !== revision || !Array.isArray(response.candidates)) {
       throw new Error('商品推荐接口尚未就绪，请启动最新后端')
     }
@@ -62,7 +64,12 @@ async function choose(candidate: ModuleProductCandidate) {
   finally { applying.value = false }
 }
 
-watch([show, () => props.item?.id], ([open]) => { if (open) void refresh() })
+watch(signature, () => {
+  sequence++
+  result.value = null; error.value = ''; loading.value = false
+  if (show.value) void refresh()
+})
+onBeforeUnmount(() => { sequence++ })
 </script>
 
 <template>

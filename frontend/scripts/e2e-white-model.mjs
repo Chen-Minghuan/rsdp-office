@@ -40,6 +40,7 @@ try {
     const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: '成功', data }) })
     if (path === '/api/v1/office/projects') return respond([{
       projectId: 'OFFICE-PROJECT-001', name: '白模测试项目',
+      leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
       floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
     }])
     if (path === '/api/v1/office/products') return respond([P1])
@@ -80,7 +81,7 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
 
-  await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
+  await page.goto(baseUrl + '/canvas?floorId=OFFICE-PROJECT-001', { waitUntil: 'networkidle' })
   await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     state.objects = [
@@ -96,7 +97,7 @@ try {
     state.canvasRevision = 3; state.canvasMode = 'design'; state.designZoneId = 'Z1'; state.cart = []; state.floorPlan = null; state.spaceTemplate = null
     localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
-  await page.goto(baseUrl + '/canvas?mode=design&zoneId=Z1', { waitUntil: 'networkidle' })
+  await page.goto(baseUrl + '/canvas?mode=design&zoneId=Z1&floorId=OFFICE-PROJECT-001', { waitUntil: 'networkidle' })
 
   await page.getByRole('button', { name: '3D 白模', exact: true }).click()
   const dialog = page.getByTestId('white-model-preview')

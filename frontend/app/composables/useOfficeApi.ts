@@ -110,12 +110,19 @@ function apiUrl(path: string) {
   return `${API_BASE}${path}`
 }
 
-async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>, timeout?: number): Promise<T> {
   const res = await $fetch<ApiResponse<T>>(apiUrl(path), {
     method: method as any,
     body: body as any,
     credentials: 'include',
+    timeout,
+    retry: timeout === undefined ? undefined : 0,
     headers: { 'Content-Type': 'application/json', ...headers },
+  }).catch((failure) => {
+    if (failure?.cause?.name === 'TimeoutError' || failure?.name === 'TimeoutError') {
+      throw new Error('服务响应超时，请重试')
+    }
+    throw failure
   })
   if (res.code !== 200) {
     throw new Error(res.message || '请求失败')
@@ -190,7 +197,7 @@ export function useOfficeApi() {
       objects: payload.objects,
       files: payload.files,
       blank: payload.blank,
-    })
+    }, undefined, 15_000)
   }
 
   const schemePath = (floorId: string) => `/api/v1/office/floors/${encodeURIComponent(floorId)}/room-scheme`
@@ -301,7 +308,7 @@ export function useOfficeApi() {
   }
 
   async function recommendModule(requestBody: ModuleRecommendationRequest): Promise<ModuleRecommendation> {
-    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody, undefined, 15_000)
   }
 
   async function selectModuleProduct(requestBody: ModuleRecommendationRequest): Promise<ModuleProductSelection> {

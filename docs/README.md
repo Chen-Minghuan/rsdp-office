@@ -13,6 +13,7 @@
 | [本机 Office 库清理](tasks/DB-003-local-office-cleanup.md) | 本机 24 张业务表、旧排版归档及备份恢复验证 |
 | [Office 读取性能](tasks/PERF-001-office-read-performance.md) | 项目预算异步加载、商品详情去重、选品目录回源合并和实测口径 |
 | [Office 批量查价和商品库分页](tasks/PERF-002-batch-prices-catalog-pagination.md) | 预算冷读、商品库分页、报价和权限验证 |
+| [款式推荐加载与本地运行恢复](tasks/PERF-003-recommendation-loading.md) | 运行 JAR 隔离、画布重复保存合并及超时重试 |
 | [Office 角色、主号名额与授权设计](tasks/TENANT-004-office-role-model.md) | 表关系、20 个主号上限、主号逐人授权和存量迁移 |
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
