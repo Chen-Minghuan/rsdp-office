@@ -8,6 +8,10 @@ const { canCreateProject } = useAuth()
 const { isProjectDrawing, isProjectOverview } = useWorkspaceNavigation()
 const showCreate = ref(false)
 const activeStatus = ref<ProjectStatusFilter>('ALL')
+// 列表视图每次进入时重取项目列表：方案确认/失效、新增楼层后阶段与进度由后端重新派生。
+onMounted(() => {
+  if (!isProjectDrawing.value && !isProjectOverview.value) void workspace.refreshProjects()
+})
 // 已完成看板保留占位：业务口径待后续定义，暂不展示数据、不参与筛选
 const statusCards = computed(() => [
   { value: 'ALL' as const, label: '全部项目', count: workspace.projects.length as number | null },
