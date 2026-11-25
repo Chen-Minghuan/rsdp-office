@@ -4,7 +4,7 @@ import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { money } from '~/utils/helpers'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
-import type { CartItem, FurnitureObject, Product, ProjectQuotationRecord, ZoneObject } from '~/types/office'
+import type { CartItem, FurnitureObject, Product, ProjectQuotationLatest, ProjectQuotationRecord, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
 import type { ProposalConfirmation } from '~/types/productScheme'
 import { proposalFurnitureSelectionRoute } from '~/utils/proposalFurnitureGate'
@@ -59,6 +59,8 @@ const demoConfirmed = ref(false)
 const savedConfirmation = ref<ProposalConfirmation | null>(null)
 // 最新已确认报价：最终报价取该快照中当前楼层行的小计之和，与报价页同一数据源
 const latestQuotation = ref<ProjectQuotationRecord | null>(null)
+// 最近一条报价记录（任意状态）：最终报价隐藏时在参考金额下方展示上一次报价时间
+const latestQuotationAny = ref<ProjectQuotationLatest | null>(null)
 const checkingCatalog = ref(false)
 const catalogApi = useOfficeApi()
 const notice = ref('')
@@ -86,16 +88,21 @@ watch([previewMode, () => store.initialized, () => store.workspaceId, () => stor
     if (read === confirmationRead) savedConfirmation.value = result
   } catch { /* Confirmation remains unknown and can be requested again. */ }
 }, { immediate: true })
-// 加载项目最新已确认报价；无确认记录或读取失败时保持空值，页面不显示最终报价行
+// 加载项目最新已确认报价与最近一条报价记录；无记录或读取失败时保持空值，页面不显示最终报价行
 let quotationRead = 0
 watch([previewMode, () => store.initialized, () => store.workspaceId, () => workspace.currentProjectId], async ([preview, ready, floorId, projectId]) => {
   const read = ++quotationRead
   latestQuotation.value = null
+  latestQuotationAny.value = null
   if (preview || !ready || !floorId || !projectId || !store.apiReady) return
-  try {
-    const result = await catalogApi.latestProjectQuotation(projectId)
-    if (read === quotationRead) latestQuotation.value = result
-  } catch { /* Quotation remains unknown and the final quote stays as a placeholder. */ }
+  // 任意状态最近记录接口失败不影响已确认报价的加载
+  const [confirmed, anyRecord] = await Promise.allSettled([
+    catalogApi.latestProjectQuotation(projectId),
+    catalogApi.latestProjectQuotationRecord(projectId),
+  ])
+  if (read !== quotationRead) return
+  latestQuotation.value = confirmed.status === 'fulfilled' ? confirmed.value : null
+  latestQuotationAny.value = anyRecord.status === 'fulfilled' ? anyRecord.value : null
 }, { immediate: true })
 const projectPermissions = computed(() => projectPermissionsFor(workspace.currentProject, user.value?.userId))
 const canEdit = computed(() => previewMode.value || !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EDIT'))
@@ -330,6 +337,9 @@ const quotationMatchesPage = computed(() => {
 })
 // 有与页面一致的确认报价（或演示模式）才显示最终报价行；此时参考金额加删除线作对比
 const showFinalQuote = computed(() => previewMode.value || (floorQuoteTotal.value !== null && quotationMatchesPage.value))
+// 上一次报价日期：优先任意状态最近一条记录，接口不可用时回退已确认报价记录；只保留日期部分
+const lastQuotationTime = computed(() =>
+  (latestQuotationAny.value?.createdAt || latestQuotation.value?.createdAt || '').split('T')[0].split(' ')[0])
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
 const pendingSpaces = computed(() => spaces.value.length - confirmedSpaces.value)
 const confirmedGroups = computed(() => groups.value.filter(group => group.spaces.every(space => space.status === '已确认')).length)
@@ -566,7 +576,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price" :class="{ 'price-strike': showFinalQuote }">{{ money(totalPrice) }}</strong></div><div v-if="showFinalQuote" class="aside-summary"><span>{{ !previewMode && floorQuoteIncomplete ? '已报价商品小计' : '最终报价' }}</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal?.total) }}</strong></div><div v-if="!previewMode && showFinalQuote && floorQuoteIncomplete" class="aside-quote-hint incomplete">含缺价 {{ floorQuoteTotal?.missingCount }} 行（未计入），报价不完整</div><div v-else-if="!previewMode && showFinalQuote" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price" :class="{ 'price-strike': showFinalQuote }">{{ money(totalPrice) }}</strong></div><div v-if="showFinalQuote" class="aside-summary"><span>{{ !previewMode && floorQuoteIncomplete ? '已报价商品小计' : '最终报价' }}</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal?.total) }}</strong></div><div v-if="!previewMode && showFinalQuote && floorQuoteIncomplete" class="aside-quote-hint incomplete">含缺价 {{ floorQuoteTotal?.missingCount }} 行（未计入），报价不完整</div><div v-else-if="!previewMode && showFinalQuote" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div v-if="!previewMode && !showFinalQuote && lastQuotationTime" class="aside-quote-hint">上一次报价日期：{{ lastQuotationTime }}</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>

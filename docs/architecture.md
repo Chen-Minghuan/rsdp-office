@@ -209,6 +209,8 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 
 报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
 
+2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在最终报价隐藏时用它展示上一次报价时间。
+
 ### 5.3 房间方案和楼层确认（FLOW-007）
 
 活动房间版本沿用楼层画布和清单。每个房间在 `office_room_scheme` 另存非活动版本的家具、清单与对应的空间快照。切换与清空选品持有同一个楼层事务锁并轮换 `schemeToken`，拒绝计划切换前发出的画布和清单写入。
