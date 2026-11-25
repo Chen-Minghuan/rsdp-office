@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { LocalProductImage, LocalProductInput, LocalProductSummary, LocalProductVariant } from '~/types/local-products'
+import type { LocalProductSummary, LocalProductImage, LocalProductInput, LocalProductVariant, WorkbookImportProgress, WorkbookMappingSelection } from '~/types/local-products'
 import { createUuid } from '~/utils/uuid'
+import { splitWorkbookProducts, workbookPreviewPageSize, workbookSize } from '~/utils/localProductImport'
 
 const api = useOfficeApi()
 const rows = ref<LocalProductSummary[]>([])
@@ -15,6 +16,13 @@ const notice = ref('')
 const form = ref<LocalProductInput | null>(null)
 const categories = ref<{ dictCode: string, dictName: string }[]>([])
 const preview = ref<Awaited<ReturnType<typeof api.previewLocalProductWorkbook>> | null>(null)
+const workbookName = ref('')
+const workbookFile = shallowRef<File | null>(null)
+const templatePage = ref(1)
+const importProgress = ref<WorkbookImportProgress | null>(null)
+const readingWorkbook = ref(false)
+const dragActive = ref(false)
+const categoryLabels = computed(() => new Map(categories.value.map(item => [item.dictCode, item.dictName])))
 let lastSave: { body: string, id: string } | undefined
 
 const maxWorkbookMb = 150
@@ -47,6 +55,11 @@ function emptyVariant(): LocalProductVariant {
   return { name: '', widthMm: null, depthMm: null, heightMm: null }
 }
 
+function categoryLabel(code: string) {
+  const name = categoryLabels.value.get(code)
+  return name ? `${name} · ${code}` : code
+}
+
 async function openProduct(id?: string) {
   error.value = ''
   notice.value = ''
@@ -57,7 +70,7 @@ async function openProduct(id?: string) {
       const detail = await api.getLocalProduct(id)
       form.value = { ...detail.product, variants: detail.variants, images: detail.images }
     } else {
-      form.value = { name: '', categoryCode: '', factoryCode: '', factoryModel: '', variants: [emptyVariant()], images: [] }
+      form.value = { name: '', categoryCode: '', factoryModel: '', variants: [emptyVariant()], images: [] }
     }
     mode.value = 'edit'
   } catch (cause) {
@@ -69,6 +82,8 @@ async function openProduct(id?: string) {
 
 function showExcel() {
   preview.value = null
+  workbookName.value = ''
+  workbookFile.value = null
   lastSave = undefined
   error.value = ''
   notice.value = ''
@@ -79,6 +94,8 @@ function showList() {
   mode.value = 'list'
   form.value = null
   preview.value = null
+  workbookName.value = ''
+  workbookFile.value = null
   error.value = ''
 }
 
@@ -122,9 +139,34 @@ async function readWorkbook(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file) return
+  if (file) await selectWorkbook(file)
+}
+
+function dragLeave(event: DragEvent) {
+  if (!(event.relatedTarget instanceof Node) || !(event.currentTarget as HTMLElement).contains(event.relatedTarget)) {
+    dragActive.value = false
+  }
+}
+
+async function dropWorkbook(event: DragEvent) {
+  dragActive.value = false
+  const files = event.dataTransfer?.files
+  if (busy.value || !files?.length) return
+  if (files.length > 1) {
+    error.value = '请一次上传一份 Excel 文件'
+    return
+  }
+  await selectWorkbook(files[0]!)
+}
+
+async function selectWorkbook(file: File) {
+  if (busy.value) return
+  workbookName.value = file.name
+  workbookFile.value = null
   error.value = ''
+  notice.value = ''
   preview.value = null
+  lastSave = undefined
   if (!file.size || !file.name.toLowerCase().endsWith('.xlsx')) {
     error.value = '请选择有效的 .xlsx 文件'
     return
@@ -133,42 +175,100 @@ async function readWorkbook(event: Event) {
     error.value = `Excel 文件不能超过 ${maxWorkbookMb} MB`
     return
   }
+  workbookFile.value = file
+  await previewWorkbook(file)
+}
+
+async function previewWorkbook(file: File, mapping?: WorkbookMappingSelection) {
   busy.value = true
+  readingWorkbook.value = true
+  error.value = ''
   try {
-    preview.value = await api.previewLocalProductWorkbook(file)
+    preview.value = await api.previewLocalProductWorkbook(file, mapping)
+    templatePage.value = 1
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Excel 预览失败'
+  } finally {
+    readingWorkbook.value = false
+    busy.value = false
+  }
+}
+
+async function applyWorkbookMapping(mapping: WorkbookMappingSelection) {
+  if (workbookFile.value) await previewWorkbook(workbookFile.value, mapping)
+}
+
+async function save(products: LocalProductInput[]) {
+  if (!products.length || busy.value || !canWrite.value) return false
+  busy.value = true
+  error.value = ''
+  try {
+    const inputs = products.map(({ factoryCode, ...product }) => product)
+    const body = JSON.stringify(inputs)
+    if (body !== lastSave?.body) lastSave = { body, id: createUuid() }
+    await api.saveLocalProducts(lastSave.id, inputs)
+    notice.value = '商品已保存'
+    showList()
+    await load(1)
+    return true
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '保存失败'
+    return false
   } finally {
     busy.value = false
   }
 }
 
-async function save(products: LocalProductInput[]) {
-  if (!products.length || busy.value) return
+async function saveWorkbook(products: LocalProductInput[], onSaved: (products: LocalProductInput[]) => void) {
+  if (!preview.value || busy.value || !canWrite.value || !products.length) return false
+  const { previewId, imageSizes } = preview.value
   busy.value = true
   error.value = ''
+  notice.value = ''
+  let savedCount = 0
   try {
-    const body = JSON.stringify(products)
-    if (body !== lastSave?.body) lastSave = { body, id: createUuid() }
-    const saved = await api.saveLocalProducts(lastSave.id, products)
-    notice.value = mode.value === 'excel' ? `已导入 ${saved.length} 件商品` : '商品已保存'
-    showList()
-    await load(1)
+    const batches = splitWorkbookProducts(products.map(({ factoryCode, ...product }) => product), imageSizes ?? {})
+    for (const [index, batch] of batches.entries()) {
+      importProgress.value = { number: index + 1, total: batches.length }
+      const body = JSON.stringify({ previewId, batch })
+      if (body !== lastSave?.body) lastSave = { body, id: createUuid() }
+      const saved = await api.saveLocalProducts(lastSave.id, batch, previewId)
+      savedCount += saved.length
+      lastSave = undefined
+      onSaved(batch)
+    }
+    notice.value = `已导入 ${savedCount} 件商品`
+    return true
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '保存失败'
+    const message = cause instanceof Error ? cause.message : '导入失败'
+    error.value = savedCount ? `已导入 ${savedCount} 件，剩余商品可继续确认。${message}` : message
+    return false
   } finally {
+    importProgress.value = null
+    if (savedCount) await load(1)
     busy.value = false
   }
+}
+
+async function importTemplate() {
+  const current = preview.value
+  if (!current) return
+  if (await saveWorkbook(current.products, saved => {
+    const models = new Set(saved.map(product => product.factoryModel))
+    current.products = current.products.filter(product => !models.has(product.factoryModel))
+  })) showList()
 }
 </script>
 
 <template>
   <main class="h-full overflow-auto">
-    <div class="mx-auto max-w-6xl space-y-5">
+    <div class="mx-auto space-y-4" :class="mode === 'excel' ? 'max-w-[86rem] px-3 py-3 sm:px-5' : 'max-w-6xl'">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
           <NuxtLink to="/products" class="text-xs text-muted hover:underline">商品库</NuxtLink>
-          <h1 class="text-2xl font-bold">本地商品</h1>
+          <h1 class="text-2xl font-bold">
+            {{ mode === 'excel' ? 'Excel 商品导入' : '本地商品' }}
+          </h1>
         </div>
         <div v-if="mode === 'list' && canWrite" class="flex gap-2">
           <button type="button" :class="secondary" :disabled="busy" @click="showExcel">Excel 导入</button>
@@ -184,12 +284,12 @@ async function save(products: LocalProductInput[]) {
         <p v-else-if="!rows.length && !error" class="p-5 text-sm text-muted">当前工作区暂无本地商品</p>
         <table v-else-if="rows.length" class="w-full min-w-[560px] text-left text-sm">
           <thead class="border-b border-line text-muted"><tr>
-            <th class="p-3">名称</th><th class="p-3">分类</th><th class="p-3">供应厂</th><th class="p-3">厂内型号</th><th class="p-3">操作</th>
+            <th class="p-3">名称</th><th class="p-3">分类</th><th class="p-3">厂内型号</th><th class="p-3">操作</th>
           </tr></thead>
           <tbody>
             <tr v-for="row in rows" :key="row.id" class="border-b border-line last:border-0">
-              <td class="p-3 font-medium">{{ row.name }}</td><td class="p-3">{{ row.categoryCode }}</td>
-              <td class="p-3">{{ row.factoryCode }}</td><td class="p-3">{{ row.factoryModel }}</td>
+              <td class="p-3 font-medium">{{ row.name }}</td><td class="p-3">{{ categoryLabel(row.categoryCode) }}</td>
+              <td class="p-3">{{ row.factoryModel }}</td>
               <td class="p-3"><button type="button" class="text-bronze-dark hover:underline" :disabled="busy" @click="openProduct(row.id)">{{ canWrite ? '编辑' : '查看' }}</button></td>
             </tr>
           </tbody>
@@ -206,13 +306,9 @@ async function save(products: LocalProductInput[]) {
         <fieldset class="space-y-5" :disabled="busy || !canWrite">
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="space-y-1 text-sm"><span>商品名称</span><input v-model.trim="form.name" :class="control" required maxlength="200"></label>
-            <label class="space-y-1 text-sm"><span>分类编码</span><input v-model.trim="form.categoryCode" :class="control" list="local-product-categories" required maxlength="16"></label>
-            <label class="space-y-1 text-sm"><span>供应厂编码</span><input v-model.trim="form.factoryCode" :class="control" required maxlength="16"></label>
+            <ProductsCategoryField v-model="form.categoryCode" :categories="categories" required />
             <label class="space-y-1 text-sm"><span>厂内型号</span><input v-model.trim="form.factoryModel" :class="control" required maxlength="64"></label>
           </div>
-          <datalist id="local-product-categories">
-            <option v-for="category in categories" :key="category.dictCode" :value="category.dictCode">{{ category.dictName }}</option>
-          </datalist>
 
           <section class="space-y-3">
             <div class="flex items-center justify-between gap-2">
@@ -251,26 +347,74 @@ async function save(products: LocalProductInput[]) {
         </fieldset>
       </form>
 
-      <section v-else-if="mode === 'excel'" class="space-y-4 rounded-xl border border-line bg-white p-5">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <h2 class="text-lg font-semibold">Excel 导入</h2>
-          <a :href="api.localProductTemplateUrl()" :class="secondary">下载模板</a>
+      <section v-else-if="mode === 'excel'" class="min-w-0 space-y-4">
+        <div class="min-w-0 border border-line bg-white p-4 sm:p-5">
+          <input id="local-product-workbook" class="peer sr-only" type="file" accept=".xlsx" aria-label="选择 Excel 文件" :disabled="busy" @change="readWorkbook">
+          <label v-if="!workbookName" for="local-product-workbook"
+            class="grid min-h-40 cursor-pointer place-content-center justify-items-center gap-2 border border-dashed px-5 py-6 text-center transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-disabled:cursor-not-allowed"
+            :class="dragActive ? 'border-accent bg-accent-tint' : 'border-accent-line bg-bg hover:bg-accent-tint'"
+            @dragenter.prevent="dragActive = !busy" @dragover.prevent @dragleave="dragLeave" @drop.prevent="dropWorkbook">
+            <span class="grid size-10 place-items-center border border-accent-line bg-white text-accent-ink">
+              <AppIcon name="upload" size="5.5" aria-hidden="true" />
+            </span>
+            <span class="text-sm font-semibold text-ink">选择 Excel 文件或拖到这里</span>
+            <span class="text-xs text-muted">供应商原表或 Office 模板 · .xlsx · 最多 {{ maxWorkbookMb }} MB</span>
+          </label>
+          <div v-else class="flex min-w-0 flex-wrap items-center gap-3 border border-line bg-bg px-3 py-2.5 sm:flex-nowrap">
+            <span class="grid size-10 shrink-0 place-items-center border border-accent-line bg-accent-tint text-accent-ink">
+              <AppIcon name="table" size="5" aria-hidden="true" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="break-words text-sm font-semibold" role="status">{{ workbookName }}</div>
+              <p v-if="readingWorkbook" class="mt-1 text-xs text-accent-ink" role="status">正在解析文件…</p>
+              <p v-else-if="workbookFile" class="mt-1 text-xs text-muted">{{ workbookSize(workbookFile.size) }}</p>
+            </div>
+            <button v-if="workbookFile && !preview && !busy" type="button" :class="secondary" @click="previewWorkbook(workbookFile)">重试预览</button>
+            <label for="local-product-workbook" class="shrink-0 cursor-pointer border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-accent-tint"
+              :class="{ 'cursor-not-allowed opacity-50': busy }">更换文件</label>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs text-muted">Excel 最大 {{ maxWorkbookMb }} MB · 单张内嵌图片最多 2 MB · 导入时自动分批</p>
+            <a :href="api.localProductTemplateUrl()" class="whitespace-nowrap text-sm font-medium text-accent-ink hover:underline">下载模板</a>
+          </div>
         </div>
-        <p class="text-sm text-muted">上传 .xlsx 文件，单文件最多 {{ maxWorkbookMb }} MB。相同供应厂和型号的行合为一件商品。</p>
-        <p class="text-sm text-muted">单张内嵌图片最多 2 MB，每批图片合计最多 12 MB。</p>
-        <input type="file" accept=".xlsx" aria-label="选择 Excel 文件" :disabled="busy" @change="readWorkbook">
-        <p v-if="busy" class="text-sm text-muted">处理中…</p>
+
         <template v-if="preview">
-          <div class="text-sm font-semibold">可导入 {{ preview.products.length }} 件，{{ preview.errors.length }} 行需要修正</div>
-          <ul v-if="preview.errors.length" class="max-h-36 overflow-auto text-sm text-red-700">
-            <li v-for="issue in preview.errors" :key="issue.row">第 {{ issue.row }} 行 · {{ issue.message }}</li>
-          </ul>
-          <ul v-if="preview.products.length" class="max-h-60 divide-y divide-line overflow-auto rounded border border-line">
-            <li v-for="product in preview.products" :key="`${product.factoryCode}/${product.factoryModel}`" class="px-3 py-2 text-sm">
-              {{ product.name }} · {{ product.factoryModel }} · {{ product.variants.length }} 个规格 · {{ product.images.length }} 张图
-            </li>
-          </ul>
-          <button type="button" :class="primary" :disabled="busy || !preview.products.length" @click="save(preview.products)">确认导入</button>
+          <details v-if="preview.errors.length" class="border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+            <summary class="font-medium">{{ preview.errors.length }} 条原表提示</summary>
+            <ul class="mt-2 max-h-36 space-y-1 overflow-auto">
+              <li v-for="(issue, index) in preview.errors" :key="index">
+                {{ issue.sheet ? issue.sheet + ' · ' + issue.column + issue.row : '第 ' + issue.row + ' 行' }} · {{ issue.message }}
+              </li>
+            </ul>
+          </details>
+          <ProductsWorkbookFieldMapping v-if="preview.mappingSheets?.length" :sheets="preview.mappingSheets" :busy="busy"
+            @apply="applyWorkbookMapping" @busy-change="busy = $event" />
+          <ProductsSupplierWorkbookReview v-else-if="preview.supplier" :preview="preview.supplier" :categories="categories" :busy="busy"
+            :preview-id="preview.previewId" :image-sizes="preview.imageSizes ?? {}" :file-bytes="workbookFile?.size ?? 0"
+            :progress="importProgress" :save-batch="saveWorkbook" @busy-change="busy = $event" />
+          <section v-else class="border border-line bg-white" aria-label="模板导入预览">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-5">
+              <div><h2 class="text-base font-semibold">预览商品</h2>
+                <p class="mt-0.5 text-sm text-muted">可导入 {{ preview.products.length }} 件</p></div>
+              <ProductsWorkbookPreviewPager v-model="templatePage" :total="preview.products.length" />
+            </div>
+            <ul v-if="preview.products.length" class="divide-y divide-line">
+              <li v-for="product in preview.products.slice((templatePage - 1) * workbookPreviewPageSize, templatePage * workbookPreviewPageSize)"
+                :key="product.factoryModel" class="grid gap-1 px-4 py-3 text-sm sm:grid-cols-[1fr_1fr_auto] sm:px-5">
+                <div class="min-w-0 break-words font-medium">{{ product.name }} <span class="font-normal text-muted">· {{ product.factoryModel }}</span></div>
+                <span class="break-words text-muted">{{ categoryLabel(product.categoryCode) }}</span>
+                <span class="text-muted">{{ product.variants.length }} 个规格 · {{ product.images.length }} 张图</span>
+              </li>
+            </ul>
+            <p v-else class="px-5 py-6 text-sm text-muted">没有可导入的商品。可查看原表提示后更换文件。</p>
+            <div class="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 border-t border-line bg-white px-4 py-3">
+              <p class="text-sm text-muted">Excel {{ workbookSize(workbookFile?.size ?? 0) }} · {{ preview.products.length }} 件待导入</p>
+              <button type="button" :class="primary" :disabled="busy || !preview.products.length" @click="importTemplate">
+                {{ importProgress ? `正在导入 ${importProgress.number}/${importProgress.total}` : '确认导入' }}
+              </button>
+            </div>
+          </section>
         </template>
       </section>
     </div>

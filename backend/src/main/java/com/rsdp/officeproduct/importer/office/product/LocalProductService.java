@@ -7,6 +7,7 @@ import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.office.service.CurrentUserService;
+import com.rsdp.officeproduct.importer.office.service.OfficeCatalogAccess;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -40,6 +41,8 @@ public class LocalProductService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final CurrentUserService currentUser;
+    private final OfficeCatalogAccess catalogAccess;
+    private final WorkbookPreviewCache previewCache;
 
     public Page list(int page) {
         OfficeUser user = requireMember();
@@ -84,22 +87,29 @@ public class LocalProductService {
                 || request.products().size() > MAX_PRODUCTS) {
             throw new BusinessException("每批须包含 1–100 个商品并提供批次编号");
         }
-        List<Input> inputs = request.products().stream().map(this::normalize).toList();
+        String boundFactory = boundFactory(workspace);
+        // 同一工作区的保存按事务串行，保护批次重放、型号唯一和导入归属。
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?, 0))", (r, i) -> 0, "office-local-products:" + workspace);
+        boolean usesPreview = request.previewId() != null;
+        String requestHash = usesPreview ? hash(writeJson(request)) : null;
+        if (usesPreview) {
+            List<Saved> previous = previousSave(user, request.batchId(), requestHash);
+            if (previous != null) return previous;
+        }
+        var submitted = usesPreview ? previewCache.materialize(request, user).products() : request.products();
+        List<Input> inputs = submitted.stream().map(input -> {
+            String factory = boundFactory == null && input != null && input.id() != null
+                ? find(workspace, input.id()).factoryCode() : boundFactory;
+            return normalize(input, factory);
+        }).toList();
         long newImageBytes = inputs.stream().flatMap(input -> input.images().stream()).filter(image -> image.id() == null)
             .mapToLong(image -> image.content().length).sum();
         if (newImageBytes > MAX_BATCH_IMAGE_BYTES) throw new BusinessException("每批商品图片合计不可超过 12 MB");
-        String hash = hash(writeJson(inputs));
-        // 同一工作区的保存按事务串行，保护批次重放、型号唯一和导入归属。
-        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?, 0))", (r, i) -> 0, "office-local-products:" + workspace);
-        List<Saved> previous = jdbc.query("""
-            select actor_id, request_hash, result::text from office_product_outbox where workspace_id = ? and batch_id = ?
-            """, (r, i) -> {
-                if (!user.getUserId().equals(r.getString(1)) || !hash.equals(r.getString(2))) {
-                    throw new BusinessException(409, "此批次编号已用于另一项保存");
-                }
-                return savedResult(r.getString(3));
-            }, workspace, request.batchId()).stream().findFirst().orElse(null);
-        if (previous != null) return previous;
+        if (!usesPreview) {
+            requestHash = hash(writeJson(inputs));
+            List<Saved> previous = previousSave(user, request.batchId(), requestHash);
+            if (previous != null) return previous;
+        }
 
         Set<List<String>> models = new HashSet<>();
         Set<String> editedIds = new HashSet<>();
@@ -110,27 +120,39 @@ public class LocalProductService {
                     || (input.id() != null && !editedIds.add(input.id()))) {
                 throw new BusinessException("同一批中商品或厂内型号重复");
             }
-            ProductSnapshot saved = saveProduct(workspace, user.getUserId(), input);
+            ProductSnapshot saved = saveProduct(workspace, user.getUserId(), input, boundFactory != null);
             imageBytes += saved.images().stream().mapToLong(image -> image.content().length).sum();
             if (imageBytes > MAX_BATCH_IMAGE_BYTES) throw new BusinessException("每批商品图片合计不可超过 12 MB");
             products.add(saved);
         }
         List<Saved> result = products.stream().map(p -> new Saved(p.id(), p.revision(), p.name())).toList();
-        var delivery = new Delivery(1, request.batchId(), workspace, user.getUserId(), user.getDisplayName(), products);
+        var delivery = boundFactory == null ? null
+            : writeJson(new Delivery(1, request.batchId(), workspace, user.getUserId(), user.getDisplayName(), products));
         jdbc.update("""
             insert into office_product_outbox(workspace_id, batch_id, actor_id, request_hash, payload, result)
             values (?, ?, ?, ?, ?::jsonb, ?::jsonb)
-            """, workspace, request.batchId(), user.getUserId(), hash, writeJson(delivery), writeJson(result));
+            """, workspace, request.batchId(), user.getUserId(), requestHash, delivery, writeJson(result));
         return result;
     }
 
-    private ProductSnapshot saveProduct(String workspace, String actor, Input input) {
+    private List<Saved> previousSave(OfficeUser user, UUID batchId, String hash) {
+        return jdbc.query("""
+            select actor_id, request_hash, result::text from office_product_outbox where workspace_id = ? and batch_id = ?
+            """, (r, i) -> {
+                if (!user.getUserId().equals(r.getString(1)) || !hash.equals(r.getString(2))) {
+                    throw new BusinessException(409, "此批次编号已用于另一项保存");
+                }
+                return savedResult(r.getString(3));
+            }, user.getWorkspaceId(), batchId).stream().findFirst().orElse(null);
+    }
+
+    private ProductSnapshot saveProduct(String workspace, String actor, Input input, boolean ownFactory) {
         String id = input.id() == null ? UUID.randomUUID().toString() : input.id();
         int revision = 1;
         boolean duplicate = Boolean.TRUE.equals(jdbc.queryForObject("""
-            select exists (select 1 from office_product where workspace_id = ? and factory_code = ?
+            select exists (select 1 from office_product where workspace_id = ? and (? = '' or factory_code = ?)
                 and factory_model = ? and product_id <> ?)
-            """, Boolean.class, workspace, input.factoryCode(), input.factoryModel(), id));
+            """, Boolean.class, workspace, input.factoryCode(), input.factoryCode(), input.factoryModel(), id));
         if (duplicate) throw new BusinessException(409, "本工作区已存在商品型号 " + input.factoryModel());
         if (input.id() == null) {
             jdbc.update("""
@@ -139,6 +161,9 @@ public class LocalProductService {
                 """, id, workspace, input.name(), input.categoryCode(), input.factoryCode(), input.factoryModel(), actor, actor);
         } else {
             Summary current = find(workspace, id);
+            if (ownFactory && !current.factoryCode().isEmpty() && !current.factoryCode().equals(input.factoryCode())) {
+                throw new BusinessException(409, "该商品的历史供应厂与工作区绑定不一致，请联系管理员核对");
+            }
             if (!Objects.equals(input.revision(), current.revision())) {
                 throw new BusinessException(409, "商品已被修改，请刷新后重新编辑");
             }
@@ -224,10 +249,14 @@ public class LocalProductService {
         return user;
     }
 
+    String boundFactory(String workspace) {
+        return catalogAccess.boundFactoryCode(workspace);
+    }
+
     boolean modelExists(String workspace, String factoryCode, String factoryModel) {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
-            select exists (select 1 from office_product where workspace_id = ? and factory_code = ? and factory_model = ?)
-            """, Boolean.class, workspace, factoryCode, factoryModel));
+            select exists (select 1 from office_product where workspace_id = ? and (? = '' or factory_code = ?) and factory_model = ?)
+            """, Boolean.class, workspace, factoryCode, factoryCode, factoryModel));
     }
 
     private OfficeUser requireMember() {
@@ -240,7 +269,7 @@ public class LocalProductService {
         return "DEALER".equals(user.getRole()) || Boolean.TRUE.equals(user.getProductEntryEnabled());
     }
 
-    Input normalize(Input input) {
+    Input normalize(Input input, String boundFactory) {
         if (input == null || input.variants() == null || input.variants().isEmpty() || input.variants().size() > MAX_VARIANTS) {
             throw new BusinessException("每个商品须有 1–30 个规格");
         }
@@ -258,11 +287,11 @@ public class LocalProductService {
         }
         return new Input(input.id(), input.revision(), required(input.name(), "商品名称", 200),
             required(input.categoryCode(), "分类编码", 16).toUpperCase(Locale.ROOT),
-            required(input.factoryCode(), "供应厂编码", 16).toUpperCase(Locale.ROOT),
+            boundFactory == null || boundFactory.isEmpty() ? "" : required(boundFactory, "供应厂编码", 16).toUpperCase(Locale.ROOT),
             required(input.factoryModel(), "厂内型号", 64), variants, images);
     }
 
-    private void validateImage(ImageInput image) {
+    static void validateImage(ImageInput image) {
         byte[] bytes = image.content();
         if (bytes == null || bytes.length < 12 || bytes.length > MAX_IMAGE_BYTES) {
             throw new BusinessException("单张图片必须有效且不超过 2 MB");

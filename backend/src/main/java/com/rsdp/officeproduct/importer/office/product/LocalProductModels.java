@@ -19,7 +19,9 @@ public final class LocalProductModels {
     public record ImageRef(String id, String mediaType) {}
     public record Input(String id, Integer revision, String name, String categoryCode, String factoryCode,
                         String factoryModel, List<Variant> variants, List<ImageInput> images) {}
-    public record SaveRequest(UUID batchId, List<Input> products) {}
+    public record SaveRequest(UUID batchId, List<Input> products, UUID previewId) {
+        SaveRequest(UUID batchId, List<Input> products) { this(batchId, products, null); }
+    }
     public record Saved(String id, int revision, String name) {}
     public record Summary(String id, int revision, String name, String categoryCode, String factoryCode, String factoryModel) {}
     public record Detail(Summary product, List<Variant> variants, List<ImageRef> images) {}
