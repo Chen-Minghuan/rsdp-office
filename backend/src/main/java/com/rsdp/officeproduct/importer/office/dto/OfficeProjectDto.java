@@ -24,4 +24,8 @@ public class OfficeProjectDto {
     private BigDecimal budgetTotal;
     /** COMPLETE / PENDING_PRICING / UNAVAILABLE。 */
     private String budgetStatus;
+    /** 所有楼层最新画布中的区域(kind=zone)总数；仅项目列表返回。 */
+    private Integer zoneTotal;
+    /** 所在楼层方案已确认且购物车有量（交付中）的区域数；仅项目列表返回。 */
+    private Integer zoneDelivered;
 }

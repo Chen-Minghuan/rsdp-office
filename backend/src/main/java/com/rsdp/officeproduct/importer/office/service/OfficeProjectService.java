@@ -2,6 +2,7 @@ package com.rsdp.officeproduct.importer.office.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
@@ -20,10 +21,12 @@ import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeRequirementsRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
+import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
@@ -72,6 +75,7 @@ public class OfficeProjectService {
     private final RsdpCatalogGateway catalogGateway;
     private final SharedCatalogService sharedCatalogService;
     private final OfficeProposalConfirmationMapper confirmationMapper;
+    private final OfficeCanvasMapper canvasMapper;
 
     public List<OfficeProjectDto> listProjects() {
         return listProjects(true);
@@ -89,11 +93,28 @@ public class OfficeProjectService {
         Map<String, OfficeUser> usersById = usersById(membersByProject);
         Map<String, ProjectBudget> budgets = includeBudget ? budgetsByProject(projectIds, floors) : Map.of();
         Set<String> confirmedFloorIds = confirmedFloorIds(floors);
+        Map<String, List<String>> zoneIdsByFloor = zoneIdsByFloor(floors);
+        Map<String, Map<String, Integer>> cartQtyByZoneByFloor = cartQtyByZoneByFloor(floors);
         return projects.stream()
             .map(project -> {
-                OfficeProjectDto dto = toProjectDto(project,
-                    floorsByProject.getOrDefault(project.getProjectId(), List.of()),
+                List<OfficeDesignFloor> projectFloors = floorsByProject.getOrDefault(project.getProjectId(), List.of());
+                OfficeProjectDto dto = toProjectDto(project, projectFloors,
                     membersByProject.getOrDefault(project.getProjectId(), List.of()), usersById, confirmedFloorIds);
+                dto.setZoneTotal(projectFloors.stream()
+                    .mapToInt(floor -> zoneIdsByFloor.getOrDefault(floor.getFloorId(), List.of()).size()).sum());
+                int zoneDelivered = 0;
+                for (OfficeDesignFloor floor : projectFloors) {
+                    if (!confirmedFloorIds.contains(floor.getFloorId())) {
+                        continue;
+                    }
+                    Map<String, Integer> qtyByZone = cartQtyByZoneByFloor.getOrDefault(floor.getFloorId(), Map.of());
+                    for (String zoneId : zoneIdsByFloor.getOrDefault(floor.getFloorId(), List.of())) {
+                        if (qtyByZone.getOrDefault(zoneId, 0) > 0) {
+                            zoneDelivered++;
+                        }
+                    }
+                }
+                dto.setZoneDelivered(zoneDelivered);
                 ProjectBudget budget = budgets.get(project.getProjectId());
                 if (budget != null) {
                     dto.setBudgetTotal(budget.total());
@@ -590,6 +611,61 @@ public class OfficeProjectService {
     private Set<String> confirmedFloorIds(List<OfficeDesignFloor> floors) {
         List<String> floorIds = floors.stream().map(OfficeDesignFloor::getFloorId).toList();
         return floorIds.isEmpty() ? Set.of() : new HashSet<>(confirmationMapper.confirmedFloorIds(floorIds));
+    }
+
+    /**
+     * 每个楼层最新画布中的区域（kind=zone）ID 列表；无画布行按空列表计。
+     * office_canvas.project_id 存的是楼层 ID。
+     */
+    private Map<String, List<String>> zoneIdsByFloor(List<OfficeDesignFloor> floors) {
+        List<String> floorIds = floors.stream().map(OfficeDesignFloor::getFloorId).toList();
+        if (floorIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> result = new HashMap<>();
+        for (OfficeCanvas canvas : canvasMapper.selectLatestByFloorIds(floorIds)) {
+            result.put(canvas.getProjectId(), zoneIds(canvas.getObjectsJson()));
+        }
+        return result;
+    }
+
+    /** 每楼层每个区域（zoneId）的购物车数量合计；office_cart.project_id 存楼层 ID，未分区行不计入任何区域。 */
+    private Map<String, Map<String, Integer>> cartQtyByZoneByFloor(List<OfficeDesignFloor> floors) {
+        List<String> floorIds = floors.stream().map(OfficeDesignFloor::getFloorId).toList();
+        if (floorIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Map<String, Integer>> result = new HashMap<>();
+        for (OfficeCart cart : cartMapper.selectList(new QueryWrapper<OfficeCart>().in("project_id", floorIds))) {
+            if (StringUtils.hasText(cart.getZoneId())) {
+                result.computeIfAbsent(cart.getProjectId(), floorId -> new HashMap<>())
+                    .merge(cart.getZoneId(), cart.getQty() == null ? 0 : cart.getQty(), Integer::sum);
+            }
+        }
+        return result;
+    }
+
+    /** 解析失败按空列表计，单个楼层的坏数据不能弄挂整个项目列表。 */
+    private List<String> zoneIds(String objectsJson) {
+        if (!StringUtils.hasText(objectsJson)) {
+            return List.of();
+        }
+        try {
+            JsonNode objects = objectMapper.readTree(objectsJson);
+            if (!objects.isArray()) {
+                return List.of();
+            }
+            List<String> ids = new ArrayList<>();
+            for (JsonNode item : objects) {
+                if ("zone".equals(item.path("kind").asText())) {
+                    ids.add(item.path("id").asText());
+                }
+            }
+            return ids;
+        } catch (Exception parseFailure) {
+            log.warn("项目列表统计区域时画布解析失败，按 0 计: {}", parseFailure.getMessage());
+            return List.of();
+        }
     }
 
     private OfficeDesignFloor newFloor(String projectId, String name, int sortOrder, LocalDateTime now) {

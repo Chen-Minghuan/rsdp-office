@@ -42,6 +42,12 @@ function leaderName(project: WorkspaceProject) {
   return project.leader ? project.leader.displayName || project.leader.username : ''
 }
 
+/** 交付中区域占比：楼层方案已确认的区域 / 全部区域；无区域或旧接口未返回时为 null。 */
+function progressPercent(project: WorkspaceProject) {
+  if (project.zoneTotal == null || project.zoneDelivered == null || project.zoneTotal === 0) return null
+  return Math.round((project.zoneDelivered / project.zoneTotal) * 100)
+}
+
 async function openProject(project: WorkspaceProject) {
   const firstFloor = [...project.floors].sort((a, b) => a.sortOrder - b.sortOrder)[0]
   if (!firstFloor || workspace.switching) return
@@ -101,6 +107,7 @@ const visibleProjects = computed(() => {
             <th scope="col" class="px-4 py-2.5 font-normal">负责人</th>
             <th scope="col" class="px-4 py-2.5 font-normal">楼层数</th>
             <th scope="col" class="px-4 py-2.5 font-normal">项目阶段</th>
+            <th scope="col" class="px-4 py-2.5 font-normal">进度</th>
             <th scope="col" class="px-5 py-2.5 font-normal">项目预算</th>
             <th scope="col" class="w-12 px-3 py-2.5"><span class="sr-only">进入项目</span></th>
           </tr>
@@ -128,6 +135,13 @@ const visibleProjects = computed(() => {
             <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
             <td class="px-4 py-3.5 text-sm">
               <span>{{ projectStatusOptions.find(option => option.value === project.status)?.label }}</span>
+            </td>
+            <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
+              <template v-if="progressPercent(project) !== null">
+                <span>{{ progressPercent(project) }}%</span>
+                <span class="ml-1 text-xs text-muted">{{ project.zoneDelivered }}/{{ project.zoneTotal }} 区域</span>
+              </template>
+              <span v-else class="text-muted">—</span>
             </td>
             <td class="px-5 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
               <span v-if="budgetsLoading" class="text-xs text-muted">加载中…</span>

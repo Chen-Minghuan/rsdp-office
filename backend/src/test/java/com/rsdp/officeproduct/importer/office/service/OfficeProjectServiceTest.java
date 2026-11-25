@@ -14,11 +14,13 @@ import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeRequirementsReques
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
+import com.rsdp.officeproduct.importer.office.entity.OfficeCanvas;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
 import com.rsdp.officeproduct.importer.office.entity.OfficeAuditLog;
 import com.rsdp.officeproduct.importer.office.entity.OfficeProjectMember;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeAuditLogMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
@@ -48,6 +50,7 @@ class OfficeProjectServiceTest {
     private final List<OfficeAuditLog> auditLogs = new ArrayList<>();
     private final List<OfficeCart> cartLines = new ArrayList<>();
     private final java.util.Set<String> confirmedFloorIds = new java.util.HashSet<>();
+    private final Map<String, String> canvasObjectsByFloor = new LinkedHashMap<>();
     private OfficeDesignProjectMapper projectMapper;
     private OfficeDesignFloorMapper floorMapper;
     private OfficeProjectMemberMapper memberMapper;
@@ -58,6 +61,7 @@ class OfficeProjectServiceTest {
     private RsdpCatalogGateway catalogGateway;
     private SharedCatalogService sharedCatalogService;
     private OfficeProposalConfirmationMapper confirmationMapper;
+    private OfficeCanvasMapper canvasMapper;
     private OfficeProjectService service;
 
     @BeforeEach void setup() {
@@ -68,6 +72,7 @@ class OfficeProjectServiceTest {
         auditLogs.clear();
         cartLines.clear();
         confirmedFloorIds.clear();
+        canvasObjectsByFloor.clear();
         projectMapper = mock(OfficeDesignProjectMapper.class);
         floorMapper = mock(OfficeDesignFloorMapper.class);
         memberMapper = mock(OfficeProjectMemberMapper.class);
@@ -124,8 +129,19 @@ class OfficeProjectServiceTest {
         confirmationMapper = mock(OfficeProposalConfirmationMapper.class);
         when(confirmationMapper.confirmedFloorIds(anyList())).thenAnswer(call ->
             ((List<String>) call.getArgument(0)).stream().filter(confirmedFloorIds::contains).toList());
+        canvasMapper = mock(OfficeCanvasMapper.class);
+        when(canvasMapper.selectLatestByFloorIds(anyList())).thenAnswer(call ->
+            ((List<String>) call.getArgument(0)).stream()
+                .filter(canvasObjectsByFloor::containsKey)
+                .map(floorId -> {
+                    var canvas = new OfficeCanvas();
+                    canvas.setProjectId(floorId);
+                    canvas.setObjectsJson(canvasObjectsByFloor.get(floorId));
+                    return canvas;
+                }).toList());
         service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
-            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService, confirmationMapper);
+            auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService, confirmationMapper,
+            canvasMapper);
     }
 
     private OfficeUser activeUser(String userId, String username) {
@@ -180,7 +196,49 @@ class OfficeProjectServiceTest {
         assertEquals("DESIGNING", service.listProjects(false).getFirst().getStatus());
     }
 
-    @Test void listsProjectsWithoutReadingCartOrCatalogWhenBudgetIsExcluded() {
+    @Test void projectProgressCountsCartedZonesOnConfirmedFloors() {
+        var created = service.createProject(request("进度项目", List.of("一层", "二层")));
+        String firstFloorId = created.getFloors().get(0).getFloorId();
+        String secondFloorId = created.getFloors().get(1).getFloorId();
+        canvasObjectsByFloor.put(firstFloorId, objectsJson("F1", 3));
+        canvasObjectsByFloor.put(secondFloorId, objectsJson("F2", 2));
+        // 一层：F1-Z0/F1-Z1 购物车有量，F1-Z2 无购物车行 → 交付中 2
+        cartLines.add(cart(firstFloorId, "V-1", 1, "F1-Z0"));
+        cartLines.add(cart(firstFloorId, "V-1", 1, "F1-Z1"));
+        // 二层：F2-Z0 有量，F2-Z1 数量为 0 同样视为设计中 → 交付中 1
+        cartLines.add(cart(secondFloorId, "V-2", 2, "F2-Z0"));
+        cartLines.add(cart(secondFloorId, "V-2", 0, "F2-Z1"));
+
+        var before = service.listProjects(false).getFirst();
+        assertEquals(5, before.getZoneTotal());
+        assertEquals(0, before.getZoneDelivered());
+
+        confirmedFloorIds.add(firstFloorId);
+        var partial = service.listProjects(false).getFirst();
+        assertEquals(5, partial.getZoneTotal());
+        assertEquals(2, partial.getZoneDelivered());
+
+        confirmedFloorIds.add(secondFloorId);
+        var all = service.listProjects(false).getFirst();
+        assertEquals(5, all.getZoneTotal());
+        assertEquals(3, all.getZoneDelivered());
+    }
+
+    @Test void projectProgressIsZeroWithoutCanvasAndSurvivesBrokenCanvasJson() {
+        var noCanvas = service.createProject(request("无画布", List.of("一层")));
+        var listed = service.listProjects(false).getFirst();
+        assertEquals(0, listed.getZoneTotal());
+        assertEquals(0, listed.getZoneDelivered());
+
+        var broken = service.createProject(request("坏画布", List.of("一层")));
+        canvasObjectsByFloor.put(broken.getFloors().getFirst().getFloorId(), "{not-json");
+        var survived = service.listProjects(false);
+        assertEquals(2, survived.size());
+        assertEquals(0, survived.get(1).getZoneTotal());
+        assertEquals(0, survived.get(1).getZoneDelivered());
+    }
+
+    @Test void listsProjectsWithoutReadingCatalogPricingWhenBudgetIsExcluded() {
         var created = service.createProject(request("总部", List.of("一层")));
         cartLines.add(cart(created.getFloors().getFirst().getFloorId(), "V-1", 1));
 
@@ -189,7 +247,8 @@ class OfficeProjectServiceTest {
         assertEquals(created.getProjectId(), projects.getFirst().getProjectId());
         assertNull(projects.getFirst().getBudgetTotal());
         assertNull(projects.getFirst().getBudgetStatus());
-        verifyNoInteractions(cartMapper, catalogGateway);
+        // 进度口径需要读取本地购物车表；预算排除时不得触发目录定价
+        verifyNoInteractions(catalogGateway);
     }
 
     @Test void separateBudgetsUseOnlyProjectsTheCurrentAccountCanRead() {
@@ -548,9 +607,9 @@ class OfficeProjectServiceTest {
                 OfficeDesignProjectMapper.class, OfficeDesignFloorMapper.class, OfficeProjectMemberMapper.class,
                 OfficeUserMapper.class, OfficeProjectAccessService.class, OfficeAuditService.class, ObjectMapper.class,
                 OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class,
-                OfficeProposalConfirmationMapper.class
+                OfficeProposalConfirmationMapper.class, OfficeCanvasMapper.class
             ).newInstance(projectMapper, floorMapper, memberMapper, userMapper, access, auditService, new ObjectMapper(),
-                cartMapper, catalogGateway, sharedCatalogService, confirmationMapper);
+                cartMapper, catalogGateway, sharedCatalogService, confirmationMapper, canvasMapper);
         } catch (NoSuchMethodException missingBudgetDependencies) {
             throw new AssertionError("项目服务尚未提供购物车预算聚合依赖", missingBudgetDependencies);
         } catch (ReflectiveOperationException failed) {
@@ -579,11 +638,25 @@ class OfficeProjectServiceTest {
     }
 
     private OfficeCart cart(String floorId, String productId, int qty) {
+        return cart(floorId, productId, qty, null);
+    }
+
+    private OfficeCart cart(String floorId, String productId, int qty, String zoneId) {
         var cart = new OfficeCart();
         cart.setProjectId(floorId);
         cart.setProductId(productId);
         cart.setQty(qty);
+        cart.setZoneId(zoneId);
         return cart;
+    }
+
+    private String objectsJson(String zoneIdPrefix, int zoneCount) {
+        var zones = new StringBuilder();
+        for (int i = 0; i < zoneCount; i++) {
+            if (i > 0) zones.append(',');
+            zones.append("{\"id\":\"").append(zoneIdPrefix).append("-Z").append(i).append("\",\"kind\":\"zone\"}");
+        }
+        return "[" + zones + ",{\"id\":\"F-1\",\"kind\":\"furniture\"}]";
     }
 
     private CreateOfficeProjectRequest request(String name, List<String> floorNames) {

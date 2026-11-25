@@ -24,6 +24,8 @@
 
 项目阶段由方案确认数据读时派生：项目全部楼层在 `office_proposal_confirmation` 存在未失效（`retired=false`）记录 → `DELIVERING`，否则 → `DESIGNING`（无楼层项目为设计中）。列表接口用一次 `confirmedFloorIds` 批量查询完成派生，前端只读展示，不提供人工修改入口。`office_design_project.status` 列保留但不再读取，新建项目仍写默认值。详见 [WORKSPACE-006](tasks/WORKSPACE-006-project-status.md)。
 
+项目列表接口同时返回区域进度字段 `zoneTotal` / `zoneDelivered`：区域为楼层最新画布 `objects_json` 中 `kind=zone` 的对象（每楼层取 `created_at` 最新一行，无画布按 0 计，解析失败按 0 计）；所在楼层方案已确认（交付中口径同上）**且该区域购物车数量合计 > 0**（`office_cart` 按楼层与 `zone_id` 聚合，未分区行不计入）的区域计入 `zoneDelivered`，购物车为 0 的区域视为设计中；前端按 `zoneDelivered / zoneTotal` 计算进度百分比，`zoneTotal` 为 0 时显示占位。
+
 ```text
 DesignProject（项目资料与客户需求备注）
   └─ DesignFloor（floorId 作为既有 projectId 工作区隔离键）

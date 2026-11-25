@@ -37,6 +37,8 @@ function projectFromDto(dto: ProjectDto): WorkspaceProject {
     collaborators: dto.collaborators ?? [],
     referenceImages: dto.referenceImages ?? [],
     floors: (dto.floors || []).map(floorFromDto),
+    zoneTotal: dto.zoneTotal ?? null,
+    zoneDelivered: dto.zoneDelivered ?? null,
   }
 }
 

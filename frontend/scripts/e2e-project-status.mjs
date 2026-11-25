@@ -9,8 +9,10 @@ const browser = await chromium.launch({ headless: true, executablePath: process.
 async function scenario() {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
   const projects = [
-    { projectId: 'P1', name: '总部办公', status: 'DELIVERING' },
-    { projectId: 'P2', name: '设计项目', status: 'DESIGNING' },
+    { projectId: 'P1', name: '总部办公', status: 'DELIVERING', zoneTotal: 4, zoneDelivered: 4 },
+    { projectId: 'P2', name: '设计项目', status: 'DESIGNING', zoneTotal: 5, zoneDelivered: 2 },
+    // 无区域项目：进度显示占位
+    { projectId: 'P3', name: '空白项目', status: 'DESIGNING', zoneTotal: 0, zoneDelivered: 0 },
   ].map(project => ({
     ...project,
     customerRequirements: '', requirementsRevision: 1,
@@ -37,27 +39,38 @@ try {
   const cards = page.getByRole('region', { name: '项目阶段筛选' })
   const list = page.getByRole('region', { name: '项目列表', exact: true })
   assert.equal(await cards.getByRole('button').count(), 4, '看板为全部/设计中/交付中/已完成占位')
-  assert.equal(await cards.getByRole('button', { name: /全部项目/ }).innerText(), '全部项目\n2')
+  assert.equal(await cards.getByRole('button', { name: /全部项目/ }).innerText(), '全部项目\n3')
   assert.equal(await cards.getByRole('button', { name: /交付中/ }).innerText(), '交付中\n1')
-  assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n1')
+  assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n2')
   const completedCard = cards.getByRole('button', { name: /已完成/ })
   assert.equal(await completedCard.innerText(), '已完成\n—', '已完成看板占位不展示数据')
   assert.ok(await completedCard.isDisabled(), '已完成看板禁用、不参与筛选')
-  for (const label of ['设计中', '交付中']) {
-    await cards.getByRole('button', { name: new RegExp(label) }).click()
-    assert.equal(await list.locator('tbody tr').count(), 1)
-  }
-  await cards.getByRole('button', { name: /全部项目/ }).click()
+  await cards.getByRole('button', { name: /交付中/ }).click()
+  assert.equal(await list.locator('tbody tr').count(), 1)
+  await cards.getByRole('button', { name: /设计中/ }).click()
   assert.equal(await list.locator('tbody tr').count(), 2)
+  await cards.getByRole('button', { name: /全部项目/ }).click()
+  assert.equal(await list.locator('tbody tr').count(), 3)
 
   // 阶段为派生只读：不再渲染可编辑下拉，也不发起阶段修改请求
   assert.equal(await page.locator('select[aria-label$="的项目阶段"]').count(), 0)
   await list.getByText('交付中').first().waitFor()
   await list.getByText('设计中').first().waitFor()
 
+  // 进度列：交付中区域/全部区域的百分比；无区域项目显示占位
+  assert.ok((await list.locator('thead').innerText()).includes('进度'), '列表包含进度列')
+  const deliveringRow = list.locator('tbody tr', { hasText: '总部办公' })
+  assert.ok((await deliveringRow.innerText()).includes('100%'), '全部楼层确认的项目进度 100%')
+  assert.ok((await deliveringRow.innerText()).includes('4/4 区域'))
+  const designingRow = list.locator('tbody tr', { hasText: '设计项目' })
+  assert.ok((await designingRow.innerText()).includes('40%'), '部分交付按区域占比取整')
+  assert.ok((await designingRow.innerText()).includes('2/5 区域'))
+  const emptyRow = list.locator('tbody tr', { hasText: '空白项目' })
+  assert.ok((await emptyRow.innerText()).includes('—'), '无区域项目进度显示占位')
+
   await page.getByRole('searchbox', { name: '搜索项目名称' }).fill('不存在')
   await list.getByText('没有匹配的项目，换个关键词试试。').waitFor()
-  assert.equal(await cards.getByRole('button', { name: /全部项目/ }).innerText(), '全部项目\n2', '搜索不改变分类统计')
+  assert.equal(await cards.getByRole('button', { name: /全部项目/ }).innerText(), '全部项目\n3', '搜索不改变分类统计')
   await page.getByRole('searchbox', { name: '搜索项目名称' }).fill('')
 
   await mkdir('/tmp/rsdp-project-status', { recursive: true })

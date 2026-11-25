@@ -44,6 +44,10 @@ export interface WorkspaceProject {
   collaborators: WorkspaceMember[]
   referenceImages: ProjectReferenceImage[]
   floors: WorkspaceFloor[]
+  /** 所有楼层区域(kind=zone)总数；仅项目列表返回，单项目接口为 null。 */
+  zoneTotal: number | null
+  /** 所在楼层方案已确认（交付中）的区域数；仅项目列表返回。 */
+  zoneDelivered: number | null
 }
 
 export type ProjectStatus = 'DESIGNING' | 'DELIVERING'
