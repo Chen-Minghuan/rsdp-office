@@ -4,6 +4,8 @@ import type { ProjectBudget, ProjectReferenceImage, WorkspaceProject } from '~/t
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { drawingMatchesPlan } from '~/utils/drawingContext'
 import { projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
+import { authEnabled } from '~/composables/useAuth'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { ringProblem, zoneMeasurements } from '~/utils/spatial/review'
 
 const props = defineProps<{ project: WorkspaceProject; floorId: string }>()
@@ -15,10 +17,14 @@ const previewsLoading = ref(false)
 const previewsFailed = ref(false)
 const retryPreviews = ref(0)
 const loadedBudget = ref<ProjectBudget>()
-const { storageScope } = useAuth()
+const { storageScope, user } = useAuth()
 const budgetApi = useWorkspaceApi()
 const workspace = useWorkspaceStore()
 const referenceSaveError = ref('')
+
+/** 仅具有项目 EDIT 权限的成员可上传/删除楼层参考图，只读成员不显示编辑入口。 */
+const canEditProject = computed(() => !authEnabled || user.value?.role === 'DEALER'
+  || projectPermissionsFor(props.project, user.value?.userId).includes('EDIT'))
 
 /** 楼层级参考图：按当前项目与楼层区分，整体替换保存，成功后回写工作区缓存。 */
 const floorReferences = computed(() => props.project.floors.find(floor => floor.floorId === props.floorId)?.referenceImages ?? [])
@@ -27,6 +33,7 @@ const floorReferences = computed(() => props.project.floors.find(floor => floor.
 const referenceSaveSeq = new Map<string, number>()
 
 async function saveFloorReferences(images: ProjectReferenceImage[]) {
+  if (!canEditProject.value) return
   // 请求前固定 ID：响应可能到达时已切换楼层，结果仍属于发起时的项目与楼层。
   const projectId = props.project.projectId
   const floorId = props.floorId
@@ -232,7 +239,7 @@ function roomRoute(zoneId: string) {
           </div>
           <div class="text-sm">
             <ProjectReferenceImagesEditor :images="floorReferences" heading="楼层参考图" list-mode="names"
-              data-testid="floor-reference-editor" @update:images="saveFloorReferences" />
+              :disabled="!canEditProject" data-testid="floor-reference-editor" @update:images="saveFloorReferences" />
             <p v-if="referenceSaveError" role="alert" class="mt-1 text-xs text-red-700">{{ referenceSaveError }}</p>
           </div>
         </aside>
