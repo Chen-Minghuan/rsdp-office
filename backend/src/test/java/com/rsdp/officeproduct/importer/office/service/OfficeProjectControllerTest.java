@@ -21,36 +21,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class OfficeProjectControllerTest {
-    @Test void projectStatusEndpointReturnsThePersistedStage() throws Exception {
-        var service = mock(OfficeProjectService.class);
-        when(service.updateStatus("P1", "DELIVERING")).thenReturn("DELIVERING");
-        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
-        mvc.perform(patch("/api/v1/office/projects/P1/status").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"DELIVERING\"}"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("DELIVERING"));
-    }
-
-    @Test void updateFloorReferencesEndpointPassesPathIdsAndBody() throws Exception {
-        var service = mock(OfficeProjectService.class);
-        var floor = new OfficeFloorDto();
-        floor.setFloorId("OFLR-1");
-        floor.setProjectId("OPRJ-1");
-        var image = new ProjectReferenceImage();
-        image.setUrl("/uploads/images/a.png");
-        image.setName("风格");
-        floor.setReferenceImages(List.of(image));
-        when(service.updateFloorReferences(eq("OPRJ-1"), eq("OFLR-1"), any())).thenReturn(floor);
-        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
-        mvc.perform(put("/api/v1/office/projects/OPRJ-1/floors/OFLR-1/references").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"referenceImages\":[{\"url\":\"/uploads/images/a.png\",\"name\":\"风格\"}]}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.floorId").value("OFLR-1"))
-            .andExpect(jsonPath("$.data.referenceImages[0].url").value("/uploads/images/a.png"))
-            .andExpect(jsonPath("$.data.referenceImages[0].name").value("风格"));
-        verify(service).updateFloorReferences(eq("OPRJ-1"), eq("OFLR-1"),
-            argThat(request -> request.getReferenceImages().size() == 1
-                && "风格".equals(request.getReferenceImages().get(0).getName())));
-    }
     private final OfficeProjectService projects = mock(OfficeProjectService.class);
     private final org.springframework.test.web.servlet.MockMvc mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(projects)).build();
 

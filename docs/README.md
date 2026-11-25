@@ -17,6 +17,8 @@
 | [开发规范与流程](development.md) | 开始任务、实现、验证和交付如何执行 |
 | [进度表](status.md) | 当前实现到哪里，差距是什么，下一项做什么 |
 | [Qwen 图片/PDF 配置](vision-configuration.md) | 后端密钥、模型、地域地址、PDF 页码及识别边界 |
+| [提示词 A/B/C/D 实验](tasks/RENDER-012-prompt-ab-experiment.md) | 完整/精简提示词、平面图贡献与 Prompt Extend 的对照实验 |
+| [三图空间控制与几何审核](tasks/RENDER-011-spatial-layout-control.md) | F/P三图、地面坐标、两排直线描述与位置审核的实验边界 |
 | [底图先行与后台并行识别](tasks/RECOG-007-progressive-recognition.md) | 预览先到、模型并行、真实进度和标准图缓存 |
 | [原图墙线约束](tasks/RECOG-004-local-wall-contours.md) | 原图墙线与封闭区域校正、来源坐标映射和异常保留 |
 | [房名定位与同图轮廓继承](tasks/RECOG-005-label-grounding-and-correction-reuse.md) | 棋牌室位置校正、开放分区人工边界继承及真实/模拟验证范围 |
@@ -35,7 +37,7 @@
 | [移除项目信息](tasks/WORKSPACE-001-remove-project-info.md) | 历史上传页精简、资料接口/表移除、设计数据保留与启动迁移 |
 | [项目创建与多楼层](tasks/WORKSPACE-003-project-floors.md) | 项目/需求/楼层规划、分层上传与工作区隔离、楼层树和需求备注 |
 | [五入口导航与项目总览](tasks/WORKSPACE-005-project-overview-navigation.md) | 工作台总览、房间进度、图纸和历史概念图、兼容旧上传地址 |
-| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 设计中、交付中、已完成的保存、权限、计数和筛选 |
+| [项目阶段与工作台分类](tasks/WORKSPACE-006-project-status.md) | 阶段按方案确认派生、只读展示：设计中/交付中计数、筛选与进度列（人工修改已移除） |
 | [项目需求 AI 总结](tasks/WORKSPACE-004-project-requirements-ai-summary.md) | 原文/总结双面翻转、事实抽取、版本复核、持久化缓存与真实模型验证 |
 | [工作区与经销商角色](tasks/TENANT-001-workspace-roles.md) | 经销商工作区隔离、主号开户、项目成员收紧与审计 |
 | [工作区账号中心](tasks/TENANT-003-workspace-account-center.md) | 账号行悬停菜单、报价/账号直达与经销商角色隔离；收藏入口由 CAT-010 扩展为全角色 |

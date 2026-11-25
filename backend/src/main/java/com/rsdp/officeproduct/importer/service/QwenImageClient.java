@@ -3,6 +3,7 @@ package com.rsdp.officeproduct.importer.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.config.RenderProperties;
+import com.rsdp.officeproduct.importer.office.service.RenderGenerationOptions;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -32,14 +33,19 @@ public class QwenImageClient {
     }
 
     public JsonNode submit(List<byte[]> references, String prompt) {
+        return submit(references,prompt,RenderGenerationOptions.baseline());
+    }
+
+    public JsonNode submit(List<byte[]> references, String prompt, RenderGenerationOptions options) {
         requireConfigured();
         if (references == null || references.isEmpty() || references.size() > 3) throw new BusinessException("生成参考图数量须为 1 至 3 张");
         List<Map<String, String>> content = new ArrayList<>();
         for (byte[] reference : references) content.add(Map.of("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(reference)));
         content.add(Map.of("text", prompt));
-        var body = Map.of("model", properties.getModel(), "input", Map.of("messages", List.of(Map.of("role", "user", "content", content))),
-            // Avoid automatic prompt rewrites changing the requested layout or adding furniture.
-            "parameters", Map.of("n", 1, "size", "1536*1024", "prompt_extend", false, "watermark", false, "negative_prompt", "二维平面布局图叠加，中央竖立的平面图板，悬浮图纸，横置展示板，商品清单，编号，文字，尺寸标注，拼贴画，分屏，白边，水印"));
+        java.util.LinkedHashMap<String,Object> parameters=new java.util.LinkedHashMap<>();parameters.put("n",1);parameters.put("size","1536*1024");parameters.put("prompt_extend",options.promptExtend());
+        if(options.promptExtend())parameters.put("prompt_extend_mode","direct");if(options.seed()!=null)parameters.put("seed",options.seed());
+        parameters.put("watermark",false);parameters.put("negative_prompt","低清晰度，粗糙建模，灰蒙，过曝，塑料质感，家具扭曲，家具断裂，部件悬空，重复家具，错误透视，二维平面图，正俯视彩色平面布置图，白模，图纸，展板，规格表，尺寸线，编号，文字，多视图拼贴，多面板，上下分栏，水印，白边");
+        var body = Map.of("model", properties.getModel(), "input", Map.of("messages", List.of(Map.of("role", "user", "content", content))),"parameters",parameters);
         HttpHeaders headers = headers();
         headers.set("X-DashScope-Async", "enable");
         return exchange(base() + "/services/aigc/image-generation/generation", HttpMethod.POST, new HttpEntity<>(body, headers));

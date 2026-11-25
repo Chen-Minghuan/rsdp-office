@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProjectBudget, ProjectStatus, WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, WorkspaceProject } from '~/types/workspace'
 import { projectOverviewRoute } from '~/utils/projectBenchRoutes'
 import { projectStatusOptions, type ProjectStatusFilter } from '~/utils/projectStatus'
 
@@ -11,8 +11,6 @@ const { storageScope } = useAuth()
 const api = useWorkspaceApi()
 const budgetByProject = ref<Record<string, ProjectBudget>>({})
 const budgetsLoading = ref(false)
-const updatingStatus = ref<Record<string, boolean>>({})
-const statusError = ref('')
 const projectKeys = computed(() => workspace.projects.map(project => project.projectId).join(','))
 
 watch([projectKeys, storageScope], async ([projects, scope], _previous, onCleanup) => {
@@ -44,30 +42,16 @@ function leaderName(project: WorkspaceProject) {
   return project.leader ? project.leader.displayName || project.leader.username : ''
 }
 
+/** 交付中区域占比：楼层方案已确认的区域 / 全部区域；无区域或旧接口未返回时为 null。 */
+function progressPercent(project: WorkspaceProject) {
+  if (project.zoneTotal == null || project.zoneDelivered == null || project.zoneTotal === 0) return null
+  return Math.round((project.zoneDelivered / project.zoneTotal) * 100)
+}
+
 async function openProject(project: WorkspaceProject) {
   const firstFloor = [...project.floors].sort((a, b) => a.sortOrder - b.sortOrder)[0]
   if (!firstFloor || workspace.switching) return
   await navigateTo(projectOverviewRoute(firstFloor.floorId))
-}
-
-async function changeStatus(project: WorkspaceProject, event: Event) {
-  const select = event.target as HTMLSelectElement
-  const previous = project.status
-  const scope = storageScope.value
-  const next = select.value as ProjectStatus
-  if (updatingStatus.value[project.projectId] || next === previous) return
-  updatingStatus.value[project.projectId] = true
-  statusError.value = ''
-  try {
-    await workspace.updateProjectStatus(project.projectId, next)
-  } catch (error) {
-    if (scope === storageScope.value) {
-      select.value = previous
-      statusError.value = error instanceof Error ? error.message : '项目阶段保存失败，请重试'
-    }
-  } finally {
-    updatingStatus.value[project.projectId] = false
-  }
 }
 
 const visibleProjects = computed(() => {
@@ -111,8 +95,6 @@ const visibleProjects = computed(() => {
       </div>
     </div>
 
-    <p v-if="statusError" role="alert" class="border-t border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{{ statusError }}</p>
-
     <p v-if="workspace.error" role="alert" class="border-t border-line px-5 py-6 text-sm text-red-700">{{ workspace.error }}</p>
     <p v-else-if="!workspace.initialized" class="border-t border-line px-5 py-8 text-center text-sm text-muted">正在加载项目…</p>
     <p v-else-if="!workspace.projects.length" class="border-t border-line px-5 py-8 text-center text-sm text-muted">当前账号暂无可访问项目</p>
@@ -125,6 +107,7 @@ const visibleProjects = computed(() => {
             <th scope="col" class="px-4 py-2.5 font-normal">负责人</th>
             <th scope="col" class="px-4 py-2.5 font-normal">楼层数</th>
             <th scope="col" class="px-4 py-2.5 font-normal">项目阶段</th>
+            <th scope="col" class="px-4 py-2.5 font-normal">进度</th>
             <th scope="col" class="px-5 py-2.5 font-normal">项目预算</th>
             <th scope="col" class="w-12 px-3 py-2.5"><span class="sr-only">进入项目</span></th>
           </tr>
@@ -150,12 +133,15 @@ const visibleProjects = computed(() => {
               <span v-else class="text-muted">—</span>
             </td>
             <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">{{ project.floors.length }}</td>
-            <td class="px-4 py-3.5 text-sm" @click.stop @keydown.stop>
-              <select v-if="project.canManageStatus" :value="project.status" :disabled="updatingStatus[project.projectId]"
-                :aria-label="`${project.projectName}的项目阶段`" class="border border-line bg-white px-2 py-1.5 text-sm outline-bronze disabled:opacity-50" @change="changeStatus(project, $event)">
-                <option v-for="option in projectStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
-              <span v-else>{{ projectStatusOptions.find(option => option.value === project.status)?.label }}</span>
+            <td class="px-4 py-3.5 text-sm">
+              <span>{{ projectStatusOptions.find(option => option.value === project.status)?.label }}</span>
+            </td>
+            <td class="px-4 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
+              <template v-if="progressPercent(project) !== null">
+                <span>{{ progressPercent(project) }}%</span>
+                <span class="ml-1 text-xs text-muted">{{ project.zoneDelivered }}/{{ project.zoneTotal }} 区域</span>
+              </template>
+              <span v-else class="text-muted">—</span>
             </td>
             <td class="px-5 py-3.5 text-sm [font-variant-numeric:tabular-nums]">
               <span v-if="budgetsLoading" class="text-xs text-muted">加载中…</span>

@@ -92,7 +92,22 @@ public final class RenderPreviewScene {
 
     public static Shape furnitureShape(JsonNode item) {
         double x=item.path("x").asDouble(), y=item.path("y").asDouble(), w=item.path("w").asDouble(), h=item.path("h").asDouble();
-        return AffineTransform.getRotateInstance(Math.toRadians(item.path("rotation").asDouble()),x+w/2,y+h/2).createTransformedShape(new Rectangle2D.Double(x,y,w,h));
+        String template=item.path("moduleSnapshot").path("glyphTemplateId").asText(item.path("furnitureTemplateId").asText());
+        String kind=item.path("moduleSnapshot").path("kind").asText("");
+        boolean lDesk=List.of("desk-l","desk-l-rounded","desk-screen-l","desk-manager-l","desk-executive-l").contains(template)||List.of("l-desk","rounded-l-desk").contains(kind);
+        Path2D.Double local=new Path2D.Double();
+        if(lDesk) {
+            double wing=Math.min(item.path("wingWidthMm").asDouble(550),Math.min(w/2,h/2)),depth=Math.min(h*.48,template.startsWith("desk-executive")?800:650);
+            local.moveTo(0,0);local.lineTo(w,0);local.lineTo(w,h);local.lineTo(w-wing,h);local.lineTo(w-wing,depth);local.lineTo(0,depth);
+        } else {
+            local.moveTo(0,0);local.lineTo(w,0);local.lineTo(w,h);local.lineTo(0,h);
+        }
+        local.closePath();
+        Shape shaped=local;
+        if(item.path("mirrorX").asBoolean()) shaped=AffineTransform.getScaleInstance(-1,1).createTransformedShape(local);
+        AffineTransform place=new AffineTransform();place.translate(x+w/2,y+h/2);place.rotate(Math.toRadians(item.path("rotation").asDouble()));
+        place.translate(item.path("mirrorX").asBoolean()?w/2:-w/2,-h/2);
+        return place.createTransformedShape(shaped);
     }
 
     private static double area(Area shape) {
@@ -136,17 +151,17 @@ public final class RenderPreviewScene {
 
     /**
      * guided（whiteModelView）：图1为白模实时相机截图，视角/透视/结构由截图锁定，模型只替换材质与光影；
-     * 否则图1为无文字立体结构引导，由 view 决定机位。
+     * 否则图1为带F编号的立体结构引导，由 view 决定机位。
      */
     public static String prompt(JsonNode scene, String style, String view, String instructions, boolean guided) {
-        StringBuilder text=new StringBuilder("只输出一张满幅、完整、连贯的写实办公空间照片。");
+        StringBuilder text=new StringBuilder("生成一张满幅、照片级写实的3D室内效果图，材质真实细腻，光影自然，透视准确，结构合理，构图饱满，细节精致。严格遵循输入参考，不输出文字、标注、图表或拼贴。\n");
         if (guided) text.append("图1为当前办公空间 3D 白模的实时相机截图（简化材质的占位模型，不是要放入场景的图片或实体）；严格保持其相机视角、透视关系、墙体轮廓、门窗位置与洞口以及家具的数量、位置、朝向和尺寸比例不变，仅把白模块体替换为真实材质与真实办公家具，补充地面、墙面、自然光照与软装氛围，让地面、墙体和家具处于同一透视空间中。\n");
-        else text.append("图1为无文字的立体空间结构引导，不是要放入场景的图片或实体；请把简化块体替换为真实家具，让地面、墙体和家具处于同一透视空间中。\n");
-        text.append("结构引导来自当前单空间真实毫米轮廓和家具占地，不是整层图。保留多边形的凹凸结构、家具模块数量、相对位置、尺寸比例及朝向，勿擅自增删或移动模块。坐标与编号仅用于内部定位。成品严禁出现二维平面图、布局图覆盖层、带平面图的中央展板、悬浮图纸、展示牌、商品清单、左右分栏、白边拼贴、文字、数字、尺寸、标注或线稿；不得将空间轮廓当作家具摆在房间中央。\n");
+        else text.append("图1为无文字的45度空间结构参考，决定最终相机、透视和立体结构；图2为同一空间的无文字平面控制图，只用于家具地面位置、数量、朝向、占地和通道关系，不得采用图2的正俯视相机或把成品画成平面图。文字清单中的F/P编号只用于说明映射，不是参考图中的可见文字。先按照图2、空间坐标和F/P映射确定每个F块体的家具身份与商品外观（如有），再补充真实材质、自然光照、阴影、墙面和地面质感。\n");
+        text.append("严格保持结构参考中的空间轮廓、家具数量、相对位置、尺寸比例及朝向，不擅自增删、移动或改换家具类型；商品外观替换仅按F/P映射执行。\n");
         if (guided) text.append("视角：与图1截图完全一致，不得改为其他机位、俯视或纯鸟瞰角度。");
         else text.append("视角：").append("ISOMETRIC".equals(view) ? "45度斜俯视鸟瞰，移除遮挡视线的近侧墙和天花，完整展示排版。" : "室内人眼高度广角透视，保持空间和家具关系，合理选择能看见主要家具的机位。");
         text.append("\n风格：").append(style).append("。自然柔和光照，清晰细腻。空间：").append(scene.path("zone").path("name").asText()).append("。\n");
-        text.append("未选商品的模块按家具类型表达，不宣称还原真实商品。结构参考中各块仅表示各自家具位置，不能把整张结构图画成一个摆在室内的模型或图板。\n");
+        text.append("未选商品的模块按家具类型表达，不宣称还原真实商品。结构参考中的各块仅表示对应家具的位置。最终只输出一个完整空间画面，不输出F/P编号、标签、参考板、拼贴或中间步骤。\n");
         TreeMap<String,Integer> types=new TreeMap<>();
         for(JsonNode item:scene.path("furniture")) {
             String label=item.path("label").asText(item.path("furnitureTemplateId").asText("办公家具"));

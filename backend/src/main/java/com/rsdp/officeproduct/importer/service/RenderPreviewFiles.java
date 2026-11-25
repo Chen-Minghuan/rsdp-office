@@ -50,6 +50,18 @@ public class RenderPreviewFiles {
         catch (Exception e) { throw new BusinessException("效果图下载或保存失败，请再次查询任务，无需重新生成"); }
     }
 
+    /** Read only a previously saved render asset, for local visual QA. */
+    public byte[] read(String url) {
+        try {
+            if(url==null || !url.matches("/uploads/render-previews/[A-Za-z0-9_.-]+\\.png")) throw new BusinessException("效果图检查资源地址无效");
+            Path root=Path.of(properties.getStorageDirectory()).toAbsolutePath().toRealPath();
+            Path file=root.resolve(url.substring("/uploads/render-previews/".length())).toRealPath();
+            if(!file.startsWith(root) || Files.size(file)>20_000_000) throw new BusinessException("效果图检查资源不可用");
+            return Files.readAllBytes(file);
+        } catch(BusinessException e) { throw e; }
+        catch(Exception e) { throw new BusinessException("效果图检查资源读取失败"); }
+    }
+
     private String save(String filename, byte[] bytes) {
         try {
             Path directory=Path.of(properties.getStorageDirectory()).toAbsolutePath(); Files.createDirectories(directory);

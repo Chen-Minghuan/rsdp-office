@@ -37,17 +37,21 @@ export interface AssignableUser {
 export interface WorkspaceProject {
   projectId: string
   projectName: string
+  /** 由后端按方案确认数据派生：全部楼层已确认 → DELIVERING，否则 DESIGNING。 */
   status: ProjectStatus
-  canManageStatus: boolean
   customerRequirements: string
   requirementsRevision: number
   leader: WorkspaceMember | null
   collaborators: WorkspaceMember[]
   referenceImages: ProjectReferenceImage[]
   floors: WorkspaceFloor[]
+  /** 所有楼层区域(kind=zone)总数；仅项目列表返回，单项目接口为 null。 */
+  zoneTotal: number | null
+  /** 所在楼层方案已确认（交付中）的区域数；仅项目列表返回。 */
+  zoneDelivered: number | null
 }
 
-export type ProjectStatus = 'DESIGNING' | 'DELIVERING' | 'COMPLETED'
+export type ProjectStatus = 'DESIGNING' | 'DELIVERING'
 
 export interface WorkspaceRequirementsSummary {
   keyPoints: string[]
