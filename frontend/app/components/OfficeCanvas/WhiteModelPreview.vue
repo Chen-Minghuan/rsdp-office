@@ -31,8 +31,8 @@ const props = withDefaults(defineProps<{
 }>(), { zoneId: '', readonly: false, inline: false })
 
 const show = defineModel<boolean>('show', { default: false })
-/** ai-render 携带当前视角截图（data:image/png;base64,...），作为 AI 效果图的结构参考（RENDER-006）。 */
-const emit = defineEmits<{ (event: 'ai-render', viewImage: string): void; (event: 'locate', id: string): void }>()
+/** AI生成统一使用后端45°家具定位结构参考；3D预览仅负责打开发起入口。 */
+const emit = defineEmits<{ (event: 'ai-render'): void; (event: 'locate', id: string): void }>()
 
 const store = useOfficeStore()
 const api = useOfficeApi()
@@ -623,33 +623,8 @@ function locateSelected() {
   emit('locate', item.id)
 }
 
-/**
- * 截取当前视角供 AI 效果图作结构参考：先隐藏选中提亮/占地标记/轮廓框等交互叠加物，
- * 同步渲染一帧后立即读取像素（无需 preserveDrawingBuffer），再恢复选中视觉。不改任何设计数据。
- */
-function captureViewImage(): string | null {
-  if (!renderer || !scene || !camera) return null
-  const selected = selectedId.value ? furnitureMeshes.get(selectedId.value) : null
-  if (groundMarker) groundMarker.visible = false
-  if (selectionFrame) selectionFrame.visible = false
-  if (selected) {
-    if (selected.userData.procedural) setGroupEmissive(selected, 0)
-    else if ((selected as THREE.Mesh).isMesh) (selected as THREE.Mesh).material = MATERIALS.furniture
-  }
-  try {
-    renderer.render(scene, camera)
-    return renderer.domElement.toDataURL('image/png')
-  } catch {
-    return null
-  } finally {
-    syncSelectionVisuals(false)
-  }
-}
-
 function openAiRender() {
-  const image = captureViewImage()
-  if (!image) { notice.value = '当前 3D 场景尚未就绪，无法截取视角，请稍后重试'; return }
-  emit('ai-render', image)
+  emit('ai-render')
 }
 
 /** 选中视觉：材质提亮/自发光 + 占地轮廓框 + 底部选中标记（均不写回设计数据）。 */

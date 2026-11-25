@@ -22,4 +22,4 @@ export function renderSnapshotKey(value: unknown): string {
   return JSON.stringify(canonical(value))
 }
 
-export const renderPreviewActive = (status: string) => ['SUBMITTING', 'PENDING', 'RUNNING'].includes(status)
+export const renderPreviewActive = (status: string) => ['SUBMITTING', 'PENDING', 'RUNNING', 'POLLING'].includes(status)
