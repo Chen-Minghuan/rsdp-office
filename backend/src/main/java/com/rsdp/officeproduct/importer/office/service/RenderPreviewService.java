@@ -165,6 +165,27 @@ public class RenderPreviewService {
         target.setSnapshotJson(source.getSnapshotJson());target.setUpdatedAt(source.getUpdatedAt());
     }
 
+    public ObjectNode layoutSpacing(String projectId, String zoneId, String confirmationId) {
+        project(projectId);
+        id(zoneId, "空间 ID");
+        if (confirmationId != null) id(confirmationId, "方案确认 ID");
+        access.requireFloorAccess(projectId);
+        var canvas = office.getCanvas(projectId);
+        if (canvas == null) throw new BusinessException("请先保存当前空间排版");
+        JsonNode scene = RenderPreviewScene.snapshot(json.valueToTree(canvas.getObjects()), zoneId);
+        if (confirmationId != null) {
+            var confirmed = confirmations.requireRenderScene(projectId, zoneId, confirmationId);
+            if (!confirmed.equals(scene)) throw new BusinessException("当前房间与已确认方案不一致，请重新确认");
+            scene = confirmed;
+        }
+        RenderPreviewScene.validate(scene);
+        var spatial = RenderSpatialControl.prepare(scene, RenderFurnitureBindings.from(scene));
+        ObjectNode result = json.createObjectNode();
+        result.set("snapshot", scene);
+        result.set("spacing", spatial.manifest().get("furnitureSpacing"));
+        return result;
+    }
+
     public List<ObjectNode> list(String projectId,String zoneId) {
         project(projectId); id(zoneId,"空间 ID");
         access.requireFloorAccess(projectId);

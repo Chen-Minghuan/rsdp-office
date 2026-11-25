@@ -30,7 +30,8 @@ try {
   const runtimeErrors = []
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') runtimeErrors.push(message.text()) })
-  let saved = null, empty = false, fail = false, unavailable = false, delayA = false, noCatalog = false
+  let saved = null, empty = false, fail = false, unavailable = false, delayA = false, noCatalog = false, stall = false
+  let canvasSaves = 0
   let waitForSelection
   const selections = [], queries = []
   const previewImage = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#f7f4f0"/><rect x="170" y="210" width="460" height="170" rx="20" fill="#a67c52"/><rect x="210" y="380" width="35" height="100" fill="#6e5138"/><rect x="555" y="380" width="35" height="100" fill="#6e5138"/></svg>')
@@ -51,11 +52,11 @@ try {
     const respond = (data, status = 200, message = '成功') => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message, data }) })
     if (path === '/api/v1/office/projects' && route.request().method() === 'GET') return respond([{
       projectId: 'OFFICE-PROJECT-001', name: '推荐测试项目', customerRequirements: '', requirementsRevision: 1,
-      leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [],
+      leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT'] }, collaborators: [], referenceImages: [],
       floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
     }])
     if (path.endsWith('/canvas')) {
-      if (route.request().method() === 'PUT') { saved = route.request().postDataJSON(); return respond(saved) }
+      if (route.request().method() === 'PUT') { canvasSaves++; saved = route.request().postDataJSON(); return respond(saved) }
       return respond(saved)
     }
     if (path.endsWith('/module-recommendations') || path.endsWith('/module-products')) {
@@ -95,6 +96,7 @@ try {
         return respond({ canvas: saved, cartItems, match })
       }
       queries.push(body)
+      if (stall) return // Leave pending to verify the actual browser request timeout.
       const sameModuleCount = saved.objects.filter(item => item.kind === 'furniture' && item.zoneId === body.zoneId
         && item.w === current.w && item.h === current.h
         && item.furnitureTemplateId === current.furnitureTemplateId
@@ -106,8 +108,8 @@ try {
     }
     return respond(path.endsWith('/OFFICE-PROJECT-001') ? null : [])
   })
-  await page.goto(baseUrl + '/canvas', { waitUntil: 'networkidle' })
-  await page.evaluate(() => {
+  await page.goto(baseUrl + '/canvas?floorId=OFFICE-PROJECT-001', { waitUntil: 'networkidle' })
+  saved = await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001') || '{}')
     state.objects = [
       { id: 'Z', kind: 'zone', x: 0, y: 0, w: 6000, h: 4000, name: '推荐测试空间', zoneType: 'OPEN_OFFICE', seats: 0, note: '', tone: 'blue', reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL', geometrySource: 'manual_geometry', polygon: [[0,0],[6000,0],[6000,4000],[0,4000]] },
@@ -117,10 +119,13 @@ try {
     ]
     state.canvasRevision = 9; state.canvasMode = 'design'; state.designZoneId = 'Z'; state.cart = []; state.floorPlan = null; state.spaceTemplate = null
     localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
+    return { projectId: 'OFFICE-PROJECT-001', objects: state.objects, files: state.files || [],
+      revision: state.canvasRevision, schemeToken: state.schemeToken ?? null,
+      mode: state.canvasMode, designZoneId: state.designZoneId, blank: state.blank || false }
   })
-  await page.goto(baseUrl + '/canvas?mode=design&zoneId=Z', { waitUntil: 'networkidle' })
+  await page.goto(baseUrl + '/canvas?mode=design&zoneId=Z&floorId=OFFICE-PROJECT-001', { waitUntil: 'networkidle' })
   await page.getByLabel('布局房间类型').selectOption('MEETING_ROOM')
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'Z').zoneType), 'MEETING_ROOM')
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects.find(item => item.id === 'Z').zoneType === 'MEETING_ROOM')
   await page.getByTestId('tab-product-selection').click()
   const furniture = id => page.getByTestId('office-design-canvas').locator(`[data-id="${id}"]`)
   assert.equal(await page.locator('[data-furniture-id]').count(), 2, '名称与尺寸完全相同的 A/B 在已排家具列表中只显示一个代表项')
@@ -184,6 +189,15 @@ try {
   const matchingModule = panel.getByLabel('匹配单位模块')
   await card('EXACT').waitFor()
   assert.equal(await matchingModule.inputValue(), 'A', '进入推荐时使用画布已选的家具')
+  await page.waitForTimeout(1000) // Let the existing debounced autosave finish before counting panel writes.
+  const savedBeforeRotation = canvasSaves
+  await panel.getByLabel('允许旋转 90°').uncheck()
+  await card('EXACT').waitFor()
+  await panel.getByLabel('允许旋转 90°').check()
+  await card('ROTATED').waitFor()
+  await panel.getByRole('button', { name: '重新匹配' }).click()
+  await card('EXACT').waitFor()
+  assert.equal(canvasSaves, savedBeforeRotation, '旋转筛选和重新匹配不能重复写入未变更的画布；推荐仍回源')
   await page.keyboard.press('Escape')
   await panel.getByText('点击画布上的家具，或从上方列表选择。').waitFor()
   assert.equal(await card('EXACT').count(), 0, '清除画布选择时不保留旧候选')
@@ -435,6 +449,13 @@ try {
   await panel.getByRole('button', { name: '重新匹配' }).click()
   await panel.getByRole('alert').filter({ hasText: '推荐服务暂不可用' }).waitFor()
   await page.screenshot({ path: outDir + '/02-empty-error.png', animations: 'disabled' })
+  fail = false; noCatalog = false; empty = false; stall = true
+  await panel.getByRole('button', { name: '重新匹配' }).click()
+  await panel.getByRole('alert').filter({ hasText: '服务响应超时，请重试' }).waitFor({ timeout: 20_000 })
+  assert.equal(await panel.getByText('正在读取真实商品规格…').count(), 0, '超时必须结束无限加载')
+  stall = false
+  await panel.getByRole('button', { name: '重新匹配' }).click()
+  await card('SMALL').waitFor()
   await page.evaluate(() => {
     const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
     store.objects.find(item => item.id === 'A').y = 3400

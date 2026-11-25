@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
+import type { RenderFurnitureSpacing, RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
 import { renderPreviewSnapshot, renderSnapshotKey, renderPreviewActive } from '~/utils/renderPreview'
 import { createUuid } from '~/utils/uuid'
 
@@ -31,6 +31,35 @@ const selectedId = ref('')
 const selected = computed(() => jobs.value.find(item => item.previewId === selectedId.value) || jobs.value[0])
 const loading = ref(false), submitting = ref(false), error = ref(''), notice = ref('')
 const ready = computed(() => snapshot.value?.zone.reviewUnit === 'mm' && (snapshot.value?.furniture.length || 0) > 0 && (!props.formal || !!props.confirmationId))
+const measuredSpacing = ref<RenderFurnitureSpacing | null>(null)
+const measuringSpacing = ref(false)
+const spacingError = ref('')
+let spacingRequestId = 0
+watch([show, currentKey, () => store.workspaceId, () => props.confirmationId], () => {
+  spacingRequestId++
+  measuredSpacing.value = null
+  measuringSpacing.value = false
+  spacingError.value = ''
+})
+async function measureSpacing() {
+  if (!ready.value || measuringSpacing.value) return
+  const requestId = ++spacingRequestId
+  const expectedKey = currentKey.value
+  measuringSpacing.value = true
+  spacingError.value = ''
+  measuredSpacing.value = null
+  try {
+    const result = await api.layoutSpacing(zoneId.value, props.formal ? props.confirmationId : undefined)
+    if (requestId !== spacingRequestId || expectedKey !== currentKey.value) return
+    if (!result?.spacing) throw new Error('间距工具暂不可用，请刷新后重试')
+    if (renderSnapshotKey(result.snapshot) !== expectedKey) throw new Error('当前排版与已保存版本不同，请保存后重新测量')
+    measuredSpacing.value = result.spacing
+  } catch (failure) {
+    if (requestId === spacingRequestId) spacingError.value = message(failure)
+  } finally {
+    if (requestId === spacingRequestId) measuringSpacing.value = false
+  }
+}
 const activeCurrent = computed(() => jobs.value.some(item => renderPreviewActive(item.status) && !stale(item)
   && (props.formal ? item.confirmationId === props.confirmationId : item.purpose === 'CONCEPT_PREVIEW')))
 const stale = (job: RenderPreview) => job.stale || renderSnapshotKey(job.snapshot) !== currentKey.value
@@ -230,8 +259,11 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
             <label>补充偏好<textarea v-model="instructions" aria-label="效果图补充偏好" maxlength="500" rows="3" :disabled="submitting" placeholder="例如：灰色地毯、柔和自然光"></textarea></label>
             <details v-if="experimentEnabled" class="render-experiment" data-testid="render-experiment-panel" open><summary>生图提示词 A/B 实验</summary><label>实验组<select v-model="experimentGroup" aria-label="生图实验组" :disabled="submitting"><option value="A">A · 当前完整技术版</option><option value="B">B · 精简视觉任务版</option><option value="C">C · 精简版且不发送平面图</option><option value="D">D · 精简版＋Direct改写</option><option value="E">E · 完整技术版＋Direct改写</option></select></label><label>样本序号<input v-model.number="experimentSample" aria-label="实验样本序号" type="number" min="1" max="999" :disabled="submitting"></label><p>Seed {{ experimentSeed }} · 每次点击只创建1次收费生图，不会自动批量生成。</p></details>
             <p v-if="experimentEnabled" class="render-hint">当前选择实验 {{ experimentGroup }}：{{ experimentGroup === 'A' || experimentGroup === 'E' ? '完整提示词' : '精简提示词' }}，{{ experimentGroup === 'C' ? '不发送平面图，但保留审核平面图' : '发送无编号平面图' }}，Prompt Extend {{ experimentGroup === 'D' || experimentGroup === 'E' ? 'direct' : 'false' }}。</p>
-            <p v-else class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成，无需先绑定商品。图1提供无编号45°结构，图2提供无编号平面布局；F/P 映射、地面坐标和排列特征只通过文字约束传递，图3只提供商品外观。两排直线、顺序、间距和头尾位置由程序从排版计算。</p>
+            <p v-else class="render-hint">按当前空间轮廓和 {{ snapshot?.furniture.length || 0 }} 个家具模块生成。结构图和平面图提供排布，商品图提供外观，模块净距由后端从已保存排版计算。</p>
             <p v-if="selectedProductCount" class="render-hint" data-testid="render-selected-products">已绑定 {{ selectedProductCount }} 款商品。候选图片单款最多 4 张；启用商品理解时，程序按识别结果选择 1–2 张，不可用时按静态规则参考外观。</p>
+            <button class="rounded-lg border border-line px-3 py-2 text-xs disabled:opacity-50" :disabled="!ready || measuringSpacing" @click="measureSpacing">{{ measuringSpacing ? '正在测量…' : '测量已保存的家具间距' }}</button>
+            <p v-if="spacingError" role="status" class="render-hint">{{ spacingError }}</p>
+            <OfficeCanvasRenderFurnitureSpacing v-if="measuredSpacing" :spacing="measuredSpacing" data-testid="render-current-spacing" />
             <button class="render-primary" :disabled="!ready || submitting || activeCurrent || !style.trim()" @click="generate">{{ submitting ? '正在理解商品并提交…' : activeCurrent ? '当前布局正在生成…' : props.formal ? '生成方案效果图' : '生成效果预览' }}</button>
             <p v-if="!ready" class="render-hint">{{ props.formal && !props.confirmationId ? '请到项目清单确认当前楼层方案。' : '请先校准当前空间，并摆放家具。' }}</p>
             <p v-if="pending && !submitting" class="render-hint">上次提交结果可能未知。保持参数重试会查询同一生成请求；改动参数会创建新任务。</p>
@@ -278,6 +310,10 @@ onBeforeUnmount(() => { sequence++; clearTimeout(timer); window.removeEventListe
               <div v-if="selected.status === 'SUCCEEDED'" class="render-actions"><span>AI 生成 · 概念预览 · {{ selected.model }}</span><button @click="download(selected)">下载图片</button></div>
               <details v-if="selected.productReferences?.furnitureBindings?.length" class="render-reference" data-testid="render-fp-bindings"><summary>查看本次 F/P 商品映射与地面坐标</summary><div class="render-hint"><template v-for="binding in selected.productReferences.furnitureBindings" :key="binding.referenceId"><p><strong>{{ binding.referenceId }} → {{ binding.productReferenceId || '未绑定商品' }}</strong>　{{ binding.type }} · {{ binding.location }}</p><p v-if="selected.productReferences.spatialControl?.furniture.find(item => item.F === binding.referenceId)" class="render-coordinate">世界中心 {{ selected.productReferences.spatialControl.furniture.find(item => item.F === binding.referenceId)?.worldCenterMm.join(', ') }} mm · 旋转 {{ binding.rotation }}° · 平面地面中心 {{ selected.productReferences.spatialControl.furniture.find(item => item.F === binding.referenceId)?.plan.groundCenter1000.join(', ') }} · 白模地面中心 {{ selected.productReferences.spatialControl.furniture.find(item => item.F === binding.referenceId)?.guide.groundCenter1000.join(', ') }}</p></template><p>坐标范围均为 0～1000；地面中心不是家具顶部或标签位置。编号不应出现在最终效果图中。</p></div></details>
               <details v-if="selected.productReferences?.spatialControl?.layoutSemantics?.length" class="render-reference" data-testid="render-layout-semantics"><summary>查看程序识别的排列特征</summary><div class="render-hint"><p v-for="(fact, index) in selected.productReferences.spatialControl.layoutSemantics" :key="index">{{ fact.description }}</p></div></details>
+              <details v-if="selected.productReferences?.spatialControl?.furnitureSpacing" class="render-reference" data-testid="render-snapshot-spacing">
+                <summary>查看本次生图使用的实测间距</summary>
+                <OfficeCanvasRenderFurnitureSpacing :spacing="selected.productReferences.spatialControl.furnitureSpacing" />
+              </details>
               <details v-if="selected.productReferences?.items.length" class="render-reference" data-testid="render-product-agent-details"><summary>查看商品理解与选图结果</summary><div v-for="item in selected.productReferences.items" :key="item.productId" class="render-hint"><strong>{{ item.name }} · {{ productAgentItemStatus(item.agentStatus) }}</strong><p>候选 {{ item.candidateImageCount || item.availableImageCount || 0 }} 张，实际使用 {{ item.usedImageCount || 1 }} 张；选中 {{ item.images?.map(image => image.viewId).join('、') || item.imageSha256.slice(0, 12) }}。</p><template v-for="view in item.visualProfile?.views || []" :key="item.productId + ':' + view.imageId"><p v-if="view.imageComposition">{{ view.imageId }}：{{ imageCompositionText(view.imageComposition) }}<template v-if="view.target?.description">；目标：{{ view.target.description }}</template></p><p v-if="view.requiresSubjectIsolation">原图含非目标商品，需主体隔离；{{ view.target?.bbox?.length === 4 ? '已提供目标区域。' : '没有可靠目标区域。' }}</p></template><p v-for="image in item.images?.filter(image => image.isolationMethod && image.isolationMethod !== 'NONE') || []" :key="item.productId + ':crop:' + image.viewId">{{ image.viewId }} 已使用目标框裁剪，原图与生成图摘要分别保存；裁剪不等于像素级分割，请人工核对。</p><p v-if="item.visualProfile?.appearancePrompt">{{ item.visualProfile.appearancePrompt }}</p><p v-if="item.visualProfile?.uncertainties?.length">不确定项：{{ item.visualProfile.uncertainties.join('；') }}</p><p v-if="item.visualProfile">档案 {{ item.visualProfile.schemaVersion }} · {{ item.visualProfile.agentModel }} · {{ item.visualProfile.cacheKey.slice(0, 12) }}</p></div></details>
               <details v-if="selected.productReferences?.sheetUrls.length" class="render-reference"><summary>查看生成时使用的图3 · 商品图片</summary><p class="render-hint"><strong v-for="item in selected.productReferences.items" :key="item.referenceId" style="margin-right:12px">{{ item.referenceId }} × {{ item.quantity || item.furnitureReferenceIds?.length || item.furnitureNumbers.length }}</strong></p><img v-for="url in selected.productReferences.sheetUrls" :key="url" :src="api.imageUrl(url)" alt="生成时所选商品外观参考板"><p>每款商品只展示一次，数量由 F/P 映射决定；商品板不负责家具数量和布局。</p></details>
               <details v-if="selected.layoutContext" class="render-reference" data-testid="render-layout-context"><summary>查看本次生成参考的空间与间距</summary><div class="render-hint">

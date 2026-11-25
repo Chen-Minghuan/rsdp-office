@@ -2,6 +2,7 @@ package com.rsdp.officeproduct.importer.office.product;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.config.RsdpMainProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Slf4j
@@ -28,27 +30,33 @@ public class LocalProductDelivery {
     private final URI endpoint;
     private final String key;
     private final List<String> workspaces;
+    private final String factoryWorkspace;
+    private final String factoryCode;
 
-    public LocalProductDelivery(JdbcTemplate jdbc, ObjectMapper json, @Value("${rsdp.main.base-url}") String baseUrl,
+    public LocalProductDelivery(JdbcTemplate jdbc, ObjectMapper json, RsdpMainProperties main,
             @Value("${RSDP_OFFICE_INTAKE_KEY:}") String key,
             @Value("${RSDP_OFFICE_INTAKE_WORKSPACES:}") String workspaces) {
         this.jdbc = jdbc;
         this.json = json;
-        this.endpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/api/v1/integrations/office-product-intake");
+        this.endpoint = URI.create(main.getBaseUrl().replaceAll("/+$", "") + "/api/v1/integrations/office-product-intake");
         this.key = key;
         this.workspaces = Arrays.stream(workspaces.split(",")).map(String::strip).filter(s -> !s.isEmpty()).toList();
+        this.factoryWorkspace = main.getCatalogWorkspaceId();
+        this.factoryCode = main.getCatalogFactoryCode().strip().toUpperCase(Locale.ROOT);
     }
 
     private record Task(String workspace, UUID batchId, String payload, int attempts) {}
 
     @Scheduled(fixedDelayString = "${rsdp.office-product.delivery-delay-ms:3000}")
     public void deliver() {
-        if (key.length() < 32 || workspaces.isEmpty()) return;
+        if (key.length() < 32 || factoryCode.isEmpty() || !workspaces.contains(factoryWorkspace)) return;
         UUID claim = UUID.randomUUID();
         List<Task> tasks = jdbc.query("""
             with candidate as (
                 select workspace_id, batch_id from office_product_outbox
-                where workspace_id = any(string_to_array(?, ',')) and state in ('PENDING','SENDING')
+                where workspace_id = ? and payload is not null and state in ('PENDING','SENDING')
+                  and not exists (select 1 from jsonb_array_elements(payload->'products') as item
+                      where item->>'factoryCode' is distinct from ?)
                   and next_attempt_at <= now() order by next_attempt_at, created_at, batch_id for update skip locked limit 1
             )
             update office_product_outbox o set state = 'SENDING', attempts = attempts + 1,
@@ -56,7 +64,7 @@ public class LocalProductDelivery {
             from candidate c where o.workspace_id = c.workspace_id and o.batch_id = c.batch_id
             returning o.workspace_id, o.batch_id, o.payload::text, o.attempts
             """, (r, i) -> new Task(r.getString(1), r.getObject(2, UUID.class), r.getString(3), r.getInt(4)),
-            String.join(",", workspaces), claim);
+            factoryWorkspace, factoryCode, claim);
         for (Task task : tasks) {
             try {
                 var request = HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(20))

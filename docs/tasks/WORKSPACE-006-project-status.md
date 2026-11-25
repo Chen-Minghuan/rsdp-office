@@ -3,6 +3,20 @@
 状态：已实现并通过构建、模拟 UI 和隔离 PostgreSQL 验证；真实角色页面业务验收待确认
 日期：2026-11-24
 
+## 决策变更（2026-11-24）：阶段改为按方案确认派生
+
+产品要求看板"交付中"和列表"项目阶段"列反映真实业务进度，取代人工维护。变更内容：
+
+- 项目阶段不再人工维护：项目全部楼层在 `office_proposal_confirmation` 存在未失效（`retired=false`）记录 → `DELIVERING`，否则 → `DESIGNING`；无楼层项目为设计中。判定为读时派生，不校验确认快照的 `canvas_revision`/`fingerprint` 是否与当前画布一致。
+- 移除 `COMPLETED` 阶段、`PATCH /api/v1/office/projects/{projectId}/status` 端点、`canManageStatus` 字段和前端阶段下拉；列表阶段列只读。`office_design_project.status` 列保留但不再读取，新建项目仍写入默认值 `DESIGNING`。工作台保留"已完成"看板占位（禁用、计数显示 —），业务口径待后续定义后再接入数据。
+- 列表接口在 `OfficeProjectService.listProjects` 用一次 `confirmedFloorIds` 批量查询派生全部项目阶段；单项目写接口的返回同样走派生。
+
+验证：Java 测试更新为派生规则用例（全部楼层确认 → 交付中、任一缺失或失效 → 设计中、确认失效回退），`e2e-project-status.mjs` 改为只读阶段、计数、筛选与窄屏断言。隔离 PostgreSQL 专项改为用 SQL 直接改写阶段列后验证改名不覆盖，不再走已删除的 `updateStatus`。
+
+实际执行（2026-11-24 本机）：`mvn -f backend/pom.xml test`（JDK 21）360 项、0 失败、0 错误、9 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；本地 dev server（3001）上 `e2e-project-status`、`MOCK_API=1 e2e:smoke`、`e2e:workflows` 均通过（均拦截 API）。未执行真实后端联调验收。
+
+> 历史记录：以下「目标」「契约与权限」「验证记录」为阶段派生化决策前的原始规格（含人工修改阶段、`PATCH .../status` 端点与 `COMPLETED` 阶段），已被上方「决策变更（2026-11-24）」取代，仅留档，不再代表现行行为。
+
 ## 目标
 
 恢复全部项目、设计中、交付中、已完成四个统计卡片，按当前账号可访问项目的真实阶段统计并筛选。项目阶段独立于空间/排版确认；新项目和历史项目默认设计中，不以预算或画布状态猜测是否交付、完成。

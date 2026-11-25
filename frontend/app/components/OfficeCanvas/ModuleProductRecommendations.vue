@@ -9,6 +9,7 @@ const selectedId = defineModel<string | null>('selectedId')
 const props = defineProps<{ allowedRspuIds?: string[] }>()
 const store = useOfficeStore()
 const api = useOfficeApi()
+const saveRecommendationDraft = useRecommendationDraft()
 const allowRotation = ref(true)
 const applyToSameModules = ref(false)
 const tier = ref('ALL')
@@ -78,7 +79,7 @@ function groupOptionValue(group: ModuleDisplayGroup): string {
 
 const sameModuleCount = computed(() => result.value?.sameModuleCount || 0)
 const allConfirmed = computed(() => modules.value.length > 0 && modules.value.every(item => item.layoutConfirmed))
-const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.designZoneId, store.canvasRevision, allConfirmed.value]))
+const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.schemeToken, store.designZoneId, store.canvasRevision, allConfirmed.value]))
 const signature = computed(() => JSON.stringify([layoutContext.value, module.value?.id, allowRotation.value]))
 const sourceCandidates = computed(() => {
   const candidates = result.value?.candidates || []
@@ -147,8 +148,7 @@ async function refresh() {
   const revision = store.canvasRevision, zoneId = item.zoneId, rotation = allowRotation.value
   try {
     // Flush the exact reviewed draft; the server reads saved geometry and checks its revision.
-    await api.saveCanvas({ objects: JSON.parse(JSON.stringify(store.objects)), files: store.files, mode: store.canvasMode,
-      designZoneId: store.designZoneId, revision, blank: store.blank })
+    await saveRecommendationDraft()
     if (ticket !== sequence || current !== signature.value) return
     const response = await api.recommendModule({ zoneId, moduleId: item.id, canvasRevision: revision, allowRotation: rotation })
     if (ticket !== sequence || current !== signature.value) return

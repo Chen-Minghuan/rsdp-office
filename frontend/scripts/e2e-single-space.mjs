@@ -241,6 +241,33 @@ try {
   assert.deepEqual(bulkRequest.targetIds, ['F-L3'], '批量换品只提交选中分组的家具 ID')
   await productDialog.waitFor({ state: 'detached', timeout: 5000 })
 
+  // 侧栏收起时右键会议自动组主家具：自动展开并进入自动布局重排，不弹尺寸窗
+  await page.getByRole('button', { name: '收起侧边栏', exact: true }).first().click()
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const room = store.objects.find(object => object.id === 'ROOM-L')
+    store.addObject({
+      id: 'F-MEET-AUTO', zoneId: 'ROOM-L', kind: 'furniture', x: room.x + 5400, y: room.y + 3500, w: 500, h: 800, rotation: 0,
+      productId: '', label: '会议桌自动组', furnitureTemplateId: 'table-conference-rect', layoutRole: 'primary', layoutGroupId: 'auto:ROOM-L',
+      layoutSettings: { mode: 'auto', spacing: { wallMm: 0, gapMm: 0, aisleMm: 0 }, layoutContext: 'meeting', productStyleId: 'meeting-table', arrangementPresetId: 'meeting-center' },
+    })
+  })
+  await canvas().locator('[data-id="F-MEET-AUTO"]').waitFor()
+  await page.locator('[data-id="F-MEET-AUTO"]').click({ button: 'right' })
+  await page.getByRole('button', { name: '收起侧边栏', exact: true }).waitFor()
+  assert.equal(await page.getByTestId('tab-auto-layout').getAttribute('aria-selected'), 'true')
+  assert.equal(await page.getByTestId('furniture-size-dialog').count(), 0)
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.deleteObject('F-MEET-AUTO')
+  })
+  await canvas().locator('[data-id="F-MEET-AUTO"]').waitFor({ state: 'detached', timeout: 5000 })
+  const reconfirmed = await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    return store.confirmLayout('ROOM-L')
+  })
+  assert.equal(reconfirmed, true, '删除临时会议桌后需恢复 ROOM-L 已确认状态')
+
   // Cross-space switch preserves confirmed layouts and does not carry state across rooms.
   const roomLFurniture = confirmedFurniture
   await spaceSelect.locator('[data-space-id="ROOM-B"]').click()
