@@ -59,6 +59,7 @@ class ProjectQuotationServiceTest {
     private final OfficeQuotationLineMapper quotationLineMapper = mock(OfficeQuotationLineMapper.class);
     private final RsdpCatalogGateway catalogGateway = mock(RsdpCatalogGateway.class);
     private final OfficeAuditService auditService = mock(OfficeAuditService.class);
+    private final OfficeProposalConfirmationService proposalConfirmations = mock(OfficeProposalConfirmationService.class);
 
     @Test
     void coefficientQuotesCartLinesAndUnassignedFurniture() {
@@ -198,6 +199,41 @@ class ProjectQuotationServiceTest {
     }
 
     @Test
+    void confirmRejectsFloorWithoutProposalConfirmation() {
+        stubScenario(true);
+        when(proposalConfirmations.latest(FLOOR_ID)).thenReturn(null);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID,
+            request("COEFFICIENT", "1.25", "100", "50", List.of(confirmLine("V-DESK", 2, "300")))));
+
+        assertEquals(true, error.getMessage().contains("1F"));
+        assertEquals(true, error.getMessage().contains("确认"));
+        verify(quotationMapper, never()).insert(any(OfficeQuotation.class));
+    }
+
+    @Test
+    void confirmRejectsStaleProposalConfirmation() {
+        stubScenario(true);
+        when(proposalConfirmations.latest(FLOOR_ID))
+            .thenReturn(new OfficeProposalConfirmationService.Status("PROP-T", 1, java.time.LocalDateTime.now(), false));
+
+        assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID,
+            request("COEFFICIENT", "1.25", "100", "50", List.of(confirmLine("V-DESK", 2, "300")))));
+        verify(quotationMapper, never()).insert(any(OfficeQuotation.class));
+    }
+
+    @Test
+    void previewConfirmationSkipsProposalGate() {
+        stubScenario(true);
+
+        ProjectQuotationRecordDto draft = service().previewConfirmation(PROJECT_ID,
+            request("COEFFICIENT", "1.25", "100", "50", List.of(confirmLine("V-DESK", 2, "300"))));
+
+        assertEquals("DRAFT", draft.getStatus());
+        verify(proposalConfirmations, never()).latest(anyString());
+    }
+
+    @Test
     void confirmKeepsMissingFactoryPriceLineWithIssueAndNoAmount() {
         stubScenario(false);
         when(quotationMapper.selectOne(any())).thenReturn(null);
@@ -299,7 +335,8 @@ class ProjectQuotationServiceTest {
         QuotationCatalog catalog = new QuotationCatalog(catalogGateway);
         return new ProjectQuotationService(accessService, projectMapper, quotationMapper, quotationLineMapper,
             auditService, new ProjectQuotationPreviewBuilder(floorMapper, canvasMapper, cartMapper, catalog, json),
-            new ProjectQuotationDraftBuilder(floorMapper, catalog), new QuotationRecordAssembler(json));
+            new ProjectQuotationDraftBuilder(floorMapper, catalog), new QuotationRecordAssembler(json),
+            proposalConfirmations);
     }
 
     /** 一间楼层：清单里 2 张办公桌（空间 Z1），画布里 2 把会议椅（空间 Z2）。 */
@@ -343,6 +380,9 @@ class ProjectQuotationServiceTest {
             .thenReturn(withFactoryPrice ? Map.of("V-DESK", new BigDecimal("194")) : Map.of());
         when(catalogGateway.getFactoryPrices("RSPU-CHAIR"))
             .thenReturn(withFactoryPrice ? Map.of("", new BigDecimal("100")) : Map.of());
+
+        when(proposalConfirmations.latest(FLOOR_ID))
+            .thenReturn(new OfficeProposalConfirmationService.Status("PROP-T", 1, java.time.LocalDateTime.now(), true));
     }
 
     private OfficeProductDto product(String variantId, String rspuId, String name, String variant) {
