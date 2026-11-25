@@ -98,6 +98,7 @@ class OfficeProjectServiceTest {
         when(projectMapper.selectList(any())).thenAnswer(call -> new ArrayList<>(projects.values()));
         when(floorMapper.insert(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });
         when(floorMapper.selectById(anyString())).thenAnswer(call -> floors.get(call.getArgument(0)));
+        when(floorMapper.updateById(any(OfficeDesignFloor.class))).thenAnswer(call -> { floors.put(call.getArgument(0, OfficeDesignFloor.class).getFloorId(), call.getArgument(0)); return 1; });
         when(floorMapper.selectList(any())).thenAnswer(call -> floors.values().stream()
             .filter(floor -> scopeIds(call.getArgument(0)).contains(floor.getProjectId())).toList());
         when(floorMapper.nextSortOrder(anyString())).thenAnswer(call -> floors.values().stream()
@@ -519,6 +520,156 @@ class OfficeProjectServiceTest {
         invalid.setReferenceImages(List.of(bad));
         assertEquals("参考图片地址无效，仅支持本站上传的图片", assertThrows(BusinessException.class,
             () -> service.updateReferences(created.getProjectId(), invalid)).getMessage());
+    }
+
+    private record FloorFixture(String projectId, String floorId) {}
+
+    private FloorFixture projectWithFloor() {
+        activeUser("USR-1", "leader");
+        var request = request("项目", List.of("一层"));
+        request.setLeaderUserId("USR-1");
+        var created = service.createProject(request);
+        return new FloorFixture(created.getProjectId(), created.getFloors().get(0).getFloorId());
+    }
+
+    private ProjectReferenceImage referenceImage(String url, String name) {
+        var image = new ProjectReferenceImage();
+        image.setUrl(url);
+        image.setName(name);
+        return image;
+    }
+
+    private UpdateProjectReferencesRequest referencesRequest(ProjectReferenceImage... images) {
+        var update = new UpdateProjectReferencesRequest();
+        update.setReferenceImages(List.of(images));
+        return update;
+    }
+
+    @Test void updateFloorReferencesReplacesImagesAndPersistsJson() {
+        var fixture = projectWithFloor();
+        var updated = service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest(
+            referenceImage("/uploads/images/a.png", "  风格参考  "),
+            referenceImage("/uploads/images/b.webp", null)));
+
+        assertEquals(2, updated.getReferenceImages().size());
+        assertEquals("风格参考", updated.getReferenceImages().get(0).getName());
+        assertEquals("", updated.getReferenceImages().get(1).getName());
+        var stored = floors.get(fixture.floorId());
+        assertNotNull(stored.getUpdatedAt());
+        assertTrue(stored.getReferenceImages().contains("/uploads/images/a.png"));
+        verify(access).requirePermission(fixture.projectId(), OfficeProjectPermission.EDIT);
+
+        var replaced = service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage("/uploads/images/c.png", "替换后")));
+        assertEquals(1, replaced.getReferenceImages().size());
+        assertEquals("/uploads/images/c.png", replaced.getReferenceImages().get(0).getUrl());
+        assertFalse(floors.get(fixture.floorId()).getReferenceImages().contains("/uploads/images/a.png"));
+    }
+
+    @Test void updateFloorReferencesWithNullOrEmptyListClearsImages() {
+        var fixture = projectWithFloor();
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage("/uploads/images/a.png", "基线")));
+
+        var cleared = service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            new UpdateProjectReferencesRequest());
+        assertEquals(List.of(), cleared.getReferenceImages());
+        assertEquals("[]", floors.get(fixture.floorId()).getReferenceImages());
+
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage("/uploads/images/b.png", "再次")));
+        var emptied = service.updateFloorReferences(fixture.projectId(), fixture.floorId(), referencesRequest());
+        assertEquals(List.of(), emptied.getReferenceImages());
+        assertEquals("[]", floors.get(fixture.floorId()).getReferenceImages());
+    }
+
+    @Test void updateFloorReferencesRejectsUnknownFloor() {
+        var fixture = projectWithFloor();
+        var update = referencesRequest(referenceImage("/uploads/images/a.png", "图"));
+        assertEquals("楼层不存在", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), "OFLR-UNKNOWN", update)).getMessage());
+        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+    }
+
+    @Test void updateFloorReferencesRejectsFloorFromAnotherProject() {
+        var fixture = projectWithFloor();
+        activeUser("USR-2", "other");
+        var otherRequest = request("其他项目", List.of("一层"));
+        otherRequest.setLeaderUserId("USR-2");
+        var other = service.createProject(otherRequest);
+        String otherFloorId = other.getFloors().get(0).getFloorId();
+        String baseline = floors.get(otherFloorId).getReferenceImages();
+
+        var update = referencesRequest(referenceImage("/uploads/images/a.png", "图"));
+        assertEquals("楼层不存在", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), otherFloorId, update)).getMessage());
+        assertEquals(baseline, floors.get(otherFloorId).getReferenceImages());
+        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+    }
+
+    @Test void updateFloorReferencesRejectsNullRequest() {
+        var fixture = projectWithFloor();
+        assertEquals("参考图片参数不能为空", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(), null)).getMessage());
+        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
+    }
+
+    @Test void updateFloorReferencesRejectsInvalidUrls() {
+        var fixture = projectWithFloor();
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage("/uploads/images/base.png", "基线")));
+        String baseline = floors.get(fixture.floorId()).getReferenceImages();
+
+        assertEquals("参考图片地址无效，仅支持本站上传的图片", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+                referencesRequest(referenceImage("https://example.com/evil.png", "外链")))).getMessage());
+        assertEquals("参考图片地址无效，仅支持本站上传的图片", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+                referencesRequest(referenceImage("/uploads/images/../secret.png", "穿越")))).getMessage());
+        assertEquals("参考图片地址不能为空", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+                referencesRequest(referenceImage("  ", "空白")))).getMessage());
+        assertEquals(baseline, floors.get(fixture.floorId()).getReferenceImages());
+
+        var trimmed = service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage(" /uploads/images/trim.png ", "前后空格")));
+        assertEquals("/uploads/images/trim.png", trimmed.getReferenceImages().get(0).getUrl());
+    }
+
+    @Test void updateFloorReferencesRejectsMoreThanTenImages() {
+        var fixture = projectWithFloor();
+        var eleven = java.util.stream.IntStream.range(0, 11)
+            .mapToObj(index -> referenceImage("/uploads/images/" + index + ".png", "图" + index)).toList();
+        assertEquals("项目参考图片不能超过 10 张", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+                referencesRequest(eleven.toArray(ProjectReferenceImage[]::new)))).getMessage());
+        assertNull(floors.get(fixture.floorId()).getReferenceImages());
+
+        var ten = service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(eleven.subList(0, 10).toArray(ProjectReferenceImage[]::new)));
+        assertEquals(10, ten.getReferenceImages().size());
+    }
+
+    @Test void updateFloorReferencesRejectsOverlongName() {
+        var fixture = projectWithFloor();
+        assertEquals("参考图片名称不能超过 200 个字符", assertThrows(BusinessException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+                referencesRequest(referenceImage("/uploads/images/a.png", "x".repeat(201))))).getMessage());
+
+        var boundary = service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage("/uploads/images/a.png", "x".repeat(200))));
+        assertEquals(200, boundary.getReferenceImages().get(0).getName().length());
+    }
+
+    @Test void updateFloorReferencesRequiresEditPermission() {
+        var fixture = projectWithFloor();
+        doThrow(new com.rsdp.officeproduct.importer.common.AccessDeniedException("无权编辑"))
+            .when(access).requirePermission(fixture.projectId(), OfficeProjectPermission.EDIT);
+        assertThrows(com.rsdp.officeproduct.importer.common.AccessDeniedException.class,
+            () -> service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+                referencesRequest(referenceImage("/uploads/images/a.png", "图"))));
+        assertNull(floors.get(fixture.floorId()).getReferenceImages());
+        verify(floorMapper, never()).updateById(any(OfficeDesignFloor.class));
     }
 
     @Test void listProjectsFiltersToAccessibleProjectsWhenEnforced() {

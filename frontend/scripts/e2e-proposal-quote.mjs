@@ -6,7 +6,8 @@ import { chromium } from 'playwright'
 
 // 方案页最终报价缺价提示 UI 回归：独立端口 + 模拟 API。
 // 覆盖：完整报价显示「最终报价」；部分缺价改显示「已报价商品小计」并红色提示缺价行数；
-// 全部缺价显示 ¥0.00；无确认报价不显示最终报价行。缺价行（subtotal 为 null）不得计入合计。
+// 全部缺价显示 ¥0.00；无确认报价不显示最终报价行；报价快照与页面商品不一致时不显示最终报价。
+// 缺价行（subtotal 为 null）不得计入合计。最终报价仅在报价行与页面商品（productId+数量）严格一致时展示。
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
@@ -32,6 +33,8 @@ try {
   const floorId = 'OFLR-QUOTE'
   const storageKey = 'rsdp-office-v01:MOCK-USER:' + floorId
   const P1 = { id: 'P1', rspuId: 'R1', variantId: 'V1', widthMm: 1200, depthMm: 550, heightMm: 750, widthCm: 120, depthCm: 55, name: '行政桌 1200', desc: '', variant: '暖白 / 钢脚', price: 1999, kind: 'desk' }
+  const P2 = { ...P1, id: 'P2', rspuId: 'R2', variantId: 'V2', name: '会议椅', price: 399, kind: 'chair' }
+  const P3 = { ...P1, id: 'P3', rspuId: 'R3', variantId: 'V3', name: '商品不可用', price: 0, kind: 'cabinet' }
   const baseLine = { floorId, floorName: '1F', zoneId: 'Z1', zoneName: '开放办公区', productId: 'P1', rspuId: 'R1', productName: '行政桌 1200', variant: '暖白 / 钢脚', imageUrl: null, qty: 1, factoryPrice: 344, unitPrice: 412.8 }
   const baseRecord = {
     quotationId: 'QT-1', projectId, projectName: '报价展示项目', revision: 1, status: 'CONFIRMED',
@@ -47,7 +50,7 @@ try {
     if (path === '/api/v1/office/projects') return respond([{ projectId, name: '报价展示项目', leader: {
       userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'],
     }, floors: [{ floorId, projectId, name: '1F' }] }])
-    if (path === '/api/v1/office/products') return respond([P1])
+    if (path === '/api/v1/office/products') return respond([P1, P2, P3])
     if (path === `/api/v1/office/projects/${projectId}/quotation/latest`) return respond(latestRecord)
     return respond(path.endsWith('/canvas') ? null : [])
   })
@@ -57,28 +60,30 @@ try {
 
   const url = baseUrl + '/proposal?floorId=' + floorId
   await page.goto(url, { waitUntil: 'networkidle' })
-  await page.evaluate(key => {
+  // 页面商品必须与报价行（productId + 数量）严格一致才显示最终报价，因此按场景重写页面商品集合
+  const writePageState = productIds => page.evaluate(({ key, ids }) => {
     const state = JSON.parse(localStorage.getItem(key) || '{}')
     state.objects = [
       { id: 'Z1', kind: 'zone', name: '开放办公区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', confirmed: true, reviewConfirmation: { status: 'CONFIRMED' },
         polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]], obstacles: [], facilities: [] },
-      { id: 'A', kind: 'furniture', zoneId: 'Z1', furnitureTemplateId: 'desk-straight', label: '职员桌 A', x: 400, y: 400, w: 1200, h: 600, rotation: 0,
-        productId: 'P1', layoutConfirmed: true,
-        productSelection: { product: null, cartLineId: 'L1', sourceCanvasRevision: 3 } },
+      ...ids.map((productId, index) => ({ id: 'A' + index, kind: 'furniture', zoneId: 'Z1', furnitureTemplateId: 'desk-straight', label: '家具 ' + productId, x: 400 + index * 1400, y: 400, w: 1200, h: 600, rotation: 0,
+        productId, layoutConfirmed: true,
+        productSelection: { product: null, cartLineId: 'L' + index, sourceCanvasRevision: 3 } })),
     ]
-    state.cart = [{ id: 'L1', productId: 'P1', zoneId: 'Z1', zoneName: '开放办公区', qty: 1 }]
+    state.cart = ids.map((productId, index) => ({ id: 'L' + index, productId, zoneId: 'Z1', zoneName: '开放办公区', qty: 1 }))
     state.canvasRevision = 3; state.canvasMode = 'overview'; state.designZoneId = null
     state.floorPlan = null; state.spaceTemplate = null
     localStorage.setItem(key, JSON.stringify(state))
-  }, storageKey)
+  }, { key: storageKey, ids: productIds })
 
   const aside = page.locator('.proposal-aside')
 
-  // 场景 1：完整报价 → 显示「最终报价」，金额为全部行小计合计
+  // 场景 1：完整报价且与页面商品一致 → 显示「最终报价」，金额为全部行小计合计
   latestRecord = { ...baseRecord, lines: [
     { ...baseLine, subtotal: 412.8, issue: null },
     { ...baseLine, productId: 'P2', productName: '会议椅', subtotal: 100, issue: null },
   ] }
+  await writePageState(['P1', 'P2'])
   await page.goto(url, { waitUntil: 'networkidle' })
   await aside.getByText('最终报价', { exact: true }).waitFor()
   assert.match(await aside.textContent(), /¥512\.80/, '完整报价应显示全部行合计')
@@ -92,6 +97,7 @@ try {
     { ...baseLine, productId: 'P2', productName: '会议椅', subtotal: 100, issue: null },
     { ...baseLine, productId: 'P3', productName: '商品不可用', factoryPrice: null, unitPrice: null, subtotal: null, issue: '缺出厂价，无法试算' },
   ] }
+  await writePageState(['P1', 'P2', 'P3'])
   await page.reload({ waitUntil: 'networkidle' })
   await aside.getByText('已报价商品小计', { exact: true }).waitFor()
   assert.match(await aside.textContent(), /¥512\.80/, '缺价行不得计入合计，金额仍为已定价行小计')
@@ -106,6 +112,7 @@ try {
     { ...baseLine, factoryPrice: null, unitPrice: null, subtotal: null, issue: '缺出厂价，无法试算' },
     { ...baseLine, productId: 'P2', productName: '商品不可用', factoryPrice: null, unitPrice: null, subtotal: null, issue: '商品不可用' },
   ] }
+  await writePageState(['P1', 'P2'])
   await page.reload({ waitUntil: 'networkidle' })
   await aside.getByText('已报价商品小计', { exact: true }).waitFor()
   assert.match(await aside.textContent(), /¥0\.00/, '全部缺价时合计为 0')
@@ -119,8 +126,21 @@ try {
   assert.equal(await aside.getByText('最终报价', { exact: true }).count(), 0, '无确认报价不显示最终报价')
   assert.equal(await aside.getByText('已报价商品小计').count(), 0, '无确认报价不显示已报价商品小计')
 
+  // 场景 5：报价快照与页面商品不一致（报价后页面改商品）→ 不显示最终报价，参考金额不加删除线
+  latestRecord = { ...baseRecord, lines: [
+    { ...baseLine, subtotal: 412.8, issue: null },
+    { ...baseLine, productId: 'P2', productName: '会议椅', subtotal: 100, issue: null },
+  ] }
+  await writePageState(['P1'])
+  await page.reload({ waitUntil: 'networkidle' })
+  await aside.getByText('方案摘要').waitFor()
+  await page.waitForLoadState('networkidle')
+  assert.equal(await aside.getByText('最终报价', { exact: true }).count(), 0, '报价与页面商品不一致时不显示最终报价')
+  assert.equal(await aside.getByText('已报价商品小计').count(), 0, '报价与页面商品不一致时不显示已报价商品小计')
+  assert.equal(await aside.locator('.price-strike').count(), 0, '报价与页面商品不一致时参考金额不加删除线')
+
   assert.deepEqual(errors, [], `不应有未捕获错误：${errors.join('; ')}`)
-  console.log('方案页最终报价缺价提示 UI 通过：完整报价、部分缺价、全部缺价、无确认报价四场景。API 全部模拟。')
+  console.log('方案页最终报价缺价提示 UI 通过：完整报价、部分缺价、全部缺价、无确认报价、报价与页面商品不一致五场景。API 全部模拟。')
 } finally {
   await browser?.close()
   app.kill()
