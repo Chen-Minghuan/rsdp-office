@@ -1,0 +1,127 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:net'
+import { fileURLToPath } from 'node:url'
+import { chromium } from 'playwright'
+
+// 方案页最终报价缺价提示 UI 回归：独立端口 + 模拟 API。
+// 覆盖：完整报价显示「最终报价」；部分缺价改显示「已报价商品小计」并红色提示缺价行数；
+// 全部缺价显示 ¥0.00；无确认报价不显示最终报价行。缺价行（subtotal 为 null）不得计入合计。
+const cwd = fileURLToPath(new URL('../', import.meta.url))
+const reservation = createServer()
+await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
+const port = reservation.address().port
+await new Promise(resolve => reservation.close(resolve))
+const baseUrl = `http://127.0.0.1:${port}`
+const app = spawn(process.execPath, ['.output/server/index.mjs'], {
+  cwd, env: { ...process.env, PORT: String(port), NITRO_PORT: String(port), HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1' },
+  stdio: 'ignore',
+})
+let browser
+try {
+  let up = false
+  for (let attempt = 0; attempt < 75; attempt++) {
+    try { if ((await fetch(baseUrl)).ok) { up = true; break } } catch {}
+    if (app.exitCode !== null) throw new Error('测试预览服务启动失败，请先执行 pnpm build')
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  assert.ok(up, '测试预览服务没有就绪')
+  browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined })
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const projectId = 'OPRJ-QUOTE'
+  const floorId = 'OFLR-QUOTE'
+  const storageKey = 'rsdp-office-v01:MOCK-USER:' + floorId
+  const P1 = { id: 'P1', rspuId: 'R1', variantId: 'V1', widthMm: 1200, depthMm: 550, heightMm: 750, widthCm: 120, depthCm: 55, name: '行政桌 1200', desc: '', variant: '暖白 / 钢脚', price: 1999, kind: 'desk' }
+  const baseLine = { floorId, floorName: '1F', zoneId: 'Z1', zoneName: '开放办公区', productId: 'P1', rspuId: 'R1', productName: '行政桌 1200', variant: '暖白 / 钢脚', imageUrl: null, qty: 1, factoryPrice: 344, unitPrice: 412.8 }
+  const baseRecord = {
+    quotationId: 'QT-1', projectId, projectName: '报价展示项目', revision: 1, status: 'CONFIRMED',
+    pricingMode: 'COEFFICIENT', pricingValue: 1.2, goodsTotal: 512.8, serviceFee: 0, logisticsFee: 0,
+    fees: [], totalAmount: 512.8, lineCount: 2, missingPriceLines: 0, createdBy: 'MOCK-USER', createdAt: '2026-11-25T10:00:00',
+  }
+  // 场景通过替换 latestRecord 切换；页面每次 reload 重新拉取
+  let latestRecord = null
+  await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
+  await context.route('**/api/v1/**', route => {
+    const path = new URL(route.request().url()).pathname
+    const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: '成功', data }) })
+    if (path === '/api/v1/office/projects') return respond([{ projectId, name: '报价展示项目', leader: {
+      userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'],
+    }, floors: [{ floorId, projectId, name: '1F' }] }])
+    if (path === '/api/v1/office/products') return respond([P1])
+    if (path === `/api/v1/office/projects/${projectId}/quotation/latest`) return respond(latestRecord)
+    return respond(path.endsWith('/canvas') ? null : [])
+  })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+
+  const url = baseUrl + '/proposal?floorId=' + floorId
+  await page.goto(url, { waitUntil: 'networkidle' })
+  await page.evaluate(key => {
+    const state = JSON.parse(localStorage.getItem(key) || '{}')
+    state.objects = [
+      { id: 'Z1', kind: 'zone', name: '开放办公区', x: 0, y: 0, w: 6000, h: 4000, zoneType: 'OPEN_OFFICE', tone: 'blue', reviewUnit: 'mm', confirmed: true, reviewConfirmation: { status: 'CONFIRMED' },
+        polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]], obstacles: [], facilities: [] },
+      { id: 'A', kind: 'furniture', zoneId: 'Z1', furnitureTemplateId: 'desk-straight', label: '职员桌 A', x: 400, y: 400, w: 1200, h: 600, rotation: 0,
+        productId: 'P1', layoutConfirmed: true,
+        productSelection: { product: null, cartLineId: 'L1', sourceCanvasRevision: 3 } },
+    ]
+    state.cart = [{ id: 'L1', productId: 'P1', zoneId: 'Z1', zoneName: '开放办公区', qty: 1 }]
+    state.canvasRevision = 3; state.canvasMode = 'overview'; state.designZoneId = null
+    state.floorPlan = null; state.spaceTemplate = null
+    localStorage.setItem(key, JSON.stringify(state))
+  }, storageKey)
+
+  const aside = page.locator('.proposal-aside')
+
+  // 场景 1：完整报价 → 显示「最终报价」，金额为全部行小计合计
+  latestRecord = { ...baseRecord, lines: [
+    { ...baseLine, subtotal: 412.8, issue: null },
+    { ...baseLine, productId: 'P2', productName: '会议椅', subtotal: 100, issue: null },
+  ] }
+  await page.goto(url, { waitUntil: 'networkidle' })
+  await aside.getByText('最终报价', { exact: true }).waitFor()
+  assert.match(await aside.textContent(), /¥512\.80/, '完整报价应显示全部行合计')
+  assert.match(await aside.textContent(), /取自已确认报价单/, '完整报价应保留数据口径说明')
+  assert.equal(await aside.getByText('已报价商品小计').count(), 0, '完整报价不得显示已报价商品小计')
+  assert.equal(await aside.locator('.aside-quote-hint.incomplete').count(), 0, '完整报价不得有缺价提示')
+
+  // 场景 2：部分缺价 → 改显示「已报价商品小计」，缺价行不计入并红色提示
+  latestRecord = { ...baseRecord, lineCount: 3, missingPriceLines: 1, lines: [
+    { ...baseLine, subtotal: 412.8, issue: null },
+    { ...baseLine, productId: 'P2', productName: '会议椅', subtotal: 100, issue: null },
+    { ...baseLine, productId: 'P3', productName: '商品不可用', factoryPrice: null, unitPrice: null, subtotal: null, issue: '缺出厂价，无法试算' },
+  ] }
+  await page.reload({ waitUntil: 'networkidle' })
+  await aside.getByText('已报价商品小计', { exact: true }).waitFor()
+  assert.match(await aside.textContent(), /¥512\.80/, '缺价行不得计入合计，金额仍为已定价行小计')
+  assert.equal(await aside.getByText('最终报价', { exact: true }).count(), 0, '缺价时不得显示最终报价')
+  const hint = aside.locator('.aside-quote-hint.incomplete')
+  await hint.waitFor()
+  assert.match(await hint.textContent(), /含缺价 1 行（未计入），报价不完整/)
+  assert.equal(await hint.evaluate(el => getComputedStyle(el).color), 'rgb(185, 28, 28)', '缺价提示应为红色')
+
+  // 场景 3：全部缺价 → 已报价商品小计为 ¥0.00，提示行数为总行数
+  latestRecord = { ...baseRecord, lineCount: 2, missingPriceLines: 2, lines: [
+    { ...baseLine, factoryPrice: null, unitPrice: null, subtotal: null, issue: '缺出厂价，无法试算' },
+    { ...baseLine, productId: 'P2', productName: '商品不可用', factoryPrice: null, unitPrice: null, subtotal: null, issue: '商品不可用' },
+  ] }
+  await page.reload({ waitUntil: 'networkidle' })
+  await aside.getByText('已报价商品小计', { exact: true }).waitFor()
+  assert.match(await aside.textContent(), /¥0\.00/, '全部缺价时合计为 0')
+  assert.match(await aside.locator('.aside-quote-hint.incomplete').textContent(), /含缺价 2 行（未计入），报价不完整/)
+
+  // 场景 4：无确认报价 → 不显示最终报价行
+  latestRecord = null
+  await page.reload({ waitUntil: 'networkidle' })
+  await aside.getByText('方案摘要').waitFor()
+  await page.waitForLoadState('networkidle')
+  assert.equal(await aside.getByText('最终报价', { exact: true }).count(), 0, '无确认报价不显示最终报价')
+  assert.equal(await aside.getByText('已报价商品小计').count(), 0, '无确认报价不显示已报价商品小计')
+
+  assert.deepEqual(errors, [], `不应有未捕获错误：${errors.join('; ')}`)
+  console.log('方案页最终报价缺价提示 UI 通过：完整报价、部分缺价、全部缺价、无确认报价四场景。API 全部模拟。')
+} finally {
+  await browser?.close()
+  app.kill()
+}

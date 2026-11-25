@@ -287,6 +287,7 @@ const groups = computed<ProposalGroup[]>(() => {
 const totalModules = computed(() => spaces.value.reduce((sum, space) => sum + space.modules.reduce((subtotal, module) => subtotal + module.qty, 0), 0))
 const totalPrice = computed(() => spaces.value.reduce((sum, space) => sum + space.total, 0))
 // 最终报价：已确认报价快照中当前楼层行的商品小计合计（项目级费用不摊入楼层）
+// subtotal 为 null 的缺价行不计入金额，计入 missingCount 用于提示报价不完整
 // 仅使用 status 为 CONFIRMED 的报价记录；无确认报价或当前楼层无报价行时返回 null，页面不显示最终报价
 const floorQuoteTotal = computed(() => {
   const record = latestQuotation.value
@@ -294,8 +295,12 @@ const floorQuoteTotal = computed(() => {
   if (!record || record.status !== 'CONFIRMED' || !floorId) return null
   const lines = record.lines.filter(line => line.floorId === floorId)
   if (!lines.length) return null
-  return roundMoney(lines.reduce((sum, line) => sum + (line.subtotal || 0), 0))
+  const missingCount = lines.filter(line => line.subtotal === null).length
+  const total = roundMoney(lines.reduce((sum, line) => sum + (line.subtotal ?? 0), 0))
+  return { total, missingCount }
 })
+// 缺价行 > 0 时金额仅为已定价商品小计，不作为最终报价展示
+const floorQuoteIncomplete = computed(() => (floorQuoteTotal.value?.missingCount ?? 0) > 0)
 // 有确认报价（或演示模式）才显示最终报价行；此时参考金额加删除线作对比
 const showFinalQuote = computed(() => previewMode.value || floorQuoteTotal.value !== null)
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
@@ -534,7 +539,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price" :class="{ 'price-strike': showFinalQuote }">{{ money(totalPrice) }}</strong></div><div v-if="showFinalQuote" class="aside-summary"><span>最终报价</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal) }}</strong></div><div v-if="!previewMode && floorQuoteTotal !== null" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price" :class="{ 'price-strike': showFinalQuote }">{{ money(totalPrice) }}</strong></div><div v-if="showFinalQuote" class="aside-summary"><span>{{ !previewMode && floorQuoteIncomplete ? '已报价商品小计' : '最终报价' }}</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal?.total) }}</strong></div><div v-if="!previewMode && floorQuoteTotal !== null && floorQuoteIncomplete" class="aside-quote-hint incomplete">含缺价 {{ floorQuoteTotal.missingCount }} 行（未计入），报价不完整</div><div v-else-if="!previewMode && floorQuoteTotal !== null" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -695,4 +700,6 @@ function detailTitle(detail: Detail | null) {
 .aside-summary .price-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #b2a79c; color: #a89b8e; font-size: 15px; font-weight: 600; }
 /* 最终报价的数据口径说明 */
 .aside-quote-hint { font-size: 10px; color: #a89b8e; margin: -7px 0 0; text-align: right; }
+/* 含缺价行时报价不完整，红色提示 */
+.aside-quote-hint.incomplete { color: #b91c1c; }
 </style>
