@@ -26,6 +26,11 @@ public class RenderPreviewController {
         access.requireFloorAccess(projectId);
         return Result.ok(service.list(projectId, zoneId));
     }
+    @GetMapping("/layout-spacing")
+    public Result<ObjectNode> layoutSpacing(@PathVariable String projectId, @RequestParam String zoneId,
+                                            @RequestParam(required = false) String confirmationId) {
+        return Result.ok(service.layoutSpacing(projectId, zoneId, confirmationId));
+    }
     @GetMapping("/{previewId}")
     public Result<ObjectNode> get(@PathVariable String projectId,@PathVariable String previewId) {
         access.requireFloorAccess(projectId);

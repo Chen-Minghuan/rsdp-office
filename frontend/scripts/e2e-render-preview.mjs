@@ -20,6 +20,7 @@ const furniture = { id: 'F1', kind: 'furniture', zoneId: zone.id, x: -5500, y: -
 let saved = { revision: 3, mode: 'design', designZoneId: zone.id, objects: [zone, furniture], files: [], blank: false }
 let boundProduct = false
 let jobs = [], submissions = [], polls = 0, mode = 'RUNNING', failedSubmission = false, loseFirstResponse = true
+let spacingReads = 0
 const byChange = new Map(), attemptedIds = []
 let browser, page
 try {
@@ -39,6 +40,19 @@ try {
     if (path.endsWith('/canvas')) {
       if (req.method() === 'PUT') saved = req.postDataJSON()
       return respond(saved)
+    }
+    if (path.endsWith('/render-previews/layout-spacing')) {
+      assert.equal(req.method(), 'GET')
+      assert.equal(url.searchParams.get('zoneId'), zone.id)
+      spacingReads++
+      const snapshot = {
+        zone: { id: zone.id, name: zone.name, zoneType: zone.zoneType, reviewUnit: zone.reviewUnit, evidenceKind: zone.evidenceKind, polygon: zone.polygon },
+        furniture: [{ id: furniture.id, zoneId: zone.id, x: furniture.x + (spacingReads === 1 ? 1 : 0), y: furniture.y,
+          w: furniture.w, h: furniture.h, rotation: furniture.rotation, label: furniture.label, furnitureTemplateId: furniture.furnitureTemplateId,
+          productId: furniture.productId }],
+      }
+      return respond({ snapshot, spacing: { version: 'furniture-spacing-v1', unit: 'mm', modules: [{ referenceId: 'F1', furnitureId: 'F1' }],
+        adjacent: [], joinedRows: [], description: '' } })
     }
     if (path.endsWith('/render-previews')) {
       if (req.method() === 'GET') return respond(jobs)
@@ -100,6 +114,11 @@ try {
   await open()
   await page.getByText('尚无效果预览', { exact: true }).waitFor()
   await page.getByTestId('render-experiment-panel').waitFor()
+  await page.getByRole('button', { name: '测量已保存的家具间距' }).click()
+  await page.getByText('当前排版与已保存版本不同，请保存后重新测量').waitFor()
+  await page.getByRole('button', { name: '测量已保存的家具间距' }).click()
+  await page.getByTestId('render-current-spacing').getByText('1 个模块 · 0 对相贴模块').waitFor()
+  assert.equal(submissions.length, 0, '测量净距不会提交生图')
   await page.getByLabel('效果图风格', { exact: true }).fill('浅木色现代办公室')
   await page.getByLabel('效果图补充偏好').fill('灰色地毯，柔和自然光')
   await page.getByRole('button', { name: '生成效果预览', exact: true }).click()

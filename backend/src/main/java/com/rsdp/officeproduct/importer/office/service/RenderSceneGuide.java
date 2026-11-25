@@ -61,7 +61,10 @@ public final class RenderSceneGuide {
                     var face=path(List.of(block.corners.get(i),block.corners.get(next),top.get(next),top.get(i)));
                     g.setColor(block.corners.get(next).y>=block.corners.get(i).y?new Color(172,184,187):new Color(192,202,203));g.fill(face);
                 }
-                g.setColor(new Color(221,229,228));g.fill(path(top));
+                var tabletop=path(top);
+                g.setColor(new Color(221,229,228));g.fill(tabletop);
+                // Touching modules share an edge. Show its seam without enlarging their gaps.
+                g.setColor(new Color(142,158,160));g.setStroke(new BasicStroke((float)(1.35/scale)));g.draw(tabletop);
             }
         } finally {g.dispose();}
         List<LabelPlacement> labels=withLabels?drawLabels(image,blocks,scale,tx,ty):List.of();

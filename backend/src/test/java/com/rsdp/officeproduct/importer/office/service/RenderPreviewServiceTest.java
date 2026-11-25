@@ -61,6 +61,14 @@ class RenderPreviewServiceTest {
         when(mapper.updateSnapshot(any())).thenReturn(1);
     }
     private void sync() { canvas.setObjects(json.convertValue(objects,new com.fasterxml.jackson.core.type.TypeReference<List<Object>>(){})); }
+    @Test void readsSpacingFromSavedLayoutWithoutSubmittingARender() {
+        var response = service.layoutSpacing("PROJECT", "ROOM", null);
+        assertEquals("F1", response.path("snapshot").path("furniture").get(0).path("id").asText());
+        var module = response.path("spacing").path("modules").get(0);
+        assertEquals("F1", module.path("furnitureId").asText());
+        assertFalse(module.has("nearest"));
+        verifyNoInteractions(provider, mapper, products);
+    }
     private RenderPreviewRequest request() {
         RenderPreviewRequest r=new RenderPreviewRequest(); r.setClientChangeId("CHANGE-1"); r.setZoneId("ROOM"); r.setCanvasRevision(3);
         r.setExpectedSnapshot(RenderPreviewScene.snapshot(objects,"ROOM")); r.setStyle("现代简约"); r.setView("ISOMETRIC"); r.setInstructions(""); return r;

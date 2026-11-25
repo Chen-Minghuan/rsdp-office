@@ -13,6 +13,7 @@ final class RenderVisualTaskPrompt {
         else text.append("图1同时决定家具数量和地面排列，后续商品参考板只提供商品外观。\n");
         text.append("商品参考图不提供家具数量、摆放位置或房间设计。将当前白模忠实转换为照片级写实的3D室内效果图，应用指定商品外观，但不重新设计房间。\n");
         text.append("场景严格保持").append(spatial.furniture().size()).append("件家具，不得新增、删除、复制或重新排列。\n");
+        if(!spatial.spacingDescription().isBlank())text.append(spatial.spacingDescription()).append('\n');
         appendProducts(text,bindings);
         appendLayout(text,spatial);
         text.append("保持所有家具原来的位置、朝向、尺寸比例、排列顺序和间距，保持房间轮廓、门窗和相机视角不变。\n");

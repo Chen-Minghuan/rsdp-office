@@ -37,6 +37,14 @@ export interface RenderSpatialImageGeometry {
   groundCenter1000: RenderPoint1000
   groundPolygon1000: RenderPoint1000[]
 }
+export interface RenderFurnitureSpacing {
+  version: 'furniture-spacing-v1'
+  unit: 'mm'
+  modules: Array<{ referenceId: string; furnitureId: string; nearest?: { referenceId: string; edgeGapMm: number; centerDistanceMm: number } }>
+  adjacent: Array<{ from: string; to: string; axis: 'width' | 'depth'; edgeGapMm: number; touching: boolean }>
+  joinedRows: string[][]
+  description: string
+}
 export interface RenderSpatialControl {
   version: 'spatial-control-v1'
   room: { planPolygon1000: RenderPoint1000[]; guidePolygon1000: RenderPoint1000[] }
@@ -47,6 +55,7 @@ export interface RenderSpatialControl {
     plan: RenderSpatialImageGeometry; guide: RenderSpatialImageGeometry
   }>
   layoutSemantics?: Array<{ description: string }>
+  furnitureSpacing?: RenderFurnitureSpacing
 }
 export interface RenderGeometryAudit {
   version: 'geometry-audit-v1'
