@@ -820,10 +820,13 @@ export const useOfficeStore = defineStore('office', {
         resizedMap.set(item.id, resized)
       }
       if (resizedMap.size === 0) return null
-      const candidates = Array.from(resizedMap.values())
-      const existing = current.map(item => resizedMap.get(item.id) ?? item)
-      const problem = officeFurnitureMoveProblem(zone, candidates, existing)
-      if (problem) return problem
+      const final = current.map(item => resizedMap.get(item.id) ?? item)
+      const zeroSpacing: OfficeLayoutSpacing = { wallMm: 0, gapMm: 0, aisleMm: 0 }
+      for (const item of final) {
+        const others = final.filter(other => other.id !== item.id)
+        const problem = officePlacementHardProblem(zone, item, others, zeroSpacing)
+        if (problem) return problem
+      }
       this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
       this.objectUpdate(() => {
         for (const [id, resized] of resizedMap) {
@@ -832,7 +835,8 @@ export const useOfficeStore = defineStore('office', {
         }
         current.forEach(entry => { entry.layoutConfirmed = false })
       })
-      const warning = officeFurnitureMoveWarning(zone, candidates)
+      const resizedItems = Array.from(resizedMap.values())
+      const warning = officeFurnitureMoveWarning(zone, resizedItems)
       return warning ? `已调整尺寸；请复核：${warning}` : null
     },
 

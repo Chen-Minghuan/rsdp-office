@@ -10,7 +10,7 @@ import { money } from '~/utils/helpers'
  * 复用既有服务端推荐/选品链路（module-recommendations / module-products）。
  * 布局参考主图+左右箭头+底部缩略图：大图浏览当前候选，下方缩略图可点选切换。
  */
-const props = defineProps<{ zoneId: string; item: FurnitureObject | null; bulkMode?: boolean }>()
+const props = defineProps<{ zoneId: string; item: FurnitureObject | null; bulkMode?: boolean; targetIds?: string[] }>()
 const show = defineModel<boolean>('show', { default: false })
 const emit = defineEmits<{ (event: 'applied', message: string): void }>()
 
@@ -74,7 +74,7 @@ async function choose() {
   applying.value = true; error.value = ''
   try {
     const response = await api.selectModuleProduct({ zoneId: result.value.zoneId, moduleId: result.value.moduleId,
-      canvasRevision: result.value.canvasRevision, allowRotation: true, productId: candidate.product.id, applyToSameModules: props.bulkMode })
+      canvasRevision: result.value.canvasRevision, allowRotation: true, productId: candidate.product.id, applyToSameModules: props.bulkMode, targetIds: props.bulkMode ? props.targetIds : undefined })
     if (!response?.canvas || !Array.isArray(response.cartItems)) throw new Error('保存结果无效，请重新读取')
     applyModuleProductSelection(store, response)
     show.value = false

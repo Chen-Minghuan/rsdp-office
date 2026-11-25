@@ -7,6 +7,7 @@ export interface ModuleRecommendationRequest {
   allowRotation: boolean
   productId?: string
   applyToSameModules?: boolean
+  targetIds?: string[]
 }
 export interface ModuleProductCandidate {
   product: Product

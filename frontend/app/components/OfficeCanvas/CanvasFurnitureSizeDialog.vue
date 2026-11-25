@@ -31,7 +31,15 @@ function apply() {
   error.value = ''
   const ids = props.itemIds?.length ? props.itemIds : [props.item.id]
   const result = store.resizeFurnitureBatch(ids, width.value, depth.value)
-  if (result) { error.value = result; return }
+  if (result) {
+    if (result.startsWith('已调整尺寸')) {
+      show.value = false
+      emit('applied', result)
+      return
+    }
+    error.value = result
+    return
+  }
   show.value = false
   emit('applied', `已更新 ${ids.length} 个家具尺寸为 ${width.value}×${depth.value}mm`)
 }

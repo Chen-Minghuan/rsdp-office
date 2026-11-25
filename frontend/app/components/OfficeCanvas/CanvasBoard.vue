@@ -985,7 +985,7 @@ function onReferencePointerDown(index: number, e: PointerEvent) {
 function beginFurnitureDrag(e: PointerEvent, p: { x: number; y: number }, ids: string[], target: { id: string } | { referenceMark: LayoutReferenceMark }) {
   canvasWindow.value?.focus({ preventScroll: true })
   drag.value = { mode: 'furniture', cx: p.x, cy: p.y, ids, dx: 0, dy: 0, ...target }
-  canvasWindow.value?.setPointerCapture(e.pointerId)
+  try { canvasWindow.value?.setPointerCapture(e.pointerId) } catch {}
   moveProblem.value = ''
 }
 
@@ -1164,9 +1164,10 @@ function onPointerDown(e: PointerEvent) {
           selectedId.value = selectedFurnitureIds.value.length === 1 ? selectedFurnitureIds.value[0]! : null
           return
         }
-        if (!selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
-        selectedId.value = selectedFurnitureIds.value.length === 1 ? id : null
-        beginFurnitureDrag(e, p, [...selectedFurnitureIds.value], { id })
+        const ids = selectedFurnitureIds.value.includes(id) ? [...selectedFurnitureIds.value] : [id]
+        selectedFurnitureIds.value = ids
+        selectedId.value = ids.length === 1 ? id : null
+        beginFurnitureDrag(e, p, ids, { id })
         return
       }
       selectedFurnitureIds.value = []

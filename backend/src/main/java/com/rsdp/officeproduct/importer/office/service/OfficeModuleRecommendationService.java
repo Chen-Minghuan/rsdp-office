@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -119,7 +120,20 @@ public class OfficeModuleRecommendationService {
         representativeMatch.setRelevanceScore(BigDecimal.valueOf(relevance.points()).add(representativeMatch.getFitRatio().multiply(BigDecimal.valueOf(15))));
         match = representativeMatch;
         if (match.getProduct().getPrice() == null || match.getProduct().getPrice().signum() <= 0) throw new BusinessException("商品尚未报价，请补齐报价后加入方案");
-        List<JsonNode> targets = request.isApplyToSameModules() ? context.sameModules() : List.of(context.module());
+        List<JsonNode> same = context.sameModules();
+        List<JsonNode> targets;
+        if (request.isApplyToSameModules() && request.getTargetIds() != null && !request.getTargetIds().isEmpty()) {
+            Set<String> targetIdSet = new HashSet<>(request.getTargetIds());
+            Set<String> allowed = same.stream().map(item -> item.path("id").asText()).collect(Collectors.toSet());
+            allowed.add(context.module().path("id").asText());
+            if (!allowed.containsAll(targetIdSet)) {
+                throw new BusinessException("批量替换目标包含不属于同组模块的家具");
+            }
+            targets = same.stream().filter(item -> targetIdSet.contains(item.path("id").asText())).toList();
+            if (targets.isEmpty()) targets = List.of(context.module());
+        } else {
+            targets = request.isApplyToSameModules() ? same : List.of(context.module());
+        }
         List<CartItemDto> lines = new ArrayList<>();
         String zoneName = context.objects().stream().filter(item -> request.getZoneId().equals(item.path("id").asText()) && "zone".equals(item.path("kind").asText())).findFirst().orElseThrow().path("name").asText();
         for (JsonNode target : targets) {
