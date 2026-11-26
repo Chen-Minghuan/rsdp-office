@@ -17,7 +17,7 @@ async function load(path) {
   return url
 }
 
-const { layoutReferenceTaskKey, mergeRecognizedMarks, cloneReferenceEditing } = await import(await load(new URL('../app/utils/layoutReference.ts', import.meta.url)))
+const { layoutReferenceTaskKey, mergeRecognizedMarks, cloneReferenceEditing, furnitureLayoutSignature } = await import(await load(new URL('../app/utils/layoutReference.ts', import.meta.url)))
 
 const mark = (overrides = {}) => ({ templateId: 'desk-straight', categoryId: 'workstation', group: 'g1', x: 0.1, y: 0.2, width: 0.16, depth: 0.11, rotation: 0, confidence: 'high', ...overrides })
 
@@ -61,4 +61,11 @@ assert.notEqual(snapshot.crop, editing.crop)
 snapshot.marks[0].x = 0.9
 assert.equal(editing.marks[0].x, 0.1, '修改快照不影响原编辑状态')
 
-console.log('PASS: layoutReferenceTaskKey, mergeRecognizedMarks (manual 保留/近似去重/异类保留/旧建议替换), cloneReferenceEditing 深拷贝与状态清空')
+// 排版签名：空画布为空串；与顺序无关；增/删/换家具都会改变签名。
+assert.equal(furnitureLayoutSignature([]), '')
+assert.equal(furnitureLayoutSignature([{ id: 'b' }, { id: 'a' }]), furnitureLayoutSignature([{ id: 'a' }, { id: 'b' }]), '签名与家具顺序无关')
+assert.notEqual(furnitureLayoutSignature([{ id: 'a' }]), furnitureLayoutSignature([{ id: 'a' }, { id: 'b' }]), '新增家具改变签名')
+assert.notEqual(furnitureLayoutSignature([{ id: 'a' }, { id: 'b' }]), furnitureLayoutSignature([{ id: 'a' }]), '移除家具改变签名')
+assert.notEqual(furnitureLayoutSignature([{ id: 'a' }]), furnitureLayoutSignature([{ id: 'c' }]), '同数量换家具也改变签名')
+
+console.log('PASS: layoutReferenceTaskKey, mergeRecognizedMarks (manual 保留/近似去重/异类保留/旧建议替换), cloneReferenceEditing 深拷贝与状态清空, furnitureLayoutSignature 排版签名')

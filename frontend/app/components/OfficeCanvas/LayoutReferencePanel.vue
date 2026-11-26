@@ -6,7 +6,7 @@ import { canvasDrawingRect, canvasZoneBounds } from '~/utils/officeCanvasView'
 import { furnitureById } from '~/utils/manualFurniture'
 import { uid } from '~/utils/helpers'
 import { deleteReferenceSelection, rotateReferenceSelection, MIXED_CATEGORY_IDS, MIXED_LAYOUT_CATEGORIES, REFERENCE_TEMPLATES } from '~/utils/mixedLayout'
-import { layoutReferenceTaskKey, mergeRecognizedMarks } from '~/utils/layoutReference'
+import { furnitureLayoutSignature, layoutReferenceTaskKey, mergeRecognizedMarks } from '~/utils/layoutReference'
 import type { LayoutReferenceTask } from '~/stores/layoutReference'
 
 const props = defineProps<{ plan: FloorPlanAnalysisResponse; zone: ZoneObject; categoryIds: string[]; existing: LayoutReference | null; problem: string }>()
@@ -33,7 +33,13 @@ const task = computed(() => taskStore.taskFor(props.zone.id, props.plan.analysis
 const busy = computed(() => task.value?.status === 'running')
 let disposed = false
 watch(category, id => { template.value = options(id)[0] || ''; addToExistingGroup.value = false }, { immediate: true })
-onUnmounted(() => { disposed = true })
+onUnmounted(() => {
+  disposed = true
+  // 面板卸载（跳转/隐藏）前把当前编辑同步进任务快照：已展示结果与展示后的用户编辑在跨页面重开时可恢复。
+  // crop 守卫避免裁图尚未完成时用空快照覆盖有效记录；显式关闭/应用成功时记录已清除，这里自动跳过。
+  const record = task.value
+  if (record && !record.dismissed && editing.value?.crop) taskStore.syncEditing(taskKey.value, editing.value)
+})
 // 识别任务记录在 store 内原地更新（对象引用不变），以 updatedAt 作为变化信号。
 watch(() => task.value?.updatedAt, () => {
   const record = task.value
@@ -88,21 +94,32 @@ onMounted(async () => {
     const keepPrevious = !keepCurrent && !!previous && JSON.stringify(previous.crop) === JSON.stringify(worldCrop)
     editing.value = { ...current, crop: worldCrop, marks: keepCurrent ? current.marks : keepPrevious ? previous!.marks.map(mark => ({ ...mark })) : [] }
     status.value = ''
-    // 恢复跨页面保留的识别任务：进行中提示识别中，已完成/失败则合并结果。
+    // 恢复跨页面保留的识别任务：进行中提示识别中，已完成/失败则合并结果；已展示过的结果随快照恢复并回显文案。
     const record = task.value
     if (record && !record.dismissed) {
       if (record.status === 'running') status.value = '正在识别裁图中的家具…'
       else if (!record.consumed) applyTaskResult(record)
+      else status.value = record.message
     }
   } catch (error) {
     if (!disposed) status.value = error instanceof Error ? '无法读取空间底图 · ' + error.message : '无法读取空间底图'
   }
 })
 
-/** 合并一次识别结果：crop 不一致说明底图范围已变化，旧结果不能并入。 */
+/** 合并一次识别结果：失败不合并（保留上一轮标记）；排版/crop 已变化的旧结果不能并入。 */
 function applyTaskResult(record: LayoutReferenceTask) {
   const current = editing.value
   if (!current?.crop) return
+  if (record.status === 'error') {
+    status.value = record.message
+    taskStore.consume(taskKey.value)
+    return
+  }
+  if (furnitureLayoutSignature(officeStore.furnitureForZone(props.zone.id)) !== record.layoutSignature) {
+    status.value = '识别期间画布排版已变化，结果已失效，请清除家具后重新识别'
+    taskStore.clear(taskKey.value)
+    return
+  }
   if (record.editing.crop && JSON.stringify(record.editing.crop) !== JSON.stringify(current.crop)) {
     status.value = '底图范围已变化，请重新识别'
     taskStore.clear(taskKey.value)
@@ -110,6 +127,8 @@ function applyTaskResult(record: LayoutReferenceTask) {
   }
   editing.value = { ...current, marks: mergeRecognizedMarks(current.marks, record.marks), selected: null, placement: null }
   status.value = record.message
+  // 快照同步为已展示结果：未应用就离开页面时按原样恢复。
+  taskStore.syncEditing(taskKey.value, editing.value)
   taskStore.consume(taskKey.value)
 }
 
@@ -128,6 +147,7 @@ async function recognize() {
     revision,
     upload: upload.value,
     editing: editing.value,
+    layoutSignature: furnitureLayoutSignature(officeStore.furnitureForZone(props.zone.id)),
     isValid: mark => options(mark.categoryId).includes(mark.templateId),
   })
 }
@@ -152,6 +172,11 @@ function add() {
 function applyCurrent() {
   const state = editing.value
   if (!state?.crop || !state.marks.length) return
+  // 兜底拦截：结果展示后画布才摆上家具时，阻止基于空画布识别的旧结果覆盖新排版。
+  if (officeStore.furnitureForZone(props.zone.id).length > 0) {
+    gateProblem.value = '请清除当前画布上的家具'
+    return
+  }
   emit('apply', { crop: state.crop, analysisId: props.plan.analysisId, revision, marks: state.marks.map(mark => ({ ...mark })), includeOtherCategories: includeOtherCategories.value })
 }
 </script>

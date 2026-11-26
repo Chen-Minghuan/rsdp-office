@@ -15,6 +15,8 @@ export interface LayoutReferenceTask {
   message: string
   /** 启动时的编辑快照，用于跨页面重开面板时恢复。 */
   editing: LayoutReferenceEditing
+  /** 识别启动时区域内已排版家具的签名；结果到达时比对，防止旧结果覆盖飞行期间的新排版。 */
+  layoutSignature: string
   /** running 期间用户显式放弃：不自动重开，settle 时丢弃结果。 */
   dismissed: boolean
   /** done/error 结果已在面板展示过。 */
@@ -86,6 +88,7 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
       revision: number
       upload: Blob
       editing: LayoutReferenceEditing
+      layoutSignature: string
       isValid: (mark: LayoutReferenceMark) => boolean
     }): Promise<void> {
       const key = layoutReferenceTaskKey(params.zoneId, params.analysisId, params.revision)
@@ -101,6 +104,7 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
         marks: [],
         message: '',
         editing: cloneReferenceEditing(params.editing),
+        layoutSignature: params.layoutSignature,
         dismissed: false,
         consumed: false,
         updatedAt: Date.now(),
@@ -131,6 +135,17 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
       })()
       inflight.set(key, promise)
       return promise
+    },
+    /**
+     * 把面板当前编辑状态同步进记录快照（结果展示后用户的确认/旋转/删除/补录），
+     * 供离开页面后重开时恢复。刻意不更新 updatedAt：updatedAt 是恢复 watch 的重开信号，
+     * 编辑同步若触发它，用户主动隐藏（Escape/切工具）后会被立即重开。
+     */
+    syncEditing(key: string, editing: LayoutReferenceEditing) {
+      const record = this.tasks[key]
+      if (!record || record.dismissed) return
+      record.editing = cloneReferenceEditing(editing)
+      this.persistRecord(record, key)
     },
     consume(key: string) {
       const record = this.tasks[key]

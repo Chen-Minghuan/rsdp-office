@@ -13,6 +13,11 @@ export function mergeRecognizedMarks(current: LayoutReferenceMark[], detected: L
   return [...manual, ...fresh]
 }
 
+/** 区域排版签名：识别启动时记录，结果到达时比对，防止旧结果覆盖飞行期间的新排版。 */
+export function furnitureLayoutSignature(items: Array<{ id: string }>): string {
+  return items.map(item => item.id).sort().join('|')
+}
+
 /** 深拷贝编辑快照：存入任务记录或恢复面板时使用，选中态与放置态不随快照保留。 */
 export function cloneReferenceEditing(editing: LayoutReferenceEditing): LayoutReferenceEditing {
   return {

@@ -26,13 +26,13 @@ referenceTasks.ensureHydrated()
 const referenceTask = computed(() => zone.value && plan.value
   ? referenceTasks.taskFor(zone.value.id, plan.value.analysisId, plan.value.analysisRevision || 1)
   : null)
-// 跨页面保留的识别任务：进行中或结果未展示时自动重开参考面板。
+// 跨页面保留的识别任务：进行中、结果未展示、或结果已展示但未应用（记录仍在）时都自动重开参考面板。
 // 任务记录在 store 内原地更新（引用不变），以 updatedAt 为变化信号；不监听 referenceEditing，
-// 因此用户主动隐藏（Escape/切工具）不被打断，仅在任务状态推进时重开。显式「返回组合布局」才是放弃。
+// 因此用户主动隐藏（Escape/切工具）不被打断，仅在任务状态推进或本面板重挂载时重开。显式「返回组合布局」才是放弃。
 watch([() => referenceTask.value?.updatedAt, () => referenceTask.value && layoutReferenceTaskKey(referenceTask.value.zoneId, referenceTask.value.analysisId, referenceTask.value.revision)], () => {
   const record = referenceTask.value
   if (!record || record.dismissed || referenceEditing.value) return
-  if (record.status === 'running' || !record.consumed) referenceEditing.value = cloneReferenceEditing(record.editing)
+  referenceEditing.value = cloneReferenceEditing(record.editing)
 }, { immediate: true })
 const hasSource = computed(() => !!(plan.value && (plan.value.previewUrl || plan.value.referenceImageUrl || plan.value.imageUrl)
   && (plan.value.previewBounds || plan.value.drawingBounds) && zone.value?.mmPerSourceUnit && zone.value.reviewUnit === 'mm'))
@@ -82,9 +82,9 @@ onUnmounted(() => {
 function openReference() {
   if (!zone.value) return
   referenceMessage.value = ''
-  // 有待处理的识别任务时从快照恢复（保留此前编辑），否则全新开始。
+  // 有未放弃的识别任务时从快照恢复（进行中、结果未展示、已展示未应用；保留此前编辑），否则全新开始。
   const record = referenceTask.value
-  referenceEditing.value = record && !record.dismissed && (record.status === 'running' || !record.consumed)
+  referenceEditing.value = record && !record.dismissed
     ? cloneReferenceEditing(record.editing)
     : { zoneId: zone.value.id, crop: null, marks: [], selected: null, placement: null }
 }
