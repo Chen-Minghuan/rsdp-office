@@ -18,7 +18,7 @@ public interface OfficeProposalConfirmationMapper {
         """)
     Row latest(@Param("floorId") String floorId);
 
-    /** 批量返回存在未失效(retired=false)确认记录的楼层 ID，用于项目阶段派生。 */
+    /** 批量返回存在未失效(retired=false)确认记录的楼层 ID，用于项目列表区域进度派生。 */
     @Select("""
         <script>
         SELECT DISTINCT floor_id FROM office_proposal_confirmation

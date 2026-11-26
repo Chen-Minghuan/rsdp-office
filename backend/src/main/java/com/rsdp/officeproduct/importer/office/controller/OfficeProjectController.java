@@ -6,6 +6,7 @@ import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProjectStatusDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectMemberDto;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeRequirementsRequest;
@@ -57,6 +58,13 @@ public class OfficeProjectController {
     public Result<OfficeProjectDto> updateProject(@PathVariable String projectId,
                                                    @RequestBody UpdateOfficeProjectRequest request) {
         return Result.ok(projectService.updateProject(projectId, request));
+    }
+
+    @PatchMapping("/{projectId}/status")
+    public Result<OfficeProjectStatusDto> updateStatus(@PathVariable String projectId,
+                                                      @RequestBody OfficeProjectStatusDto request) {
+        return Result.ok(new OfficeProjectStatusDto(projectService.updateStatus(projectId,
+            request == null ? null : request.status())));
     }
 
     @PatchMapping("/{projectId}/floors/{floorId}")

@@ -31,8 +31,52 @@ watch([() => props.project.projectId, storageScope], async ([projectId], _, onCl
 
 const floors = computed(() => [...props.project.floors].sort((a, b) => a.sortOrder - b.sortOrder))
 const cover = computed(() => props.project.referenceImages[0])
-const memberNames = computed(() => [props.project.leader, ...props.project.collaborators]
-  .flatMap(member => member ? [member.displayName || member.username] : []))
+
+const showProposalDate = ref(false)
+const proposalTargetDate = ref('')
+const proposalDateStorageKey = (projectId: string) => `rsdp-office:proposal-target-date:${projectId}`
+
+watch(() => props.project.projectId, (projectId) => {
+  const stored = localStorage.getItem(proposalDateStorageKey(projectId)) ?? ''
+  proposalTargetDate.value = /^\d{4}-\d{2}-\d{2}$/.test(stored) ? stored : ''
+}, { immediate: true })
+
+function onProposalDateSave(date: string) {
+  proposalTargetDate.value = date
+  if (date) localStorage.setItem(proposalDateStorageKey(props.project.projectId), date)
+  else localStorage.removeItem(proposalDateStorageKey(props.project.projectId))
+  showProposalDate.value = false
+}
+
+const todayStamp = ref(new Date().toDateString())
+function refreshToday() { todayStamp.value = new Date().toDateString() }
+let todayTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  todayTimer = setInterval(refreshToday, 60_000)
+  document.addEventListener('visibilitychange', refreshToday)
+})
+onBeforeUnmount(() => {
+  clearInterval(todayTimer)
+  document.removeEventListener('visibilitychange', refreshToday)
+})
+
+const proposalDays = computed(() => {
+  todayStamp.value // 跨日后触发重新计算
+  if (!proposalTargetDate.value) return null
+  const target = new Date(`${proposalTargetDate.value}T00:00:00`)
+  if (Number.isNaN(target.getTime())) return null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.max(0, Math.round((target.getTime() - today.getTime()) / 86400000))
+})
+
+const memberName = (member: { displayName: string; username: string } | null) => member ? member.displayName || member.username : ''
+const teamText = computed(() => {
+  const leader = memberName(props.project.leader)
+  const collaborators = props.project.collaborators.map(memberName).filter(Boolean)
+  if (leader && collaborators.length) return `${leader} | ${collaborators.join('；')}`
+  return leader || collaborators.join('；') || '暂无团队成员'
+})
 const budget = computed(() => {
   const { budgetTotal, budgetStatus } = loadedBudget.value ?? props.project
   if (budgetTotal == null || budgetStatus === 'UNAVAILABLE') return '—'
@@ -125,9 +169,16 @@ function roomRoute(zoneId: string) {
         <p v-else-if="budget === '—'" class="mt-1 text-xs text-neutral-600">暂无可用价格</p>
       </div>
       <div class="min-w-0 text-sm">
-        <h3 class="mb-2 font-semibold">项目团队</h3>
-        <p v-if="memberNames.length" class="wrap-break-word text-neutral-600">{{ memberNames.join(' · ') }}</p>
-        <p v-else class="text-neutral-600">暂无团队成员</p>
+        <p class="flex items-end gap-2">
+          <span class="grid text-xs leading-tight text-neutral-600"><span>距离</span><span>汇报提案</span></span>
+          <span class="text-[clamp(1.65rem,3vw,3rem)] font-bold leading-none tracking-tight tabular-nums" data-testid="proposal-countdown">{{ proposalDays ?? '—' }}</span>
+          <span v-if="proposalDays !== null" class="font-semibold">天</span>
+          <button type="button" aria-label="设置汇报提案日期" class="ml-auto rounded-lg p-2 text-neutral-600 hover:bg-accent-tint"
+            @click="showProposalDate = true"><AppIcon name="settings" /></button>
+        </p>
+        <p v-if="proposalDays === null" class="mt-1 text-xs text-neutral-600">点击右侧按钮设置提案日期</p>
+        <h3 class="mb-2 mt-3 font-semibold">项目团队</h3>
+        <p class="wrap-break-word text-xs text-neutral-600" data-testid="project-team">{{ teamText }}</p>
       </div>
     </section>
 
@@ -205,6 +256,8 @@ function roomRoute(zoneId: string) {
       </div>
     </section>
     <CustomerRequirementsDialog v-if="showRequirements" :key="project.projectId" @close="showRequirements = false" />
+    <ProposalTargetDateDialog v-if="showProposalDate" :date="proposalTargetDate"
+      @save="onProposalDateSave" @close="showProposalDate = false" />
   </div>
 </template>
 

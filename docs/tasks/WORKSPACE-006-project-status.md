@@ -3,7 +3,19 @@
 状态：已实现并通过构建、模拟 UI 和隔离 PostgreSQL 验证；真实角色页面业务验收待确认
 日期：2026-11-24
 
-## 决策变更（2026-11-24）：阶段改为按方案确认派生
+## 决策变更（2026-11-25）：恢复人工维护阶段
+
+用户要求项目列表中的项目阶段恢复手动修改：项目负责人（及所属工作区主号）点击阶段通过下拉切换 设计中/交付中/已完成，其他成员只读不显示下拉。本次取代 2026-11-24 的派生化决策（区域进度派生保留）。变更内容：
+
+- 恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`OfficeProjectStatusDto`、`OfficeProjectService.updateStatus`（校验 `DESIGNING/DELIVERING/COMPLETED`、更新时间与审计 `PROJECT_STATUS_CHANGED`）、`OfficeProjectAccessService.canManageStatus/requireStatusManager`（实际负责人或所属工作区主号，不沿用可转授的 `MANAGE_MEMBERS`）与 `OfficeProjectDto.canManageStatus`。DB 列与 CHECK 约束（含 `COMPLETED`）沿用 `20261124_project_status.sql` 迁移，无新迁移。
+- 删除读时派生 `derivedStatus`：列表与单项目接口直接读 `office_design_project.status`，新建项目仍默认 `DESIGNING`；`confirmedFloorIds` 批量查询保留，仅用于区域进度（`zoneTotal`/`zoneDelivered`）派生。
+- 前端恢复阶段下拉（`canManageStatus` 为真时可编辑，保存失败回退原值并提示），`ProjectStatus` 恢复 `COMPLETED`；工作台"已完成"看板由占位改为真实计数并参与筛选。
+- 存量项目沿用切换前的显示阶段（2026-11-26 用户确认）：新增一次性回填迁移 `20261126_project_status_backfill.sql`，按原派生口径把"存在楼层且全部楼层有未失效方案确认、仍为默认 `DESIGNING`"的项目置为 `DELIVERING`；经 `office_data_migration` 标记保证只执行一次，重跑不覆盖此后的人工修改，也不动已是 `COMPLETED` 等人工值的行。
+- `e2e-project-status.mjs` 恢复手动维护断言（负责人/主号可改、成员只读、失败回退、刷新持久）；`e2e-project-refresh.mjs` 改为"阶段不随确认自动变化、进度仍派生、外部修改的阶段随重取生效"的断言。
+
+验证结果记录于 [开发进度](../status.md) 2026-11-25 条目。
+
+## 决策变更（2026-11-24）：阶段改为按方案确认派生（已被 2026-11-25 决策取代）
 
 产品要求看板"交付中"和列表"项目阶段"列反映真实业务进度，取代人工维护。变更内容：
 
@@ -15,7 +27,7 @@
 
 实际执行（2026-11-24 本机）：`mvn -f backend/pom.xml test`（JDK 21）360 项、0 失败、0 错误、9 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；本地 dev server（3001）上 `e2e-project-status`、`MOCK_API=1 e2e:smoke`、`e2e:workflows` 均通过（均拦截 API）。未执行真实后端联调验收。
 
-> 历史记录：以下「目标」「契约与权限」「验证记录」为阶段派生化决策前的原始规格（含人工修改阶段、`PATCH .../status` 端点与 `COMPLETED` 阶段），已被上方「决策变更（2026-11-24）」取代，仅留档，不再代表现行行为。
+> 历史记录：以下「目标」「契约与权限」「验证记录」为最初的人工维护规格（含 `PATCH .../status` 端点与 `COMPLETED` 阶段），曾於 2026-11-24 被派生化决策取代，2026-11-25 起恢复为现行行为（权限口径与「契约与权限」一致）。
 
 ## 目标
 
