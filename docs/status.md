@@ -9,6 +9,8 @@
 # 开发进度与下一步
 
 2026-11-25 [WORKSPACE-006 恢复人工维护阶段](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 项目阶段由"按方案确认读时派生"改回负责人/所属工作区主号人工维护：恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`canManageStatus` 权限字段与前端阶段下拉（设计中/交付中/已完成），其他成员只读；删除 `derivedStatus`，`office_design_project.status` 恢复为唯一事实来源；区域进度（zoneTotal/zoneDelivered）保留按方案确认派生。工作台"已完成"看板由占位改为真实计数并参与筛选。`e2e-project-status` 恢复手动维护断言，`e2e-project-refresh` 改为阶段不随确认自动变化、进度仍派生的断言。实际执行（2026-11-25 本机）：`mvn -f backend/pom.xml test` 422 项、0 失败、0 错误、10 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；dev server（3001）上 `e2e:project-status`、`e2e:workflows`、`MOCK_API=1 e2e:smoke` 与自起服务的 `e2e:project-refresh` 均通过（均拦截 API）；`git diff --check` 通过。未做真实后端联调与真实角色页面验收。
+2026-11-25 [登录页主题改版](tasks/AUTH-001-user-login.md#2026-11-25-登录页主题改版) 登录页统一为工作区紫色主题，桌面双栏、窄屏上下布局。前端构建、登录专项模拟、账号隔离、工作流和冒烟通过。本地真实后端验证匿名跳转，真实账号提交与公网部署未执行。
+
 2026-11-25 [商品库混合展示](tasks/INTEG-003-office-product-review.md#商品库混合展示) 公共库与本工作区商品在同一网格搜索和分页。隔离数据库、浏览器和 RSDP 测试替身验证 56 件跨六页混排，关闭后普通员工只看到本地商品，重新开启恢复混排。Java、前端构建、模拟工作流和冒烟通过，本机前后端已更新。
 
 2026-11-25 [本地商品卡片与编辑权限](tasks/INTEG-003-office-product-review.md#本地商品卡片与编辑权限) 本地与公共库共用商品卡片和详情布局。本地浏览支持名称与型号搜索。真实隔离环境验证普通员工只读、授权后保存、撤权后拒绝写入和跨工作区隔离。Java、前端构建、模拟工作流和模拟冒烟通过，本机前后端已更新。
