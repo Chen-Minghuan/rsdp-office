@@ -60,12 +60,7 @@ public class CatalogProductFilterService {
 
     public CatalogProductPageDto pageProducts(String view, CatalogProductPageRequest request, boolean refresh) {
         List<CatalogFilterProduct> snapshot = rsdpCatalogGateway.listFilterProducts(view, refresh);
-        String term = request.normalizedSearch().toLowerCase(Locale.ROOT);
-        List<Row> base = snapshot.stream()
-            .filter(row -> matchesSearch(row.summary(), term))
-            .filter(row -> matchesStatus(row.summary(), request.getStatus()))
-            .map(row -> new Row(row, ProductFilterSupport.attributes(toSource(row))))
-            .toList();
+        List<Row> base = baseRows(snapshot, request);
         CatalogFacetsDto facets = buildFacets(base);
         ProductFilter filter = request.toFilter();
         List<Row> matching = base.stream().filter(row -> row.attributes().matches(filter)).toList();
@@ -75,6 +70,20 @@ public class CatalogProductFilterService {
         long active = snapshot.stream().filter(row -> "active".equals(row.summary().getStatus())).count();
         return new CatalogProductPageDto(matching.size(), snapshot.size(), active,
             request.getPage(), request.getSize(), rows, facets);
+    }
+
+    public CatalogFacetsDto facets(String view, CatalogProductPageRequest request, boolean refresh) {
+        if ("none".equals(view)) return CatalogFacetsDto.empty();
+        return buildFacets(baseRows(rsdpCatalogGateway.listFilterProducts(view, refresh), request));
+    }
+
+    private List<Row> baseRows(List<CatalogFilterProduct> snapshot, CatalogProductPageRequest request) {
+        String term = request.normalizedSearch().toLowerCase(Locale.ROOT);
+        return snapshot.stream()
+            .filter(row -> matchesSearch(row.summary(), term))
+            .filter(row -> matchesStatus(row.summary(), request.getStatus()))
+            .map(row -> new Row(row, ProductFilterSupport.attributes(toSource(row))))
+            .toList();
     }
 
     private CatalogFacetsDto buildFacets(List<Row> base) {

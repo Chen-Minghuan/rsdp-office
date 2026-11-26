@@ -65,6 +65,11 @@ public class CatalogProductPageRequest {
         return new ProductFilter(levels, spaceTypes, productTypes, materials, colors, widthRanges, legTypes, storageTypes);
     }
 
+    public boolean hasAdvancedFilters() {
+        return Stream.of(levels, spaceTypes, productTypes, materials, colors, widthRanges, legTypes, storageTypes)
+            .anyMatch(list -> !list.isEmpty());
+    }
+
     public String normalizedSearch() {
         return search == null ? "" : search.strip();
     }

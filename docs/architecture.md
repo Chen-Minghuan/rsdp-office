@@ -22,7 +22,11 @@
 
 ## 2. 核心数据关系（目标模型）
 
-项目阶段使用 `office_design_project.status`（`DESIGNING / DELIVERING / COMPLETED`），默认设计中，数据库非空和枚举约束由启动迁移保证。列表返回 `status`、`canManageStatus`，`PATCH /api/v1/office/projects/{projectId}/status` 仅更新阶段与更新时间并记录审计；权限限所属工作区主号和有项目查看权的实际负责人，不继承协作者的成员管理权限。普通改名/参考资料更新不回写阶段，避免并发覆盖。管理阶段独立于设计确认快照。详见 [WORKSPACE-005](tasks/WORKSPACE-006-project-status.md)。
+项目阶段由方案确认数据读时派生：项目全部楼层在 `office_proposal_confirmation` 存在未失效（`retired=false`）记录 → `DELIVERING`，否则 → `DESIGNING`（无楼层项目为设计中）。列表接口用一次 `confirmedFloorIds` 批量查询完成派生，前端只读展示，不提供人工修改入口。`office_design_project.status` 列保留但不再读取，新建项目仍写默认值。详见 [WORKSPACE-006](tasks/WORKSPACE-006-project-status.md)。
+
+项目列表接口同时返回区域进度字段 `zoneTotal` / `zoneDelivered`：区域为楼层最新画布 `objects_json` 中 `kind=zone` 的对象（每楼层取 `created_at` 最新一行，无画布按 0 计，解析失败按 0 计）；所在楼层方案已确认（交付中口径同上）**且该区域购物车数量合计 > 0**（`office_cart` 按楼层与 `zone_id` 聚合，未分区行不计入）的区域计入 `zoneDelivered`，购物车为 0 的区域视为设计中；前端按 `zoneDelivered / zoneTotal` 计算进度百分比，`zoneTotal` 为 0 时显示占位。
+
+客户端刷新契约：项目列表由应用外壳 `workspace.init()` 拉取一次，此后不随路由自动重取；派生字段（阶段、区域进度）只能由列表接口给出，因此进入工作台项目列表视图时 `workspace.refreshProjects()` 静默重取（保留旧数据避免闪烁、不重置 office 画布状态，首次加载仍由 `init()` 负责）。方案确认、确认失效（画布保存/清单变化）与新增楼层均不主动失效列表，依赖进入列表时的重取获得最新派生阶段与进度；若未来出现需要实时阶段的其他消费方（如侧栏角标），再引入版本号广播式失效。回归见 `pnpm e2e:project-refresh`。
 
 ```text
 DesignProject（项目资料与客户需求备注）
@@ -156,6 +160,10 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 Office 本地商品、规格和图片表沿用 RSDP 的款式与变体模型及毫米尺寸口径。Office 本地保存时同事务记录待发送数据，由后台向已配置的接入端自动推送。RSDP 每次录入或导入建立一张审核单，按商品保存候选和审核决定。每个获准商品独立写入正式主档、变体和来源映射。现有共享目录仍以 RSDP 正式主档为准。表结构、来源、版本和接口权限见 [INTEG-003](tasks/INTEG-003-office-product-review.md)。
 
+本地商品列表的 `search` 按名称和厂内型号匹配，分页行返回主图 ID，图片内容由单独的图片接口读取。列表、详情和图片继续按工作区隔离。列表和详情响应中的 `canWrite` 供界面显示录入和编辑操作，保存按当前服务端权限独立核验。
+
+商品库浏览入口 `GET /api/v1/products/browse` 统一返回本地和公共商品的分页结果。它从会话确定本地工作区，并按当前公共库开关决定是否读取 RSDP。两类商品按各自目录顺序交错，在一类读尽后继续另一类。分页结果保留各自的稳定 ID 和详情入口。RSDP 读取失败时接口仍返回符合筛选的本地商品，并附公共库不可用状态。
+
 审核单以最后一件商品处理完成的时间起算，满 7 天由 RSDP 数据保留任务整单清理。接收回执和精简结论与删除同事务保存，支持清理后的批次幂等回包及来源版本校验。
 
 个人商品收藏按服务端会话用户隔离：`office_favorite_folder` 保存默认分组与用户自建分组，`office_favorite_item` 以 `(folder_id,rspu_id)` 保存多分组商品关系。`rspu_id` 是 RSDP 商品弱关联，不建本地商品外键；下架不删除收藏。接口提供当前用户分组/数量/商品选择、自建分组、完整勾选事务保存及已收藏商品 ID，保存时独立核验商品可见性和分组归属。详见 [CAT-008](tasks/CAT-008-personal-favorites.md)。
@@ -269,3 +277,21 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 RENDER-004 更新：RenderProductReferences 按有效商品的 rspuId 从 image_assets 读取公共/当前变体图片，主图优先、内容去重、每款最多 4 个角度；每款参考块合图后仍限制为两板。版本 selected-products-multiview-v2，保存每张来源与摘要及实际使用张数。provider 第一张图片改为 RenderSceneGuide 的无文字立体代理图，原 referencePng 仅供平面核对；实际引导 URL 随任务保存并响应 layoutGuideUrl。正向与负向提示共同限定完整场景，不能将图纸或清单绘入场景。见 [RENDER-004](tasks/RENDER-004-multiview-products-and-scene-guide.md)。
 
 RENDER-005 更新：RenderLayoutContext 从不可变当前设计计算多边形净面积、旋转外包离墙/相邻净距、主模块行列与朝向，并按项目/空间稳定 ID/来源修订/图片摘要关联原识别记录。原始轮廓不覆盖用户几何，来源不可用可降级，门窗未知明确标记。汇总提示替代逐件大坐标清单；RenderSceneGuide 支持 L 型与镜像。测量存于服务端附件、响应 layoutContext，客户端 snapshot 投影包含排版角色/分组/设置及来源比例字段。见 [RENDER-005](tasks/RENDER-005-physical-layout-context.md)。
+
+RENDER-009 更新：RenderFurnitureBindings 从后端校验后的scene统一分配逐件F编号和按productId共享的P编号，方位由旋转外包中心与房间边界计算。RenderSceneGuide 保留45°几何；生图输入使用无文字结构图，内部审核另存带F标签版本。RenderProductReferences 将无P文字参考板按商品组顺序映射到F家具；2D工具栏和3D白模AI入口均只提交ISOMETRIC，不再上传白模相机截图，历史whiteModelView仍可读取。生成PNG后由RenderProductAuditService和QwenVisionClient做一次非权威性视觉核对，qualityAudit写回snapshot_json附件；SUCCEEDED不等于商品精确还原，不自动重新生图。静态提示词实验进一步将通用画质提示与空间数据分离：生图文字不携带毫米尺寸、商品规格或旋转角度，真实数值仍保存在任务附件；固定使用简洁的照片级3D室内效果图品质提示。见 [RENDER-009](tasks/RENDER-009-furniture-product-bindings.md)。
+
+## 生图前商品视觉理解与建筑标注（RENDER-010，实验）
+
+`experiment/render-product-agent` 在不改变 RenderPreview 三个 API 和手动生成方式的前提下，加入商品视觉档案。`ProductVisualUnderstandingService` 只输出经硬校验的商品可见证据；`RenderReferencePlanner` 决定实际选图；`RenderPromptCompiler` 决定哪些外观描述可以进入最终提示词。档案按商品/变体、原图哈希、视觉模型和协议版本缓存，任务快照保存实际档案和选图。失败回退静态 v6，不自动重试生图。
+
+`RenderArchitecturalOpenings` 是后端唯一门窗贴墙计算，`RenderLayoutContext` 的事实、`RenderSceneGuide` 的洞口和生成后建筑审核共同读取它。门窗高度仍是示意估计，未解析门洞不成为生成事实。详见 [RENDER-010](tasks/RENDER-010-product-visual-agent.md)。
+
+RENDER-010 2026-11-24 更新：新生图任务的首图、页面核对和生成后审核统一使用带 F 编号的 RenderSceneGuide，商品参考板绘制 P 编号，提示词逐件携带 F→P；平面图仍仅供人工核对。商品理解升级为 product-visual-profile-v2/reference-understanding-v2-target-audit，system 固定“商品构成→目标识别→参考适用性→目标外观”职责，user 携带动态商品记录。套组必须显式报警；可靠目标框经 RenderSubjectCropper 确定性裁剪后才可进入生图，无法可靠定位时阻断，目标裁剪不等于像素级分割且必须保留人工复核提示。原图与生成图摘要、目标框和隔离方式写入 manifest，缓存按新协议失效，历史快照不回填。详见 [RENDER-010](tasks/RENDER-010-product-visual-agent.md#2026-11-24-fp-显式生图与商品目标隔离跟进)。
+
+## 三图空间控制与位置几何审核（RENDER-011，实验）
+
+v9 曾将带F的图1/图2送入生图；真实样本出现编号和椅子复制后，v10 改为无F编号的45°结构图和平面控制图，带F白模只供审核，图3仍为带P商品板。`RenderSpatialControl` 统一世界毫米、`z=0`地面轮廓和两套`0～1000`投影坐标；`RenderLayoutSemantics` 从坐标生成两排直线、顺序、间距、旋转和头尾关系，视觉智能体不得决定这些事实。`RenderGeometryAuditService` 不再向观测模型提供预期数量或坐标，只要求其从结果图穷举实例；随后由 `RenderGeometryMetrics` 独立进行一对一匹配，计算中心偏移和地面IoU，类别不覆盖几何。所有输入、映射和审核保存在原任务快照，不新增映射表，不自动重试收费生图。详见 [RENDER-011](tasks/RENDER-011-spatial-layout-control.md)。
+
+## 提示词与参考图对照实验（RENDER-012，实验）
+
+RenderGenerationOptions 显式定义 A/B/C/D/E；缺省使用正式 E（完整技术提示词＋Direct）。RenderVisualTaskPrompt 从同一 RenderLayoutSemantics 结构化事实生成无坐标 JSON 的精简任务，Java 仍保存完整空间事实。C 只从生图输入移除平面图，审核继续使用；D/E 使用 prompt_extend=direct，其中 E 保留 A 的完整技术提示词。实验参数、seed、实际图片角色与哈希进入原任务快照并参与幂等，不新增表、不自动批量收费生图。任务快照另存 generationTiming 时间戳，接口计算准备、提交、服务生成和图片下载耗时，页面实时显示等待及最终耗时；Direct 改写包含在服务生成阶段，当前不能单独拆分。详见 [RENDER-012](tasks/RENDER-012-prompt-ab-experiment.md)。

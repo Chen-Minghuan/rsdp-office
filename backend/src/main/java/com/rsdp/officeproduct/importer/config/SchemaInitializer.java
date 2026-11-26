@@ -71,6 +71,7 @@ public class SchemaInitializer {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261123_office_project_favorites.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_product_scheme.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_local_products.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261125_office_local_product_images.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_simple_office_permissions.sql"));
             Resource legacyFloorPlanStorage = new ClassPathResource("db/migrations/20261124_remove_unused_floor_plan_storage.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(legacyFloorPlanStorage), false, false, "--",

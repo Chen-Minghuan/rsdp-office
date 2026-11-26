@@ -7,6 +7,7 @@ const context = await browser.newContext({ viewport: { width: 1600, height: 1000
 const page = await context.newPage()
 const pageErrors = []
 page.on('pageerror', error => pageErrors.push(error.message))
+page.on('console', message => { if (message.type() === 'error') console.error('CONSOLE:', message.text().slice(0, 300)) })
 
 const SPACE_RULES = [['职员台', 'STAFF'], ['主管台', 'MANAGER'], ['高管台', 'SENIOR_MANAGER'], ['总裁台', 'PRESIDENT'],
   ['会议台', 'MEETING'], ['洽谈台', 'NEGOTIATION'], ['前台', 'RECEPTION'], ['茶台', 'PANTRY'], ['茶水柜', 'PANTRY']]
@@ -41,6 +42,16 @@ function storageTypeOf(product) {
   }
   return 'UNSPECIFIED'
 }
+function widthRangeOf(width) {
+  if (width == null) return 'UNSPECIFIED'
+  if (width <= 1000) return 'LE_1000'
+  if (width <= 1200) return 'R1000_1200'
+  if (width <= 1600) return 'R1200_1600'
+  if (width <= 2000) return 'R1600_2000'
+  if (width <= 2400) return 'R2000_2400'
+  if (width <= 2800) return 'R2400_2800'
+  return 'GT_2800'
+}
 
 const products = []
 let seq = 0
@@ -58,17 +69,6 @@ for (let k = 1; k <= 20; k++) add(`1.6米主管台 ${k}`, '纳柯+液态银', '�
 for (let k = 1; k <= 5; k++) add(`2米文件柜 ${k}`, '雅士白', '高柜', 'PB', 1200, 'active')
 for (let k = 1; k <= 5; k++) add(`办公椅 ${k}`, '液态银', '', 'WO', 600, 'active')
 for (let k = 1; k <= 10; k++) add(`1.2米双人位 ${k}`, '雅士白', '', 'WO', 1200, 'inactive')
-
-function widthRangeOf(width) {
-  if (width == null) return 'UNSPECIFIED'
-  if (width <= 1000) return 'LE_1000'
-  if (width <= 1200) return 'R1000_1200'
-  if (width <= 1600) return 'R1200_1600'
-  if (width <= 2000) return 'R1600_2000'
-  if (width <= 2400) return 'R2000_2400'
-  if (width <= 2800) return 'R2400_2800'
-  return 'GT_2800'
-}
 
 function buildFacets(base) {
   const tally = values => values.reduce((map, value) => map.set(value, (map.get(value) || 0) + 1), new Map())
@@ -107,6 +107,12 @@ let failNextPage = false
 let delayNextPageMs = 0
 const pageRequests = []
 
+function filterBase(params) {
+  return products.filter(product => (
+    !params.search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(params.search))
+  ) && (!params.status || (params.status === 'active' ? product.status === 'active' : product.status !== 'active')))
+}
+
 await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
 await context.route('**/api/v1/**', async route => {
   const request = route.request()
@@ -114,12 +120,25 @@ await context.route('**/api/v1/**', async route => {
   const respond = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ code: status, message: status === 200 ? '成功' : '服务暂不可用', data }) })
   if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: false })
   if (url.pathname === '/api/v1/office/workspace/shared-catalog') return respond({ workspaceEnabled: true, dealer: false, effectiveVisible: true })
-  if (url.pathname === '/api/v1/products/page' && request.method() === 'GET') {
+  if (url.pathname === '/api/v1/products/browse/facets') {
+    const params = {
+      search: (url.searchParams.get('search') || '').toLowerCase(),
+      status: url.searchParams.get('status') || '',
+    }
+    return respond({
+      localCategories: [], sharedCategories: [], sharedUnavailable: false,
+      colors: [...new Set(products.map(product => product.colorPrimaryName).filter(Boolean))],
+      advanced: buildFacets(filterBase(params)),
+    })
+  }
+  if (url.pathname === '/api/v1/products/browse' && request.method() === 'GET') {
     const params = {
       page: Number(url.searchParams.get('page') || 1),
       size: Number(url.searchParams.get('size') || 20),
       search: (url.searchParams.get('search') || '').toLowerCase(),
       status: url.searchParams.get('status') || '',
+      color: url.searchParams.get('color') || '',
+      category: url.searchParams.get('category') || '',
       levels: url.searchParams.getAll('levels'),
       spaceTypes: url.searchParams.getAll('spaceTypes'),
       productTypes: url.searchParams.getAll('productTypes'),
@@ -128,15 +147,11 @@ await context.route('**/api/v1/**', async route => {
       widthRanges: url.searchParams.getAll('widthRanges'),
       legTypes: url.searchParams.getAll('legTypes'),
       storageTypes: url.searchParams.getAll('storageTypes'),
-      refresh: url.searchParams.get('refresh'),
     }
     pageRequests.push(params)
     if (failNextPage) return respond(null, 500)
     if (delayNextPageMs) { const delay = delayNextPageMs; delayNextPageMs = 0; await new Promise(resolve => setTimeout(resolve, delay)) }
-    const base = products.filter(product => (
-      !params.search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(params.search))
-    ) && (!params.status || (params.status === 'active' ? product.status === 'active' : product.status !== 'active')))
-    const matching = base.filter(product => (
+    const matching = filterBase(params).filter(product => (
       (!params.levels.length || params.levels.includes(product.productLevel))
       && (!params.spaceTypes.length || params.spaceTypes.includes(spaceTypeOf(product.productName)))
       && (!params.productTypes.length || params.productTypes.includes(productTypeOf(product.productName)))
@@ -145,14 +160,14 @@ await context.route('**/api/v1/**', async route => {
       && (!params.widthRanges.length || params.widthRanges.includes(widthRangeOf(product.width)))
       && (!params.legTypes.length || legTypesOf(product).some(leg => params.legTypes.includes(leg)))
       && (!params.storageTypes.length || params.storageTypes.includes(storageTypeOf(product)))
+      && (!params.color || (product.colorPrimaryName || '').trim() === params.color)
     ))
     return respond({
-      page: params.page, size: params.size,
       rows: matching.slice((params.page - 1) * params.size, params.page * params.size)
-        .map(({ description, material, width, ...summary }) => summary),
+        .map(({ description, material, width, ...summary }) => ({ local: null, shared: summary })),
       total: matching.length, catalogTotal: products.length,
       activeTotal: products.filter(product => product.status === 'active').length,
-      facets: buildFacets(base),
+      localTotal: 0, canManageLocal: false, sharedUnavailable: false,
     })
   }
   if (/^\/api\/v1\/products\/P-\d+$/.test(url.pathname) && request.method() === 'GET') {
@@ -179,6 +194,7 @@ const dialog = page.getByRole('dialog', { name: '全部筛选' })
 const cards = page.locator('[aria-label="商品卡片列表"] > *')
 const chips = page.locator('.active-filter-chip')
 const totalText = () => page.getByText(/共 \d+ 件商品/).first().innerText()
+const quickColor = page.getByRole('combobox', { name: '筛选商品颜色' })
 
 async function openDialog() {
   await page.getByRole('button', { name: /^全部筛选/ }).click()
@@ -186,6 +202,10 @@ async function openDialog() {
 }
 async function pickGroup(group, optionName) {
   await dialog.locator(`section[aria-label="${group}"]`).getByRole('button', { name: optionName, exact: true }).click()
+}
+async function closeDialog() {
+  await dialog.getByRole('button', { name: '完成', exact: true }).click()
+  await dialog.waitFor({ state: 'hidden' })
 }
 
 try {
@@ -199,8 +219,8 @@ try {
   await openDialog()
   const gridBox = await page.locator('[aria-label="商品卡片列表"]').boundingBox()
   const dialogBox = await dialog.boundingBox()
-  assert.ok(dialogBox.y > 100, '抽屉从工具栏下方开始，不覆盖页面头部')
-  assert.ok(gridBox.x + gridBox.width <= dialogBox.x + 1, '商品区左移不被抽屉遮挡')
+  assert.ok(dialogBox.y > 100, '面板从工具栏区域开始')
+  assert.ok(gridBox.x + gridBox.width <= dialogBox.x + 1, '商品区不被面板遮挡')
 
   // 再次点击全部筛选按钮收起，再打开
   await page.getByRole('button', { name: /^全部筛选/ }).click()
@@ -209,7 +229,7 @@ try {
   await pickGroup('空间类型', '职员空间')
   await page.waitForFunction(() => document.body.innerText.includes('共 60 件商品'))
   assert.equal(await chips.count(), 1)
-  assert.equal(await dialog.isVisible(), true, '点选后弹层保持打开可继续多选')
+  assert.equal(await dialog.isVisible(), true, '点选后面板保持打开可继续多选')
   assert.equal(pageRequests.at(-1).page, 1)
   assert.deepEqual(pageRequests.at(-1).spaceTypes, ['STAFF'])
 
@@ -219,16 +239,14 @@ try {
   assert.equal(await chips.count(), 0)
 
   // 完成关闭，已应用条件保留
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
   assert.equal(await chips.count(), 0)
 
   // 弹层回显 + Esc 关闭不改变已应用条件
   await openDialog()
   await pickGroup('空间类型', '职员空间')
   await page.waitForFunction(() => document.body.innerText.includes('共 60 件商品'))
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
   await openDialog()
   assert.equal(await dialog.locator('section[aria-label="空间类型"]').getByRole('button', { name: '职员空间', exact: true }).getAttribute('aria-pressed'), 'true')
   await page.keyboard.press('Escape')
@@ -241,8 +259,7 @@ try {
   await dialog.getByRole('button', { name: '清空', exact: true }).click()
   await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
   assert.equal(await chips.count(), 0)
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
 
   // 滚动时页签追踪分组
   await openDialog()
@@ -252,16 +269,14 @@ try {
   await page.locator('.af-body').evaluate(el => { el.scrollTop = 0 })
   await page.waitForTimeout(250)
   assert.equal((await dialog.locator('.af-tab.is-active').innerText()).trim(), '产品等级', '滚回顶部页签追踪到产品等级')
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
 
   // 尺寸区间筛选
   await openDialog()
   await pickGroup('尺寸分类', '1.2–1.6m')
   await page.waitForFunction(() => document.body.innerText.includes('共 80 件商品'))
   assert.deepEqual(pageRequests.at(-1).widthRanges, ['R1200_1600'])
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
   await chips.filter({ hasText: '1.2–1.6m' }).waitFor()
 
   // 单删标签
@@ -269,14 +284,17 @@ try {
   await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
   assert.equal(await chips.count(), 0)
 
-  // 快捷下拉与弹层同步
-  await page.getByRole('combobox', { name: '筛选产品分类' }).selectOption('CHAIR')
+  // 快捷颜色筛选独立于高级筛选标签
+  await quickColor.selectOption('液态银')
+  await page.waitForFunction(() => document.body.innerText.includes('共 5 件商品'))
+  assert.equal(await chips.count(), 0)
+
+  // 高级筛选叠加快捷条件
+  await openDialog()
+  await pickGroup('产品分类', '椅类')
   await page.waitForFunction(() => document.body.innerText.includes('共 5 件商品'))
   assert.equal(await chips.count(), 1)
-  await openDialog()
-  assert.equal(await dialog.locator('section[aria-label="产品分类"]').getByRole('button', { name: '椅类', exact: true }).getAttribute('aria-pressed'), 'true')
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
 
   // 应用失败保留旧列表并提示，重试成功
   failNextPage = true
@@ -291,16 +309,17 @@ try {
   await pickGroup('收纳分类', '高柜')
   await page.getByText('没有找到匹配的商品').waitFor()
   assert.equal(await chips.count(), 2)
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
 
-  // 清空全部标签
+  // 清空全部高级标签，快捷颜色仍生效；再清空快捷条件恢复 100
   await page.getByRole('button', { name: '清空全部', exact: true }).click()
-  await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
+  await page.waitForFunction(() => document.body.innerText.includes('共 5 件商品'))
   assert.equal(await chips.count(), 0)
+  await quickColor.selectOption('')
+  await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
 
-  // 筛选后回到第一页
-  await page.getByRole('combobox', { name: '筛选商品主色' }).selectOption('蜜芽胡桃')
+  // 搜索后筛选回到第一页
+  await page.getByLabel('搜索商品名称或编码').fill('职员台')
   await page.waitForFunction(() => document.body.innerText.includes('共 60 件商品'))
   await page.getByRole('button', { name: '下一页' }).click()
   await page.waitForFunction(() => document.body.innerText.includes('正在显示 21–40'))
@@ -308,30 +327,33 @@ try {
   await pickGroup('产品等级', 'B级')
   assert.equal(pageRequests.at(-1).page, 1)
   await page.waitForFunction(() => document.body.innerText.includes('正在显示 1–20'))
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
+
+  // 清空条件恢复全部
+  await page.getByRole('button', { name: '清空条件', exact: true }).click()
+  await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
 
   // 过期响应不覆盖新条件
-  await page.getByRole('button', { name: '清空全部', exact: true }).click()
-  await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
   delayNextPageMs = 900
-  void page.getByRole('combobox', { name: '筛选产品分类' }).selectOption('DESK')
+  void quickColor.selectOption('雅士白')
   await page.waitForTimeout(80)
-  await page.getByRole('combobox', { name: '筛选产品分类' }).selectOption('CHAIR')
+  await quickColor.selectOption('液态银')
   await page.waitForFunction(() => document.body.innerText.includes('共 5 件商品'), null, { timeout: 5000 })
   await page.waitForTimeout(1400)
   assert.match(await totalText(), /共 5 件商品/)
-  assert.equal(await chips.count(), 1)
-  assert.equal(await page.getByRole('combobox', { name: '筛选产品分类' }).inputValue(), 'CHAIR')
+  assert.equal(await quickColor.inputValue(), '液态银')
 
-  // 刷新携带 refresh=true 并保留已应用筛选
+  // 刷新保留高级筛选
+  await openDialog()
+  await pickGroup('产品分类', '椅类')
+  await page.waitForFunction(() => document.body.innerText.includes('共 5 件商品'))
+  await closeDialog()
   await page.getByRole('button', { name: '刷新商品列表' }).click()
   await page.waitForFunction(() => document.body.innerText.includes('共 5 件商品'))
   await page.waitForTimeout(300)
-  assert.equal(pageRequests.at(-1).refresh, 'true')
   assert.deepEqual(pageRequests.at(-1).productTypes, ['CHAIR'])
 
-  // 抽屉打开时可直接点击商品进入详情（非模态）
+  // 面板打开时可直接点击商品进入详情（非模态）
   await openDialog()
   await page.locator('[aria-label="商品卡片列表"] a').first().click()
   await page.waitForURL(/\/products\/P-\d+/)
@@ -345,17 +367,18 @@ try {
   assert.ok(footer, '底部按钮区域应可见')
   assert.ok(footer.y + footer.height <= 844, '底部按钮应完整位于视口内')
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '弹层不得产生横向溢出')
-  await dialog.getByRole('button', { name: '完成', exact: true }).click()
-  await dialog.waitFor({ state: 'hidden' })
+  await closeDialog()
 
   assert.deepEqual(pageErrors, [], `页面脚本错误: ${pageErrors.join('; ')}`)
   console.log('e2e-product-filters: all assertions passed')
 } catch (error) {
+  await page.screenshot({ path: 'C:/Users/34717/AppData/Local/Temp/merge-debug.png' }).catch(() => {})
+  console.error('BODY_TEXT:', (await page.locator('body').innerText()).slice(0, 600))
   console.error('PAGE_REQUESTS:', JSON.stringify(pageRequests.map(params => ({
     page: params.page, status: params.status, search: params.search, levels: params.levels,
     spaceTypes: params.spaceTypes, productTypes: params.productTypes, materials: params.materials,
     colors: params.colors, widthRanges: params.widthRanges, legTypes: params.legTypes,
-    storageTypes: params.storageTypes, refresh: params.refresh,
+    storageTypes: params.storageTypes, color: params.color,
   })), null, 1))
   throw error
 } finally {

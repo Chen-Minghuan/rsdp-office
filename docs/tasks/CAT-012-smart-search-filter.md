@@ -112,3 +112,10 @@ UI 回归与冒烟均为接口拦截/模拟，不作为真实接口验收证据�
 - 筛选面板从视口右侧固定抽屉改为 `.catalog-split` 内嵌网格列，顺序为 商品区 | 筛选面板(400px) | 自选组合+收藏夹，即两者位置互换；641–1099px 仍为右侧固定抽屉，≤640px 全屏。
 - 面板上沿对齐筛选工具栏区域顶部（`--af-top` 决定高度并 sticky 跟随），补齐此前工具栏下方的空白。
 - 「全部筛选」按钮改为开合切换：再点一次即收起。E2E 新增按钮二次点击收起断言；筛选/workflows/favorites/smoke 全部通过，`pnpm build` 退出码 0。
+
+## 2026-11-25 合并 upstream/main：browse 链路整合
+
+- 上游将商品库改为 `/products/browse`（公共库+本地商品混排、本地分类、quick 分类/颜色）。合并后八组高级筛选接入同一 browse 链路：`ProductCatalogBrowseService.page` 增加 `CatalogProductPageRequest`，有高级筛选时走 `rsdp.listFilterProducts` + `ProductFilter`（本地商品不参与高级筛选）；`/browse/facets?search&status` 返回 `advanced` 分组（`CatalogProductFilterService.facets` 复用基础集）。
+- 页面保留上游 quick 分类/颜色与本地商品展示；高级面板、标签、即时应用/失败回滚、内嵌互换布局全部保留；resetFilters 同时清空 quick 条件。`/products/page` 旧入口保留未删。
+- 冲突文件：RsdpCatalogGateway（双方方法并存）、index.vue（状态/监听/模板融合）、useOfficeApi、workflows、e2e-product-filters（重写为 browse mock）、README/status。
+- 验证：后端全量 `mvn test` 退出码 0（browse 测试更新签名并新增高级筛选用例）；`pnpm build` 退出码 0；筛选/workflows/favorites/smoke 四套 E2E 全部通过。

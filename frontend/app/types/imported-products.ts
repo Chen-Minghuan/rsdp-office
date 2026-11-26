@@ -1,3 +1,5 @@
+import type { LocalProductCatalogItem } from './local-products'
+
 export interface CatalogCapabilities {
   managed: boolean
 }
@@ -148,4 +150,24 @@ export interface CatalogProductPage {
   page: number
   size: number
   facets: CatalogFacets
+}
+
+export type CatalogBrowseRow = { local: LocalProductCatalogItem, shared: null } | { local: null, shared: ImportedProduct }
+
+export interface CatalogBrowsePage {
+  rows: CatalogBrowseRow[]
+  total: number
+  catalogTotal: number
+  activeTotal: number
+  localTotal: number
+  canManageLocal: boolean
+  sharedUnavailable: boolean
+}
+
+export interface CatalogBrowseFacets {
+  localCategories: string[]
+  sharedCategories: string[]
+  colors: string[]
+  sharedUnavailable: boolean
+  advanced?: CatalogFacets
 }

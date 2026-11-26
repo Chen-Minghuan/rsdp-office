@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import type { FurnitureObject } from '~/types/office'
-import { buildWhiteModelScene, facilityKindLabel, obstacleKindLabel, WHITE_MODEL_FLOOR_THICKNESS_MM, type WhiteModelScene } from '~/utils/whiteModel'
+import { buildWhiteModelScene, facilityKindLabel, obstacleKindLabel, WHITE_MODEL_FLOOR_THICKNESS_MM, WHITE_MODEL_WALL_HEIGHT_MM, type WhiteModelScene } from '~/utils/whiteModel'
 import { furnitureById } from '~/utils/manualFurniture'
 import { officeFurnitureMoveProblem, officeFurnitureMoveWarning } from '~/utils/officeManualPlacement'
 import { reconcileSelection, shouldStartDrag } from '~/utils/furniture3d/selection'
@@ -15,6 +15,9 @@ import { buildWindowModel } from '~/utils/furniture3d/windowModel'
 import { buildWallGeometry } from '~/utils/furniture3d/wallGeometry'
 import { buildDoorModel } from '~/utils/furniture3d/doorModel'
 import { workstationSeatGeometry, type WorkstationSeat } from '~/utils/furniture3d/workstationSeating'
+import { obstacleRing } from '~/utils/spatial/obstacles'
+import { planRoomDecor, roomDecorThemes, type RoomDecorTheme } from '~/utils/furniture3d/roomDecorPlan'
+import { buildRoomDecorMeshes } from '~/utils/furniture3d/roomDecorMeshes'
 
 /**
  * 交互式 3D 白模（RENDER-003 初版，RENDER-004 升级）。
@@ -31,8 +34,8 @@ const props = withDefaults(defineProps<{
 }>(), { zoneId: '', readonly: false, inline: false })
 
 const show = defineModel<boolean>('show', { default: false })
-/** ai-render 携带当前视角截图（data:image/png;base64,...），作为 AI 效果图的结构参考（RENDER-006）。 */
-const emit = defineEmits<{ (event: 'ai-render', viewImage: string): void; (event: 'locate', id: string): void }>()
+/** AI生成统一使用后端45°家具定位结构参考；3D预览仅负责打开发起入口。 */
+const emit = defineEmits<{ (event: 'ai-render'): void; (event: 'locate', id: string): void }>()
 
 const store = useOfficeStore()
 const api = useOfficeApi()
@@ -53,6 +56,16 @@ const hoverLabel = ref('')
 const productsError = ref('')
 const notice = ref('')
 const showProductSelector = ref(false)
+const finish = ref<'model' | RoomDecorTheme>('model')
+const photoView = ref<'overview' | 'eye'>('overview')
+const decorated = computed(() => finish.value !== 'model')
+const inspectionOnly = computed(() => props.readonly || decorated.value)
+const decorPlan = computed(() => {
+  if (finish.value === 'model' || !sceneData.value || !zone.value) return null
+  const room = zone.value
+  const doorClearances = (room.obstacles ?? []).filter(item => item.kind === 'DOOR_CLEARANCE').map(item => obstacleRing(room, item))
+  return planRoomDecor(sceneData.value, furniture.value, finish.value, doorClearances)
+})
 
 const selectedItem = computed(() => furniture.value.find(item => item.id === selectedId.value) || null)
 // 列表按模块与布局规格合并职员桌，商品绑定/排版来源不拆行；属性仍读取实际选中实例。
@@ -93,6 +106,7 @@ let groundMarker: THREE.Group | null = null
 let selectionFrame: THREE.LineSegments | null = null
 let sun: THREE.DirectionalLight | null = null
 let fill: THREE.DirectionalLight | null = null
+let decorMeshes: ReturnType<typeof buildRoomDecorMeshes> | null = null
 const furnitureMeshes = new Map<string, THREE.Object3D>()
 /** 点击与拖动分离：按下只记录，超过阈值才进入拖动（只读模式不拖动）。 */
 let pointerDown: { x: number; y: number; id: string } | null = null
@@ -279,6 +293,8 @@ function rebuild() {
   if (!root || !sceneData.value) return
   for (const child of [...root.children]) disposeObjectTree(child, sharedMaterials)
   root.clear()
+  decorMeshes?.texture?.dispose()
+  decorMeshes = decorPlan.value ? buildRoomDecorMeshes(decorPlan.value) : null
   furnitureMeshes.clear()
   modelToken++
   const data = sceneData.value
@@ -286,28 +302,48 @@ function rebuild() {
   // 地板与墙体
   // ExtrudeGeometry 分组 0=顶/底面、1=侧面 → [木地板, 断面深色]
   const floorGeo = new THREE.ExtrudeGeometry(polygonShape(data.floor), { depth: WHITE_MODEL_FLOOR_THICKNESS_MM, bevelEnabled: false })
-  const floor = new THREE.Mesh(floorGeo, [MATERIALS.floor, MATERIALS.floorSide])
+  const floor = new THREE.Mesh(floorGeo, [decorMeshes?.floor ?? MATERIALS.floor, decorMeshes?.floorEdge ?? MATERIALS.floorSide])
   floor.geometry.rotateX(-Math.PI / 2)
   floor.position.y = -WHITE_MODEL_FLOOR_THICKNESS_MM
   floor.receiveShadow = true
   root.add(floor)
-  for (const wall of data.walls) {
+  for (const [wallIndex, wall] of data.walls.entries()) {
     const length = Math.hypot(wall.b[0] - wall.a[0], wall.b[1] - wall.a[1])
     if (length < 1) continue
     const geo = buildWallGeometry(wall)
-    const mesh = new THREE.Mesh(geo, MATERIALS.wall)
+    const mesh = new THREE.Mesh(geo, decorMeshes?.wall ?? MATERIALS.wall)
+    mesh.userData.decorWallIndex = wallIndex
     mesh.position.set(C.x(wall.a[0]), 0, C.z(wall.a[1]))
     mesh.rotation.y = Math.atan2(wall.b[1] - wall.a[1], wall.b[0] - wall.a[0])
     mesh.castShadow = true
     mesh.receiveShadow = true
-    edgeLines(mesh, geo)
+    if (!decorated.value) edgeLines(mesh, geo)
     root.add(mesh)
   }
-  for (const window of data.windows) root.add(buildWindowModel(window))
-  for (const door of data.doors) root.add(buildDoorModel(door))
+  for (const window of data.windows) {
+    const model = buildWindowModel(window)
+    model.userData.decorWallIndex = window.wallIndex
+    root.add(model)
+  }
+  for (const door of data.doors) {
+    const model = buildDoorModel(door)
+    model.userData.decorWallIndex = door.wallIndex
+    root.add(model)
+  }
+  if (decorMeshes) {
+    // Ceiling is a finish surface for the interior view. Keep the overview open.
+    const ceilingGeometry = new THREE.ShapeGeometry(polygonShape(data.floor))
+    ceilingGeometry.rotateX(-Math.PI / 2)
+    const ceiling = new THREE.Mesh(ceilingGeometry, new THREE.MeshStandardMaterial({
+      color: '#eeede8', roughness: 1, side: THREE.DoubleSide,
+    }))
+    ceiling.position.y = Math.min(...data.walls.map(wall => wall.heightMm))
+    decorMeshes.fixtures.add(ceiling)
+    root.add(decorMeshes.decor)
+  }
 
   // 布置区（仅展示）
-  for (const region of data.regions) {
+  for (const region of decorated.value ? [] : data.regions) {
     const geo = new THREE.ShapeGeometry(polygonShape(region))
     geo.rotateX(-Math.PI / 2)
     const mesh = new THREE.Mesh(geo, MATERIALS.region)
@@ -317,6 +353,7 @@ function rebuild() {
 
   // 家具与障碍体积
   for (const volume of data.volumes) {
+    if (decorated.value && (volume.tone === 'noPlacement' || volume.tone === 'doorClearance')) continue
     let mesh: THREE.Mesh
     if (volume.ring && volume.ring.length >= 3) {
       const geo = new THREE.ExtrudeGeometry(polygonShape(volume.ring), { depth: volume.heightMm, bevelEnabled: false })
@@ -330,8 +367,8 @@ function rebuild() {
       // 画布 (x,y 向下) → three (x,z=-y) 的映射本身带镜像，顺时针画布角 = 正 rotation.y
       // （与墙体 atan2(dy,dx) 同号）；取反会让 90/270° 的异形家具朝向反转。
       mesh.rotation.y = (volume.rotDeg * Math.PI) / 180
-      edgeLines(mesh, geo)
-      if (volume.source === 'furniture') {
+      if (!decorated.value) edgeLines(mesh, geo)
+      if (!decorated.value && volume.source === 'furniture') {
         // 接地阴影板：让白色家具从地板中分离出来
         const pad = new THREE.Mesh(new THREE.BoxGeometry(volume.w + 90, 15, volume.d + 90), MATERIALS.contactShadow)
         pad.position.set(C.x(volume.cx), 8, C.z(volume.cy))
@@ -368,13 +405,13 @@ function rebuild() {
     }
   }
 
-  for (const seat of data.workstationSeats) {
+  for (const seat of decorated.value ? [] : data.workstationSeats) {
     const desk = furnitureMeshes.get(seat.deskId)
     if (desk) addWorkstationSeat(desk, seat)
   }
 
   // 设施标注
-  for (const facility of data.facilities) {
+  for (const facility of decorated.value ? [] : data.facilities) {
     const material = facilityMaterial(FACILITY_COLORS[facility.kind] ?? 0x9a938a)
     if (facility.shape === 'point') {
       const [x, y] = facility.points[0]!
@@ -414,6 +451,7 @@ function rebuild() {
   // 仅在空间轮廓变化时重置相机，家具编辑/选中不重置视角
   const floorKey = JSON.stringify(data.floor)
   if (floorKey !== framedFloorKey) { frameCamera(data); framedFloorKey = floorKey }
+  applyPhotoView()
   syncSelectionVisuals()
   void upgradeFurnitureModels(data)
 }
@@ -442,7 +480,7 @@ async function upgradeFurnitureModels(data: WhiteModelScene) {
       root.add(model)
       addHitProxy(model, volume, volume.heightMm / 2)
       const seat = data.workstationSeats.find(seat => seat.deskId === volume.id)
-      if (seat) addWorkstationSeat(model, seat)
+      if (seat && !decorated.value) addWorkstationSeat(model, seat)
       furnitureMeshes.set(volume.id, model)
     } catch {
       // 模型缺失/加载失败：回退白模方块，不阻断交互
@@ -472,6 +510,65 @@ function frameCamera(data: WhiteModelScene) {
     fill.position.set(C.x(cx) - span * 0.6, span * 0.9, C.z(cy) - span * 0.55)
     fill.target.position.set(C.x(cx), 0, C.z(cy))
   }
+}
+
+function applyPhotoView() {
+  const plan = decorPlan.value, data = sceneData.value
+  if (!plan || !data || !camera || !controls || !root || !decorMeshes) return
+  const useEye = photoView.value === 'eye' && !!plan.eye
+  if (useEye && plan.eye) {
+    camera.position.set(plan.eye.position[0], 1600, C.z(plan.eye.position[1]))
+    controls.target.set(plan.eye.target[0], 1380, C.z(plan.eye.target[1]))
+  } else {
+    frameCamera(data)
+    if (plan.eye) {
+      const span = Math.max(data.bounds.maxX - data.bounds.minX, data.bounds.maxY - data.bounds.minY, 2000)
+      const direction = new THREE.Vector2(plan.eye.position[0] - controls.target.x, C.z(plan.eye.position[1]) - controls.target.z).normalize()
+      if (direction.lengthSq() > 0) {
+        camera.position.set(controls.target.x + direction.x * span * 0.98, span * 1.32, controls.target.z + direction.y * span * 0.98)
+      }
+    }
+    const target = controls.target
+    target.y = 400
+    const projected = new THREE.Vector3()
+    for (let attempt = 0; attempt < 3; attempt++) {
+      camera.lookAt(target)
+      camera.updateMatrixWorld()
+      const reach = Math.max(...data.floor.flatMap(([x, y]) => [0, WHITE_MODEL_WALL_HEIGHT_MM].map(height => {
+        projected.set(x, height, C.z(y)).project(camera!)
+        return Math.max(Math.abs(projected.x), Math.abs(projected.y))
+      })))
+      if (reach <= 0.91) break
+      camera.position.sub(target).multiplyScalar(reach / 0.88).add(target)
+    }
+  }
+  controls.update()
+  decorMeshes.fixtures.visible = useEye
+  const accent = plan.panel?.wallIndex
+  const centerX = (data.bounds.minX + data.bounds.maxX) / 2
+  const centerY = (data.bounds.minY + data.bounds.maxY) / 2
+  // Hide the foreground walls in the overview so they do not hide the layout.
+  root.traverse(object => {
+    const index = object.userData.decorWallIndex as number | undefined
+    if (index === undefined || !data.walls[index]) return
+    const { a, b } = data.walls[index]
+    const midX = (a[0] + b[0]) / 2, midY = (a[1] + b[1]) / 2
+    const nx = a[1] - b[1], ny = b[0] - a[0]
+    const cameraSide = (camera!.position.x - midX) * nx + (-camera!.position.z - midY) * ny
+    const interiorSide = (centerX - midX) * nx + (centerY - midY) * ny
+    object.visible = useEye || index === accent || cameraSide * interiorSide >= 0
+  })
+}
+
+function changeFinish() {
+  selectedId.value = ''
+  hoverLabel.value = ''
+  notice.value = ''
+  showProductSelector.value = false
+  photoView.value = 'overview'
+  framedFloorKey = ''
+  if (sun) sun.color.setHex(decorPlan.value ? roomDecorThemes[decorPlan.value.theme].light : 0xfff2e0)
+  if (ready3d.value) rebuild()
 }
 
 /** 沿父链找到带业务 ID 的命中对象（GLB 子 Mesh 也归属同一家具实例）。 */
@@ -504,7 +601,7 @@ function onPointerMove(event: PointerEvent) {
   const rect = renderer.domElement.getBoundingClientRect()
   pointerNdc.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
   raycaster.setFromCamera(pointerNdc, camera)
-  if (pointerDown && !dragging && pointerDown.id && !props.readonly && shouldStartDrag(pointerDown.x, pointerDown.y, event.clientX, event.clientY)) {
+  if (pointerDown && !dragging && pointerDown.id && !inspectionOnly.value && shouldStartDrag(pointerDown.x, pointerDown.y, event.clientX, event.clientY)) {
     const mesh = furnitureMeshes.get(pointerDown.id)
     if (mesh) {
       selectedId.value = pointerDown.id // 拖动即选中，与 2D 行为一致
@@ -569,7 +666,7 @@ function commitDrag(id: string, originX: number, originZ: number) {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || !show.value || props.readonly || !ready3d.value || !camera || !zone.value
+  if (event.defaultPrevented || !show.value || inspectionOnly.value || !ready3d.value || !camera || !zone.value
     || dragging || pointerDown || showProductSelector.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
   if (target?.isContentEditable || target?.closest('input, textarea, select, [role="textbox"], [role="combobox"], [role="spinbutton"]')) return
@@ -599,7 +696,7 @@ function onKeydown(event: KeyboardEvent) {
 
 function rotateSelected() {
   const item = selectedItem.value
-  if (!item || props.readonly || !zone.value) return
+  if (!item || inspectionOnly.value || !zone.value) return
   // 与 2D 同一套旋转：越界/重叠校验失败不改动，确认失效与撤销语义一致
   const result = store.rotateFurnitureGroup([item.id], zone.value.id)
   notice.value = result || `已旋转「${item.label || '家具'}」90°，与 2D 排版同步`
@@ -607,7 +704,7 @@ function rotateSelected() {
 
 function replaceModule(templateId: string) {
   const item = selectedItem.value
-  if (!item || props.readonly) return
+  if (!item || inspectionOnly.value) return
   // 复用 2D 排版同一套带校验的模块替换：保留 ID/中心/旋转，失败不改旧家具，成功清除旧选品并使确认失效
   const result = store.replaceFurnitureModule(item.id, templateId)
   notice.value = result || `已替换模块，位置与旋转保持不变；旧商品绑定已清除，确认状态失效，可撤销`
@@ -623,39 +720,14 @@ function locateSelected() {
   emit('locate', item.id)
 }
 
-/**
- * 截取当前视角供 AI 效果图作结构参考：先隐藏选中提亮/占地标记/轮廓框等交互叠加物，
- * 同步渲染一帧后立即读取像素（无需 preserveDrawingBuffer），再恢复选中视觉。不改任何设计数据。
- */
-function captureViewImage(): string | null {
-  if (!renderer || !scene || !camera) return null
-  const selected = selectedId.value ? furnitureMeshes.get(selectedId.value) : null
-  if (groundMarker) groundMarker.visible = false
-  if (selectionFrame) selectionFrame.visible = false
-  if (selected) {
-    if (selected.userData.procedural) setGroupEmissive(selected, 0)
-    else if ((selected as THREE.Mesh).isMesh) (selected as THREE.Mesh).material = MATERIALS.furniture
-  }
-  try {
-    renderer.render(scene, camera)
-    return renderer.domElement.toDataURL('image/png')
-  } catch {
-    return null
-  } finally {
-    syncSelectionVisuals(false)
-  }
-}
-
 function openAiRender() {
-  const image = captureViewImage()
-  if (!image) { notice.value = '当前 3D 场景尚未就绪，无法截取视角，请稍后重试'; return }
-  emit('ai-render', image)
+  emit('ai-render')
 }
 
 /** 选中视觉：材质提亮/自发光 + 占地轮廓框 + 底部选中标记（均不写回设计数据）。 */
 function syncSelectionVisuals(rebuildGeometry = true) {
   for (const [meshId, mesh] of furnitureMeshes) {
-    const selected = meshId === selectedId.value
+    const selected = !decorated.value && meshId === selectedId.value
     if (mesh.userData.procedural) setGroupEmissive(mesh, selected ? 0x4a3a14 : 0)
     else if ((mesh as THREE.Mesh).isMesh) (mesh as THREE.Mesh).material = selected ? MATERIALS.furnitureSelected : MATERIALS.furniture
   }
@@ -667,7 +739,7 @@ function syncGroundMarker(rebuildGeometry = false) {
   if (!groundMarker || !selectionFrame) return
   const mesh = furnitureMeshes.get(selectedId.value)
   const item = selectedItem.value
-  if (!mesh || !item) { groundMarker.visible = false; selectionFrame.visible = false; return }
+  if (!mesh || !item || decorated.value) { groundMarker.visible = false; selectionFrame.visible = false; return }
   if (rebuildGeometry) {
     for (const child of [...groundMarker.children]) { groundMarker.remove(child); disposeObjectTree(child, sharedMaterials) }
     const w = item.w + 140, d = item.h + 140
@@ -751,7 +823,10 @@ async function init() {
   const resize = () => {
     if (!host.value || !renderer || !camera) return
     const { clientWidth: w, clientHeight: h } = host.value
-    if (w && h) { renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix() }
+    if (w && h) {
+      renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix()
+      if (photoView.value === 'overview') applyPhotoView()
+    }
   }
   resizeObserver = new ResizeObserver(resize)
   resizeObserver.observe(host.value)
@@ -791,10 +866,13 @@ function dispose() {
   resizeObserver = null
   renderer?.setAnimationLoop(null)
   if (root) { for (const child of [...root.children]) disposeObjectTree(child, sharedMaterials); root.clear() }
+  decorMeshes?.texture?.dispose()
+  decorMeshes = null
   if (groundMarker) { for (const child of [...groundMarker.children]) disposeObjectTree(child, sharedMaterials) }
   selectionFrame?.geometry.dispose()
   if (scene) { scene.environment = null; scene.background = null }
   void releaseFurnitureModelCache()
+  controls?.dispose()
   renderer?.dispose()
   renderer?.domElement.remove()
   renderer = null; scene = null; camera = null; controls = null; root = null; groundMarker = null; selectionFrame = null; sun = null; fill = null
@@ -804,6 +882,7 @@ function dispose() {
 watch(show, async value => {
   if (value) {
     initError.value = ''; notice.value = ''; selectedId.value = ''
+    finish.value = 'model'; photoView.value = 'overview'
     framedFloorKey = ''
     if (store.products.length === 0) {
       try { store.products = await api.loadProducts() } catch { productsError.value = '商品列表加载失败，仅影响商品信息展示与替换' }
@@ -814,6 +893,8 @@ watch(show, async value => {
 }, { immediate: true })
 
 watch(sceneKey, () => { if (ready3d.value) rebuild() })
+watch(finish, changeFinish)
+watch(photoView, applyPhotoView)
 watch(selectedId, () => syncSelectionVisuals())
 // 家具被删除或切换空间后清理选中，属性不串到其他空间
 watch(() => furniture.value.map(item => item.id).join(','), ids => {
@@ -842,7 +923,9 @@ const legend = [
       @keydown="onKeydown"
       :data-ready="ready3d || undefined"
       :data-selected="selectedId || undefined"
-      :data-readonly="readonly || undefined"
+      :data-readonly="inspectionOnly || undefined"
+      :data-finish="finish"
+      :data-view="decorated ? photoView : undefined"
       :data-furniture="sceneData?.volumes.filter(v => v.source === 'furniture').length ?? 0"
       :data-default-seats="sceneData?.workstationSeats.filter(seat => !seat.existingChairId).length ?? 0"
       :data-obstacles="(sceneData?.volumes.filter(v => v.source === 'obstacle').length ?? 0) + (sceneData?.windows.length ?? 0) + (sceneData?.doors.length ?? 0)"
@@ -851,23 +934,34 @@ const legend = [
       :data-openings="sceneData?.walls.reduce((sum, wall) => sum + (wall.openings?.length ?? 0), 0) ?? 0"
       :data-facilities="sceneData?.facilities.length ?? 0"
       :data-walls="sceneData?.walls.length ?? 0">
-      <header class="flex flex-none items-center justify-between border-b border-line bg-white px-4 py-2.5">
+      <header class="flex flex-none flex-wrap items-center justify-between gap-2 border-b border-line bg-white px-4 py-2.5">
         <div>
           <h2 class="text-sm font-bold">3D 空间预览 · {{ zone?.name || '当前空间' }}<span v-if="readonly" class="ml-2 text-[10px] font-normal text-muted">只读</span></h2>
-          <p class="text-xs text-muted">{{ readonly ? '自由旋转/缩放视角；点选家具查看真实业务属性；修改请前往设计模式' : '自由旋转/缩放视角；点选家具可拖动、方向键微调、旋转和替换，改动实时同步 2D 排版' }}</p>
+          <p class="text-xs text-muted">{{ decorated ? '装修预览 · 沿用当前排版。缺少商品模型时显示类别示意。' : readonly ? '自由旋转/缩放视角；点选家具查看真实业务属性；修改请前往设计模式' : '自由旋转/缩放视角；点选家具可拖动、方向键微调、旋转和替换，改动实时同步 2D 排版' }}</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="flex items-center gap-1.5 text-xs text-muted">
+            装修预览
+            <select v-model="finish" aria-label="装修预览风格" class="rounded-lg border border-line bg-white px-2 py-1.5 text-ink" :disabled="!ready3d || !ready">
+              <option value="model">原始白模</option>
+              <option v-for="(theme, key) in roomDecorThemes" :key="key" :value="key">{{ theme.label }}</option>
+            </select>
+          </label>
+          <div v-if="decorated" class="flex rounded-lg border border-line" role="group" aria-label="取景">
+            <button type="button" class="rounded-l-lg px-2.5 py-1.5 text-xs" :class="photoView === 'overview' ? 'bg-cream font-semibold' : 'text-muted'" :aria-pressed="photoView === 'overview'" @click="photoView = 'overview'">俯视</button>
+            <button type="button" class="rounded-r-lg px-2.5 py-1.5 text-xs disabled:opacity-40" :class="photoView === 'eye' ? 'bg-cream font-semibold' : 'text-muted'" :aria-pressed="photoView === 'eye'" :disabled="!decorPlan?.eye" :title="decorPlan?.eye ? undefined : '空间内没有找到合适的取景点'" @click="photoView = 'eye'">人眼视角</button>
+          </div>
           <button v-if="!inline" class="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:bg-cream" :disabled="!ready3d" @click="openAiRender">AI 概念效果图</button>
           <button class="rounded-lg border border-line px-3 py-1.5 text-xs" aria-label="关闭 3D 预览" @click="show = false">✕ 关闭</button>
         </div>
       </header>
       <div class="relative flex min-h-0 flex-1">
-        <div ref="host" class="relative min-w-0 flex-1 cursor-grab active:cursor-grabbing">
+        <div ref="host" class="relative min-w-0 flex-1 cursor-grab active:cursor-grabbing" data-testid="white-model-viewport">
           <div v-if="!ready" class="absolute inset-0 z-10 grid place-items-center bg-[#faf8f5] text-sm text-muted">请先完成图纸比例校准（毫米）后再预览 3D 场景</div>
           <div v-else-if="initError" class="absolute inset-0 z-10 grid place-items-center bg-[#faf8f5] text-sm text-red-700">{{ initError }}</div>
           <div class="pointer-events-none absolute inset-0 z-[4]" style="background: radial-gradient(ellipse 118% 105% at 50% 42%, transparent 58%, rgba(40,34,26,0.13) 100%)"></div>
           <div v-if="hoverLabel" class="pointer-events-none absolute left-3 top-3 z-10 rounded-lg bg-black/70 px-2.5 py-1 text-xs text-white">{{ hoverLabel }}</div>
-          <div class="absolute bottom-3 left-3 z-10 flex flex-wrap gap-2 rounded-lg bg-white/85 px-3 py-2 text-[11px] text-muted shadow">
+          <div v-if="!decorated" class="absolute bottom-3 left-3 z-10 flex flex-wrap gap-2 rounded-lg bg-white/85 px-3 py-2 text-[11px] text-muted shadow">
             <span v-for="[color, label] in legend" :key="label" class="flex items-center gap-1"><i class="inline-block h-2.5 w-2.5 rounded-sm border border-line" :style="{ background: color }"></i>{{ label }}</span>
           </div>
         </div>
@@ -887,12 +981,12 @@ const legend = [
             </ul>
           </div>
           <OfficeCanvasSelectedFurniturePanel
-            :item="selectedItem" :zone="zone" :readonly="readonly"
+            :item="selectedItem" :zone="zone" :readonly="inspectionOnly"
             :products="store.products" :products-error="productsError"
             @rotate="rotateSelected" @replace-module="replaceModule"
             @change-product="showProductSelector = true" @locate="locateSelected" />
           <p v-if="selectedWorkstationSeat" class="text-[11px] text-muted" data-testid="white-model-paired-seat">{{ selectedWorkstationSeat.existingChairId ? '桌椅配套 · 已有独立座椅' : '默认配套办公椅 · 随工位一起移动、旋转' }}</p>
-          <p v-if="selectedItem && !readonly" class="text-[11px] leading-relaxed text-muted" data-testid="white-model-keyboard-help">方向键按当前视角移动 10 mm · Shift 100 mm · Alt 1 mm · Ctrl/⌘+Z 撤销</p>
+          <p v-if="selectedItem && !inspectionOnly" class="text-[11px] leading-relaxed text-muted" data-testid="white-model-keyboard-help">方向键按当前视角移动 10 mm · Shift 100 mm · Alt 1 mm · Ctrl/⌘+Z 撤销</p>
           <div>
             <h3 class="mb-1 font-semibold text-ink">设施标注（{{ sceneData?.facilities.length || 0 }}）</h3>
             <ul class="space-y-1 text-muted">
@@ -906,7 +1000,7 @@ const legend = [
           <p v-if="notice" class="rounded-lg bg-[#eef5ee] px-2.5 py-2 text-[#3c6b3c]" data-testid="white-model-notice">{{ notice }}</p>
         </aside>
       </div>
-      <OfficeCanvasFurnitureProductSelector v-if="!readonly && selectedItem" v-model:show="showProductSelector" :zone-id="activeZoneId" :item="selectedItem" @applied="onProductApplied" />
+      <OfficeCanvasFurnitureProductSelector v-if="!inspectionOnly && selectedItem" v-model:show="showProductSelector" :zone-id="activeZoneId" :item="selectedItem" @applied="onProductApplied" />
     </div>
   </Teleport>
 </template>
