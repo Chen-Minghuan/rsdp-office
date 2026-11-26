@@ -8,7 +8,13 @@
 
 # 开发进度与下一步
 
+2026-11-26 [WORKSPACE-006 阶段保存与列表重取竞态修复](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 修复评审指出的竞态：进入项目列表触发 `refreshProjects()` 静默重取后立刻保存阶段时，迟到的旧列表响应会用保存前的阶段覆盖刚保存的值。`workspace` store 新增 `statusOverrides`（按项目记录保存时间与阶段），重取响应按请求发出时间比对，保存时间晚于请求发出时间的项目以人工保存值为准；`init()` 首次加载下拉尚未渲染，不受影响。`e2e-project-status` 新增延迟响应回归（列表响应延迟 800ms 返回保存前快照，断言下拉保持刚保存的阶段且不被覆盖）。实际执行（2026-11-26 本机）：`mvn -f backend/pom.xml test` 446 项、0 失败、0 错误、11 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；自建预览服务（3015）上 `e2e:project-status` 通过，且暂撤修复后该回归如预期失败（证明用例有效）、恢复后复跑通过；`e2e:project-refresh`（自起服务）通过。未做真实后端联调。
+
+2026-11-26 [WORKSPACE-006 存量项目阶段回填](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 恢复人工维护阶段时存量项目沿用切换前的显示阶段（用户确认的口径）：新增一次性迁移 `20261126_project_status_backfill.sql` 并注册进 `SchemaInitializer`，按原派生规则把"存在楼层且全部楼层有未失效方案确认、仍为默认 DESIGNING"的项目置为 DELIVERING；经 `office_data_migration` 标记表保证只执行一次，重启重跑不覆盖负责人此后的人工修改，也不动已是 COMPLETED 等人工值的行。同步更新产品需求文档（阶段人工维护、已完成看板为真实计数、存量回填口径）与 `OfficeProposalConfirmationMapper` 注释。实际执行（2026-11-26 本机）：`mvn -f backend/pom.xml test` 通过、0 失败 0 错误；`OfficeProjectStatusPostgresTest` 新增回填用例（全确认/部分确认/无楼层/确认失效/人工已完成五类项目、二次执行幂等、回填后人工修改不被覆盖），因本机未配置 `RSDP_TEST_POSTGRES_URL` 跳过，回填 SQL 未经真实 PostgreSQL 验证，不计为数据库验收。
+
 2026-11-26 [本地商品收藏和组合](tasks/INTEG-003-office-product-review.md#本地商品收藏和组合) 商品库的两类卡片共用个人收藏、项目收藏和自选组合。关闭公共库的普通员工浏览器模拟、隔离 PostgreSQL 持久化和工作区校验、前端构建及 Java 回归通过。本机前后端已更新。
+
+2026-11-25 [WORKSPACE-006 恢复人工维护阶段](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 项目阶段由"按方案确认读时派生"改回负责人/所属工作区主号人工维护：恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`canManageStatus` 权限字段与前端阶段下拉（设计中/交付中/已完成），其他成员只读；删除 `derivedStatus`，`office_design_project.status` 恢复为唯一事实来源；区域进度（zoneTotal/zoneDelivered）保留按方案确认派生。工作台"已完成"看板由占位改为真实计数并参与筛选。`e2e-project-status` 恢复手动维护断言，`e2e-project-refresh` 改为阶段不随确认自动变化、进度仍派生的断言。实际执行（2026-11-25 本机）：`mvn -f backend/pom.xml test` 422 项、0 失败、0 错误、10 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；dev server（3001）上 `e2e:project-status`、`e2e:workflows`、`MOCK_API=1 e2e:smoke` 与自起服务的 `e2e:project-refresh` 均通过（均拦截 API）；`git diff --check` 通过。未做真实后端联调与真实角色页面验收。
 
 2026-11-25 [LAYOUT-048 家具重叠定位](tasks/LAYOUT-048-furniture-overlap-feedback.md) 排版画布实时显示冲突家具对并支持定位，保存与生图校验指出房间、家具和坐标。前端构建、排版与模拟 UI 回归、Java 全量测试通过。
 
