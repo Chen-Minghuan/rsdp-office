@@ -70,6 +70,16 @@ const renderApi = useRenderPreviewApi()
 
 const previewMode = computed(() => route.query.preview === '1')
 const selectionIssues = computed(() => previewMode.value ? [] : store.proposalFurnitureCartMismatches)
+// 方案确认前置条件：空间复核确认（服务端签发）与排版确认（逐家具 layoutConfirmed）。
+// 排版只统计有家具的空间，无家具空间不算阻塞（对齐后端确认语义）。
+const pendingReviewZones = computed(() => previewMode.value ? [] : store.pendingReviewZones)
+const layoutPendingZones = computed(() => {
+  if (previewMode.value) return []
+  return store.zones.filter((zone) => {
+    const items = store.furnitureForZone(zone.id)
+    return items.length > 0 && !items.every((item) => item.layoutConfirmed)
+  })
+})
 const confirmed = computed(() => previewMode.value ? demoConfirmed.value
   : !!savedConfirmation.value?.current && savedConfirmation.value.canvasRevision === store.canvasRevision)
 const cartSignature = computed(() => JSON.stringify(store.cart.map(item => [item.id, item.zoneId, item.productId, item.qty])))
@@ -356,7 +366,8 @@ function confirmGroup(group: ProposalGroup) {
 }
 
 async function confirmProposal() {
-  if (!canEdit.value || checkingCatalog.value || selectionIssues.value.length) return
+  if (!canEdit.value || checkingCatalog.value || selectionIssues.value.length || confirmed.value
+    || pendingReviewZones.value.length || layoutPendingZones.value.length) return
   if (previewMode.value) {
     demoConfirmed.value = true
     setNotice('已在演示中确认')
@@ -420,6 +431,30 @@ function detailTitle(detail: Detail | null) {
           <NuxtLink :to="proposalFurnitureSelectionRoute(workspace.currentFloorId, issue.zoneId, store.canEnterLayout)" class="text-accent-ink font-semibold hover:underline">
             {{ store.canEnterLayout ? '去选品' : '去复核空间' }}
           </NuxtLink>
+        </li>
+      </ul>
+    </details>
+
+    <details v-if="pendingReviewZones.length || layoutPendingZones.length" class="proposal-selection" data-testid="proposal-precheck-issues">
+      <summary>
+        <template v-if="pendingReviewZones.length && layoutPendingZones.length">{{ pendingReviewZones.length }} 个空间待复核确认 · {{ layoutPendingZones.length }} 个空间排版未确认</template>
+        <template v-else-if="pendingReviewZones.length">{{ pendingReviewZones.length }} 个空间待复核确认</template>
+        <template v-else>{{ layoutPendingZones.length }} 个空间排版未确认</template>
+      </summary>
+      <ul class="proposal-selection-list">
+        <li v-for="zone in pendingReviewZones" :key="`review-${zone.id}`">
+          <div>
+            <strong>{{ zone.name }}</strong>
+            <div>空间复核确认未完成，确认方案前需要先完成复核</div>
+          </div>
+          <NuxtLink :to="{ path: '/canvas', query: { floorId: workspace.currentFloorId, zoneId: zone.id } }" class="text-accent-ink font-semibold hover:underline">去复核空间</NuxtLink>
+        </li>
+        <li v-for="zone in layoutPendingZones" :key="`layout-${zone.id}`">
+          <div>
+            <strong>{{ zone.name }}</strong>
+            <div>空间内还有家具排版未确认，确认方案前需要先确认全部排版</div>
+          </div>
+          <NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId, zoneId: zone.id } }" class="text-accent-ink font-semibold hover:underline">去排版确认</NuxtLink>
         </li>
       </ul>
     </details>
@@ -498,7 +533,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length || confirmed || !!pendingReviewZones.length || !!layoutPendingZones.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
