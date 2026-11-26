@@ -28,6 +28,8 @@ const failedCollectionItems = ref(false)
 const facetLoading = ref(false)
 const facetError = ref('')
 let facetRequest = 0
+let loadingFacetKey: string | null = null
+let loadedFacetKey: string | null = null
 let listRequest = 0
 
 const isLoading = ref(true)
@@ -151,12 +153,11 @@ watch(search, (value, _, onCleanup) => {
   onCleanup(() => clearTimeout(timeout))
 })
 watch(currentPage, value => { pageInput.value = value })
-watch([submittedSearch, status, category, color, pageSize, currentPage, catalogStatusReady, localOnly], (next, prev) => {
-  if (next[0] !== prev[0] || next[1] !== prev[1]) {
-    currentPage.value = 1
-    pageInput.value = 1
-    void loadFacets(true)
-  }
+watch([submittedSearch, status, category, color, pageSize], () => {
+  currentPage.value = 1
+  pageInput.value = 1
+}, { flush: 'sync' })
+watch([submittedSearch, status, category, color, pageSize, currentPage, catalogStatusReady, localOnly], () => {
   void loadProducts()
   void loadFacets()
 })
@@ -265,28 +266,41 @@ watch(appliedFilters, () => {
 
 onBeforeUnmount(() => window.removeEventListener('resize', measureDrawerTop))
 
-async function loadFacets() {
-  if (!catalogStatusReady.value || facetLoading.value) return
-  if (arguments.length === 0 && catalogFacets.value && !catalogFacets.value.sharedUnavailable) return
+function currentFacetKey() {
+  return JSON.stringify([storageScope.value, localOnly.value, submittedSearch.value, status.value])
+}
+
+async function loadFacets(force: boolean | Event = false) {
+  if (!catalogStatusReady.value) return
+  const key = currentFacetKey()
+  if (force !== true && (facetLoading.value && loadingFacetKey === key
+    || loadedFacetKey === key && catalogFacets.value && !catalogFacets.value.sharedUnavailable)) return
   const request = ++facetRequest
+  loadingFacetKey = key
   facetLoading.value = true
   facetError.value = ''
   try {
     const facets = await api.browseProductFacets({ search: submittedSearch.value, status: status.value })
-    if (request === facetRequest) {
+    if (request === facetRequest && key === currentFacetKey()) {
       catalogFacets.value = facets
+      loadedFacetKey = key
       if (facets.sharedUnavailable) facetError.value = '公共库的分类和颜色暂时无法加载。'
       if (facets.localCategories.length) loadLocalCategoryLabels()
     }
   } catch {
-    if (request === facetRequest) facetError.value = '分类和颜色暂时无法加载，请重试。'
+    if (request === facetRequest && key === currentFacetKey()) facetError.value = '分类和颜色暂时无法加载，请重试。'
   } finally {
-    if (request === facetRequest) facetLoading.value = false
+    if (request === facetRequest) {
+      facetLoading.value = false
+      loadingFacetKey = null
+    }
   }
 }
 
 function invalidateFacets() {
   facetRequest++
+  loadingFacetKey = null
+  loadedFacetKey = null
   catalogFacets.value = null
   facetError.value = ''
   facetLoading.value = false
@@ -298,6 +312,7 @@ function refreshCatalog() {
   const filtersChange = category.value || color.value || currentPage.value !== 1
   invalidateFacets()
   currentPage.value = 1
+  void loadFacets()
   if (!filtersChange) void loadProducts()
 }
 

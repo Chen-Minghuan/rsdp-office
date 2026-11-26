@@ -82,7 +82,7 @@ class ProductFilterSupportTest {
 
 - [ ] **Step 2: 运行测试并确认因类型不存在而失败**
 
-Run: `mvn -f backend/pom.xml test -Dtest=ProductFilterSupportTest`  
+Run: `mvn -f backend/pom.xml test -Dtest=ProductFilterSupportTest`
 Expected: 编译失败，提示 `ProductFilterSupport.Source`、`ProductFilterSupport.Attributes`、`ProductFilter` 不存在。
 
 - [ ] **Step 3: 实现纯派生与匹配模块**
@@ -153,12 +153,12 @@ return (levels.isEmpty() || levels.contains(attributes.productLevel()))
 
 - [ ] **Step 4: 运行专项测试并补充边界用例**
 
-Run: `mvn -f backend/pom.xml test -Dtest=ProductFilterSupportTest`  
+Run: `mvn -f backend/pom.xml test -Dtest=ProductFilterSupportTest`
 Expected: 3 个初始用例通过。追加测试：单人位职员台仍为 DESK、1.4米双人位为 UNCLASSIFIED、长副柜优先于副柜、无效宽度为空时 PB+宽度不能匹配。
 
 - [ ] **Step 5: 检查本任务差异**
 
-Run: `git diff --check -- backend/src/main/java/com/rsdp/officeproduct/importer/service/ProductFilterSupport.java backend/src/test/java/com/rsdp/officeproduct/importer/service/ProductFilterSupportTest.java`  
+Run: `git diff --check -- backend/src/main/java/com/rsdp/officeproduct/importer/service/ProductFilterSupport.java backend/src/test/java/com/rsdp/officeproduct/importer/service/ProductFilterSupportTest.java`
 Expected: 无输出。只读复核，不提交。
 
 ---
@@ -208,7 +208,7 @@ void loadsFilterSnapshotAndCachesPerView() throws Exception {
 
 - [ ] **Step 2: 运行并确认缺少 `listFilterProducts`**
 
-Run: `mvn -f backend/pom.xml test -Dtest=RsdpCatalogGatewayTest#loadsFilterSnapshotAndCachesPerView`  
+Run: `mvn -f backend/pom.xml test -Dtest=RsdpCatalogGatewayTest#loadsFilterSnapshotAndCachesPerView`
 Expected: 编译失败，提示方法不存在。
 
 - [ ] **Step 3: 补充 DTO 字段和快照读取**
@@ -244,12 +244,12 @@ public List<CatalogFilterProduct> listFilterProducts(String viewMode, boolean re
 
 - [ ] **Step 4: 运行网关专项测试**
 
-Run: `mvn -f backend/pom.xml test -Dtest=RsdpCatalogGatewayTest`  
+Run: `mvn -f backend/pom.xml test -Dtest=RsdpCatalogGatewayTest`
 Expected: 新用例及已有兼容、权限、尺寸用例全部通过。
 
 - [ ] **Step 5: 检查差异**
 
-Run: `git diff --check -- backend/src/main/java/com/rsdp/officeproduct/importer/dto/response/ProductListItemDto.java backend/src/main/java/com/rsdp/officeproduct/importer/dto/response/ProductDetailDto.java backend/src/main/java/com/rsdp/officeproduct/importer/service/RsdpCatalogGateway.java backend/src/main/java/com/rsdp/officeproduct/importer/service/CatalogFilterProduct.java backend/src/test/java/com/rsdp/officeproduct/importer/service/RsdpCatalogGatewayTest.java`  
+Run: `git diff --check -- backend/src/main/java/com/rsdp/officeproduct/importer/dto/response/ProductListItemDto.java backend/src/main/java/com/rsdp/officeproduct/importer/dto/response/ProductDetailDto.java backend/src/main/java/com/rsdp/officeproduct/importer/service/RsdpCatalogGateway.java backend/src/main/java/com/rsdp/officeproduct/importer/service/CatalogFilterProduct.java backend/src/test/java/com/rsdp/officeproduct/importer/service/RsdpCatalogGatewayTest.java`
 Expected: 无输出。只读复核，不提交。
 
 ---
@@ -300,7 +300,7 @@ void rejectsInvalidWidthAndBindsRepeatedLevels() throws Exception {
 
 - [ ] **Step 2: 运行并确认契约不存在**
 
-Run: `mvn -f backend/pom.xml test -Dtest=CatalogProductFilterServiceTest,ProductImportControllerTest`  
+Run: `mvn -f backend/pom.xml test -Dtest=CatalogProductFilterServiceTest,ProductImportControllerTest`
 Expected: 编译失败，提示请求、facets 或筛选服务类型不存在。
 
 - [ ] **Step 3: 实现请求、响应与筛选流程**
@@ -381,12 +381,12 @@ private ProductFilterSupport.Source toSource(CatalogFilterProduct row) {
 
 - [ ] **Step 4: 运行后端契约测试**
 
-Run: `mvn -f backend/pom.xml test -Dtest=CatalogProductFilterServiceTest,ProductImportControllerTest,RsdpCatalogGatewayTest`  
+Run: `mvn -f backend/pom.xml test -Dtest=CatalogProductFilterServiceTest,ProductImportControllerTest,RsdpCatalogGatewayTest`
 Expected: 全部通过。
 
 - [ ] **Step 5: 检查差异**
 
-Run: `git diff --check -- backend/src/main backend/src/test`  
+Run: `git diff --check -- backend/src/main backend/src/test`
 Expected: 无输出。只读复核，不提交。
 
 ---
@@ -421,7 +421,7 @@ assert.notEqual(cloned.spaceTypes, next.spaceTypes)
 
 - [ ] **Step 2: 运行并确认模块不存在**
 
-Run: `node scripts/test-product-filter.mjs`（工作目录 `frontend/`）  
+Run: `node scripts/test-product-filter.mjs`（工作目录 `frontend/`）
 Expected: 找不到 `productFilter.ts`。
 
 - [ ] **Step 3: 实现类型、重复参数和不可变状态工具**
@@ -473,12 +473,12 @@ export function toggleProductFilter<K extends keyof CatalogProductFilters>(value
 
 - [ ] **Step 4: 运行纯逻辑测试**
 
-Run: `node scripts/test-product-filter.mjs`（工作目录 `frontend/`）  
+Run: `node scripts/test-product-filter.mjs`（工作目录 `frontend/`）
 Expected: 全部断言通过。
 
 - [ ] **Step 5: 检查差异**
 
-Run: `git diff --check -- frontend/app/types/imported-products.ts frontend/app/composables/useOfficeApi.ts frontend/app/utils/productFilter.ts frontend/scripts/test-product-filter.mjs`  
+Run: `git diff --check -- frontend/app/types/imported-products.ts frontend/app/composables/useOfficeApi.ts frontend/app/utils/productFilter.ts frontend/scripts/test-product-filter.mjs`
 Expected: 无输出。只读复核，不提交。
 
 ---
@@ -528,7 +528,7 @@ assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= w
 
 - [ ] **Step 2: 运行并确认入口不存在**
 
-Run: `PLAYWRIGHT_EXECUTABLE_PATH="C:/Users/34717/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe" node scripts/e2e-product-filters.mjs`（工作目录 `frontend/`）  
+Run: `PLAYWRIGHT_EXECUTABLE_PATH="C:/Users/34717/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe" node scripts/e2e-product-filters.mjs`（工作目录 `frontend/`）
 Expected: 找不到“全部筛选”按钮。
 
 - [ ] **Step 3: 实现双栏弹层**
@@ -579,10 +579,10 @@ function confirm() { if (!props.saving) emit('confirm', cloneProductFilters(draf
 
 - [ ] **Step 5: 运行 UI 专项与既有工作流**
 
-Run: `PLAYWRIGHT_EXECUTABLE_PATH="C:/Users/34717/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe" pnpm e2e:product-filters`（工作目录 `frontend/`）  
+Run: `PLAYWRIGHT_EXECUTABLE_PATH="C:/Users/34717/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe" pnpm e2e:product-filters`（工作目录 `frontend/`）
 Expected: 全部专项断言通过。
 
-Run: `PLAYWRIGHT_EXECUTABLE_PATH="C:/Users/34717/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe" pnpm e2e:workflows`（工作目录 `frontend/`）  
+Run: `PLAYWRIGHT_EXECUTABLE_PATH="C:/Users/34717/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe" pnpm e2e:workflows`（工作目录 `frontend/`）
 Expected: 既有工作流通过。
 
 - [ ] **Step 6: 浏览器检查已确认状态**
@@ -591,7 +591,7 @@ Expected: 既有工作流通过。
 
 - [ ] **Step 7: 检查差异**
 
-Run: `git diff --check -- frontend`  
+Run: `git diff --check -- frontend`
 Expected: 无输出。只读复核，不提交。
 
 ---
@@ -609,10 +609,10 @@ Expected: 无输出。只读复核，不提交。
 
 - [ ] **Step 1: 运行全量后端与前端构建**
 
-Run: `mvn -f backend/pom.xml test`  
+Run: `mvn -f backend/pom.xml test`
 Expected: 记录总测试数、失败数、错误数、跳过数，必须 0 失败、0 错误。
 
-Run: `pnpm build`（工作目录 `frontend/`）  
+Run: `pnpm build`（工作目录 `frontend/`）
 Expected: 构建退出码 0；重复导入、大分块和弃用警告单独记录，不描述成独立 lint/typecheck。
 
 - [ ] **Step 2: 运行相关 UI 回归**
@@ -644,5 +644,5 @@ Expected: 全部退出码 0。任何失败必须记录实际选择器和错误�
 
 - [ ] **Step 5: 最终差异检查**
 
-Run: `git diff --check && git status --short --branch`  
+Run: `git diff --check && git status --short --branch`
 Expected: 无 whitespace 错误；只包含本需求文件和原有本地文档，不包含截图、临时脚本、凭据或生成产物。只读复核，不提交或推送。

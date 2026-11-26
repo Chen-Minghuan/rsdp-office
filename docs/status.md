@@ -8,6 +8,8 @@
 
 # 开发进度与下一步
 
+2026-11-26 [CAT-012 商品筛选 PR 合并修复](tasks/CAT-012-smart-search-filter.md#2026-11-26-pr-27-合并修复) 已合入 PR #27，修复编译、非在售漏查、选项请求竞态和快捷筛选分页，补强制刷新回源及回归用例；全量 Java、构建与浏览器回归进行中，未发布远程。
+
 2026-11-26 [WORKSPACE-006 阶段保存与列表重取竞态修复](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 修复评审指出的竞态：进入项目列表触发 `refreshProjects()` 静默重取后立刻保存阶段时，迟到的旧列表响应会用保存前的阶段覆盖刚保存的值。`workspace` store 新增 `statusOverrides`（按项目记录保存时间与阶段），重取响应按请求发出时间比对，保存时间晚于请求发出时间的项目以人工保存值为准；`init()` 首次加载下拉尚未渲染，不受影响。`e2e-project-status` 新增延迟响应回归（列表响应延迟 800ms 返回保存前快照，断言下拉保持刚保存的阶段且不被覆盖）。实际执行（2026-11-26 本机）：`mvn -f backend/pom.xml test` 446 项、0 失败、0 错误、11 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；自建预览服务（3015）上 `e2e:project-status` 通过，且暂撤修复后该回归如预期失败（证明用例有效）、恢复后复跑通过；`e2e:project-refresh`（自起服务）通过。未做真实后端联调。
 
 2026-11-26 [WORKSPACE-006 存量项目阶段回填](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 恢复人工维护阶段时存量项目沿用切换前的显示阶段（用户确认的口径）：新增一次性迁移 `20261126_project_status_backfill.sql` 并注册进 `SchemaInitializer`，按原派生规则把"存在楼层且全部楼层有未失效方案确认、仍为默认 DESIGNING"的项目置为 DELIVERING；经 `office_data_migration` 标记表保证只执行一次，重启重跑不覆盖负责人此后的人工修改，也不动已是 COMPLETED 等人工值的行。同步更新产品需求文档（阶段人工维护、已完成看板为真实计数、存量回填口径）与 `OfficeProposalConfirmationMapper` 注释。实际执行（2026-11-26 本机）：`mvn -f backend/pom.xml test` 通过、0 失败 0 错误；`OfficeProjectStatusPostgresTest` 新增回填用例（全确认/部分确认/无楼层/确认失效/人工已完成五类项目、二次执行幂等、回填后人工修改不被覆盖），因本机未配置 `RSDP_TEST_POSTGRES_URL` 跳过，回填 SQL 未经真实 PostgreSQL 验证，不计为数据库验收。

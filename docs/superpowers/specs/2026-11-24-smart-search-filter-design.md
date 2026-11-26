@@ -1,7 +1,7 @@
 # 智能搜索和筛选器设计
 
-日期：2026-11-24  
-分支：`feature/smart-search-filter`  
+日期：2026-11-24
+分支：`feature/smart-search-filter`
 状态：界面样式已确认，设计文档待审阅；尚未开始实现
 
 ## 1. 背景与当前证据

@@ -20,6 +20,7 @@ import com.rsdp.officeproduct.importer.office.product.LocalCatalogReader;
 import com.rsdp.officeproduct.importer.office.product.LocalProductService;
 import com.rsdp.officeproduct.importer.office.product.WorkbookPreviewCache;
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
+import com.rsdp.officeproduct.importer.service.CatalogProductFilterService;
 import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import org.apache.ibatis.session.SqlSession;
 import org.junit.jupiter.api.Test;
@@ -130,7 +131,7 @@ class LocalFavoritePostgresTest {
         var shared = mock(SharedCatalogService.class);
         when(shared.resolveViewMode()).thenReturn("none");
         var gateway = mock(RsdpCatalogGateway.class);
-        var products = new ProductQueryService(gateway, shared, access, local);
+        var products = new ProductQueryService(gateway, mock(CatalogProductFilterService.class), shared, access, local);
         var personal = new OfficeFavoriteService(currentUser, products,
             session.getMapper(OfficeFavoriteFolderMapper.class), session.getMapper(OfficeFavoriteItemMapper.class));
         var project = new OfficeProjectFavoriteService(currentUser, mock(OfficeProjectAccessService.class),

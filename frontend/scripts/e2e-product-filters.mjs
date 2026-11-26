@@ -60,6 +60,7 @@ function add(name, color, description, material, width, status) {
   products.push({
     rspuId: `P-${seq}`, rspuCode: `C-${seq}`, externalCode: `E-${seq}`, productName: name,
     productLevel: 'B', colorPrimaryName: color, primaryImageUrl: null, retailPrice: 1000 + seq,
+    categoryPath: [productTypeOf(name)],
     status, description, material, width,
     createdAt: '2026-11-01T08:00:00', updatedAt: '2026-11-01T08:00:00',
   })
@@ -106,6 +107,8 @@ function buildFacets(base) {
 let failNextPage = false
 let delayNextPageMs = 0
 const pageRequests = []
+const facetRequests = []
+let nextFacetDelayMs = 0
 
 function filterBase(params) {
   return products.filter(product => (
@@ -125,8 +128,12 @@ await context.route('**/api/v1/**', async route => {
       search: (url.searchParams.get('search') || '').toLowerCase(),
       status: url.searchParams.get('status') || '',
     }
+    facetRequests.push(params)
+    const delay = nextFacetDelayMs
+    nextFacetDelayMs = 0
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay))
     return respond({
-      localCategories: [], sharedCategories: [], sharedUnavailable: false,
+      localCategories: [], sharedCategories: ['DESK', 'CABINET', 'CHAIR'], sharedUnavailable: false,
       colors: [...new Set(products.map(product => product.colorPrimaryName).filter(Boolean))],
       advanced: buildFacets(filterBase(params)),
     })
@@ -161,6 +168,7 @@ await context.route('**/api/v1/**', async route => {
       && (!params.legTypes.length || legTypesOf(product).some(leg => params.legTypes.includes(leg)))
       && (!params.storageTypes.length || params.storageTypes.includes(storageTypeOf(product)))
       && (!params.color || (product.colorPrimaryName || '').trim() === params.color)
+      && (!params.category || params.category === 'shared:' + product.categoryPath.join(' / '))
     ))
     return respond({
       rows: matching.slice((params.page - 1) * params.size, params.page * params.size)
@@ -214,6 +222,37 @@ try {
   assert.equal(await cards.count(), 20)
   assert.match(await totalText(), /共 100 件商品/)
   assert.equal(await chips.count(), 0)
+
+  // 快捷颜色、分类及每页条数变动都必须回到第一页，不能沿用旧页码。
+  for (const [label, value] of [['筛选商品颜色', '蜜芽胡桃+雅士白'], ['筛选产品分类', 'shared:DESK'], ['每页显示数量', '50']]) {
+    await page.getByRole('button', { name: '下一页' }).click()
+    await page.waitForFunction(() => document.body.innerText.includes('正在显示 21–40'))
+    await page.getByRole('combobox', { name: label }).selectOption(value)
+    await page.waitForFunction(() => document.body.innerText.includes('正在显示 1–'))
+    assert.equal(pageRequests.at(-1).page, 1, label + ' 修改后回到第一页')
+    await page.getByRole('combobox', { name: label }).selectOption(label === '每页显示数量' ? '20' : '')
+    await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品') && document.body.innerText.includes('正在显示 1–20'))
+  }
+
+  // 新搜索不等待旧选项；迟到的旧选项不能覆盖当前基础集。
+  const searchInput = page.getByLabel('搜索商品名称或编码')
+  nextFacetDelayMs = 1000
+  const oldFacetsStarted = page.waitForRequest(request => request.url().includes('/browse/facets?') && new URL(request.url()).searchParams.get('search') === '职员')
+  await searchInput.fill('职员')
+  await oldFacetsStarted
+  await page.waitForFunction(() => document.body.innerText.includes('共 60 件商品'))
+  const newFacetsFinished = page.waitForResponse(response => response.url().includes('/browse/facets?') && new URL(response.url()).searchParams.get('search') === '主管')
+  await searchInput.fill('主管')
+  await newFacetsFinished
+  await page.waitForTimeout(1200)
+  await openDialog()
+  const spaces = dialog.locator('section[aria-label="空间类型"]')
+  assert.equal(await spaces.getByRole('button', { name: '职员空间', exact: true }).isDisabled(), true)
+  assert.equal(await spaces.getByRole('button', { name: '主管空间', exact: true }).isDisabled(), false)
+  assert.equal(facetRequests.at(-1).search, '主管')
+  await closeDialog()
+  await searchInput.fill('')
+  await page.waitForFunction(() => document.body.innerText.includes('共 100 件商品'))
 
   // 点选立即筛选，弹层保持打开
   await openDialog()

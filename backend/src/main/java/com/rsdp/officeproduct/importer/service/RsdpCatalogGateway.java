@@ -444,8 +444,9 @@ public class RsdpCatalogGateway {
         if (activeRefresh != null) return joinFilterSnapshot(activeRefresh);
         try {
             if (!refresh) cached = freshFilterSnapshot(viewMode);
-            if (cached == null) {
-                cached = new FilterSnapshotEntry(List.copyOf(loadFilterSnapshot(listProducts(viewMode))),
+            if (refresh || cached == null) {
+                // Browsing includes off-shelf products; the design recommendation catalog stays active-only.
+                cached = new FilterSnapshotEntry(List.copyOf(loadFilterSnapshot(readProducts(viewMode, false, null))),
                     System.currentTimeMillis());
                 filterSnapshotCache.put(viewMode, cached);
             }
