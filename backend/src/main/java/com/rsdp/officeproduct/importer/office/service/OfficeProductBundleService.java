@@ -49,7 +49,21 @@ public class OfficeProductBundleService {
         String userId = userId();
         String name = request.name().strip();
         validateItems(request.items(), true);
-        List<SavedItem> items = request.items().stream().map(this::resolveItem).toList();
+        // 只强制校验新增条目；已保存条目失效时保留原展示信息，不阻断其他商品编辑。
+        var previousRow = request.revision() == 0 ? null : bundles.findById(bundleId, userId);
+        var previousItems = previousRow == null ? java.util.Map.<String, SavedItem>of() : decode(previousRow).items().stream()
+            .collect(Collectors.toMap(OfficeProductBundleService::itemKey, item -> item, (a, b) -> a));
+        List<SavedItem> items = request.items().stream().map(item -> {
+            SavedItem previous = previousItems.get(itemKey(item));
+            if (previous != null) {
+                try {
+                    return resolveItem(item);
+                } catch (BusinessException unavailable) {
+                    return previous;
+                }
+            }
+            return resolveItem(item);
+        }).toList();
         var row = new OfficeProductBundleMapper.Row(bundleId, userId, name, request.revision(), encode(items));
         int writes = request.revision() == 0 ? bundles.create(row) : bundles.update(row);
         if (writes != 1) throw new BusinessException("商品组合已变化，请重新读取后编辑");
@@ -59,6 +73,14 @@ public class OfficeProductBundleService {
     public void delete(String bundleId, int revision) {
         validId(bundleId);
         if (bundles.delete(bundleId, userId(), revision) != 1) throw new BusinessException("商品组合已变化或不存在");
+    }
+
+    private static String itemKey(SavedItem item) {
+        return item.rspuId() + "\n" + item.variantId();
+    }
+
+    private static String itemKey(Item item) {
+        return item.rspuId() + "\n" + item.variantId();
     }
 
     private SavedItem resolveItem(Item item) {

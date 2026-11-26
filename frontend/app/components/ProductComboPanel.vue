@@ -17,7 +17,7 @@ const savingIds = ref<Set<string>>(new Set())
 const expandedIds = ref<Set<string>>(new Set())
 let bundlesRequest = 0
 
-const panelWidth = ref(320)
+const panelWidth = defineModel<number>('width', { default: 280 })
 const minPanelWidth = 280
 const maxPanelWidth = 480
 let resizeState: { startX: number, startWidth: number } | null = null
@@ -83,24 +83,43 @@ function replaceBundle(result: ProductBundle) {
     : [...bundles.value, result]
 }
 
+// 同一组合的保存按顺序排队，执行时读取最新 revision 与条目，不再静默丢弃第二次保存。
+const saveChains = new Map<string, Promise<unknown>>()
+
+function enqueueSave(bundleId: string, task: () => Promise<ProductBundle | null>) {
+  const previous = saveChains.get(bundleId) || Promise.resolve()
+  savingIds.value = new Set(savingIds.value).add(bundleId)
+  const run = previous.then(task, task)
+  saveChains.set(bundleId, run)
+  return run.finally(() => {
+    if (saveChains.get(bundleId) === run) {
+      saveChains.delete(bundleId)
+      const next = new Set(savingIds.value)
+      next.delete(bundleId)
+      savingIds.value = next
+    }
+  })
+}
+
+function latestBundle(bundle: ProductBundle) {
+  return bundles.value.find(row => row.bundleId === bundle.bundleId) || bundle
+}
+
 // 保存成功一律用服务端返回的最新 revision 更新本地，不再整表回拉，避免慢回拉覆盖新名称/新组合。
 async function persist(bundle: ProductBundle, name: string, items: BundleDisplayItem[]) {
-  if (isSaving(bundle.bundleId)) return null
-  savingIds.value = new Set(savingIds.value).add(bundle.bundleId)
   panelError.value = ''
   try {
-    return await api.saveProductBundle(bundle.bundleId, {
+    const result = await api.saveProductBundle(bundle.bundleId, {
       name,
       revision: bundle.revision,
       items: items.map(({ rspuId, variantId, quantity }) => ({ rspuId, variantId, quantity })),
     })
+    // 在队列任务内部就更新本地，保证下一次排队保存读到最新 revision。
+    replaceBundle(result)
+    return result
   } catch (error) {
     panelError.value = error instanceof Error ? error.message : '保存组合失败'
     return null
-  } finally {
-    const next = new Set(savingIds.value)
-    next.delete(bundle.bundleId)
-    savingIds.value = next
   }
 }
 
@@ -125,7 +144,9 @@ async function confirmName() {
   nameError.value = ''
   try {
     if (editingBundle.value) {
-      const result = await persist(editingBundle.value, nameInput.value.trim(), editingBundle.value.items)
+      const editing = editingBundle.value
+      const result = await enqueueSave(editing.bundleId,
+        () => persist(latestBundle(editing), nameInput.value.trim(), latestBundle(editing).items))
       if (result) {
         replaceBundle(result)
         nameDialog.value?.close()
@@ -232,18 +253,24 @@ async function addProductsToBundle(bundle: ProductBundle, selections: { product:
       return
     }
   }
-  const items = mergeItems(bundle, additions)
-  if (items.length > 5) {
-    panelError.value = '每个组合最多5个商品'
-    return
-  }
-  const result = await persist(bundle, bundle.name, items)
+  const result = await enqueueSave(bundle.bundleId, async () => {
+    const current = latestBundle(bundle)
+    const items = mergeItems(current, additions)
+    if (items.length > 5) {
+      panelError.value = '每个组合最多5个商品'
+      return null
+    }
+    return persist(current, current.name, items)
+  })
   if (result) replaceBundle(result)
 }
 
 async function removeItem(bundle: ProductBundle, target: BundleDisplayItem) {
-  const items = bundle.items.filter(item => item.rspuId !== target.rspuId || item.variantId !== target.variantId)
-  const result = await persist(bundle, bundle.name, items)
+  const result = await enqueueSave(bundle.bundleId, async () => {
+    const current = latestBundle(bundle)
+    const items = current.items.filter(item => item.rspuId !== target.rspuId || item.variantId !== target.variantId)
+    return persist(current, current.name, items)
+  })
   if (result) replaceBundle(result)
 }
 
@@ -354,8 +381,7 @@ defineExpose({ addProduct })
 </script>
 
 <template>
-  <aside data-testid="combo-panel" class="relative flex shrink-0 flex-col border border-line bg-white"
-    :style="{ width: '100%', maxWidth: `${panelWidth}px` }" aria-label="自选组合侧边栏">
+  <aside data-testid="combo-panel" class="relative flex w-full shrink-0 flex-col border border-line bg-white" aria-label="自选组合侧边栏">
     <button type="button" data-testid="combo-panel-resize-handle" aria-label="拖动调整自选组合栏宽度"
       class="absolute -left-1.5 top-0 z-10 hidden h-full w-3 cursor-ew-resize md:block" @pointerdown="startResize" />
     <div class="border-b border-line p-4">

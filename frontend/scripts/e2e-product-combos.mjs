@@ -48,6 +48,7 @@ async function openPage(initialCombos = []) {
     }
     const bundleMatch = path.match(/^\/api\/v1\/office\/product-bundles\/([^/]+)$/)
     if (bundleMatch && request.method() === 'PUT') {
+      if (state.saveDelays?.length) await new Promise(resolve => setTimeout(resolve, state.saveDelays.shift()))
       const body = request.postDataJSON()
       const existing = state.combos.find(combo => combo.bundleId === bundleMatch[1])
       if ((body.revision || 0) !== (existing?.revision || 0)) return reject('商品组合已变化，请重新读取后编辑')
@@ -171,6 +172,17 @@ try {
   assert.equal(state.saves.at(-1).name, '洽谈区组合')
   assert.equal(state.saves.at(-1).items.length, 5, '重命名不覆盖商品')
 
+  // 拖动调宽：外层网格轨道与实际宽度一起变化
+  const rail = page.locator('.catalog-collections')
+  const beforeWidth = (await rail.boundingBox()).width
+  const handle = await page.getByTestId('combo-panel-resize-handle').boundingBox()
+  await page.mouse.move(handle.x + 3, handle.y + 120)
+  await page.mouse.down()
+  await page.mouse.move(handle.x - 97, handle.y + 120, { steps: 6 })
+  await page.mouse.up()
+  const afterWidth = (await rail.boundingBox()).width
+  assert.ok(afterWidth > beforeWidth + 50, `拖宽应联动外层布局（${beforeWidth}→${afterWidth}）`)
+
   // 删除需确认
   await reloadedCard.getByRole('button', { name: '删除', exact: true }).click()
   const deleteDialog = page.getByRole('dialog', { name: '删除组合' })
@@ -201,6 +213,22 @@ try {
   assert.deepEqual(invalid.state.saves.at(-1).items.map(item => item.rspuId), ['P1'])
   assert.deepEqual(invalid.errors, [])
   await invalid.context.close()
+
+  // 第一次保存未结束时再次保存：按组合排队，两件都保留且 revision 连续
+  const queued = await openPage([{
+    bundleId: 'CB-1', name: '排队组合', revision: 1,
+    items: [{ rspuId: 'P1', variantId: 'V1', quantity: 1 }, { rspuId: 'P2', variantId: 'V1', quantity: 1 }, { rspuId: 'P3', variantId: 'V1', quantity: 1 }],
+  }])
+  const queuedCard = queued.page.getByTestId('combo-card').first()
+  await queuedCard.waitFor({ state: 'visible' })
+  queued.state.saveDelays = [400, 0]
+  await queued.page.getByTestId('product-card-P4').dragTo(queuedCard)
+  await queued.page.getByTestId('product-card-P5').dragTo(queuedCard)
+  await queued.page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('5/5'))
+  assert.deepEqual(queued.state.saves.map(save => save.revision), [2, 3], '第二次保存排在第一次之后，revision 不冲突')
+  assert.deepEqual(queued.state.saves.at(-1).items.map(item => item.rspuId), ['P1', 'P2', 'P3', 'P4', 'P5'])
+  assert.deepEqual(queued.errors, [])
+  await queued.context.close()
 
   // 每账号最多 10 个组合：达到上限后创建入口禁用
   const full = await openPage(Array.from({ length: 10 }, (_, index) => ({
