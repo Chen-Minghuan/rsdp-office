@@ -36,6 +36,8 @@ mvn spring-boot:run
 
 服务默认监听 `8082` 端口。
 
+使用 JAR 常驻运行时，从仓库根目录执行 `scripts/run-local-backend.sh`，或对已构建产物执行 `scripts/run-local-backend.sh --skip-build`。需要 Java 21，脚本构建时不运行测试；测试另行执行。每次启动先复制 JAR 到独立 `output/local-runtime/backend.*` 目录，避免后续 Maven 打包替换运行文件引发类加载异常。更新前先停止旧进程，脚本不会自动终止占用端口的服务。详见 [PERF-003](../docs/tasks/PERF-003-recommendation-loading.md)。
+
 ### 用户登录
 
 开启公网认证时，后端使用 `office_user` 表保存用户和 PBKDF2 加盐密码哈希，不保存明文密码。首次部署可以通过环境变量创建一个用户：

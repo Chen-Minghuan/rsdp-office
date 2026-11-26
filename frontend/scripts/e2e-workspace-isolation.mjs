@@ -62,7 +62,7 @@ try {
     const page = await anonymous.newPage()
     for (const destination of ['/', '/canvas?mode=design', '/products']) {
       await page.goto(baseUrl + destination)
-      await page.getByRole('heading', { name: '登录办公空间智能设计平台', exact: true }).waitFor({ timeout: 10000 })
+      await page.getByRole('heading', { name: '登录工作台', exact: true }).waitFor({ timeout: 10000 })
       const url = new URL(page.url())
       assert.equal(url.pathname, '/login')
       assert.equal(url.searchParams.get('redirect'), destination === '/' ? '/workspace/project-bench?view=drawing' : destination)
@@ -113,7 +113,11 @@ try {
     if (path === '/api/v1/office/users/assignable') return respond([currentUser])
     if (currentUser.userId === 'USER-UNASSIGNED') {
       const rows = [{ rspuId: 'RSPU-AUTHORIZED', productName: '独立浏览商品', status: 'active', retailPrice: null }]
-      if (path === '/api/v1/products/page') return respond({ page: 1, size: 20, rows, total: 1, catalogTotal: 1, activeTotal: 1 })
+      if (path === '/api/v1/office/workspace/shared-catalog') return respond({ workspaceEnabled: true, dealer: false, effectiveVisible: true })
+      if (path === '/api/v1/products/browse') return respond({
+        rows: rows.map(shared => ({ shared, local: null })), total: 1, catalogTotal: 1, activeTotal: 1,
+        localTotal: 0, canManageLocal: false, sharedUnavailable: false,
+      })
       if (path === '/api/v1/products' || path === '/api/v1/office/favorites/items') return respond(rows)
     }
     if (path === '/api/v1/office/favorites/product-ids' && currentUser.userId === 'USER-UNASSIGNED') return respond(['RSPU-AUTHORIZED'])
@@ -177,7 +181,7 @@ try {
   async function logoutAndLogin(username) {
     await page.getByRole('button', { name: '退出登录', exact: true }).click()
     await page.waitForURL(/\/login/)
-    await page.getByRole('heading', { name: '登录办公空间智能设计平台', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '登录工作台', exact: true }).waitFor()
     await page.locator('#username').fill(username)
     await page.locator('#password').fill('test-password')
     await page.getByRole('button', { name: '登录', exact: true }).click()

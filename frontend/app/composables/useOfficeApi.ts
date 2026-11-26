@@ -1,11 +1,14 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ProjectQuotationLatest, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
-import type { LocalProductInput, LocalProductSummary, LocalProductVariant, LocalProductImage } from '~/types/local-products'
 import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
+import type {
+  LocalProductInput, LocalProductCatalogItem, LocalProductDetail, LocalProductWorkbookPreview,
+  WorkbookCategoryItem, WorkbookFieldColumns, WorkbookMappingSelection,
+} from '~/types/local-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -110,12 +113,19 @@ function apiUrl(path: string) {
   return `${API_BASE}${path}`
 }
 
-async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>, timeout?: number): Promise<T> {
   const res = await $fetch<ApiResponse<T>>(apiUrl(path), {
     method: method as any,
     body: body as any,
     credentials: 'include',
+    timeout,
+    retry: timeout === undefined ? undefined : 0,
     headers: { 'Content-Type': 'application/json', ...headers },
+  }).catch((failure) => {
+    if (failure?.cause?.name === 'TimeoutError' || failure?.name === 'TimeoutError') {
+      throw new Error('服务响应超时，请重试')
+    }
+    throw failure
   })
   if (res.code !== 200) {
     throw new Error(res.message || '请求失败')
@@ -190,7 +200,7 @@ export function useOfficeApi() {
       objects: payload.objects,
       files: payload.files,
       blank: payload.blank,
-    })
+    }, undefined, 15_000)
   }
 
   const schemePath = (floorId: string) => `/api/v1/office/floors/${encodeURIComponent(floorId)}/room-scheme`
@@ -301,7 +311,7 @@ export function useOfficeApi() {
   }
 
   async function recommendModule(requestBody: ModuleRecommendationRequest): Promise<ModuleRecommendation> {
-    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody, undefined, 15_000)
   }
 
   async function selectModuleProduct(requestBody: ModuleRecommendationRequest): Promise<ModuleProductSelection> {
@@ -395,6 +405,19 @@ export function useOfficeApi() {
 
   async function loadCatalogCapabilities(): Promise<CatalogCapabilities> {
     return await request('GET', '/api/v1/products/capabilities')
+  }
+
+  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string }) {
+    const { page, size, ...filters } = options
+    const query = new URLSearchParams({ page: String(page), size: String(size) })
+    for (const [name, value] of Object.entries(filters)) {
+      if (value) query.set(name, value)
+    }
+    return request<CatalogBrowsePage>('GET', `/api/v1/products/browse?${query}`)
+  }
+
+  function browseProductFacets() {
+    return request<CatalogBrowseFacets>('GET', '/api/v1/products/browse/facets')
   }
 
   async function loadFavoriteFolders(rspuId?: string): Promise<FavoriteFolder[]> {
@@ -519,21 +542,32 @@ export function useOfficeApi() {
   }
 
   const localProductsPath = '/api/v1/office/local-products'
-  const listLocalProducts = (page: number) => request<{ canWrite: boolean, products: LocalProductSummary[], hasMore: boolean }>(
-    'GET', `${localProductsPath}?page=${page}`)
-  const getLocalProduct = (id: string) => request<{
-    product: LocalProductSummary, variants: LocalProductVariant[], images: LocalProductImage[]
-  }>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
-  const saveLocalProducts = (batchId: string, products: LocalProductInput[]) => request<{ id: string, name: string, revision: number }[]>(
-    'POST', localProductsPath, { batchId, products })
-  const localProductImageUrl = (id: string) => apiUrl(`${localProductsPath}/images/${encodeURIComponent(id)}`)
+  function listLocalProducts(page: number, search = '') {
+    const query = new URLSearchParams({ page: String(page) })
+    if (search) query.set('search', search)
+    return request<{ canWrite: boolean, products: LocalProductCatalogItem[], hasMore: boolean }>('GET', `${localProductsPath}?${query}`)
+  }
+  const getLocalProduct = (id: string) => request<LocalProductDetail>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
+  const saveLocalProducts = (batchId: string, products: LocalProductInput[], previewId?: string | null) => request<{ id: string, name: string, revision: number }[]>(
+    'POST', localProductsPath, { batchId, products, previewId })
+  const localProductImagePath = (id: string) => `${localProductsPath}/images/${encodeURIComponent(id)}`
+  const workbookPreviewImageUrl = (id: string, key: string) => apiUrl(`${localProductsPath}/excel-preview/${encodeURIComponent(id)}/images/${encodeURIComponent(key)}`)
   const localProductTemplateUrl = () => apiUrl(`${localProductsPath}/excel-template`)
   const listLocalProductCategories = () => request<{ dictCode: string, dictName: string }[]>('GET', '/api/v1/dicts/category')
 
-  async function previewLocalProductWorkbook(file: File) {
+  const suggestWorkbookFields = (headers: Record<number, string>) => request<WorkbookFieldColumns>(
+    'POST', `${localProductsPath}/excel-field-suggestions`, { headers })
+  const suggestWorkbookCategories = (candidates: string[], products: WorkbookCategoryItem[]) => request<Record<number, string>>(
+    'POST', `${localProductsPath}/excel-category-suggestions`, { candidates, products })
+  const suggestWorkbookMaterials = (descriptions: string[]) => request<Record<number, string>>(
+    'POST', `${localProductsPath}/excel-material-suggestions`, { descriptions })
+
+  async function previewLocalProductWorkbook(file: File, mapping?: WorkbookMappingSelection) {
     const form = new FormData()
     form.set('file', file)
-    const response = await $fetch<ApiResponse<{ products: LocalProductInput[], errors: { row: number, message: string }[] }>>(
+    form.set('imageReferences', 'true')
+    if (mapping) form.set('mapping', new Blob([JSON.stringify(mapping)], { type: 'application/json' }))
+    const response = await $fetch<ApiResponse<LocalProductWorkbookPreview>>(
       apiUrl(`${localProductsPath}/excel-preview`), { method: 'POST', body: form, credentials: 'include' })
     if (response.code !== 200) throw new Error(response.message || 'Excel 预览失败')
     return response.data
@@ -590,6 +624,8 @@ export function useOfficeApi() {
     resetProject,
     loadImportedProducts,
     loadImportedProductPage,
+    browseProductCatalog,
+    browseProductFacets,
     loadCatalogCapabilities,
     loadFavoriteFolders,
     createFavoriteFolder,
@@ -618,10 +654,14 @@ export function useOfficeApi() {
     listLocalProducts,
     getLocalProduct,
     saveLocalProducts,
-    localProductImageUrl,
+    localProductImagePath,
+    workbookPreviewImageUrl,
     localProductTemplateUrl,
     listLocalProductCategories,
     previewLocalProductWorkbook,
+    suggestWorkbookFields,
+    suggestWorkbookCategories,
+    suggestWorkbookMaterials,
     createWorkspaceUser,
     getSharedCatalogStatus,
     setWorkspaceSharedCatalog,
