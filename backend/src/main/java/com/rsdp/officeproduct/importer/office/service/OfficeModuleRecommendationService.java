@@ -8,6 +8,7 @@ import com.rsdp.officeproduct.importer.office.dto.*;
 import com.rsdp.officeproduct.importer.office.entity.OfficeCart;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.office.product.LocalProductReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -187,6 +188,9 @@ public class OfficeModuleRecommendationService {
         }
         List<List<ModuleRecommendationDto.Candidate>> choices = new ArrayList<>();
         for (var item : items) {
+            if (LocalProductReference.isLocal(item.rspuId())) {
+                throw new BusinessException("组合中有尚未报价的本地商品，请使用已报价商品后再应用到房间");
+            }
             var product = office.currentProductVariant(item.rspuId(), item.variantId());
             if (product == null) throw new BusinessException("有商品变体已不可用，请调整后重试");
             var candidates = modules.stream().map(module -> candidate(module, product)).toList();

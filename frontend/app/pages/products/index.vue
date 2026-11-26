@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CatalogBrowseFacets, CatalogBrowseRow, CatalogFacets, CatalogProductFilters, ImportedProduct } from '~/types/imported-products'
 import { cloneProductFilters, countProductFilters, emptyProductFilters, FILTER_KEYS } from '~/utils/productFilter'
-
+import { localProductId, localProductReference } from '~/utils/catalogProductReference'
 
 const api = useOfficeApi()
 const workspace = useWorkspaceStore()
@@ -74,7 +74,6 @@ let projectFavoriteStateVersion = 0
 const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
 const catalogStatusReady = ref(false)
 const localOnly = computed(() => catalogStatus.value?.effectiveVisible === false)
-const showRsdpProducts = computed(() => catalogStatusReady.value && catalogStatus.value?.effectiveVisible === true)
 const savingCatalogStatus = ref(false)
 let statusRequest = 0
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
@@ -112,13 +111,26 @@ const collectionLoading = computed(() => loadingCollectionItems.value
 const collectionError = computed(() => failedCollectionItems.value
   || !!(collection.value === 'project' ? projectFavoriteStatusError.value : favoriteStatusError.value))
 const collectionProducts = computed(() => {
-  if (!statsAvailable.value) return []
   const ids = collection.value === 'project' ? projectFavoriteProductIds.value : favoriteProductIds.value
-  return collectionItems.value.filter(product => ids.has(product.rspuId))
+  return collectionItems.value.filter(product => ids.has(product.rspuId) && (!localOnly.value || localProductId(product.rspuId)))
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(resultTotal.value / pageSize.value)))
-const pageProducts = computed(() => localOnly.value ? serverProducts.value.filter(row => row.local) : serverProducts.value)
-const sharedPageProducts = computed(() => pageProducts.value.flatMap(row => row.shared ? [row.shared] : []))
+const pageProducts = computed<ImportedProduct[]>(() => serverProducts.value.flatMap(row => {
+  if (!row.local) return !localOnly.value && row.shared ? [row.shared] : []
+  const item = row.local
+  return [{
+    rspuId: localProductReference(item.id),
+    rspuCode: item.factoryModel,
+    externalCode: null,
+    productName: item.name,
+    categoryPath: [localCategoryLabel(item.categoryCode)],
+    primaryImageUrl: item.primaryImageId ? api.localProductImagePath(item.primaryImageId) : null,
+    retailPrice: null,
+    status: 'active',
+    createdAt: '',
+    updatedAt: '',
+  }]
+}))
 const pageStart = computed(() => resultTotal.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
 const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, resultTotal.value))
 const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
@@ -387,11 +399,11 @@ async function loadProjectFavoriteProductIds(preserveCurrent = false) {
   }
 }
 
-watch([() => workspace.currentProjectId, showRsdpProducts], () => {
-  if (showRsdpProducts.value) void loadProjectFavoriteProductIds()
+watch([() => workspace.currentProjectId, catalogStatusReady], () => {
+  if (catalogStatusReady.value) void loadProjectFavoriteProductIds()
 })
-watch(showRsdpProducts, visible => {
-  if (visible) void loadFavoriteProductIds()
+watch(catalogStatusReady, ready => {
+  if (ready) void loadFavoriteProductIds()
 })
 
 function openFavorites(product: ImportedProduct, section: 'project' | 'personal' = 'personal') {
@@ -399,9 +411,9 @@ function openFavorites(product: ImportedProduct, section: 'project' | 'personal'
 }
 
 const collectionVersion = ref(0)
-watch([collection, () => workspace.currentProjectId, storageScope, collectionVersion, showRsdpProducts],
+watch([collection, () => workspace.currentProjectId, storageScope, collectionVersion, catalogStatusReady, localOnly],
   async ([section, projectId], _, onCleanup) => {
-    if (!showRsdpProducts.value) return
+    if (!catalogStatusReady.value) return
     let current = true
     onCleanup(() => { current = false })
     collectionItems.value = []
@@ -513,7 +525,7 @@ onMounted(loadCatalogContext)
         <NuxtLink v-if="canManageLocal" to="/products/local" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
           管理本地商品
         </NuxtLink>
-        <button v-if="showRsdpProducts" type="button" class="collection-toggle border border-neutral-300 px-3 py-2 text-sm font-semibold text-accent-ink"
+        <button v-if="catalogStatusReady" type="button" class="collection-toggle border border-neutral-300 px-3 py-2 text-sm font-semibold text-accent-ink"
           :aria-controls="collectionId" :aria-expanded="collectionOpen" @click="toggleCollection">收藏夹</button>
       </div>
     </header>
@@ -527,14 +539,14 @@ onMounted(loadCatalogContext)
       <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? catalogTotal : '—' }}</strong></span>
       <span>本地商品 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? localTotal : '—' }}</strong></span>
       <span v-if="!localOnly">在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
-      <span v-if="showRsdpProducts && favoriteStatusError" class="text-red-800">收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadFavoriteProductIds">重试</button></span>
-      <span v-if="showRsdpProducts && projectFavoriteStatusError" class="text-red-800">项目收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadProjectFavoriteProductIds()">重试</button></span>
+      <span v-if="favoriteStatusError" class="text-red-800">收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadFavoriteProductIds">重试</button></span>
+      <span v-if="projectFavoriteStatusError" class="text-red-800">项目收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadProjectFavoriteProductIds()">重试</button></span>
     </div>
 
     <p v-if="sharedUnavailable && !listError && !isLoading" role="status" class="text-sm text-amber-800">
       公共库暂时无法加载，当前显示本地商品。
     </p>
-    <div class="catalog-split" :class="{ 'advanced-open': advancedOpen, 'with-collections': showRsdpProducts }">
+    <div class="catalog-split" :class="{ 'advanced-open': advancedOpen }">
       <section class="catalog-main min-w-0" aria-label="商品列表">
         <form ref="filtersForm" class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
           <label class="filter-search grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
@@ -613,23 +625,14 @@ onMounted(loadCatalogContext)
         </div>
 
         <ProductCatalogGrid v-else>
-          <template v-for="row in pageProducts" :key="row.local ? 'local:' + row.local.id : 'shared:' + row.shared.rspuId">
-            <ProductCatalogTile v-if="row.local" :name="row.local.name" :code="row.local.factoryModel"
-              :image-url="row.local.primaryImageId ? api.localProductImagePath(row.local.primaryImageId) : undefined"
-              :to="{ path: `/products/local/${encodeURIComponent(row.local.id)}`, query: { from: 'catalog' } }">
-              <template #metadata>
-                <span class="truncate text-xs text-neutral-600">{{ localCategoryLabel(row.local.categoryCode) }}</span>
-                <span class="mt-auto pt-1 text-xs font-medium text-accent-ink">本地商品</span>
-              </template>
-            </ProductCatalogTile>
-            <ProductCatalogCard v-else :product="row.shared"
-              :personal-favorite="favoriteProductIds.has(row.shared.rspuId)"
-              :project-favorite="projectFavoriteProductIds.has(row.shared.rspuId)"
-              :project-available="!!workspace.currentProjectId"
-              :bundle-available="bundlesAvailable"
-              @personal="togglePersonalFavorite(row.shared)" @project="openFavorites(row.shared, 'project')" @bundle="addToBundle(row.shared)"
-            />
-          </template>
+          <ProductCatalogCard v-for="product in pageProducts" :key="product.rspuId" :product="product"
+            :local-category="product.categoryPath?.[0]"
+            :personal-favorite="favoriteProductIds.has(product.rspuId)"
+            :project-favorite="projectFavoriteProductIds.has(product.rspuId)"
+            :project-available="!!workspace.currentProjectId"
+            :bundle-available="bundlesAvailable"
+            @personal="togglePersonalFavorite(product)" @project="openFavorites(product, 'project')" @bundle="addToBundle(product)"
+          />
         </ProductCatalogGrid>
 
         <div v-if="statsAvailable && resultTotal" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
@@ -671,9 +674,9 @@ onMounted(loadCatalogContext)
         :top="drawerTop"
         :saving="advancedSaving" :error="advancedError"
         @confirm="applyAdvancedFilters" @cancel="advancedOpen = false" />
-      <aside v-if="showRsdpProducts" :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
+      <aside :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
         :class="{ 'is-open': collectionOpen }" aria-label="产品库收藏" tabindex="-1">
-        <ProductBundlePanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="sharedPageProducts" class="mb-4" />
+        <ProductBundlePanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="pageProducts" class="mb-4" />
         <ProductCatalogFavorites
           :section="collection"
           :project-name="workspace.currentProject?.projectName || ''"
@@ -681,7 +684,6 @@ onMounted(loadCatalogContext)
           :total="collectionProducts.length"
           :loading="collectionLoading"
           :error="collectionError"
-          :catalog-unavailable="!!listError"
           @select="selectedCollection = $event"
           @retry="reloadCollection"
           @open="openFavorites($event, collection)"
@@ -725,8 +727,7 @@ onMounted(loadCatalogContext)
   gap: 1rem;
 }
 @media (min-width: 1100px) {
-  .catalog-split.advanced-open.with-collections { grid-template-columns: minmax(0, 1fr) 400px clamp(13rem, 17vw, 18rem); }
-  .catalog-split.advanced-open:not(.with-collections) { grid-template-columns: minmax(0, 1fr) 400px; }
+  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px clamp(13rem, 17vw, 18rem); }
 }
 @media (min-width: 641px) and (max-width: 1099px) {
   .catalog-split.advanced-open { margin-right: 400px; }
@@ -739,7 +740,7 @@ onMounted(loadCatalogContext)
 .filter-search { grid-column: 1 / -1; }
 
 @media (min-width: 1100px) {
-  .catalog-split.with-collections { grid-template-columns: minmax(0, 1fr) clamp(13rem, 17vw, 18rem); }
+  .catalog-split { grid-template-columns: minmax(0, 1fr) clamp(13rem, 17vw, 18rem); }
   .catalog-collections,
   .catalog-collections.is-open { display: block; grid-row: auto; }
   .collection-toggle { display: none; }

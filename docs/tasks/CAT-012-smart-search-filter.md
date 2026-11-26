@@ -119,3 +119,9 @@ UI 回归与冒烟均为接口拦截/模拟，不作为真实接口验收证据�
 - 页面保留上游 quick 分类/颜色与本地商品展示；高级面板、标签、即时应用/失败回滚、内嵌互换布局全部保留；resetFilters 同时清空 quick 条件。`/products/page` 旧入口保留未删。
 - 冲突文件：RsdpCatalogGateway（双方方法并存）、index.vue（状态/监听/模板融合）、useOfficeApi、workflows、e2e-product-filters（重写为 browse mock）、README/status。
 - 验证：后端全量 `mvn test` 退出码 0（browse 测试更新签名并新增高级筛选用例）；`pnpm build` 退出码 0；筛选/workflows/favorites/smoke 四套 E2E 全部通过。
+
+## 2026-11-25 二次合并 upstream/main（PR-24 本地商品收藏）
+
+- 上游新增本地商品收藏/自选组合后再次合并：保留双方导入、收藏栏常驻；`catalog-split` 不再使用 with-collections，advanced-open 三列规则简化为单一选择器。
+- 修复 favorites E2E 取消收藏后的时序断言：改为等待列表只剩 1 件再断言，消除偶发失败。
+- 验证：`mvn test` 退出码 0；`pnpm build` 退出码 0；筛选/workflows/favorites/smoke 全部通过。

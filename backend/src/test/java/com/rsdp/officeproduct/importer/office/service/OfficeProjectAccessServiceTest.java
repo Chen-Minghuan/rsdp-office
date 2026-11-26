@@ -147,6 +147,32 @@ class OfficeProjectAccessServiceTest {
         assertEquals("W1", access.workspaceForProjectCreation());
     }
 
+    @Test void onlyOwningMainAccountOrActualReadableProjectLeaderCanManageStatus() {
+        addWorkspace("W1", "OWNER");
+        addWorkspace("W2", "OTHER-OWNER");
+        addProject("P1", "W1");
+        addMember("P1", "LEAD", "LEADER");
+        addMember("P1", "STAFF", "COLLABORATOR");
+        members.get(1).setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.MANAGE_MEMBERS)));
+        enforcementOn("OWNER", "W1");
+        currentUser.currentUser().setRole("DEALER");
+        assertDoesNotThrow(() -> access.requireStatusManager("P1"));
+        enforcementOn("LEAD", "W1");
+        assertDoesNotThrow(() -> access.requireStatusManager("P1"));
+        members.getFirst().setPermissionFlags(0);
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+        enforcementOn("STAFF", "W1");
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+        enforcementOn("OTHER-OWNER", "W2");
+        currentUser.currentUser().setRole("DEALER");
+        addMember("P1", "OTHER-OWNER", "LEADER");
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+        enforcementOn("ADMIN", "W1");
+        currentUser.currentUser().setRole("ADMIN");
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+    }
+
     @Test void memberAndLeaderChecksFollowMembership() {
         addProject("P1", null);
         enforcementOn("USR-1");

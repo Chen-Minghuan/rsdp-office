@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ImportedProduct } from '~/types/imported-products'
+import { catalogProductPath, localProductId } from '~/utils/catalogProductReference'
 import { catalogSourceLabel } from '~/utils/catalogSource'
 
 const props = defineProps<{
@@ -8,9 +9,11 @@ const props = defineProps<{
   projectFavorite: boolean
   projectAvailable: boolean
   bundleAvailable: boolean
+  localCategory?: string
 }>()
 
 const emit = defineEmits<{ personal: []; project: []; bundle: [] }>()
+const isLocal = computed(() => !!localProductId(props.product.rspuId))
 const name = computed(() => props.product.productName || '未命名商品')
 const price = computed(() => {
   const amount = props.product.retailPrice
@@ -29,16 +32,22 @@ function dragProduct(event: DragEvent) {
 
 <template>
   <ProductCatalogTile :name="name" :code="product.rspuCode || product.externalCode || product.rspuId"
-    :image-url="product.primaryImageUrl" :to="`/products/${product.rspuId}`"
+    :image-url="product.primaryImageUrl" :to="catalogProductPath(product.rspuId)"
     :draggable="bundleAvailable && product.status === 'active'" @dragstart="dragProduct">
     <template #metadata>
-      <span v-if="product.sourceChannel" class="truncate text-xs text-neutral-600">
-        {{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}
-      </span>
-      <div class="mt-auto flex flex-wrap items-baseline justify-between gap-x-1.5 gap-y-0.5 pt-1">
-        <span class="text-xs" :class="product.status === 'active' ? 'text-green' : 'text-neutral-600'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
-        <span class="wrap-break-word text-sm font-semibold text-accent-ink tabular-nums">{{ price }}</span>
-      </div>
+      <template v-if="isLocal">
+        <span v-if="localCategory" class="truncate text-xs text-neutral-600">{{ localCategory }}</span>
+        <span class="mt-auto pt-1 text-xs font-medium text-accent-ink">本地商品</span>
+      </template>
+      <template v-else>
+        <span v-if="product.sourceChannel" class="truncate text-xs text-neutral-600">
+          {{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}
+        </span>
+        <div class="mt-auto flex flex-wrap items-baseline justify-between gap-x-1.5 gap-y-0.5 pt-1">
+          <span class="text-xs" :class="product.status === 'active' ? 'text-green' : 'text-neutral-600'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
+          <span class="wrap-break-word text-sm font-semibold text-accent-ink tabular-nums">{{ price }}</span>
+        </div>
+      </template>
     </template>
     <button v-if="product.status === 'active'" type="button"
       class="border-t border-line px-2.5 py-1.5 text-left text-xs font-medium text-accent-ink enabled:hover:bg-accent-tint disabled:opacity-45"

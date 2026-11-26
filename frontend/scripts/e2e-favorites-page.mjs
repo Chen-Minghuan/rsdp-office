@@ -323,6 +323,10 @@ try {
   await removeDialog.getByRole('button', { name: '确认取消收藏', exact: true }).click()
   await removeDialog.waitFor({ state: 'hidden' })
   assert.deepEqual(state.personalSaves.at(-1), { rspuId: 'P3', folderIds: [] }, '全部收藏中取消应清空所有收藏夹勾选')
+  await page.waitForFunction(() => {
+    const list = document.querySelector('[aria-label="收藏商品列表"]')
+    return list && list.querySelectorAll('li').length === 1
+  }, { timeout: 5000 })
   assert.equal(await grid.getByRole('listitem').count(), 1, '取消后全部收藏只剩一件商品')
 
   // 页面级删除收藏夹（F1 已空）
