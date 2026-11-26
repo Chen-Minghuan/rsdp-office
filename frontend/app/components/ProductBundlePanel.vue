@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { BundleDisplayItem, ProductBundle } from '~/types/productScheme'
-import type { ImportedProduct, ProductVariant } from '~/types/imported-products'
+import type { ImportedProduct } from '~/types/imported-products'
+import { catalogProductPath, localProductId } from '~/utils/catalogProductReference'
 import { createUuid } from '~/utils/uuid'
 import { productBundleError } from '~/utils/productBundleError'
 
@@ -10,7 +11,7 @@ const available = defineModel<boolean>('available', { default: false })
 const bundles = ref<ProductBundle[]>([])
 const active = ref<ProductBundle | null>(null)
 const product = ref<ImportedProduct | null>(null)
-const variants = ref<ProductVariant[]>([])
+const variants = ref<{ variantId: string; displayName: string }[]>([])
 const variantId = ref('')
 const loading = ref(false)
 const variantLoading = ref(false)
@@ -61,11 +62,16 @@ async function addProduct(item: ImportedProduct) {
   variantLoading.value = true
   const request = ++variantRequest
   try {
-    const detail = await api.getProduct(item.rspuId)
+    const productId = localProductId(item.rspuId)
+    const options = productId
+      ? (await api.getLocalProduct(productId)).variants.flatMap(variant => variant.id
+          ? [{ variantId: variant.id, displayName: variant.name }]
+          : [])
+      : (await api.getProduct(item.rspuId)).variants.filter(variant => variant.status === 'active')
     if (request !== variantRequest) return
-    variants.value = detail.variants.filter(variant => variant.status === 'active')
+    variants.value = options
     if (variants.value.length === 1) variantId.value = variants.value[0]!.variantId
-    if (!variants.value.length) error.value = '此商品暂无可加入的在售规格'
+    if (!variants.value.length) error.value = '此商品暂无可加入的规格'
   } catch (failure) {
     if (request === variantRequest) error.value = productBundleError(failure, '暂时无法读取商品规格，请重试。')
   } finally {
@@ -90,7 +96,7 @@ function addVariant() {
   })
   product.value = null
   error.value = ''
-  notice.value = '规格已加入，保存后可在产品方案页应用。'
+  notice.value = localProductId(item.rspuId) ? '本地商品规格已加入。' : '规格已加入，保存后可在产品方案页应用。'
 }
 
 function drop(event: DragEvent) {
@@ -165,9 +171,14 @@ onMounted(load)
         <label class="bundle-label">组合名称<input v-model="active.name" aria-label="组合名称" maxlength="100" required></label>
         <ul v-if="active.items.length" class="bundle-items">
           <li v-for="item in active.items" :key="JSON.stringify([item.rspuId, item.variantId])">
-            <div><strong>{{ item.name }}</strong><small>{{ item.variant }}</small></div>
-            <input v-model.number="item.quantity" type="number" min="1" max="200" required :aria-label="`${item.name}数量`">
-            <button type="button" :aria-label="`移除${item.name}`" @click="removeItem(item)">×</button>
+            <div>
+              <NuxtLink v-if="item.name" :to="catalogProductPath(item.rspuId)" class="font-semibold text-accent-ink hover:underline">{{ item.name }}</NuxtLink>
+              <strong v-else>商品不可用</strong>
+              <small>{{ item.variant }}</small>
+              <small v-if="item.name && localProductId(item.rspuId)" class="text-muted">本地商品 · 待报价</small>
+            </div>
+            <input v-model.number="item.quantity" type="number" min="1" max="200" required :aria-label="`${item.name || '不可用商品'}数量`">
+            <button type="button" :aria-label="`移除${item.name || '不可用商品'}`" @click="removeItem(item)">×</button>
           </li>
         </ul>
         <div v-if="product" class="bundle-picker">
@@ -261,6 +272,7 @@ onMounted(load)
 
 .bundle-list span,
 .bundle-items strong,
+.bundle-items a,
 .bundle-items small {
   display: block;
   overflow-wrap: anywhere;

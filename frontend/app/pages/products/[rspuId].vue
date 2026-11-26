@@ -40,6 +40,7 @@ async function loadProduct() {
   error.value = null
   try {
     product.value = await api.getProduct(rspuId)
+    if (!product.value) error.value = '商品不存在或已删除'
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载商品失败'
   } finally {
@@ -56,71 +57,53 @@ function formatDate(date: string) {
   return Number.isNaN(ts.getTime()) ? '—' : ts.toLocaleDateString('zh-CN')
 }
 
-onMounted(async () => {
-  await loadProduct()
-})
+onMounted(loadProduct)
 </script>
 
 <template>
-  <div class="mx-auto flex h-full min-h-0 w-full max-w-[1480px] flex-col overflow-y-auto">
-    <div class="flex-none">
-      <div class="mb-3 text-xs text-muted">
-        <NuxtLink to="/products" class="hover:text-bronze-dark">商品资源 / 商品库</NuxtLink> / 商品详情
+  <ProductsCatalogProductDetails :name="product ? product.productName || '未命名商品' : undefined" back-to="/products"
+    :images="galleryImages" :loading="isLoading" :error="error" @retry="loadProduct">
+    <template v-if="product" #badges>
+      <span class="border border-accent-line bg-accent-tint px-2 py-1 text-xs font-semibold text-accent-ink">RSDP 商品</span>
+      <span v-if="product.status" class="px-2 py-1 text-xs font-semibold"
+        :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-white text-muted'">
+        {{ product.status === 'active' ? '在售' : '非在售' }}
+      </span>
+    </template>
+    <template v-if="product?.retailPrice != null" #price>
+      <span class="text-lg font-bold text-accent-ink tabular-nums sm:text-xl">{{ formatPrice(product.retailPrice) }}</span>
+    </template>
+    <template v-if="product" #facts>
+      <div class="min-w-0">
+        <dt class="text-xs text-muted">商品编码</dt>
+        <dd class="mt-1 break-words text-sm font-semibold tabular-nums">{{ product.rspuCode || product.rspuId }}</dd>
       </div>
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 class="mb-2 text-[25px] font-bold tracking-tight">{{ product?.productName || '商品详情' }}</h1>
-          <p class="text-xs text-muted">查看商品资料与规格报价（商品数据由 RSDP 主项目统一维护）。</p>
+      <div class="min-w-0">
+        <dt class="text-xs text-muted">外部编码</dt>
+        <dd class="mt-1 break-words text-sm font-semibold tabular-nums">{{ product.externalCode || '—' }}</dd>
+      </div>
+      <div class="min-w-0">
+        <dt class="text-xs text-muted">主色</dt>
+        <dd class="mt-1 break-words text-sm font-medium">{{ product.colorPrimaryName || '—' }}</dd>
+      </div>
+      <div class="min-w-0">
+        <dt class="text-xs text-muted">商品来源</dt>
+        <dd class="mt-1 break-words text-sm font-medium">{{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}</dd>
+      </div>
+    </template>
+    <ProductsCatalogProductSpecifications :variants="specifications" />
+    <template v-if="product" #more>
+      <details class="border border-line bg-white">
+        <summary class="cursor-pointer px-4 py-3 text-sm font-semibold sm:px-5">说明与记录</summary>
+        <div class="border-t border-line p-4 sm:p-5">
+          <h2 class="text-sm font-semibold">描述 / 配置说明</h2>
+          <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-6">{{ product.description || '暂无说明' }}</p>
+          <dl class="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4">
+            <div><dt class="text-xs text-muted">创建时间</dt><dd class="mt-1 text-sm tabular-nums">{{ formatDate(product.createdAt) }}</dd></div>
+            <div><dt class="text-xs text-muted">更新时间</dt><dd class="mt-1 text-sm tabular-nums">{{ formatDate(product.updatedAt) }}</dd></div>
+          </dl>
         </div>
-        <NuxtLink to="/products" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm hover:bg-cream">
-          <AppIcon name="arrowLeft" size="4" />返回商品库
-        </NuxtLink>
-      </div>
-    </div>
-
-    <div v-if="error" class="flex-none rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">
-      {{ error }}
-    </div>
-
-    <div v-if="isLoading" class="grid flex-1 place-items-center">
-      <div class="flex items-center gap-2 text-muted">
-        <AppIcon name="reset" size="5" class="animate-spin" />
-        <span class="text-sm">加载商品中…</span>
-      </div>
-    </div>
-
-    <div v-else-if="!product" class="grid flex-1 place-items-center">
-      <div class="text-center">
-        <h2 class="text-base font-bold">商品不存在或已删除</h2>
-        <NuxtLink to="/products" class="mt-3 inline-block rounded-lg bg-bronze px-4 py-2 text-sm text-white">返回商品库</NuxtLink>
-      </div>
-    </div>
-
-    <div v-else class="flex-none space-y-5">
-      <ProductsCatalogProductDetails :name="product.productName || '未命名商品'" :code="product.rspuCode || product.rspuId" :images="galleryImages">
-        <template #badges>
-          <span class="rounded-md px-2.5 py-1 text-xs" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
-          <span class="text-xs text-muted">{{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}</span>
-        </template>
-        <template #price>
-          <span class="text-xl font-bold text-bronze-dark">{{ formatPrice(product.retailPrice) }}</span>
-        </template>
-        <template #facts>
-          <div><dt class="mb-1 text-xs text-muted">主色</dt><dd class="text-sm text-ink">{{ product.colorPrimaryName || '—' }}</dd></div>
-          <div><dt class="mb-1 text-xs text-muted">外部编码</dt><dd class="break-all text-sm text-ink">{{ product.externalCode || '—' }}</dd></div>
-          <div><dt class="mb-1 text-xs text-muted">在售状态</dt><dd class="text-sm text-ink">{{ product.status === 'active' ? '在售' : product.status ? '非在售' : '—' }}</dd></div>
-        </template>
-        <template #description>
-          <div class="mt-5 border-t border-line pt-4"><div class="mb-1 text-xs text-muted">描述 / 配置说明</div><p class="whitespace-pre-wrap text-sm leading-6 text-ink">{{ product.description || '暂无说明' }}</p></div>
-        </template>
-        <template #dates>
-          <section class="grid gap-3 rounded-lg border border-line bg-[#fbfaf8] p-4 text-xs sm:grid-cols-2">
-            <div><span class="text-muted">创建时间</span><div class="mt-1 font-medium text-ink">{{ formatDate(product.createdAt) }}</div></div>
-            <div><span class="text-muted">更新时间</span><div class="mt-1 font-medium text-ink">{{ formatDate(product.updatedAt) }}</div></div>
-          </section>
-        </template>
-      </ProductsCatalogProductDetails>
-      <ProductsCatalogProductSpecifications :variants="specifications" show-logistics />
-    </div>
-  </div>
+      </details>
+    </template>
+  </ProductsCatalogProductDetails>
 </template>

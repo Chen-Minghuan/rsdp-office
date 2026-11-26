@@ -3,7 +3,6 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFavoriteFolderDto;
@@ -18,6 +17,7 @@ import org.springframework.dao.DuplicateKeyException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -105,7 +105,6 @@ class OfficeFavoriteServiceTest {
     @Test
     void saveAddsNewFoldersRemovesUncheckedAndKeepsUnchangedMembership() {
         authenticate("U1");
-        when(productQueryService.getProduct("P1")).thenReturn(new ProductDetailDto());
         when(folderMapper.selectBatchIds(List.of("F2", "F3"))).thenReturn(List.of(
             folder("F2", "U1", "分组二", false), folder("F3", "U1", "分组三", false)));
         when(itemMapper.findByUserId("U1")).thenReturn(List.of(item("F1", "P1"), item("F3", "P1")));
@@ -124,7 +123,6 @@ class OfficeFavoriteServiceTest {
     @Test
     void emptySelectionRemovesProductFromAllCurrentUserFoldersOnly() {
         authenticate("U1");
-        when(productQueryService.getProduct("P1")).thenReturn(new ProductDetailDto());
         when(itemMapper.findByUserId("U1")).thenReturn(List.of(item("F1", "P1"), item("F2", "P1"), item("F2", "P2")));
 
         service.saveProductFolders("P1", List.of());
@@ -139,7 +137,6 @@ class OfficeFavoriteServiceTest {
     @Test
     void saveRejectsFolderOwnedByAnotherUser() {
         authenticate("U1");
-        when(productQueryService.getProduct("P1")).thenReturn(new ProductDetailDto());
         when(folderMapper.selectBatchIds(List.of("F-OTHER"))).thenReturn(List.of(folder("F-OTHER", "U2", "他人分组", false)));
 
         assertThrows(AccessDeniedException.class, () -> service.saveProductFolders("P1", List.of("F-OTHER")));
@@ -162,8 +159,8 @@ class OfficeFavoriteServiceTest {
             itemAt("F1", "P1", "2026-11-20T10:00:00"),
             itemAt("F2", "P1", "2026-11-22T10:00:00"),
             itemAt("F1", "P2", "2026-11-21T10:00:00")));
-        when(productQueryService.listProducts(false)).thenReturn(List.of(
-            product("P1", "职员桌"), product("P2", "办公椅"), product("P3", "未收藏商品")));
+        when(productQueryService.collectionProducts(anyCollection())).thenReturn(Map.of(
+            "P1", product("P1", "职员桌"), "P2", product("P2", "办公椅"), "P3", product("P3", "未收藏商品")));
 
         List<ProductListItemDto> result = service.listFavoriteItems(null);
 
@@ -180,8 +177,8 @@ class OfficeFavoriteServiceTest {
             itemAt("F1", "P1", "2026-11-20T10:00:00"),
             itemAt("F2", "P1", "2026-11-22T10:00:00"),
             itemAt("F1", "P2", "2026-11-21T10:00:00")));
-        when(productQueryService.listProducts(false)).thenReturn(List.of(
-            product("P1", "职员桌"), product("P2", "办公椅")));
+        when(productQueryService.collectionProducts(anyCollection())).thenReturn(Map.of(
+            "P1", product("P1", "职员桌"), "P2", product("P2", "办公椅")));
 
         List<ProductListItemDto> result = service.listFavoriteItems("F1");
 
@@ -212,7 +209,7 @@ class OfficeFavoriteServiceTest {
         when(itemMapper.findByUserId("U1")).thenReturn(List.of(
             itemAt("F1", "P1", "2026-11-20T10:00:00"),
             itemAt("F1", "P2", "2026-11-21T10:00:00")));
-        when(productQueryService.listProducts(false)).thenReturn(List.of(product("P1", "职员桌")));
+        when(productQueryService.collectionProducts(anyCollection())).thenReturn(Map.of("P1", product("P1", "职员桌")));
 
         List<ProductListItemDto> result = service.listFavoriteItems(null);
 

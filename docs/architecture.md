@@ -166,7 +166,7 @@ Office 本地商品、规格和图片表沿用 RSDP 的款式与变体模型及�
 
 审核单以最后一件商品处理完成的时间起算，满 7 天由 RSDP 数据保留任务整单清理。接收回执和精简结论与删除同事务保存，支持清理后的批次幂等回包及来源版本校验。
 
-个人商品收藏按服务端会话用户隔离：`office_favorite_folder` 保存默认分组与用户自建分组，`office_favorite_item` 以 `(folder_id,rspu_id)` 保存多分组商品关系。`rspu_id` 是 RSDP 商品弱关联，不建本地商品外键；下架不删除收藏。接口提供当前用户分组/数量/商品选择、自建分组、完整勾选事务保存及已收藏商品 ID，保存时独立核验商品可见性和分组归属。详见 [CAT-008](tasks/CAT-008-personal-favorites.md)。
+个人商品收藏按服务端会话用户隔离：`office_favorite_folder` 保存默认分组与用户自建分组，`office_favorite_item` 以 `(folder_id,rspu_id)` 保存多分组商品关系。`rspu_id` 保存商品弱关联，RSDP 编号沿用旧值，Office 本地编号带 `OFFICE-LOCAL-` 前缀。接口提供当前用户分组/数量/商品选择、自建分组、完整勾选事务保存及已收藏商品 ID，保存时独立核验商品可见性和分组归属。详见 [CAT-008](tasks/CAT-008-personal-favorites.md)。
 项目商品收藏使用独立的 `office_project_favorite_item`，以 `(project_id,user_id,rspu_id)` 联合主键实现每个成员在每个项目下各自收藏，不与个人分组混用。项目切换只刷新项目收藏状态；个人爱心跨项目保留。服务端从会话取得用户并逐次核验项目访问权和商品可见性。统一收藏弹窗只合并交互，不合并两套数据。详见 [CAT-009](tasks/CAT-009-project-favorites.md)。
 收藏中心 `/favorites` 对所有登录角色开放：侧栏账号浮层新增「收藏」直达入口，工作区账号仅主号可管理，报价入口按项目授权展示。个人与项目收藏各新增只读商品列表接口（`/favorites/items`、`/projects/{projectId}/favorites/items`），按收藏时间倒序，复用商品可见性过滤，他人收藏夹与无权限项目分别返回 403；自定义收藏夹可经 `DELETE /favorites/folders/{folderId}` 事务删除（默认夹保护、归属校验）。认证关闭的本地开发使用固定 `LOCAL-DEV` 用户读写收藏；数据库结构不变。详见 [CAT-010](tasks/CAT-010-favorites-center-page.md)。
 Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `widthCm/depthCm` 数据继续兼容。画布旧候选的厘米字段由毫米向上取整，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。

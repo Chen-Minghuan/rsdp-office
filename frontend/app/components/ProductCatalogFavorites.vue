@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ImportedProduct } from '~/types/imported-products'
+import { catalogProductPath } from '~/utils/catalogProductReference'
 
 defineProps<{
   section: 'personal' | 'project'
@@ -8,7 +9,6 @@ defineProps<{
   total: number
   loading: boolean
   error: boolean
-  catalogUnavailable: boolean
 }>()
 
 const emit = defineEmits<{
@@ -36,12 +36,11 @@ const emit = defineEmits<{
       <p role="alert">暂时无法读取收藏。</p>
       <button type="button" class="font-semibold underline" @click="emit('retry')">重试收藏夹</button>
     </div>
-    <p v-else-if="catalogUnavailable" class="text-sm text-neutral-600">商品目录暂不可用。</p>
     <p v-else-if="!products.length" class="text-sm text-neutral-600">当前目录范围内暂无收藏商品。</p>
     <template v-else>
       <ul aria-label="当前目录收藏商品" class="grid gap-2">
         <li v-for="product in products" :key="product.rspuId" class="flex min-w-0 items-center gap-2 border border-neutral-200 bg-white p-2">
-          <NuxtLink :to="`/products/${product.rspuId}`" class="flex min-w-0 flex-1 items-center gap-2 hover:text-accent-ink">
+          <NuxtLink :to="catalogProductPath(product.rspuId)" class="flex min-w-0 flex-1 items-center gap-2 hover:text-accent-ink">
             <span class="relative block size-10 shrink-0 bg-white">
               <ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" />
             </span>
