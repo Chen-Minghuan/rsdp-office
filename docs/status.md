@@ -8,7 +8,19 @@
 
 # 开发进度与下一步
 
+2026-11-26 [WORKSPACE-006 阶段保存与列表重取竞态修复](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 修复评审指出的竞态：进入项目列表触发 `refreshProjects()` 静默重取后立刻保存阶段时，迟到的旧列表响应会用保存前的阶段覆盖刚保存的值。`workspace` store 新增 `statusOverrides`（按项目记录保存时间与阶段），重取响应按请求发出时间比对，保存时间晚于请求发出时间的项目以人工保存值为准；`init()` 首次加载下拉尚未渲染，不受影响。`e2e-project-status` 新增延迟响应回归（列表响应延迟 800ms 返回保存前快照，断言下拉保持刚保存的阶段且不被覆盖）。实际执行（2026-11-26 本机）：`mvn -f backend/pom.xml test` 446 项、0 失败、0 错误、11 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；自建预览服务（3015）上 `e2e:project-status` 通过，且暂撤修复后该回归如预期失败（证明用例有效）、恢复后复跑通过；`e2e:project-refresh`（自起服务）通过。未做真实后端联调。
+
+2026-11-26 [WORKSPACE-006 存量项目阶段回填](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 恢复人工维护阶段时存量项目沿用切换前的显示阶段（用户确认的口径）：新增一次性迁移 `20261126_project_status_backfill.sql` 并注册进 `SchemaInitializer`，按原派生规则把"存在楼层且全部楼层有未失效方案确认、仍为默认 DESIGNING"的项目置为 DELIVERING；经 `office_data_migration` 标记表保证只执行一次，重启重跑不覆盖负责人此后的人工修改，也不动已是 COMPLETED 等人工值的行。同步更新产品需求文档（阶段人工维护、已完成看板为真实计数、存量回填口径）与 `OfficeProposalConfirmationMapper` 注释。实际执行（2026-11-26 本机）：`mvn -f backend/pom.xml test` 通过、0 失败 0 错误；`OfficeProjectStatusPostgresTest` 新增回填用例（全确认/部分确认/无楼层/确认失效/人工已完成五类项目、二次执行幂等、回填后人工修改不被覆盖），因本机未配置 `RSDP_TEST_POSTGRES_URL` 跳过，回填 SQL 未经真实 PostgreSQL 验证，不计为数据库验收。
+
+2026-11-26 [本地商品收藏和组合](tasks/INTEG-003-office-product-review.md#本地商品收藏和组合) 商品库的两类卡片共用个人收藏、项目收藏和自选组合。关闭公共库的普通员工浏览器模拟、隔离 PostgreSQL 持久化和工作区校验、前端构建及 Java 回归通过。本机前后端已更新。
+
 2026-11-25 [PROJECT-005 保存回归](tasks/PROJECT-005-floor-reference-images.md#验证记录) 补两组楼层保存回归：连续编辑后重新读取保留最后一次修改；参考图保存与楼层改名并发时两边都保留。并发组暴露出真实丢失更新——改名与参考图两条写路径均为读整行→改单字段→整行 `updateById` 写回，交错时用旧快照互覆盖；已按 `updateRequirements` 先例改为 `OfficeDesignFloorMapper.updateName`/`updateReferenceImages` 按列定点更新。`OfficeProjectServiceTest` 新增 4 用例（连续参考图重读、连续改名+交错重读、栅栏模拟并发交错保留、按列写契约），反向验证临时改回整行写后并发与契约两用例确定性失败；新增 `OfficeFloorSavePostgresTest`（RSDP_TEST_POSTGRES_URL 门控）固化真实库交错读写。Java 全量 433 运行/0 失败/11 跳过（跳过均为 Postgres 门控，含本次新增集成测试未真实执行）。项目级改名与项目参考图存在同类整行写风险，列为后续观察项。
+
+2026-11-25 [WORKSPACE-006 恢复人工维护阶段](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 项目阶段由"按方案确认读时派生"改回负责人/所属工作区主号人工维护：恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`canManageStatus` 权限字段与前端阶段下拉（设计中/交付中/已完成），其他成员只读；删除 `derivedStatus`，`office_design_project.status` 恢复为唯一事实来源；区域进度（zoneTotal/zoneDelivered）保留按方案确认派生。工作台"已完成"看板由占位改为真实计数并参与筛选。`e2e-project-status` 恢复手动维护断言，`e2e-project-refresh` 改为阶段不随确认自动变化、进度仍派生的断言。实际执行（2026-11-25 本机）：`mvn -f backend/pom.xml test` 422 项、0 失败、0 错误、10 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；dev server（3001）上 `e2e:project-status`、`e2e:workflows`、`MOCK_API=1 e2e:smoke` 与自起服务的 `e2e:project-refresh` 均通过（均拦截 API）；`git diff --check` 通过。未做真实后端联调与真实角色页面验收。
+
+2026-11-25 [公共和本地商品详情统一](tasks/INTEG-003-office-product-review.md#公共和本地商品详情统一) 公共库和本地商品共用详情布局、图片和规格交互。前端构建、图片预览、模拟工作流和冒烟通过。本机更新后，以「1.2米茶几」截图数据和样本图片检查桌面及窄屏。
+
+2026-11-25 [本地商品详情界面](tasks/INTEG-003-office-product-review.md#本地商品详情界面) 桌面并排展示图片和规格，窄屏将规格置于图片下方。支持键盘放大图片和切换多条规格。使用「2米茶台」的已保存资料进行桌面、窄屏浏览器检查，前端构建、模拟工作流和冒烟通过，本机前端已更新。
 2026-11-25 [登录页主题改版](tasks/AUTH-001-user-login.md#2026-11-25-登录页主题改版) 登录页统一为工作区紫色主题，桌面双栏、窄屏上下布局。前端构建、登录专项模拟、账号隔离、工作流和冒烟通过。本地真实后端验证匿名跳转，真实账号提交与公网部署未执行。
 
 2026-11-25 [商品库混合展示](tasks/INTEG-003-office-product-review.md#商品库混合展示) 公共库与本工作区商品在同一网格搜索和分页。隔离数据库、浏览器和 RSDP 测试替身验证 56 件跨六页混排，关闭后普通员工只看到本地商品，重新开启恢复混排。Java、前端构建、模拟工作流和冒烟通过，本机前后端已更新。

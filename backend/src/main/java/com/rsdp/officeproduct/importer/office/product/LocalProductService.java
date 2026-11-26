@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -52,6 +53,17 @@ public class LocalProductService {
         long offset = Math.max(0L, (long) page - 1) * PAGE_SIZE;
         List<CatalogItem> rows = catalogReader.rows(user.getWorkspaceId(), keyword, "", "", offset, PAGE_SIZE + 1);
         return new Page(canWrite(user), rows.stream().limit(PAGE_SIZE).toList(), rows.size() > PAGE_SIZE);
+    }
+
+    public List<CatalogItem> catalogItems(Collection<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        OfficeUser user = currentUser.currentUser();
+        if (user == null || user.getWorkspaceId() == null) return List.of();
+        return catalogReader.findByIds(user.getWorkspaceId(), ids);
+    }
+
+    public void requireVisible(String productId) {
+        find(requireMember().getWorkspaceId(), productId);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

@@ -24,7 +24,7 @@ export interface BundleItem {
 }
 
 export interface BundleDisplayItem extends BundleItem {
-  name: string
+  name: string | null
   variant: string | null
   imageUrl?: string | null
 }

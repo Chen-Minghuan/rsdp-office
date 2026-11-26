@@ -91,7 +91,7 @@ public class OfficeFavoriteService {
         if (folderIds == null) {
             throw new BusinessException("收藏夹选择不能为空");
         }
-        productQueryService.getProduct(rspuId);
+        productQueryService.requireVisibleCollectionProduct(rspuId);
         LinkedHashSet<String> selected = new LinkedHashSet<>();
         for (String folderId : folderIds) {
             if (!StringUtils.hasText(folderId)) {
@@ -154,8 +154,7 @@ public class OfficeFavoriteService {
             latestByProduct.merge(item.getRspuId(), item.getCreatedAt(),
                 (current, next) -> next != null && (current == null || next.isAfter(current)) ? next : current);
         }
-        Map<String, ProductListItemDto> products = productQueryService.listProducts(false).stream()
-            .collect(Collectors.toMap(ProductListItemDto::getRspuId, product -> product, (a, b) -> a));
+        var products = productQueryService.collectionProducts(latestByProduct.keySet());
         return latestByProduct.entrySet().stream()
             .sorted(Map.Entry.<String, LocalDateTime>comparingByValue(
                 Comparator.nullsFirst(Comparator.naturalOrder())).reversed())

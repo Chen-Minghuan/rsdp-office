@@ -4,9 +4,10 @@ import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
-// 工作台项目列表刷新回归：项目阶段与区域进度由后端在列表接口读时派生，
-// 前端在进入项目列表视图时静默重取。本脚本用可变 mock 状态模拟
-// 方案确认、确认失效（清单变化）与新增楼层，断言 SPA 返回列表后阶段/进度即时更新。
+// 工作台项目列表刷新回归：项目阶段由负责人/主号人工维护（mock 用可变状态模拟），
+// 区域进度仍由后端在列表接口按方案确认读时派生，前端在进入项目列表视图时静默重取。
+// 本脚本用可变 mock 状态模拟方案确认、确认失效（清单变化）、新增楼层与外部阶段修改，
+// 断言 SPA 返回列表后阶段/进度即时更新。
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
@@ -33,8 +34,9 @@ const catalog = [{ rspuId: 'RSPU', productName: product.name, retailPrice: 1250,
 const selected = { ...furniture, productId: product.id, productSelection: { cartLineId: 'LINE', product } }
 const cartLine = { lineId: 'LINE', zoneId: zone.id, zoneName: zone.name, projectId: floorId, productId: product.id, qty: 1 }
 
-// 单一可变状态：项目列表处理器按它读时派生阶段与进度，写接口负责翻转。
+// 单一可变状态：项目列表处理器按它返回人工维护的阶段并派生进度，写接口负责翻转确认状态。
 const state = {
+  status: 'DESIGNING',
   floors: [{ floorId, name: '1F', confirmed: false, cartQty: 1, zones: 1 }],
   canvas: { projectId: floorId, revision: 5, mode: 'design', designZoneId: zone.id, objects: [zone, selected], files: [], blank: false },
   cart: [cartLine],
@@ -43,10 +45,10 @@ const state = {
 }
 
 function projectDto() {
-  const allConfirmed = state.floors.length > 0 && state.floors.every(floor => floor.confirmed)
   return [{
     projectId, name: '总部办公', customerRequirements: '', requirementsRevision: 1,
-    status: allConfirmed ? 'DELIVERING' : 'DESIGNING',
+    status: state.status,
+    canManageStatus: false,
     zoneTotal: state.floors.reduce((total, floor) => total + floor.zones, 0),
     zoneDelivered: state.floors.reduce((total, floor) => total + (floor.confirmed && floor.cartQty > 0 ? floor.zones : 0), 0),
     leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' },
@@ -145,40 +147,40 @@ try {
 
   await page.goto(baseUrl + '/workspace/project-bench', { waitUntil: 'networkidle' })
   await row().getByText('设计中', { exact: true }).waitFor()
-  assert.ok((await row().innerText()).includes('0%'), '未确认楼层进度为 0%')
+  assert.equal(await row().getByRole('progressbar').getAttribute('aria-valuenow'), '0', '未确认楼层进度为 0%')
   assert.ok((await row().innerText()).includes('0/1 区域'))
   assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n1')
 
-  // 场景 1：确认方案 → 返回工作台，阶段前进为交付中、进度 100%
+  // 场景 1：确认方案 → 返回工作台，进度前进 100%；阶段为人工维护，不随确认自动变化
   await nav.getByRole('link', { name: '项目清单', exact: true }).click()
   await page.waitForURL(url => url.pathname === '/proposal')
   await page.getByRole('button', { name: '确认方案', exact: true }).click()
   await page.getByText('方案已确认', { exact: true }).waitFor()
   await backToProjectList()
-  await row().getByText('交付中', { exact: true }).waitFor()
-  assert.ok((await row().innerText()).includes('100%'), '全部楼层确认后进度 100%')
-  assert.ok((await row().innerText()).includes('1/1 区域'))
-  assert.equal(await cards.getByRole('button', { name: /交付中/ }).innerText(), '交付中\n1')
-  assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n0')
+  await row().getByText('1/1 区域', { exact: true }).waitFor()
+  assert.equal(await row().getByRole('progressbar').getAttribute('aria-valuenow'), '100', '全部楼层确认后进度 100%')
+  await row().getByText('设计中', { exact: true }).waitFor()
+  assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n1')
+  assert.equal(await cards.getByRole('button', { name: /交付中/ }).innerText(), '交付中\n0')
 
-  // 场景 2：清单变化导致确认失效 → 返回工作台，阶段与进度回退
+  // 场景 2：清单变化导致确认失效 → 返回工作台，进度回退；阶段仍保持人工值
   await nav.getByRole('link', { name: '产品方案', exact: true }).click()
   await page.getByTestId('product-scheme').waitFor()
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '清空选品' }).click()
   await page.getByText('已清空当前房间选品').waitFor()
   await backToProjectList()
+  await row().getByText('0/1 区域', { exact: true }).waitFor()
+  assert.equal(await row().getByRole('progressbar').getAttribute('aria-valuenow'), '0', '确认失效后进度回退 0%')
   await row().getByText('设计中', { exact: true }).waitFor()
-  assert.ok((await row().innerText()).includes('0%'), '确认失效后进度回退 0%')
-  assert.ok((await row().innerText()).includes('0/1 区域'))
   assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n1')
 
-  // 场景 3：已交付项目新增未确认楼层 → 返回工作台，阶段回退设计中
+  // 场景 3：已确认项目新增未确认楼层 → 返回工作台，阶段保持人工值、楼层数更新
   state.floors[0].confirmed = true
   state.floors[0].cartQty = 1
   state.confirmation = { confirmationId: 'PROP-TEST', canvasRevision: state.canvas.revision, confirmedAt: '2026-11-25T12:00:00', current: true }
   await backToProjectList()
-  await row().getByText('交付中', { exact: true }).waitFor()
+  await row().getByText('1/1 区域', { exact: true }).waitFor()
   await page.getByRole('button', { name: '＋ 添加新楼层', exact: true }).click()
   await page.getByRole('textbox', { name: '新楼层名称' }).fill('2F')
   await page.getByRole('button', { name: '添加', exact: true }).click()
@@ -188,11 +190,12 @@ try {
   assert.ok((await row().innerText()).includes('2'), '新增楼层后列表显示 2 个楼层')
   assert.equal(await cards.getByRole('button', { name: /设计中/ }).innerText(), '设计中\n1')
 
-  // 场景 4：重取期间保留旧数据，不闪烁加载占位
+  // 场景 4：重取期间保留旧数据，不闪烁加载占位；外部（负责人）修改的阶段在重取后生效
   state.floors[0].confirmed = true
   state.floors[1].confirmed = true
   await nav.getByRole('link', { name: '项目工作台', exact: true }).click()
   state.delayNextProjects = true
+  state.status = 'DELIVERING'
   await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
   await row().getByText('设计中', { exact: true }).waitFor()
   assert.equal(await list.getByText('正在加载项目…', { exact: true }).count(), 0, '静默重取不应清空列表')
@@ -200,7 +203,7 @@ try {
   assert.ok((await row().innerText()).includes('1/1 区域'), '无区域的新楼层不影响区域进度')
 
   assert.deepEqual(pageErrors, [])
-  console.log('Project refresh E2E passed: confirm/invalidation/floor-add update stage and progress on SPA return; refetch keeps stale rows visible. API mocked.')
+  console.log('Project refresh E2E passed: confirm/invalidation/floor-add update progress and externally changed stage on SPA return; refetch keeps stale rows visible. API mocked.')
 } finally {
   await browser?.close()
   app.kill('SIGTERM')

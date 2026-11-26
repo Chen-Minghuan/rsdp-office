@@ -10,8 +10,10 @@ import java.util.List;
 public class OfficeProjectDto {
     private String projectId;
     private String name;
-    /** 由方案确认数据派生：全部楼层存在未失效确认 → DELIVERING，否则 DESIGNING。 */
+    /** 由项目负责人或所属工作区主号人工维护：DESIGNING / DELIVERING / COMPLETED。 */
     private String status;
+    /** 当前用户是否可修改项目阶段（负责人或工作区主号）。 */
+    private boolean canManageStatus;
     private String customerRequirements;
     private Integer requirementsRevision;
     private ProjectMemberDto leader;

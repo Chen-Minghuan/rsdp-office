@@ -3,8 +3,10 @@ package com.rsdp.officeproduct.importer.office.product;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 import static com.rsdp.officeproduct.importer.office.product.LocalProductModels.CatalogItem;
@@ -12,6 +14,17 @@ import static com.rsdp.officeproduct.importer.office.product.LocalProductModels.
 @Repository
 @RequiredArgsConstructor
 public class LocalCatalogReader {
+    private static final String CATALOG_ROWS = """
+        select p.product_id, p.revision, p.name, p.category_code, p.factory_code, p.factory_model,
+            (select i.image_id from office_product_image i
+             where i.workspace_id = p.workspace_id and i.product_id = p.product_id and i.position is not null
+             order by i.position, i.image_id limit 1) as primary_image_id
+        from office_product p where p.workspace_id = :workspace
+        """;
+    private static final RowMapper<CatalogItem> CATALOG_ITEM = (r, i) ->
+        new CatalogItem(r.getString("product_id"), r.getInt("revision"), r.getString("name"),
+            r.getString("category_code"), r.getString("factory_code"), r.getString("factory_model"),
+            r.getString("primary_image_id"));
     private static final String MATCH = """
         (:search = '' or strpos(lower(p.name), lower(:search)) > 0
                       or strpos(lower(p.factory_model), lower(:search)) > 0)
@@ -31,17 +44,14 @@ public class LocalCatalogReader {
     }
 
     public List<CatalogItem> rows(String workspace, String search, String category, String color, long offset, int limit) {
-        return jdbc.query("""
-            select p.product_id, p.revision, p.name, p.category_code, p.factory_code, p.factory_model,
-                (select i.image_id from office_product_image i
-                 where i.workspace_id = p.workspace_id and i.product_id = p.product_id and i.position is not null
-                 order by i.position, i.image_id limit 1) as primary_image_id
-            from office_product p where p.workspace_id = :workspace and
-            """ + MATCH + " order by p.updated_at desc, p.product_id limit :limit offset :offset",
+        return jdbc.query(CATALOG_ROWS + " and " + MATCH + " order by p.updated_at desc, p.product_id limit :limit offset :offset",
             parameters(workspace, search, category, color).addValue("offset", offset).addValue("limit", limit),
-            (r, i) -> new CatalogItem(r.getString("product_id"), r.getInt("revision"), r.getString("name"),
-                r.getString("category_code"), r.getString("factory_code"), r.getString("factory_model"),
-                r.getString("primary_image_id")));
+            CATALOG_ITEM);
+    }
+
+    public List<CatalogItem> findByIds(String workspace, Collection<String> ids) {
+        return jdbc.query(CATALOG_ROWS + " and p.product_id in (:ids)",
+            new MapSqlParameterSource("workspace", workspace).addValue("ids", ids), CATALOG_ITEM);
     }
 
     public List<String> categories(String workspace) {
