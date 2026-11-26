@@ -32,6 +32,7 @@ const cartLine = { lineId: 'LINE', zoneId: zone.id, zoneName: zone.name, project
 let canvas = { projectId: floorId, revision: 5, mode: 'design', designZoneId: zone.id, objects: [zone, selected], files: [], blank: false }
 let cart = [cartLine]
 let slot = 'A', otherSlot = null, bundle = null, confirmation = null, submitted = null
+let confirmedSlot = null
 let bundleApiMissing = true
 let browser
 try {
@@ -78,15 +79,30 @@ try {
       return ok(canvas)
     }
     if (path.endsWith('/cart')) return ok(cart)
-    if (path.endsWith('/room-scheme')) return ok({ activeSlot: slot, alternativeSaved: !!otherSlot })
+    if (path.endsWith('/room-scheme')) return ok({ activeSlot: slot, alternativeSaved: !!otherSlot, confirmedSlot })
+    if (path.endsWith('/room-scheme/slots')) {
+      const summarize = item => ({ id: item.id, label: item.label ?? null, productName: item.productSelection?.product?.name ?? null, w: item.w, h: item.h })
+      const inRoom = item => item.kind === 'furniture' && item.zoneId === zone.id
+      return ok({ activeSlot: slot, active: canvas.objects.filter(inRoom).map(summarize), inactive: (otherSlot?.objects || []).filter(inRoom).map(summarize) })
+    }
     if (path.includes('/room-scheme/')) {
       const action = path.split('/').at(-1)
       const body = request.postDataJSON()
       assert.equal(body.zoneId, zone.id)
+      if (action === 'confirm-choice') {
+        assert.ok(otherSlot, '没有 Plan B 时不能确认方案选择')
+        confirmedSlot = slot
+        return ok({ activeSlot: slot, alternativeSaved: true, confirmedSlot })
+      }
+      if (action === 'cancel-choice') {
+        confirmedSlot = null
+        return ok({ activeSlot: slot, alternativeSaved: true, confirmedSlot })
+      }
       assert.equal(body.revision, canvas.revision)
       assert.equal(body.schemeToken ?? undefined, canvas.schemeToken)
       let objects = canvas.objects
       if (action === 'activate') {
+        assert.equal(confirmedSlot, null, '已确认方案选择的空间不能切换')
         const old = { objects, cart }
         if (otherSlot) ({ objects, cart } = otherSlot)
         otherSlot = old
@@ -102,7 +118,7 @@ try {
       }
       canvas = { ...canvas, objects, revision: canvas.revision + 1, schemeToken: 'TOKEN-' + (canvas.revision + 1) }
       confirmation = null
-      return ok({ canvas, cart, scheme: { activeSlot: slot, alternativeSaved: !!otherSlot } })
+      return ok({ canvas, cart, scheme: { activeSlot: slot, alternativeSaved: !!otherSlot, confirmedSlot } })
     }
     if (path.endsWith('/proposal-confirmation')) {
       if (method === 'POST') {
@@ -176,6 +192,34 @@ try {
   await page.getByRole('button', { name: '应用组合' }).click()
   await page.getByText('已更新当前房间选品，剩余 0 件家具待选').waitFor()
   await page.getByRole('link', { name: '去项目清单确认' }).click()
+  // 有 Plan B 但未确认方案选择：横幅展示两个方案的家具对比，确认方案被预检查拦截
+  const choiceBanner = page.getByTestId('proposal-scheme-choice-issues')
+  await choiceBanner.getByText('1 个空间待确认方案', { exact: true }).waitFor()
+  await choiceBanner.locator('summary').click()
+  await choiceBanner.getByText('副总办公室', { exact: true }).waitFor()
+  await choiceBanner.getByText('1 件家具', { exact: true }).first().waitFor()
+  assert.equal(await choiceBanner.getByText('1 件家具', { exact: true }).count(), 2, 'Plan A/B 应各显示家具件数')
+  assert.ok((await choiceBanner.getByText('胡桃木办公桌 × 1', { exact: true }).count()) >= 1)
+  await page.getByRole('button', { name: '确认方案', exact: true }).click()
+  const precheckModal = page.getByTestId('proposal-precheck-modal')
+  await precheckModal.waitFor()
+  await precheckModal.getByText('方案选择未确认', { exact: true }).waitFor()
+  await precheckModal.getByText('副总办公室', { exact: true }).click()
+  await precheckModal.waitFor({ state: 'hidden' })
+  // 确认使用当前 Plan B：按钮锁定，选中的 Plan B 保持选中样式，Plan A 不可点击
+  await page.getByTestId('scheme-choice-confirm').click()
+  await page.getByText('副总办公室 已确认使用 Plan B', { exact: true }).waitFor()
+  await choiceBanner.waitFor({ state: 'hidden' })
+  assert.equal(await plan('A').isDisabled(), true, '确认后 Plan A 不可点击')
+  assert.equal(await plan('B').getAttribute('aria-pressed'), 'true', '确认后 Plan B 保持选中')
+  assert.equal(await plan('B').isDisabled(), true, '确认后 Plan B 也不可再切换')
+  // 取消确认恢复切换，横幅重新出现
+  await page.getByTestId('scheme-choice-cancel').click()
+  await page.getByText('副总办公室 已取消方案确认，可重新切换', { exact: true }).waitFor()
+  await choiceBanner.waitFor({ state: 'visible' })
+  assert.equal(await plan('A').isDisabled(), false, '取消后恢复切换')
+  await page.getByTestId('scheme-choice-confirm').click()
+  await page.getByText('副总办公室 已确认使用 Plan B', { exact: true }).waitFor()
   await page.getByRole('button', { name: '确认方案', exact: true }).click()
   await page.getByText('方案已确认', { exact: true }).waitFor()
   await page.reload()
@@ -194,7 +238,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-narrow.png' })
   assert.deepEqual(pageErrors, [])
-  console.log('Product scheme mock UI passed: bundle, Plan A/B, clear, confirmation after reload, formal render, narrow layout')
+  console.log('Product scheme mock UI passed: bundle, Plan A/B create, choice confirm/cancel lock, clear, confirmation after reload, formal render, narrow layout')
 } finally {
   await browser?.close()
   app.kill('SIGTERM')

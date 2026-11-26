@@ -83,6 +83,8 @@ const inspectedProduct = computed(() => selectedSchemeProducts.value.find(item =
 const proposalRoute = computed(() => ({ path: '/proposal', query: { floorId: workspace.currentFloorId } }))
 // Plan B 按需创建：后端 alternativeSaved=true 表示另一方案槽已有保存内容（即 Plan B 已存在）
 const hasPlanB = computed(() => !!schemeState.value?.alternativeSaved)
+// 在方案确认页确认使用某个 Plan 后锁定切换，需先取消确认（后端同样拒绝 activate）
+const schemeLocked = computed(() => !!schemeState.value?.confirmedSlot)
 async function switchScheme(targetSlot: 'A' | 'B') {
   if (!await changeScheme('activate', { targetSlot })) return
   layoutPreview.value = null
@@ -257,15 +259,15 @@ watch(() => store.canEnterLayout, (confirmed) => {
       <h1>{{ schemeRoom?.name || '未选择空间' }}</h1>
       <span v-if="schemeArea">{{ schemeArea }} m²</span>
       <span>已选 <strong>{{ selectedCount }}</strong> / {{ schemeFurniture.length }} 件</span>
-      <div class="scheme-versions" aria-label="房间方案">
+      <div class="scheme-versions" aria-label="房间方案" :title="schemeLocked ? `已在方案确认页确认使用 Plan ${schemeState?.confirmedSlot}，取消后才可切换` : undefined">
         <button type="button"
-          :aria-pressed="schemeState ? schemeState.activeSlot === 'A' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
+          :aria-pressed="schemeState ? schemeState.activeSlot === 'A' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom || schemeLocked"
           @click="switchScheme('A')">Plan A</button>
         <button v-if="hasPlanB" type="button"
-          :aria-pressed="schemeState ? schemeState.activeSlot === 'B' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
+          :aria-pressed="schemeState ? schemeState.activeSlot === 'B' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom || schemeLocked"
           @click="switchScheme('B')">Plan B</button>
         <button v-else type="button" class="scheme-add" aria-label="新建 Plan B" title="以 Plan A 为起点创建 Plan B"
-          :disabled="!schemeState || !canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
+          :disabled="!schemeState || !canEditScheme || schemeBusy || !store.apiReady || !schemeRoom || schemeLocked"
           @click="switchScheme('B')">+</button>
       </div>
       <button type="button" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !canClear" @click="clearScheme">清空选品</button>
@@ -392,6 +394,11 @@ watch(() => store.canEnterLayout, (confirmed) => {
 
 .scheme-add {
   min-width: 2rem;
+}
+
+/* 方案选择确认锁定后：当前选中的 Plan 保持选中样式 */
+.scheme-versions button[aria-pressed=true]:disabled {
+  opacity: 1;
 }
 
 .scheme-header button,
