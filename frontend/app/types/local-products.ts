@@ -41,6 +41,26 @@ export interface LocalProductDetail {
   canWrite: boolean
 }
 
+export interface LocalProductCapacity {
+  used: number
+  limit: number
+}
+
+export interface LocalProductImportRecord {
+  id: string
+  fileName: string
+  fileBytes: number
+  actorName: string
+  createdAt: string
+  batchCount: number
+  productCount: number
+}
+
+export interface LocalProductImportDetail {
+  record: LocalProductImportRecord
+  products: { id: string, name: string, revision: number }[]
+}
+
 export interface LocalProductWorkbookIssue {
   row: number
   message: string

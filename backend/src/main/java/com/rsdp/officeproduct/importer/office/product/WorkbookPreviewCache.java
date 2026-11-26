@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -33,6 +34,8 @@ public class WorkbookPreviewCache {
     private long totalBytes;
 
     private record Attachment(Path path, String mediaType, int bytes) {}
+    record WorkbookSource(String fileName, long fileBytes) {}
+    record Materialized(List<Input> products, WorkbookSource source) {}
     static class Limit extends BusinessException {
         Limit(String message) { super(message); }
     }
@@ -42,15 +45,17 @@ public class WorkbookPreviewCache {
         private final String workspace;
         private final String user;
         private final Path directory;
+        private final WorkbookSource source;
         private final Map<String, Attachment> files = new HashMap<>();
         private long bytes;
         private Instant lastAccess = Instant.now();
         private boolean kept;
 
-        private Session(OfficeUser actor) throws IOException {
+        private Session(OfficeUser actor, WorkbookSource source) throws IOException {
             workspace = actor.getWorkspaceId();
             user = actor.getUserId();
             directory = Files.createTempDirectory("office-product-preview-");
+            this.source = source;
         }
 
         ImageInput store(ImageInput input) throws IOException {
@@ -83,11 +88,9 @@ public class WorkbookPreviewCache {
 
         void keep() {
             synchronized (WorkbookPreviewCache.this) {
-                if (!files.isEmpty()) {
-                    kept = true;
-                    lastAccess = Instant.now();
-                    sessions.put(id, this);
-                }
+                kept = true;
+                lastAccess = Instant.now();
+                sessions.put(id, this);
             }
         }
 
@@ -99,16 +102,16 @@ public class WorkbookPreviewCache {
         }
     }
 
-    Session open(OfficeUser actor) throws IOException {
+    Session open(OfficeUser actor, WorkbookSource source) throws IOException {
         expire();
-        return new Session(actor);
+        return new Session(actor, source);
     }
 
     synchronized ImageInput read(UUID id, String image, OfficeUser actor) {
         return load(attachment(requireSession(id, actor), image));
     }
 
-    synchronized SaveRequest materialize(SaveRequest request, OfficeUser actor) {
+    synchronized Materialized materialize(SaveRequest request, OfficeUser actor) {
         Session session = requireSession(request.previewId(), actor);
         long bytes = 0;
         var inputs = new ArrayList<Input>();
@@ -132,14 +135,14 @@ public class WorkbookPreviewCache {
             inputs.add(new Input(null, product.revision(), product.name(), product.categoryCode(),
                 product.factoryCode(), product.factoryModel(), product.variants(), images));
         }
-        return new SaveRequest(request.batchId(), inputs);
+        return new Materialized(inputs, session.source);
     }
 
     private Session requireSession(UUID id, OfficeUser actor) {
         var session = sessions.get(id);
         if (session == null || !Objects.equals(session.workspace, actor.getWorkspaceId())
                 || !Objects.equals(session.user, actor.getUserId()) || expired(session)) {
-            throw new BusinessException(404, "Excel 图片预览已失效，请重新上传文件");
+            throw new BusinessException(404, "Excel 预览已失效，请重新上传文件");
         }
         session.lastAccess = Instant.now();
         return session;

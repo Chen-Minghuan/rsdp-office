@@ -66,3 +66,14 @@ export function furnitureIntersects(a: Footprint, b: Footprint, gap = 0) {
   const otherParts = parts(b)
   return parts(a).some(first => otherParts.some(second => !separated(first, second, gap) && !separated(second, first, gap)))
 }
+
+export function furnitureOverlapPairs(items: FurnitureObject[]) {
+  const pairs: Array<[FurnitureObject, FurnitureObject]> = []
+  for (const [index, item] of items.entries()) {
+    for (let j = index + 1; j < items.length; j++) {
+      const other = items[j]!
+      if (item.id !== other.id && item.zoneId === other.zoneId && furnitureIntersects(item, other)) pairs.push([item, other])
+    }
+  }
+  return pairs
+}

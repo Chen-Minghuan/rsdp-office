@@ -24,6 +24,10 @@ export interface OfficeFurniturePlacement {
 
 export { rotatedFurnitureFootprint as officeFurnitureFootprint } from './layoutConstraints'
 
+export function layoutFurnitureName(item: FurnitureObject) {
+  return item.label?.trim() || item.moduleSnapshot?.name || furnitureById.get(item.furnitureTemplateId || '')?.name || '家具'
+}
+
 export function manualOfficeFurniture(draft: OfficeFurniturePlacement, xMm: number, yMm: number): FurnitureObject {
   return {
     id: '', kind: 'furniture', zoneId: draft.zoneId, productId: '', furnitureTemplateId: draft.template.id,
@@ -51,8 +55,10 @@ export function officePlacementHardProblem(zone: ZoneObject, candidate: Furnitur
   }
   // L 型桌按主台面 + 侧翼两块判定，内角可放椅子或相邻家具。
   for (const item of existing) {
-    if (item.zoneId !== zone.id) continue
-    if (furnitureIntersects(candidate, item, spacing.gapMm)) return '此位置与已有家具重叠或间距不足'
+    if (item.zoneId !== zone.id || !furnitureIntersects(candidate, item, spacing.gapMm)) continue
+    const names = `「${layoutFurnitureName(candidate)}」与「${layoutFurnitureName(item)}」`
+    if (spacing.gapMm === 0 || furnitureIntersects(candidate, item)) return names + '的占地重叠'
+    return `${names}的间距不足 ${spacing.gapMm} mm`
   }
   for (const area of zoneLayoutExclusions(zone)) {
     if (furnitureFootprintRects(candidate).some(rect => rectOverlapsBlocker(rect, area))) return '此位置占用了入口或禁放区'

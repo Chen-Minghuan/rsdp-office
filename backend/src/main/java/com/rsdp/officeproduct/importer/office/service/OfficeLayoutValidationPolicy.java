@@ -76,9 +76,9 @@ public final class OfficeLayoutValidationPolicy {
                 for (Area area : exclusions) if (blocksIntersectArea(blocks, area)) throw new BusinessException("已确认家具占用了入口或禁放区");
                 for (Rectangle2D.Double band : channelBands) if (blocksIntersect(blocks, band)) throw new BusinessException("已确认家具压占通道，请调整家具或通道位置");
                 for (int j = 0; j < furniture.size(); j++) {
-                    if (i != j && blocksOverlap(blocks, bounds.get(j))
+                    if (i != j && blocksWithinGap(blocks, bounds.get(j), 0)
                         && (!(meetingGeometry.get(i) || meetingGeometry.get(j)) || OfficeMeetingFootprint.intersects(meetingShapes.get(i), meetingShapes.get(j)))) {
-                        throw new BusinessException("已确认家具存在重叠");
+                        throw new BusinessException(furnitureOverlapMessage(zone, item, furniture.get(j)));
                     }
                 }
                 String bundle = item.path("mixedBundleId").asText();
@@ -159,9 +159,18 @@ public final class OfficeLayoutValidationPolicy {
         return false;
     }
 
-    private static boolean blocksOverlap(List<Rectangle2D.Double> first, List<Rectangle2D.Double> second) {
-        for (Rectangle2D.Double a : first) for (Rectangle2D.Double b : second) if (a.intersects(b)) return true;
-        return false;
+    static String furnitureOverlapMessage(JsonNode zone, JsonNode first, JsonNode second) {
+        String space = zone.path("name").asText("").trim();
+        String prefix = space.isBlank() ? "空间内" : "空间「" + space + "」内";
+        return prefix + furnitureLocation(first) + "与" + furnitureLocation(second) + "的占地重叠";
+    }
+
+    private static String furnitureLocation(JsonNode item) {
+        String name = item.path("label").asText("").trim();
+        if (name.isBlank()) name = item.path("moduleSnapshot").path("name").asText("").trim();
+        if (name.isBlank()) name = "家具 " + item.path("id").asText();
+        return "「" + name + "」（" + Math.round(item.path("x").asDouble()) + ", "
+            + Math.round(item.path("y").asDouble()) + " mm）";
     }
 
     private static double number(JsonNode node, String key) {

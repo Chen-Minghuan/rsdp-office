@@ -7,6 +7,8 @@ import type { WorkspaceType } from '~/utils/workspaceType'
 import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
 import type {
   LocalProductInput, LocalProductCatalogItem, LocalProductDetail, LocalProductWorkbookPreview,
+  LocalProductImportDetail, LocalProductImportRecord,
+  LocalProductCapacity,
   WorkbookCategoryItem, WorkbookFieldColumns, WorkbookMappingSelection,
 } from '~/types/local-products'
 
@@ -128,7 +130,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers?
     throw failure
   })
   if (res.code !== 200) {
-    throw new Error(res.message || '请求失败')
+    throw Object.assign(new Error(res.message || '请求失败'), { code: res.code })
   }
   return res.data
 }
@@ -543,6 +545,15 @@ export function useOfficeApi() {
     return request<{ canWrite: boolean, products: LocalProductCatalogItem[], hasMore: boolean }>('GET', `${localProductsPath}?${query}`)
   }
   const getLocalProduct = (id: string) => request<LocalProductDetail>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
+  const getLocalProductCapacity = () => request<LocalProductCapacity>('GET', `${localProductsPath}/capacity`)
+  function listLocalProductImports(page: number, search = '') {
+    const query = new URLSearchParams({ page: String(page) })
+    if (search) query.set('search', search)
+    return request<{ canWrite: boolean, hasMore: boolean, records: LocalProductImportRecord[] }>(
+      'GET', `${localProductsPath}/imports?${query}`)
+  }
+  const getLocalProductImport = (id: string) =>
+    request<LocalProductImportDetail>('GET', `${localProductsPath}/imports/${encodeURIComponent(id)}`)
   const saveLocalProducts = (batchId: string, products: LocalProductInput[], previewId?: string | null) => request<{ id: string, name: string, revision: number }[]>(
     'POST', localProductsPath, { batchId, products, previewId })
   const localProductImagePath = (id: string) => `${localProductsPath}/images/${encodeURIComponent(id)}`
@@ -646,6 +657,9 @@ export function useOfficeApi() {
     listWorkspaceUsers,
     setWorkspaceProductEntry,
     listLocalProducts,
+    getLocalProductCapacity,
+    listLocalProductImports,
+    getLocalProductImport,
     getLocalProduct,
     saveLocalProducts,
     localProductImagePath,

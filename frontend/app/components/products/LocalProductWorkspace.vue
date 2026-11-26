@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { LocalProductCatalogItem, LocalProductImage, LocalProductInput, LocalProductVariant, WorkbookImportProgress, WorkbookMappingSelection } from '~/types/local-products'
+import type { LocalProductCapacity, LocalProductCatalogItem, LocalProductImage, LocalProductInput, LocalProductVariant, WorkbookImportProgress, WorkbookMappingSelection } from '~/types/local-products'
 import { withApiBase } from '~/utils/apiBase'
 import { createUuid } from '~/utils/uuid'
 import { splitWorkbookProducts, workbookPreviewPageSize, workbookSize } from '~/utils/localProductImport'
@@ -24,12 +24,27 @@ const preview = ref<Awaited<ReturnType<typeof api.previewLocalProductWorkbook>> 
 const workbookName = ref('')
 const workbookFile = shallowRef<File | null>(null)
 const templatePage = ref(1)
+const templateSelection = ref(new Set<string>())
+const supplierSelectedCount = ref(0)
 const importProgress = ref<WorkbookImportProgress | null>(null)
 const readingWorkbook = ref(false)
 const dragActive = ref(false)
 const categoryLabels = computed(() => new Map(categories.value.map(item => [item.dictCode, item.dictName])))
-let lastSave: { body: string, id: string } | undefined
+const lastSave = shallowRef<{ body: string, id: string, workbook: boolean }>()
 let listRequest = 0
+let capacityRequest = 0
+const capacity = ref<LocalProductCapacity>()
+const capacityError = ref(false)
+const capacityLoading = ref(false)
+const selectedTemplateProducts = computed(() => (preview.value?.products ?? [])
+  .filter(product => templateSelection.value.has(product.factoryModel)))
+const selectedCount = computed(() => preview.value?.supplier ? supplierSelectedCount.value : selectedTemplateProducts.value.length)
+const remainingCapacity = computed(() => capacity.value ? Math.max(0, capacity.value.limit - capacity.value.used) : null)
+const projectedUsed = computed(() => (capacity.value?.used ?? 0) + selectedCount.value)
+const capacityExcess = computed(() => remainingCapacity.value === null ? 0 : Math.max(0, selectedCount.value - remainingCapacity.value))
+const capacityBlocksImport = computed(() => capacityExcess.value > 0 && !lastSave.value?.workbook)
+const capacityRate = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 2 })
+const capacityNumber = new Intl.NumberFormat('zh-CN')
 
 const maxWorkbookMb = 150
 const maxWorkbookBytes = maxWorkbookMb * 1024 * 1024
@@ -42,6 +57,7 @@ onMounted(async () => {
   await load()
   const id = route.query.edit
   if (typeof id === 'string' && id && !listError.value) await openProduct(id)
+  else if (route.query.view === 'import' && canWrite.value) showExcel()
 })
 
 watch(search, (_, _old, onCleanup) => {
@@ -51,7 +67,25 @@ watch(search, (_, _old, onCleanup) => {
   const timeout = setTimeout(() => { void load(1) }, 180)
   onCleanup(() => clearTimeout(timeout))
 })
-onBeforeUnmount(() => { listRequest++ })
+onBeforeUnmount(() => { listRequest++; capacityRequest++ })
+
+async function refreshCapacity() {
+  const request = ++capacityRequest
+  capacityLoading.value = true
+  capacityError.value = false
+  try {
+    const current = await api.getLocalProductCapacity()
+    if (request === capacityRequest) capacity.value = current
+  } catch {
+    if (request === capacityRequest) capacityError.value = true
+  } finally {
+    if (request === capacityRequest) capacityLoading.value = false
+  }
+}
+
+function capacityWidth(used: number, limit: number) {
+  return Math.min(100, used / limit * 100) + '%'
+}
 
 async function load(next = page.value) {
   const request = ++listRequest
@@ -87,7 +121,7 @@ async function openProduct(id?: string) {
   }
   error.value = ''
   notice.value = ''
-  lastSave = undefined
+  lastSave.value = undefined
   busy.value = true
   try {
     if (id) {
@@ -113,10 +147,11 @@ function showExcel() {
   preview.value = null
   workbookName.value = ''
   workbookFile.value = null
-  lastSave = undefined
+  lastSave.value = undefined
   error.value = ''
   notice.value = ''
   mode.value = 'excel'
+  void refreshCapacity()
 }
 
 function showList() {
@@ -126,7 +161,7 @@ function showList() {
   workbookName.value = ''
   workbookFile.value = null
   error.value = ''
-  if (route.path === '/products/local' && route.query.edit) {
+  if (route.path === '/products/local' && (route.query.edit || route.query.view === 'import')) {
     void router.replace({ path: route.path })
   }
 }
@@ -198,7 +233,7 @@ async function selectWorkbook(file: File) {
   error.value = ''
   notice.value = ''
   preview.value = null
-  lastSave = undefined
+  lastSave.value = undefined
   if (!file.size || !file.name.toLowerCase().endsWith('.xlsx')) {
     error.value = '请选择有效的 .xlsx 文件'
     return
@@ -216,8 +251,12 @@ async function previewWorkbook(file: File, mapping?: WorkbookMappingSelection) {
   readingWorkbook.value = true
   error.value = ''
   try {
-    preview.value = await api.previewLocalProductWorkbook(file, mapping)
+    const result = await api.previewLocalProductWorkbook(file, mapping)
+    supplierSelectedCount.value = 0
+    templateSelection.value = new Set(result.products.map(product => product.factoryModel))
+    preview.value = result
     templatePage.value = 1
+    void refreshCapacity()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Excel 预览失败'
   } finally {
@@ -237,8 +276,8 @@ async function save(products: LocalProductInput[]) {
   try {
     const inputs = products.map(({ factoryCode, ...product }) => product)
     const body = JSON.stringify(inputs)
-    if (body !== lastSave?.body) lastSave = { body, id: createUuid() }
-    await api.saveLocalProducts(lastSave.id, inputs)
+    if (body !== lastSave.value?.body) lastSave.value = { body, id: createUuid(), workbook: false }
+    await api.saveLocalProducts(lastSave.value.id, inputs)
     notice.value = '商品已保存'
     showList()
     await load(1)
@@ -260,24 +299,30 @@ async function saveWorkbook(products: LocalProductInput[], onSaved: (products: L
   let savedCount = 0
   try {
     const batches = splitWorkbookProducts(products.map(({ factoryCode, ...product }) => product), imageSizes ?? {})
+    const retrying = lastSave.value?.workbook && lastSave.value.body === JSON.stringify({ previewId, batch: batches[0] })
+    await refreshCapacity()
+    if (!retrying && remainingCapacity.value !== null && products.length > remainingCapacity.value) {
+      throw new Error(`还可录入 ${remainingCapacity.value} 件商品，请减少本次选择。`)
+    }
     for (const [index, batch] of batches.entries()) {
       importProgress.value = { number: index + 1, total: batches.length }
       const body = JSON.stringify({ previewId, batch })
-      if (body !== lastSave?.body) lastSave = { body, id: createUuid() }
-      const saved = await api.saveLocalProducts(lastSave.id, batch, previewId)
+      if (body !== lastSave.value?.body) lastSave.value = { body, id: createUuid(), workbook: true }
+      const saved = await api.saveLocalProducts(lastSave.value.id, batch, previewId)
       savedCount += saved.length
-      lastSave = undefined
+      lastSave.value = undefined
       onSaved(batch)
     }
     notice.value = `已导入 ${savedCount} 件商品`
     return true
   } catch (cause) {
+    if (cause instanceof Error && 'code' in cause && cause.code === 409) lastSave.value = undefined
     const message = cause instanceof Error ? cause.message : '导入失败'
     error.value = savedCount ? `已导入 ${savedCount} 件，剩余商品可继续确认。${message}` : message
     return false
   } finally {
     importProgress.value = null
-    if (savedCount) await load(1)
+    await Promise.all([refreshCapacity(), savedCount ? load(1) : undefined])
     busy.value = false
   }
 }
@@ -285,10 +330,10 @@ async function saveWorkbook(products: LocalProductInput[], onSaved: (products: L
 async function importTemplate() {
   const current = preview.value
   if (!current) return
-  if (await saveWorkbook(current.products, saved => {
+  if (await saveWorkbook(selectedTemplateProducts.value, saved => {
     const models = new Set(saved.map(product => product.factoryModel))
     current.products = current.products.filter(product => !models.has(product.factoryModel))
-  })) showList()
+  }) && !current.products.length) showList()
 }
 </script>
 
@@ -424,6 +469,35 @@ async function importTemplate() {
           </div>
         </div>
 
+        <section class="space-y-3 border border-line bg-white px-4 py-3 sm:px-5" aria-label="本地商品录入占用率">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="text-sm font-semibold">本地商品录入占用率</h2>
+            <button type="button" class="text-xs font-semibold text-accent-ink disabled:opacity-50"
+              :disabled="capacityLoading || busy" @click="refreshCapacity">刷新额度</button>
+          </div>
+          <div v-if="capacity" class="space-y-2">
+            <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-muted" aria-live="polite">
+              <span>已用 <strong class="text-sm text-ink">{{ capacityNumber.format(capacity.used) }} / {{ capacityNumber.format(capacity.limit) }} 件</strong>
+                · {{ capacityRate.format(capacity.used / capacity.limit) }}</span>
+              <span>剩余 {{ capacityNumber.format(remainingCapacity ?? 0) }} 件</span>
+              <span v-if="selectedCount && !busy" :class="capacityExcess ? 'font-semibold text-amber-800' : 'font-semibold text-accent-ink'">
+                本次已选 {{ selectedCount }} 件 · 导入后预计 {{ capacityRate.format(projectedUsed / capacity.limit) }}
+              </span>
+            </div>
+            <div class="relative h-2 overflow-hidden rounded-full bg-bg" role="progressbar" aria-label="本地商品录入占用率"
+              :aria-valuemin="0" :aria-valuemax="capacity.limit" :aria-valuenow="Math.min(capacity.used, capacity.limit)">
+              <div v-if="selectedCount && !busy" class="absolute inset-y-0 left-0"
+                :class="capacityExcess ? 'bg-amber-300' : 'bg-accent-line'" :style="{ width: capacityWidth(projectedUsed, capacity.limit) }" />
+              <div class="absolute inset-y-0 left-0 bg-accent" :style="{ width: capacityWidth(capacity.used, capacity.limit) }" />
+            </div>
+            <p v-if="capacityExcess && !busy" class="text-xs text-amber-800">
+              {{ lastSave?.workbook ? '上一批结果待确认，可以重试。' : `超出剩余名额 ${capacityExcess} 件，请减少本次选择。` }}
+            </p>
+          </div>
+          <p v-if="capacityError" role="status" class="text-xs text-amber-800">暂时无法读取最新额度。</p>
+          <p v-else-if="!capacity" role="status" class="text-xs text-muted">正在读取工作区额度…</p>
+        </section>
+
         <template v-if="preview">
           <details v-if="preview.errors.length" class="border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
             <summary class="font-medium">{{ preview.errors.length }} 条原表提示</summary>
@@ -435,27 +509,39 @@ async function importTemplate() {
           </details>
           <ProductsWorkbookFieldMapping v-if="preview.mappingSheets?.length" :sheets="preview.mappingSheets" :busy="busy"
             @apply="applyWorkbookMapping" @busy-change="busy = $event" />
-          <ProductsSupplierWorkbookReview v-else-if="preview.supplier" :preview="preview.supplier" :categories="categories" :busy="busy"
+          <ProductsSupplierWorkbookReview v-else-if="preview.supplier" :key="preview.previewId ?? workbookName"
+            :preview="preview.supplier" :categories="categories" :busy="busy"
             :preview-id="preview.previewId" :image-sizes="preview.imageSizes ?? {}" :file-bytes="workbookFile?.size ?? 0"
-            :progress="importProgress" :save-batch="saveWorkbook" @busy-change="busy = $event" />
+            :progress="importProgress" :capacity-blocked="capacityBlocksImport" :save-batch="saveWorkbook"
+            @selection-change="supplierSelectedCount = $event" @busy-change="busy = $event" />
           <section v-else class="border border-line bg-white" aria-label="模板导入预览">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-5">
               <div><h2 class="text-base font-semibold">预览商品</h2>
                 <p class="mt-0.5 text-sm text-muted">可导入 {{ preview.products.length }} 件</p></div>
-              <ProductsWorkbookPreviewPager v-model="templatePage" :total="preview.products.length" />
+              <div class="flex flex-wrap items-center gap-3">
+                <button v-if="preview.products.length" type="button" class="text-sm font-semibold text-accent-ink" :disabled="busy"
+                  @click="templateSelection = new Set(selectedCount === preview.products.length ? [] : preview.products.map(product => product.factoryModel))">
+                  {{ selectedCount === preview.products.length ? '清空选择' : '全选' }}
+                </button>
+                <ProductsWorkbookPreviewPager v-model="templatePage" :total="preview.products.length" />
+              </div>
             </div>
             <ul v-if="preview.products.length" class="divide-y divide-line">
               <li v-for="product in preview.products.slice((templatePage - 1) * workbookPreviewPageSize, templatePage * workbookPreviewPageSize)"
-                :key="product.factoryModel" class="grid gap-1 px-4 py-3 text-sm sm:grid-cols-[1fr_1fr_auto] sm:px-5">
-                <div class="min-w-0 break-words font-medium">{{ product.name }} <span class="font-normal text-muted">· {{ product.factoryModel }}</span></div>
+                :key="product.factoryModel" class="grid gap-1 px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:px-5">
+                <label class="flex min-w-0 items-start gap-2 break-words font-medium">
+                  <input v-model="templateSelection" type="checkbox" :value="product.factoryModel" :disabled="busy"
+                    :aria-label="'选择 ' + product.factoryModel" class="mt-1 shrink-0 accent-accent">
+                  <span class="min-w-0">{{ product.name }} <span class="font-normal text-muted">· {{ product.factoryModel }}</span></span>
+                </label>
                 <span class="break-words text-muted">{{ categoryLabel(product.categoryCode) }}</span>
                 <span class="text-muted">{{ product.variants.length }} 个规格 · {{ product.images.length }} 张图</span>
               </li>
             </ul>
             <p v-else class="px-5 py-6 text-sm text-muted">没有可导入的商品。可查看原表提示后更换文件。</p>
             <div class="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 border-t border-line bg-white px-4 py-3">
-              <p class="text-sm text-muted">Excel {{ workbookSize(workbookFile?.size ?? 0) }} · {{ preview.products.length }} 件待导入</p>
-              <button type="button" :class="primary" :disabled="busy || !preview.products.length" @click="importTemplate">
+              <p class="text-sm text-muted">Excel {{ workbookSize(workbookFile?.size ?? 0) }} · 已选 {{ selectedCount }} 件</p>
+              <button type="button" :class="primary" :disabled="busy || !selectedCount || capacityBlocksImport" @click="importTemplate">
                 {{ importProgress ? `正在导入 ${importProgress.number}/${importProgress.total}` : '确认导入' }}
               </button>
             </div>

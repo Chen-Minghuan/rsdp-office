@@ -10,9 +10,10 @@ const props = defineProps<{
   imageSizes: Record<string, number>
   fileBytes: number
   progress?: WorkbookImportProgress | null
+  capacityBlocked: boolean
   saveBatch: (products: LocalProductInput[], onSaved: (products: LocalProductInput[]) => void) => Promise<boolean>
 }>()
-const emit = defineEmits<{ busyChange: [busy: boolean] }>()
+const emit = defineEmits<{ busyChange: [busy: boolean], selectionChange: [count: number] }>()
 const api = useOfficeApi()
 type CategorySource = 'workbook' | 'default' | 'ai' | 'manual'
 type MaterialOrigin = 'COLUMN' | 'DESCRIPTION' | 'QWEN' | null
@@ -96,7 +97,9 @@ const filters: { key: ReviewFilter, label: string }[] = [
 const filterCounts = computed(() => ({ all: drafts.value.length, 'needs-review': needsReview.value, ready: readyCount.value, selected: selected.value.length }))
 const hasPickable = computed(() => visibleDrafts.value.some(draft => !draft.selected && !draftIssue(draft)))
 const selectedIssues = computed(() => selected.value.filter(draft => draftIssue(draft)).length)
-const canSubmit = computed(() => categoryMode.value !== null && selected.value.length > 0 && !selectedIssues.value)
+const canSubmit = computed(() => categoryMode.value !== null && selected.value.length > 0
+  && !selectedIssues.value && !props.capacityBlocked)
+watch(() => selected.value.length, count => emit('selectionChange', count), { immediate: true })
 
 function categoryLabel(code: string) {
   const name = categoryLabels.value.get(code.trim().toUpperCase())
@@ -570,6 +573,7 @@ async function confirm() {
           <p v-if="selected.length && !canSubmit" class="mt-0.5 text-xs text-amber-800">
             <template v-if="!categoryMode">请先选择导入方式。</template>
             <template v-else-if="selectedIssues">有 {{ selectedIssues }} 件还需核对。</template>
+            <template v-else-if="capacityBlocked">已超出本工作区剩余名额，请减少选择。</template>
           </p>
         </div>
         <div class="flex flex-wrap gap-2">

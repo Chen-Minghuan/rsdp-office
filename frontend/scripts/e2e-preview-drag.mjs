@@ -49,7 +49,7 @@ try {
       ] } })
     }
     if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
-      const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER' }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
+      const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT'] }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
     }
     const data = path.endsWith('/floor-plan/PREVIEW-DRAG') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
@@ -203,7 +203,7 @@ try {
   await page.getByTestId('reference-add').click()
   await page.mouse.click(coffeeBox.x + coffeeBox.width / 2, coffeeBox.y + coffeeBox.height / 2)
   await page.getByTestId('reference-apply').click()
-  await page.getByText('此位置与已有家具重叠或间距不足', { exact: true }).waitFor()
+  await page.getByText(/「.*」与「.*」的占地重叠/).waitFor()
   assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 4, '重叠校验不会挪动或删掉家具')
   assert.equal((await state()).objects.filter(item => item.layoutReference).length, 0)
   await page.keyboard.press('Delete')

@@ -25,6 +25,13 @@ const localFavoriteProduct = {
 }
 const savedBundles = []
 let staffCanEditLocalProducts = false
+let localCapacityUsed = 4999
+let supplierCapacityPreview = false
+const capacitySaves = []
+const quotaPreviewProducts = ['LIMIT-1', 'LIMIT-2'].map(factoryModel => ({
+  name: '额度验证 ' + factoryModel, categoryCode: 'CODE-1', factoryModel, images: [],
+  variants: [{ name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450 }],
+}))
 let catalogPageRequests = 0
 let importRequests = 0
 let legacyAuditDetailRequests = 0
@@ -72,6 +79,12 @@ const batchOverview = {
   batchId: 'BATCH-MOCK', fileName: '商品清单.xlsx', status: 'done',
   totalRows: 2, successCount: 1, failedCount: 1,
 }
+const localImport = {
+  id: '00000000-0000-4000-8000-000000000001', fileName: '本地商品导入.xlsx',
+  fileBytes: 3 * 1024 * 1024, actorName: '测试用户', createdAt: '2026-11-25T06:00:00Z',
+  batchCount: 2, productCount: 1,
+}
+let historicalImportRequests = 0
 await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
 const reviewMock = createReviewConfirmMock()
 const defaultProject = {
@@ -107,7 +120,29 @@ await context.route('**/api/v1/**', async route => {
     savedBundles.push(bundle)
     return respond(bundle)
   }
+  if (url.pathname === '/api/v1/office/local-products/capacity') return respond({ used: localCapacityUsed, limit: 5000 })
+  if (url.pathname === '/api/v1/office/local-products/excel-preview') {
+    if (supplierCapacityPreview) return respond({
+      products: [], errors: [], previewId: 'SUPPLIER-QUOTA-PREVIEW', imageSizes: {},
+      supplier: { products: quotaPreviewProducts.map(product => ({ product, sources: [], images: [] })), images: {} },
+    })
+    return respond({ products: quotaPreviewProducts, errors: [], previewId: 'QUOTA-PREVIEW', imageSizes: {} })
+  }
+  if (url.pathname === '/api/v1/office/local-products/imports') {
+    const query = url.searchParams.get('search') || ''
+    return respond({ canWrite: catalogDealer || staffCanEditLocalProducts, hasMore: false,
+      records: localImport.fileName.includes(query) ? [localImport] : [] })
+  }
+  if (url.pathname === `/api/v1/office/local-products/imports/${localImport.id}`) {
+    return respond({ record: localImport, products: [{ id: localProduct.id, name: localProduct.name, revision: 1 }] })
+  }
   if (url.pathname === '/api/v1/office/local-products') {
+    if (request.method() === 'POST') {
+      const { products } = request.postDataJSON()
+      capacitySaves.push(products)
+      localCapacityUsed += products.length
+      return respond(products.map(product => ({ id: product.factoryModel, name: product.name, revision: 1 })))
+    }
     const query = (url.searchParams.get('search') || '').toLowerCase()
     const matches = [localProduct.name, localProduct.factoryModel].some(value => value.toLowerCase().includes(query))
     return respond({ canWrite: catalogDealer || staffCanEditLocalProducts,
@@ -127,7 +162,10 @@ await context.route('**/api/v1/**', async route => {
   if (url.pathname.startsWith('/api/v1/dicts/')) {
     return respond([{ dictCode: 'CODE-1', dictName: '测试字典项' }])
   }
-  if (url.pathname === '/api/v1/products/import-batches' && request.method() === 'GET') return respond([batchOverview])
+  if (url.pathname === '/api/v1/products/import-batches' && request.method() === 'GET') {
+    historicalImportRequests++
+    return respond([batchOverview])
+  }
   if (url.pathname === '/api/v1/products/import-batches/BATCH-MOCK/status' && request.method() === 'GET') {
     return respond({ ...batchOverview, rows: [
       { excelRowNumber: 2, status: 'success', generatedRspuId: 'PRODUCT-1' },
@@ -875,10 +913,52 @@ try {
   assert.equal(await page.getByRole('link', { name: '批量导入' }).count(), 0)
 
   await page.getByRole('link', { name: '导入记录', exact: true }).click()
-  await heading('Office 历史导入记录')
+  await heading('导入记录')
+  await page.getByText(localImport.fileName, { exact: true }).waitFor()
+  await page.getByText('3.00 MB', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '查看商品', exact: true }).click()
+  assert.equal(await page.getByRole('link', { name: localProduct.name, exact: true }).getAttribute('href'), `/products/local/${localProduct.id}`)
+  assert.equal(historicalImportRequests, 0, '当前 Office 记录不需要读取早期批次接口')
+  await page.getByRole('searchbox', { name: '搜索 Excel 文件名' }).fill('无匹配')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await heading('没有匹配的导入记录')
+  await page.getByRole('button', { name: '清空搜索', exact: true }).click()
+  await page.getByText(localImport.fileName, { exact: true }).waitFor()
+  await page.getByText('早期导入记录', { exact: true }).click()
   await page.getByRole('button', { name: '查看批次' }).click()
   await page.getByText(/商品名称不能为空/).waitFor()
-  assert.equal(await page.getByRole('link', { name: '去 RSDP 导入' }).count(), 1)
+  assert.equal(await page.getByRole('link', { name: '去 RSDP 导入' }).count(), 0)
+  await page.getByRole('link', { name: '导入 Excel', exact: true }).click()
+  await heading('Excel 商品导入')
+  assert.equal(new URL(page.url()).searchParams.get('view'), 'import')
+  const capacityGauge = page.getByRole('progressbar', { name: '本地商品录入占用率' })
+  await capacityGauge.waitFor()
+  assert.equal(await capacityGauge.getAttribute('aria-valuenow'), '4999')
+  assert.equal(await capacityGauge.getAttribute('aria-valuemax'), '5000')
+  await page.getByLabel('选择 Excel 文件').setInputFiles({ name: '额度验证.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from('mock') })
+  await page.getByText('超出剩余名额 1 件，请减少本次选择。', { exact: true }).waitFor()
+  const confirmWorkbook = page.getByRole('button', { name: '确认导入', exact: true })
+  assert.equal(await confirmWorkbook.isDisabled(), true)
+  assert.equal(capacitySaves.length, 0)
+  await page.getByRole('checkbox', { name: '选择 LIMIT-2' }).uncheck()
+  await page.getByText('本次已选 1 件 · 导入后预计 100%', { exact: true }).waitFor()
+  await confirmWorkbook.click()
+  await page.getByText('已导入 1 件商品', { exact: true }).waitFor()
+  await page.waitForFunction(() => document.querySelector('[aria-label="本地商品录入占用率"][role="progressbar"]')?.getAttribute('aria-valuenow') === '5000')
+  assert.deepEqual(capacitySaves.map(products => products.map(product => product.factoryModel)), [['LIMIT-1']])
+  await page.getByRole('checkbox', { name: '选择 LIMIT-2' }).check()
+  assert.equal(await confirmWorkbook.isDisabled(), true)
+  supplierCapacityPreview = true
+  localCapacityUsed = 4999
+  await page.getByLabel('选择 Excel 文件').setInputFiles({ name: '供应商额度验证.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from('mock') })
+  await page.getByRole('radio', { name: '单一品类导入' }).check()
+  await page.getByRole('checkbox', { name: '选择 LIMIT-1' }).check()
+  await page.getByRole('checkbox', { name: '选择 LIMIT-2' }).check()
+  await page.getByText('超出剩余名额 1 件，请减少本次选择。', { exact: true }).waitFor()
+  assert.equal(await confirmWorkbook.isDisabled(), true)
+  await page.getByRole('checkbox', { name: '选择 LIMIT-2' }).uncheck()
+  await page.getByText('本次已选 1 件 · 导入后预计 100%', { exact: true }).waitFor()
+  assert.equal(await confirmWorkbook.isEnabled(), true)
 
   for (const route of ['audit', 'manual', 'import']) {
     await page.goto(`${baseUrl}/products/${route}`, { waitUntil: 'networkidle' })
@@ -915,7 +995,7 @@ try {
   assert.equal(await collectionToggle.getAttribute('aria-expanded'), 'true')
   await page.getByRole('button', { name: '项目侧栏', exact: true }).click()
   await page.getByRole('link', { name: '导入记录', exact: true }).click()
-  await heading('Office 历史导入记录')
+  await heading('导入记录')
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   assert.deepEqual(pageErrors, [])
   console.log('Workflow E2E passed: navigation, context, filters, pagination, read-only details, legacy redirects, history, retry, empty/error states and responsive layouts.')

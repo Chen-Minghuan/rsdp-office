@@ -24,8 +24,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -285,6 +287,33 @@ class LocalProductWorkbookTest {
             sameWorkspace.setWorkspaceId("WS-TEST");
             sameWorkspace.setUserId("USR-OTHER");
             assertThrows(BusinessException.class, () -> cache.read(referenced.previewId(), image.id(), sameWorkspace));
+        } finally {
+            cache.shutdown();
+        }
+    }
+
+    @Test
+    void retainsFileMetadataForAnImageFreeWorkbook() throws Exception {
+        var cache = new WorkbookPreviewCache();
+        try {
+            var workbookService = new LocalProductWorkbook(productService(new RsdpMainProperties()), cache);
+            byte[] bytes;
+            try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(workbookService.template()));
+                 var output = new ByteArrayOutputStream()) {
+                row(workbook.getSheetAt(0), 1, "会议桌", "OF", "DESK-NO-IMAGE", "默认", "1200", "600");
+                workbook.write(output);
+                bytes = output.toByteArray();
+            }
+            var preview = workbookService.preview(new MockMultipartFile("file", "C:\\fakepath\\产品表.xlsx", null, bytes), null, true);
+            assertNotNull(preview.previewId());
+            assertTrue(preview.imageSizes().isEmpty());
+            var actor = new OfficeUser();
+            actor.setWorkspaceId("WS-TEST");
+            actor.setUserId("USR-TEST");
+            var request = new LocalProductModels.SaveRequest(UUID.randomUUID(), preview.products(), preview.previewId());
+            var materialized = cache.materialize(request, actor);
+            assertEquals(new WorkbookPreviewCache.WorkbookSource("产品表.xlsx", bytes.length), materialized.source());
+            assertEquals(1, materialized.products().size());
         } finally {
             cache.shutdown();
         }

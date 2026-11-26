@@ -72,9 +72,11 @@ public final class RenderPreviewScene {
             Area footprint = new Area(furnitureShape(item));
             Area outside = new Area(footprint); outside.subtract(room);
             if (area(outside) > 1) throw new BusinessException("家具超出当前空间，请调整排版后生成");
-            for (Area other : footprints) {
-                Area intersection = new Area(footprint); intersection.intersect(other);
-                if (area(intersection) > 1) throw new BusinessException("当前家具存在重叠，请调整排版后生成");
+            for (int i = 0; i < footprints.size(); i++) {
+                Area intersection = new Area(footprint); intersection.intersect(footprints.get(i));
+                if (area(intersection) > 1) {
+                    throw new BusinessException(OfficeLayoutValidationPolicy.furnitureOverlapMessage(zone, items.get(i), item) + "，请调整排版后生成");
+                }
             }
             footprints.add(footprint);
         }
