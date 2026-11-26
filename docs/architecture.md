@@ -55,6 +55,8 @@ Viewport（平移、缩放）独立于上述物理几何
 
 2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换在事务内完成。主号可换负责人并配置权限，获授成员管理权限的项目成员可调整协作者。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
 
+2026-11-25 楼层级参考图（PROJECT-005）：`office_design_floor.reference_images` 为 **text 列**（项目级为 JSONB，列类型不同），存同一 `[{url, name}]` JSON 契约，由服务层 Jackson 序列化/解析（解析失败按空列表降级）。`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references` 整体替换（null/空列表即清空），复用项目级校验（≤10 张、仅本站 `/uploads/images/` 前缀、拒绝 `..`、名称 ≤200 字符），要求项目 EDIT 权限并核验楼层归属。前端项目总览页按楼层编辑（无 EDIT 权限不显示入口，后端仍独立鉴权），保存按 `projectId/floorId` 单调序号防乱序覆盖、请求前固定 ID 防止切楼层串写，成功后回写工作区缓存；画布工具栏「参考图」弹层只读展示当前楼层参考图。方案页最终报价取最新 CONFIRMED 报价快照中当前楼层行小计合计（缺价行不计入、红色提示行数），且仅当报价行与页面商品按 productId+数量严格一致时展示。见 [PROJECT-005](tasks/PROJECT-005-floor-reference-images.md)。
+
 Office 系统管理员标记存于 `office_user.is_system_admin`，PostgreSQL 部分唯一索引限制最多一人。`/api/v1/office/admin/users` 提供现有账号的列表、状态管理、重置密码和删除，服务端逐请求校验管理员。工作区主号随工作区一并创建，工作区成员账号由主号开通。账号停用或重置密码时会话立即失效，仍任项目负责人或工作区主号的账号不能直接删除。见 [AUTH-003](tasks/AUTH-003-user-admin.md) 和 [TENANT-004](tasks/TENANT-004-office-role-model.md)。
 
 2026-11-06 工作区与经销商角色（TENANT-001）：在全局角色与项目角色之间新增工作区（经销商）隔离层。`office_workspace(workspace_id, name, owner_user_id 唯一)` 一个经销商主号恰好一个工作区；`office_user.role` 增加第三档 `DEALER`（经销商主号），`office_user.workspace_id` 记录账号归属、`office_user.source` 预留来源标记（`DEALER_STAFF`/`FACTORY_SALES`，一期不参与鉴权）；`office_design_project.workspace_id` 使项目唯一归属一个工作区（旧项目为空，保持 PROJECT-004 纯成员判定，补录留待后续）。访问规则（仅 `rsdp.auth.enabled=true` 强制）：项目有工作区时访问者须为同工作区且具有对应权限的项目成员，或为该工作区主号；跨工作区成员关系写入拒绝、读取双重校验；创建项目仅限经销商主号，项目归属该主号拥有的工作区；`/users/assignable` 限定本工作区账号池。系统管理员经 `GET/POST /api/v1/office/admin/workspaces` 创建工作区+主号（单事务）；经销商主号经 `/api/v1/office/workspace/me|users` 开户（仅 USER 角色）。`office_audit_log` 记录成员替换（前后集合）、开户与建工作区，与业务写入同事务；成员移出按请求实时查库即时生效（含已登录会话）。经销商主号可停用（工作区/项目/账号保留、会话失效）但拥有工作区时拒绝删除。开发模式下项目/成员接口放行，经销商主号接口因无法解析归属明确报错。现有表中的项目授权、主号名额和已确认报价的字段级权限见 [TENANT-004](tasks/TENANT-004-office-role-model.md)。见 [TENANT-001](tasks/TENANT-001-workspace-roles.md)。
@@ -210,6 +212,8 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 ### 5.2 项目报价存储（QUOTE-001）
 
 报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
+
+2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在最终报价隐藏时用它展示上一次报价时间。
 
 ### 5.3 房间方案和楼层确认（FLOW-007）
 

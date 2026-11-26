@@ -3,6 +3,7 @@ export interface WorkspaceFloor {
   projectId: string
   floorName: string
   sortOrder: number
+  referenceImages: ProjectReferenceImage[]
 }
 
 export interface WorkspaceMember {

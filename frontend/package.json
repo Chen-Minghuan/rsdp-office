@@ -64,7 +64,9 @@
     "test:white-model": "node scripts/test-white-model.mjs",
     "test:furniture3d": "node scripts/test-furniture3d.mjs",
     "e2e:white-model": "node scripts/e2e-white-model.mjs",
-    "e2e:proposal-3d": "node scripts/e2e-proposal-3d.mjs"
+    "e2e:proposal-3d": "node scripts/e2e-proposal-3d.mjs",
+    "e2e:proposal-quote": "node scripts/e2e-proposal-quote.mjs",
+    "e2e:floor-references": "node scripts/e2e-floor-references.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

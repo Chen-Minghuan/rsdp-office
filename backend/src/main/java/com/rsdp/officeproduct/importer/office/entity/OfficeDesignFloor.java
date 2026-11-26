@@ -15,6 +15,8 @@ public class OfficeDesignFloor {
     private String projectId;
     private String name;
     private Integer sortOrder;
+    /** 楼层参考图 JSON 数组（[{url,name}]），与项目级参考图同一契约。 */
+    private String referenceImages;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

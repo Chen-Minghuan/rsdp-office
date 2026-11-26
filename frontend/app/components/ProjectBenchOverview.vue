@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { RenderPreview } from '~/types/renderPreview'
-import type { ProjectBudget, WorkspaceProject } from '~/types/workspace'
+import type { ProjectBudget, ProjectReferenceImage, WorkspaceProject } from '~/types/workspace'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { drawingMatchesPlan } from '~/utils/drawingContext'
 import { projectDrawingRoute, projectOverviewRoute } from '~/utils/projectBenchRoutes'
+import { authEnabled } from '~/composables/useAuth'
+import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { ringProblem, zoneMeasurements } from '~/utils/spatial/review'
 
 const props = defineProps<{ project: WorkspaceProject; floorId: string }>()
@@ -15,8 +17,51 @@ const previewsLoading = ref(false)
 const previewsFailed = ref(false)
 const retryPreviews = ref(0)
 const loadedBudget = ref<ProjectBudget>()
-const { storageScope } = useAuth()
+const { storageScope, user } = useAuth()
 const budgetApi = useWorkspaceApi()
+const workspace = useWorkspaceStore()
+const referenceSaveError = ref('')
+
+/** 仅具有项目 EDIT 权限的成员可上传/删除楼层参考图，只读成员不显示编辑入口。 */
+const canEditProject = computed(() => !authEnabled || user.value?.role === 'DEALER'
+  || projectPermissionsFor(props.project, user.value?.userId).includes('EDIT'))
+
+/** 楼层级参考图：按当前项目与楼层区分，整体替换保存，成功后回写工作区缓存。 */
+const floorReferences = computed(() => props.project.floors.find(floor => floor.floorId === props.floorId)?.referenceImages ?? [])
+
+/** 各楼层保存请求的单调序号：同一楼层连续保存时仅最后一次响应生效，避免乱序覆盖。 */
+const referenceSaveSeq = new Map<string, number>()
+
+/** 保存中的楼层 key：上一次保存返回前禁用编辑入口，保证同一楼层的保存按顺序到达后端。 */
+const referenceSavingKeys = reactive(new Set<string>())
+const referenceSaving = computed(() => referenceSavingKeys.has(`${props.project.projectId}/${props.floorId}`))
+
+async function saveFloorReferences(images: ProjectReferenceImage[]) {
+  if (!canEditProject.value) return
+  // 请求前固定 ID：响应可能到达时已切换楼层，结果仍属于发起时的项目与楼层。
+  const projectId = props.project.projectId
+  const floorId = props.floorId
+  const key = `${projectId}/${floorId}`
+  // 串行保存：上一次保存未返回前不再发新请求，避免旧请求晚到覆盖服务器新列表。
+  if (referenceSavingKeys.has(key)) return
+  const seq = (referenceSaveSeq.get(key) ?? 0) + 1
+  referenceSaveSeq.set(key, seq)
+  referenceSaveError.value = ''
+  referenceSavingKeys.add(key)
+  try {
+    const floor = await budgetApi.updateFloorReferences(projectId, floorId, images)
+    if (referenceSaveSeq.get(key) !== seq) return
+    const target = workspace.projects
+      .find(project => project.projectId === projectId)?.floors
+      .find(item => item.floorId === floorId)
+    if (target) target.referenceImages = floor.referenceImages
+  } catch (cause) {
+    if (referenceSaveSeq.get(key) !== seq || props.floorId !== floorId) return
+    referenceSaveError.value = cause instanceof Error ? cause.message : '楼层参考图保存失败'
+  } finally {
+    referenceSavingKeys.delete(key)
+  }
+}
 
 watch([() => props.project.projectId, storageScope], async ([projectId], _, onCleanup) => {
   let active = true
@@ -251,6 +296,12 @@ function roomRoute(zoneId: string) {
             </template>
             <p v-else class="text-neutral-600">尚未上传图纸</p>
             <NuxtLink :to="projectDrawingRoute(floorId)" class="inline-block font-semibold text-accent-ink hover:underline">上传或识别图纸</NuxtLink>
+          </div>
+          <div class="text-sm">
+            <ProjectReferenceImagesEditor :images="floorReferences" heading="楼层参考图" list-mode="names"
+              :disabled="!canEditProject || referenceSaving" data-testid="floor-reference-editor" @update:images="saveFloorReferences" />
+            <p v-if="referenceSaving" class="mt-1 text-xs text-neutral-600">正在保存…</p>
+            <p v-if="referenceSaveError" role="alert" class="mt-1 text-xs text-red-700">{{ referenceSaveError }}</p>
           </div>
         </aside>
       </div>
