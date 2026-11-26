@@ -41,7 +41,7 @@ try {
   }
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
-  await context.route('**/api/v1/**', route => {
+  await context.route('**/api/v1/**', async route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     if (path === '/api/v1/office/projects') {
@@ -50,6 +50,23 @@ try {
         leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
         floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
       }] }) })
+    }
+    if (path.endsWith(`/office/projects/${encodeURIComponent('OFFICE-PROJECT-001')}/module-recommendations`)) {
+      const req = await route.request().postDataJSON()
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { moduleId: req.moduleId, zoneId: req.zoneId, canvasRevision: req.canvasRevision, widthMm: 1200, depthMm: 600, targetCategory: '职员桌', sameModuleCount: 2, missingDimensions: 0, eligibleVariantCount: 2, candidates: [
+        { product: { id: 'PRODUCT-A', rspuId: 'RSPU-A', rspuCode: 'A', name: '测试商品', widthMm: 1200, depthMm: 600, price: 100 }, tier: 'CLOSE', fitRatio: 1, rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 0, relevanceScore: 95, matchReason: '同品类' },
+        { product: { id: 'PRODUCT-B', rspuId: 'RSPU-B', rspuCode: 'B', name: '测试商品B', widthMm: 1100, depthMm: 550, price: 200 }, tier: 'CLOSE', fitRatio: 0.9, rotationDeg: 0, remainingWidthMm: 100, remainingDepthMm: 50, relevanceScore: 90, matchReason: '同品类' },
+      ] } }) })
+    }
+    if (path.endsWith(`/office/projects/${encodeURIComponent('OFFICE-PROJECT-001')}/module-products`)) {
+      const body = await route.request().postDataJSON()
+      await page.evaluate(req => { window.lastModuleProductRequest = req }, body)
+      // 回显当前画布，避免绑定动作把测试中的家具清空
+      const objects = await page.evaluate(() => {
+        const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+        return JSON.parse(JSON.stringify(store.objects))
+      })
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { canvas: { objects, files: [], revision: 2 }, cartItems: [], match: { product: { id: 'PRODUCT-A', name: '测试商品', widthMm: 1200, depthMm: 600, price: 100 }, tier: 'CLOSE', fitRatio: 1, rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 0 } } }) })
     }
     const data = path.endsWith('/floor-plan/SINGLE-SPACE') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
@@ -81,10 +98,15 @@ try {
   await page.evaluate(() => {
     const key = 'rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001'
     const draft = JSON.parse(localStorage.getItem(key))
-    for (const [id, zoneId] of [['F-L','ROOM-L'],['F-B','ROOM-B']]) {
-      const zone = draft.objects.find(zone => zone.id === zoneId)
-      draft.objects.push({ id, zoneId, kind: 'furniture', x: zone.x + 500, y: zone.y + 500, w: 1200, h: 600, rotation: 0, productId: '', label: id })
-    }
+    const roomL = draft.objects.find(zone => zone.id === 'ROOM-L')
+    const roomB = draft.objects.find(zone => zone.id === 'ROOM-B')
+    draft.objects.push(
+      { id: 'F-L', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 500, y: roomL.y + 2400, w: 1200, h: 50, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-B', zoneId: 'ROOM-B', kind: 'furniture', x: roomB.x + 500, y: roomB.y + 500, w: 1200, h: 600, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-L2', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 500, y: roomL.y + 3000, w: 1200, h: 50, rotation: 0, productId: '', label: '办公桌', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-L3', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 4000, y: roomL.y + 2400, w: 800, h: 50, rotation: 0, productId: '', label: '办公桌2', furnitureTemplateId: 'desk-straight' },
+      { id: 'F-L4', zoneId: 'ROOM-L', kind: 'furniture', x: roomL.x + 1000, y: roomL.y + 4000, w: 2400, h: 1200, rotation: 0, productId: '', label: '会议桌', furnitureTemplateId: 'table-conference-rect' }
+    )
     draft.objects.push(
       { id: 'GLOBAL-REF', kind: 'reference', x: -17500, y: -7500, caption: '整层参考' },
       { id: 'GLOBAL-ARROW', kind: 'arrow', x: -17500, y: -7500, x2: -17000, y2: -7000 })
@@ -93,7 +115,7 @@ try {
   await enter('ROOM-L')
   const spaceSelect = page.getByTestId('design-space-switcher')
   assert.equal(await spaceSelect.locator('[data-space-id="ROOM-L"]').getAttribute('aria-current'), 'page')
-  assert.deepEqual(await spaceSelect.locator('[data-space-id]').evaluateAll(nodes => nodes.map(node => [node.getAttribute('data-space-id'), node.textContent.replace(/\s+/g, ' ').trim()])), [['ROOM-L', '独立 L 形办公室待确认 · 1 件'], ['ROOM-B', '其他会议室待确认 · 1 件']])
+  assert.deepEqual(await spaceSelect.locator('[data-space-id]').evaluateAll(nodes => nodes.map(node => [node.getAttribute('data-space-id'), node.textContent.replace(/\s+/g, ' ').trim()])), [['ROOM-L', '独立 L 形办公室待确认 · 4 件'], ['ROOM-B', '其他会议室待确认 · 1 件']])
   assert.equal(await page.getByRole('button', { name: '上一个空间', exact: true }).isDisabled(), true)
   await page.getByRole('button', { name: '折叠默认楼层空间', exact: true }).click()
   assert.equal(await spaceSelect.isVisible(), false)
@@ -101,15 +123,12 @@ try {
   assert.equal(await spaceSelect.isVisible(), false)
   await page.getByRole('button', { name: '展开默认楼层空间', exact: true }).click()
   assert.equal(await spaceSelect.locator('[data-space-id="ROOM-L"]').getAttribute('aria-current'), 'page')
-  // 刷新后品类选择同样为空（不预选），确认排版前需重新点选
-  await page.getByTestId('functional-category-workstation').click()
   const initial = await state()
   assert.equal(await canvas().locator('polygon.board-element').count(), 1)
   assert.equal((await canvas().locator('polygon.board-element').getAttribute('points')).split(' ').length, 6, 'L 形不能变成包围盒')
   assert.equal(await canvas().locator('img').count(), 1, '显示与当前空间对齐的原始图纸')
-  assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-L','ROOM-L'])
+  assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-L','F-L2','F-L3','F-L4','ROOM-L'])
   assert.equal(await canvas().locator('line[marker-end="url(#arrowHead)"]').count(), 0)
-  await page.getByText('尺寸（毫米）', { exact: true }).waitFor()
   await page.screenshot({ path: outDir + '/01-single-room.png' })
 
   const beforeZoom = await canvas().locator('polygon.board-element').boundingBox()
@@ -129,38 +148,161 @@ try {
   assert.deepEqual((await state()).objects, initial.objects, '缩放、适屏、调整视口均不改动几何')
 
   // Pointer coordinates must stay in world mm even with a negative world origin.
-  await page.getByRole('button', { name: '家具吸附', exact: true }).click()
   const furniture = canvas().locator('[data-id="F-L"]')
+  await furniture.waitFor()
   const from = await furniture.boundingBox()
   const zoom = from.width / 1200
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(from.x + from.width / 2 + 25, from.y + from.height / 2 + 15, { steps: 5 })
-  await page.mouse.up()
+  const canvasBox = await canvas().boundingBox()
+  const dragTargetX = from.x + from.width / 2 + 25 - canvasBox.x
+  const dragTargetY = from.y + from.height / 2 + 15 - canvasBox.y
+  const endX = canvasBox.x + dragTargetX
+  const endY = canvasBox.y + dragTargetY
+  const startX = from.x + from.width / 2
+  const startY = from.y + from.height / 2
+  await page.evaluate(({ startX, startY, endX, endY }) => {
+    const f = document.querySelector('[data-id="F-L"]')
+    const canvas = document.querySelector('[data-testid="office-design-canvas"]')
+    if (!f || !canvas) throw new Error('missing drag elements')
+    const make = (type, x, y) => new PointerEvent(type, {
+      bubbles: true, cancelable: true, clientX: x, clientY: y,
+      pointerId: 42, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, isPrimary: true,
+    })
+    f.dispatchEvent(make('pointerdown', startX, startY))
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 5
+      canvas.dispatchEvent(make('pointermove', startX + (endX - startX) * t, startY + (endY - startY) * t))
+    }
+    canvas.dispatchEvent(make('pointerup', endX, endY))
+  }, { startX, startY, endX, endY })
   const moved = (await state()).objects.find(object => object.id === 'F-L')
   const original = initial.objects.find(object => object.id === 'F-L')
   assert.ok(Math.abs(moved.x - original.x - 25 / zoom) < 3, JSON.stringify({ moved, original, zoom, from }))
   assert.ok(Math.abs(moved.y - original.y - 15 / zoom) < 3)
   assert.equal(moved.zoneId, 'ROOM-L')
 
-  await page.getByRole('button', { name: '展开侧边栏', exact: true }).first().click()
-  await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
+  // 底部家具栏回归：按 label+w+h 分组，单击切换全选，取消选择不打开换品
+  const strip = page.getByTestId('canvas-furniture-strip')
+  await strip.waitFor()
+  const groups = strip.locator('> div > div')
+  assert.equal(await groups.count(), 3, '底部栏按 label+w+h 显示 3 组')
+
+  await groups.first().click()
+  const selectedIds = await canvas().locator('.board-element[class*="ring-accent"]').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort())
+  assert.deepEqual(selectedIds, ['F-L', 'F-L2'])
+  await groups.first().click()
+  const deselectedIds = await canvas().locator('.board-element[class*="ring-accent"]').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort())
+  assert.deepEqual(deselectedIds, [])
+  assert.equal(await page.getByTestId('white-model-product-dialog').count(), 0)
+
+  // 组内碰撞：两件同时放大到互相重叠时整批不写回
+  const collision = await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const ids = ['F-L', 'F-L2']
+    const before = store.objects.filter(object => ids.includes(object.id)).map(object => ({ id: object.id, w: object.w, h: object.h }))
+    const result = store.resizeFurnitureBatch(ids, 2800, 900)
+    const after = store.objects.filter(object => ids.includes(object.id)).map(object => ({ id: object.id, w: object.w, h: object.h }))
+    return { result, before, after }
+  })
+  assert.ok(collision.result, '组内碰撞必须返回错误')
+  assert.deepEqual(collision.after, collision.before, '失败时整批不得修改尺寸')
+
+  // 成功软提示：改尺寸后触发座椅侧净空复核警告，弹窗关闭且几何生效；临时家具用后删除，不影响后续确认
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const room = store.objects.find(object => object.id === 'ROOM-L')
+    store.addObject({ id: 'F-SOFT', zoneId: 'ROOM-L', kind: 'furniture', x: room.x + 5000, y: room.y + 5500, w: 600, h: 300, rotation: 0, productId: '', label: '软提示桌', furnitureTemplateId: 'desk-straight' })
+  })
+  await canvas().locator('[data-id="F-SOFT"]').waitFor()
+  await page.locator('[data-id="F-SOFT"]').click({ button: 'right' })
+  const sizeDialog = page.getByTestId('furniture-size-dialog')
+  await sizeDialog.waitFor()
+  await sizeDialog.locator('input').first().fill('600')
+  await sizeDialog.locator('input').nth(1).fill('400')
+  await sizeDialog.getByRole('button', { name: '应用尺寸' }).click()
+  await sizeDialog.waitFor({ state: 'detached', timeout: 5000 })
+  await page.locator('p[role="status"]').filter({ hasText: '已调整尺寸；请复核' }).waitFor()
+  const resized = (await state()).objects.find(object => object.id === 'F-SOFT')
+  assert.equal(resized.h, 400)
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.deleteObject('F-SOFT')
+  })
+  await canvas().locator('[data-id="F-SOFT"]').waitFor({ state: 'detached', timeout: 5000 })
+
+  // 未修改尺寸时只提示无变化，不写回几何，也不显示更新数量
+  const beforeUnchanged = (await state()).objects.find(object => object.id === 'F-L3')
+  await page.locator('[data-id="F-L3"]').click({ button: 'right' })
+  await sizeDialog.waitFor()
+  await sizeDialog.getByRole('button', { name: '应用尺寸' }).click()
+  await sizeDialog.waitFor({ state: 'detached', timeout: 5000 })
+  await page.locator('p[role="status"]').filter({ hasText: '尺寸未变化，无需更新' }).waitFor()
+  assert.deepEqual((await state()).objects.find(object => object.id === 'F-L3'), beforeUnchanged)
+  assert.equal(await page.getByText(/已更新 \d+ 个家具尺寸/).count(), 0)
+
+  const expandButton = page.getByRole('button', { name: '展开侧边栏', exact: true }).first()
+  if (await expandButton.count() > 0) await expandButton.click()
+  await page.getByTestId('auto-confirm-recommend').click()
   const confirmedFurniture = (await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L')
   assert.ok(confirmedFurniture.every(object => object.layoutConfirmed))
-  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 1 件/)
+  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 4 件/)
 
-  // Switch through the visible selector without leaving the design page.
+  // 返回设计模式验证批量换品只提交目标分组 ID
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('canvas-furniture-strip').waitFor()
+  await page.getByTestId('furniture-strip-item-F-L3').dblclick()
+  const productDialog = page.getByTestId('white-model-product-dialog')
+  await productDialog.waitFor()
+  const currentProductName = await productDialog.locator('h3').textContent()
+  await productDialog.locator('h3').hover()
+  await page.mouse.wheel(0, 300)
+  await page.waitForTimeout(100)
+  assert.equal(await productDialog.locator('h3').textContent(), currentProductName, '滚轮不得切换当前商品')
+  assert.equal(await productDialog.getByText('1 / 2', { exact: true }).count(), 1)
+  await productDialog.getByRole('button', { name: '批量绑定该商品' }).click()
+  await page.waitForFunction(() => !!window.lastModuleProductRequest, { timeout: 5000 })
+  const bulkRequest = await page.evaluate(() => window.lastModuleProductRequest)
+  assert.deepEqual(bulkRequest.targetIds, ['F-L3'], '批量换品只提交选中分组的家具 ID')
+  await productDialog.waitFor({ state: 'detached', timeout: 5000 })
+
+  // 侧栏收起时右键会议自动组主家具：自动展开并进入自动布局重排，不弹尺寸窗
+  await page.getByRole('button', { name: '收起侧边栏', exact: true }).first().click()
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const room = store.objects.find(object => object.id === 'ROOM-L')
+    store.addObject({
+      id: 'F-MEET-AUTO', zoneId: 'ROOM-L', kind: 'furniture', x: room.x + 5400, y: room.y + 3500, w: 500, h: 800, rotation: 0,
+      productId: '', label: '会议桌自动组', furnitureTemplateId: 'table-conference-rect', layoutRole: 'primary', layoutGroupId: 'auto:ROOM-L',
+      layoutSettings: { mode: 'auto', spacing: { wallMm: 0, gapMm: 0, aisleMm: 0 }, layoutContext: 'meeting', productStyleId: 'meeting-table', arrangementPresetId: 'meeting-center' },
+    })
+  })
+  await canvas().locator('[data-id="F-MEET-AUTO"]').waitFor()
+  await page.locator('[data-id="F-MEET-AUTO"]').click({ button: 'right' })
+  await page.getByRole('button', { name: '收起侧边栏', exact: true }).waitFor()
+  assert.equal(await page.getByTestId('tab-auto-layout').getAttribute('aria-selected'), 'true')
+  assert.equal(await page.getByTestId('furniture-size-dialog').count(), 0)
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.deleteObject('F-MEET-AUTO')
+  })
+  await canvas().locator('[data-id="F-MEET-AUTO"]').waitFor({ state: 'detached', timeout: 5000 })
+  const reconfirmed = await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    return store.confirmLayout('ROOM-L')
+  })
+  assert.equal(reconfirmed, true, '删除临时会议桌后需恢复 ROOM-L 已确认状态')
+
+  // Cross-space switch preserves confirmed layouts and does not carry state across rooms.
+  const roomLFurniture = confirmedFurniture
   await spaceSelect.locator('[data-space-id="ROOM-B"]').click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-B')
   await assertFit('ROOM-B')
   assert.equal(await page.getByRole('button', { name: '下一个空间', exact: true }).isDisabled(), true)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   assert.equal(await canvas().locator('img').count(), 1, '显示与当前空间对齐的原始图纸')
-  // Cross-space switch preserves confirmed layouts and does not carry unfinished placement.
   await page.getByRole('button', { name: '上一个空间', exact: true }).click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-L')
   await assertFit('ROOM-L')
-  assert.deepEqual((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L'), confirmedFurniture)
+  assert.deepEqual((await state()).objects.filter(object => object.kind === 'furniture' && object.zoneId === 'ROOM-L'), roomLFurniture)
   await page.getByRole('button', { name: '下一个空间', exact: true }).click()
   await page.waitForURL(url => url.searchParams.get('zoneId') === 'ROOM-B')
   await assertFit('ROOM-B')
@@ -169,7 +311,7 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await assertFit('ROOM-B')
   assert.equal(await spaceSelect.locator('[data-space-id="ROOM-B"]').getAttribute('aria-current'), 'page')
-  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 1 件/)
+  assert.match(await spaceSelect.locator('[data-space-id="ROOM-L"]').textContent(), /已确认 · 4 件/)
   assert.deepEqual(await canvas().locator('.board-element').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort()), ['F-B','ROOM-B'])
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()

@@ -4,6 +4,7 @@ import com.rsdp.officeproduct.importer.office.controller.OfficeProjectController
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
+import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -20,6 +21,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class OfficeProjectControllerTest {
+    @Test void projectStatusEndpointReturnsThePersistedStage() throws Exception {
+        var service = mock(OfficeProjectService.class);
+        when(service.updateStatus("P1", "DELIVERING")).thenReturn("DELIVERING");
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
+        mvc.perform(patch("/api/v1/office/projects/P1/status").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"DELIVERING\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("DELIVERING"));
+    }
     private final OfficeProjectService projects = mock(OfficeProjectService.class);
     private final org.springframework.test.web.servlet.MockMvc mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(projects)).build();
 

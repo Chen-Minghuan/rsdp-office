@@ -3,6 +3,7 @@ export interface WorkspaceFloor {
   projectId: string
   floorName: string
   sortOrder: number
+  referenceImages: ProjectReferenceImage[]
 }
 
 export interface WorkspaceMember {
@@ -36,8 +37,10 @@ export interface AssignableUser {
 export interface WorkspaceProject {
   projectId: string
   projectName: string
-  /** 由后端按方案确认数据派生：全部楼层已确认 → DELIVERING，否则 DESIGNING。 */
+  /** 由项目负责人或所属工作区主号人工维护。 */
   status: ProjectStatus
+  /** 当前用户是否可修改项目阶段（负责人或工作区主号），由后端按成员关系计算。 */
+  canManageStatus: boolean
   customerRequirements: string
   requirementsRevision: number
   leader: WorkspaceMember | null
@@ -50,7 +53,7 @@ export interface WorkspaceProject {
   zoneDelivered: number | null
 }
 
-export type ProjectStatus = 'DESIGNING' | 'DELIVERING'
+export type ProjectStatus = 'DESIGNING' | 'DELIVERING' | 'COMPLETED'
 
 export interface WorkspaceRequirementsSummary {
   keyPoints: string[]

@@ -12,11 +12,10 @@ const activeStatus = ref<ProjectStatusFilter>('ALL')
 onMounted(() => {
   if (!isProjectDrawing.value && !isProjectOverview.value) void workspace.refreshProjects()
 })
-// 已完成看板保留占位：业务口径待后续定义，暂不展示数据、不参与筛选
+// 阶段卡片与 projectStatusOptions 一一对应（设计中/交付中/已完成），均可点击筛选
 const statusCards = computed(() => [
   { value: 'ALL' as const, label: '全部项目', count: workspace.projects.length as number | null },
   ...projectStatusOptions.map(option => ({ value: option.value as ProjectStatusFilter, label: option.label, count: workspace.projects.filter(project => project.status === option.value).length as number | null })),
-  { value: 'COMPLETED' as const, label: '已完成', count: null },
 ])
 </script>
 

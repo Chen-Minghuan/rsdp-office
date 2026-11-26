@@ -12,9 +12,20 @@ page.on('pageerror', error => pageErrors.push(error.message))
 let listMode = 'success'
 let catalogEnabled = true
 let catalogDealer = true
-let catalogManaged = false
+let includeLocalFixture = false
 let rejectCatalogChange = false
 const catalogUpdates = []
+const localProduct = { id: 'LOCAL-TEA-TABLE', revision: 1, name: '本地样品茶几', categoryCode: 'CODE-1', factoryModel: 'LOCAL-001' }
+const localImageId = 'LOCAL-IMAGE'
+const localSideImageId = 'LOCAL-SIDE-IMAGE'
+const localCollectionId = 'OFFICE-LOCAL-' + localProduct.id
+const localFavoriteProduct = {
+  rspuId: localCollectionId, rspuCode: localProduct.factoryModel, productName: localProduct.name,
+  status: 'active', primaryImageUrl: '/api/v1/office/local-products/images/' + localImageId,
+}
+const savedBundles = []
+let staffCanEditLocalProducts = false
+let catalogPageRequests = 0
 let importRequests = 0
 let legacyAuditDetailRequests = 0
 const favoriteFolders = []
@@ -87,7 +98,32 @@ await context.route('**/api/v1/**', async route => {
     const { budgetStatus, budgetTotal, ...details } = defaultProject
     return respond(details)
   }
-  if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: catalogManaged })
+  if (url.pathname === '/api/v1/products/capabilities') return respond({ managed: true })
+  if (url.pathname === '/api/v1/office/product-bundles' && request.method() === 'GET') return respond(savedBundles)
+  if (url.pathname.startsWith('/api/v1/office/product-bundles/') && request.method() === 'PUT') {
+    const { name, revision, items } = request.postDataJSON()
+    const bundle = { bundleId: url.pathname.split('/').at(-1), name, revision: revision + 1,
+      items: items.map(item => ({ ...item, name: localProduct.name, variant: '加长规格' })) }
+    savedBundles.push(bundle)
+    return respond(bundle)
+  }
+  if (url.pathname === '/api/v1/office/local-products') {
+    const query = (url.searchParams.get('search') || '').toLowerCase()
+    const matches = [localProduct.name, localProduct.factoryModel].some(value => value.toLowerCase().includes(query))
+    return respond({ canWrite: catalogDealer || staffCanEditLocalProducts,
+      products: matches ? [{ ...localProduct, primaryImageId: localImageId }] : [], hasMore: false })
+  }
+  if (url.pathname === `/api/v1/office/local-products/${localProduct.id}`) {
+    return respond({ product: localProduct, variants: [
+      { id: 'STANDARD', name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, color: '胡桃色', material: 'PB' },
+      { id: 'LARGE', name: '加长规格', widthMm: 1400, depthMm: 600, heightMm: 450, color: '深木色', material: '碳晶板' },
+    ], images: [localImageId, localSideImageId].map(id => ({ id, mediaType: 'image/png' })),
+    canWrite: catalogDealer || staffCanEditLocalProducts })
+  }
+  if ([localImageId, localSideImageId].some(id => url.pathname === `/api/v1/office/local-products/images/${id}`)) {
+    return route.fulfill({ contentType: 'image/png', body: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9GQAAAAASUVORK5CYII=', 'base64') })
+  }
   if (url.pathname.startsWith('/api/v1/dicts/')) {
     return respond([{ dictCode: 'CODE-1', dictName: '测试字典项' }])
   }
@@ -103,28 +139,50 @@ await context.route('**/api/v1/**', async route => {
     importRequests += 1
     return respond(null, 403)
   }
-  if (url.pathname === '/api/v1/products' && request.method() === 'GET') {
-    if (listMode === 'error') return respond(null, 404)
-    return respond(listMode === 'empty' || !catalogEnabled ? [] : products)
+  if (url.pathname === '/api/v1/products/browse/facets') {
+    return respond({
+      localCategories: includeLocalFixture ? [localProduct.categoryCode] : [],
+      sharedCategories: catalogEnabled ? [...new Set(products.map(product => product.categoryPath?.join(' / ')).filter(Boolean))] : [],
+      colors: catalogEnabled ? [...new Set(products.map(product => product.colorPrimaryName).filter(Boolean))] : [],
+      sharedUnavailable: false,
+    })
   }
-  if (url.pathname === '/api/v1/products/page' && request.method() === 'GET') {
-    if (listMode === 'error') return respond(null, 404)
-    const catalog = listMode === 'empty' || !catalogEnabled ? [] : products
+  if (url.pathname === '/api/v1/products/browse' && request.method() === 'GET') {
+    if (catalogEnabled) catalogPageRequests++
+    const localCatalog = includeLocalFixture ? [{ ...localProduct, primaryImageId: localImageId }] : []
+    const sharedCatalog = listMode === 'success' && catalogEnabled ? products : []
     const page = Number(url.searchParams.get('page'))
     const size = Number(url.searchParams.get('size'))
     const search = (url.searchParams.get('search') || '').toLowerCase()
     const status = url.searchParams.get('status')
-    const matches = catalog.filter(product => (
-      !search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search))
-    ) && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active')))
-    return respond({ page, size, rows: matches.slice((page - 1) * size, page * size), total: matches.length,
-      catalogTotal: catalog.length, activeTotal: catalog.filter(product => product.status === 'active').length })
+    const color = url.searchParams.get('color')
+    const category = url.searchParams.get('category')
+    const sharedMatches = sharedCatalog.filter(product =>
+      (!search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search)))
+      && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active'))
+      && (!category || category === 'shared:' + product.categoryPath?.join(' / '))
+      && (!color || color === product.colorPrimaryName))
+    const localMatches = localCatalog.filter(product =>
+      (!search || [product.name, product.factoryModel].some(value => value.toLowerCase().includes(search)))
+      && !status && !color && (!category || category === 'local:' + product.categoryCode))
+    const matches = []
+    for (let index = 0; index < Math.max(localMatches.length, sharedMatches.length); index++) {
+      if (localMatches[index]) matches.push({ local: localMatches[index], shared: null })
+      if (sharedMatches[index]) matches.push({ local: null, shared: sharedMatches[index] })
+    }
+    return respond({ rows: matches.slice((page - 1) * size, page * size), total: matches.length,
+      localTotal: localCatalog.length, catalogTotal: localCatalog.length + sharedCatalog.length,
+      activeTotal: sharedCatalog.filter(product => product.status === 'active').length,
+      canManageLocal: catalogDealer || staffCanEditLocalProducts, sharedUnavailable: catalogEnabled && listMode === 'error' })
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
     const product = products.find(item => item.rspuId === rspuId)
-    return respond({ ...product, images: [], variants: [
-      { variantId: 'STRUCTURED', displayName: '默认规格', dimensionsText: '1200 × 600 × 450 mm', status: 'active' },
+    return respond({ ...product, description: '测试配置说明', images: [localImageId, localSideImageId].map((id, index) => ({
+      imageId: id, storageUrl: `/api/v1/office/local-products/images/${id}`, primary: index === 0,
+    })), variants: [
+      { variantId: 'STRUCTURED', displayName: '默认规格', dimensionsText: '1200 × 600 × 450 mm', materialCode: 'PB',
+        packageCount: 2, packageVolumeCbm: 0.36, grossWeight: 18, status: 'active' },
       { variantId: 'SUPPLIER', displayName: '供应商规格', sizeText: '供应商尺寸原文', dimensionsText: '1400 × 600 mm', status: 'active' },
     ] })
   }
@@ -140,12 +198,14 @@ await context.route('**/api/v1/**', async route => {
   const projectFavoriteItemsMatch = url.pathname.match(/^\/api\/v1\/office\/projects\/([^/]+)\/favorites\/items$/)
   if (projectFavoriteItemsMatch && request.method() === 'GET') {
     const projectId = projectFavoriteItemsMatch[1]
-    return respond(products.filter(product => projectFavoriteItems.some(item => item.projectId === projectId && item.rspuId === product.rspuId)))
+    const visible = catalogEnabled ? [...products, localFavoriteProduct] : [localFavoriteProduct]
+    return respond(visible.filter(product => projectFavoriteItems.some(item => item.projectId === projectId && item.rspuId === product.rspuId)))
   }
   if (url.pathname === '/api/v1/office/favorites/items' && request.method() === 'GET') {
-    return respond(products.filter(product => favoriteItems.some(item => item.rspuId === product.rspuId)))
+    const visible = catalogEnabled ? [...products, localFavoriteProduct] : [localFavoriteProduct]
+    return respond(visible.filter(product => favoriteItems.some(item => item.rspuId === product.rspuId)))
   }
-  const projectFavoriteMatch = url.pathname.match(/^\/api\/v1\/office\/projects\/([^/]+)\/favorites\/(PRODUCT-[^/]+)$/)
+  const projectFavoriteMatch = url.pathname.match(/^\/api\/v1\/office\/projects\/([^/]+)\/favorites\/((?:PRODUCT-|OFFICE-LOCAL-)[^/]+)$/)
   if (projectFavoriteMatch && request.method() === 'GET') {
     const [, projectId, rspuId] = projectFavoriteMatch
     if (delayNextProjectFavoriteRead) {
@@ -187,7 +247,7 @@ await context.route('**/api/v1/**', async route => {
     favoriteFolders.push(folder)
     return respond({ ...folder, itemCount: 0, selected: false })
   }
-  if (url.pathname.startsWith('/api/v1/office/favorites/products/PRODUCT-') && request.method() === 'PUT') {
+  if (url.pathname.startsWith('/api/v1/office/favorites/products/') && request.method() === 'PUT') {
     const rspuId = url.pathname.split('/').at(-1)
     const folderIds = request.postDataJSON().folderIds
     favoriteSaveRequests.push({ rspuId, folderIds })
@@ -252,16 +312,17 @@ try {
   assert.equal(await gridColumnCount(), 8, '2306px 超宽屏显示八列')
   await page.setViewportSize({ width: 1440, height: 960 })
   const categoryFilter = page.getByRole('combobox', { name: '筛选产品分类' })
-  const colorFilter = page.getByRole('combobox', { name: '筛选商品主色' })
+  const colorFilter = page.getByRole('combobox', { name: '筛选商品颜色' })
   await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products/browse/facets'),
     categoryFilter.focus(),
   ])
-  await categoryFilter.selectOption('办公家具 / 办公椅')
+  await categoryFilter.selectOption({ label: '办公家具 / 办公椅' })
+  await productCards().nth(1).waitFor()
   assert.equal(await productCards().count(), 2)
   await colorFilter.selectOption('深木色')
-  assert.equal(await productCards().count(), 1)
   await productCards().getByText('人体工学椅 3', { exact: true }).waitFor()
+  assert.equal(await productCards().count(), 1)
   await page.getByLabel('搜索商品名称或编码').fill('RSDP-001')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选', exact: true }).click()
@@ -541,21 +602,130 @@ try {
   assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
   assert.equal(await productCards().count(), 20)
   rejectCatalogChange = false
+  includeLocalFixture = true
+  const localCard = page.getByRole('link', { name: `查看${localProduct.name}详情` })
+  const sharedCard = page.getByRole('link', { name: '查看人体工学椅 1详情' })
+  await page.getByRole('button', { name: '刷新商品列表' }).click()
+  await localCard.waitFor()
+  await sharedCard.waitFor()
+  assert.equal(await productCards().count(), 20)
+  await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).searchParams.get('search') === 'local-001'),
+    page.getByLabel('搜索商品名称或编码').fill('local-001'),
+  ])
+  await sharedCard.waitFor({ state: 'hidden' })
+  await localCard.waitFor()
+  assert.equal(await productCards().count(), 1)
+  await page.getByRole('button', { name: '清空条件' }).click()
+  await sharedCard.waitFor()
+
+  const catalogRequestsBeforeClose = catalogPageRequests
   await catalogSwitch.click()
-  await heading('商品库还是空的')
+  await page.getByRole('switch', { name: '公共库', checked: false }).waitFor()
+  await localCard.waitFor()
   assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'false')
+  assert.equal(await productCards().count(), 1)
+  assert.equal(await sharedCard.count(), 0)
+  assert.equal(catalogPageRequests, catalogRequestsBeforeClose)
+  await page.getByRole('link', { name: '管理本地商品' }).waitFor()
+  catalogDealer = false
+  await page.reload({ waitUntil: 'networkidle' })
+  await localCard.waitFor()
+  assert.equal(await catalogSwitch.count(), 0)
+  assert.equal(await page.getByRole('link', { name: '管理本地商品' }).count(), 0)
+  const localPersonal = page.getByRole('button', { name: `个人收藏${localProduct.name}` })
+  await localPersonal.click()
+  await favoriteDialog.getByRole('checkbox', { name: /默认收藏夹/ }).check()
+  await favoriteDialog.getByRole('button', { name: /确定收藏/ }).click()
+  await favoriteDialog.waitFor({ state: 'hidden' })
+  assert.deepEqual(favoriteSaveRequests.at(-1), { rspuId: localCollectionId, folderIds: ['F-DEFAULT'] })
+  const localProjectFavorite = page.getByRole('button', { name: `项目收藏${localProduct.name}` })
+  await localProjectFavorite.click()
+  await favoriteDialog.getByRole('button', { name: '确定收藏', exact: true }).click()
+  await favoriteDialog.waitFor({ state: 'hidden' })
+  assert.equal(projectFavoriteSaveRequests.at(-1).rspuId, localCollectionId)
+  await page.getByRole('button', { name: `加入组合 ${localProduct.name}` }).click()
+  await page.getByRole('combobox', { name: '选择商品规格' }).selectOption('LARGE')
+  await page.getByLabel('组合名称').fill('本地茶几组合')
+  await page.getByRole('button', { name: '加入规格' }).click()
+  await page.getByRole('button', { name: '保存组合' }).click()
+  await page.getByText('组合已保存', { exact: true }).waitFor()
+  assert.equal(savedBundles[0].items[0].rspuId, localCollectionId)
+  assert.equal(savedBundles[0].items[0].variantId, 'LARGE')
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.equal(await localPersonal.getAttribute('aria-pressed'), 'true')
+  assert.equal(await localProjectFavorite.getAttribute('aria-pressed'), 'true')
+  const bundlesPanel = page.getByRole('region', { name: '自选商品组合' })
+  await bundlesPanel.getByRole('button', { name: /本地茶几组合/ }).click()
+  assert.equal(await bundlesPanel.getByRole('link', { name: localProduct.name }).getAttribute('href'),
+    `/products/local/${localProduct.id}?from=catalog`)
+  await page.goto(`${baseUrl}/favorites`)
+  const savedLocalCard = page.getByRole('list', { name: '收藏商品列表' }).getByRole('link', { name: `查看${localProduct.name}详情` }).first()
+  await savedLocalCard.waitFor()
+  assert.equal(await savedLocalCard.getAttribute('href'), `/products/local/${localProduct.id}?from=catalog`)
+  await page.goto(`${baseUrl}/products`)
+  await localCard.waitFor()
+  await page.getByLabel('搜索商品名称或编码').fill('无匹配型号')
+  await heading('没有找到匹配的商品')
+  await page.getByLabel('搜索商品名称或编码').fill('local-001')
+  await localCard.waitFor()
+  await localCard.click()
+  await heading(localProduct.name)
+  const localDimensions = page.getByTestId('catalog-product-dimensions')
+  assert.equal(await localDimensions.innerText(), '1200 × 600 × 450 mm')
+  await page.getByRole('combobox', { name: '选择规格' }).selectOption('LARGE')
+  assert.equal(await localDimensions.innerText(), '1400 × 600 × 450 mm')
+  await page.getByText('碳晶板', { exact: true }).waitFor()
+  const secondaryImage = page.getByRole('button', { name: '查看商品图片 2' })
+  await secondaryImage.click()
+  assert.equal(await secondaryImage.getAttribute('aria-pressed'), 'true')
+  const enlargeImage = page.getByRole('button', { name: `放大${localProduct.name}图片` })
+  await enlargeImage.waitFor()
+  await enlargeImage.focus()
+  await page.keyboard.press('Enter')
+  const zoomDialog = page.getByRole('dialog', { name: `${localProduct.name}图片完整预览` })
+  await zoomDialog.waitFor()
+  await page.keyboard.press('Escape')
+  await zoomDialog.waitFor({ state: 'hidden' })
+  assert.equal(await enlargeImage.evaluate(element => document.activeElement === element), true)
+  await page.setViewportSize({ width: 390, height: 900 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  assert.equal(await localDimensions.innerText(), '1400 × 600 × 450 mm')
+  await page.setViewportSize({ width: 1440, height: 960 })
+  assert.equal(await page.getByRole('link', { name: '编辑商品' }).count(), 0)
+  assert.equal(await page.getByLabel('宽（mm）').count(), 0)
+  await page.waitForFunction(name => Array.from(document.images).some(img => img.alt === name && img.naturalWidth > 0), localProduct.name + '图片')
+  assert.equal(catalogPageRequests, catalogRequestsBeforeClose)
+  await page.goto(`${baseUrl}/products/local?edit=${localProduct.id}`)
+  await page.getByRole('alert').filter({ hasText: '当前账号没有商品编辑权限' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '保存', exact: true }).count(), 0)
+  staffCanEditLocalProducts = true
+  await page.goto(`${baseUrl}/products/local/${localProduct.id}?from=catalog`)
+  await page.getByRole('link', { name: '编辑商品' }).click()
+  await heading('编辑商品')
+  assert.equal(await page.getByLabel('宽（mm）').first().inputValue(), '1200')
+  assert.equal(await page.getByLabel('宽（mm）').first().isEnabled(), true)
+  await page.getByRole('button', { name: '保存', exact: true }).waitFor()
+  staffCanEditLocalProducts = false
+  await page.goto(`${baseUrl}/products`)
+  await localCard.waitFor()
+  assert.equal(await sharedCard.count(), 0)
+  catalogDealer = true
+  await page.reload({ waitUntil: 'networkidle' })
   await catalogSwitch.click()
-  await page.getByRole('link', { name: '查看人体工学椅 1详情' }).first().waitFor()
+  await sharedCard.waitFor()
+  await localCard.waitFor()
   assert.equal(await catalogSwitch.getAttribute('aria-checked'), 'true')
   assert.deepEqual(catalogUpdates, [false, false, true])
   catalogDealer = false
-  catalogManaged = true
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal(await catalogSwitch.count(), 0)
+  await localCard.waitFor()
+  await sharedCard.waitFor()
 
   const waitForCatalogPage = (pageNumber, size, search = null) => page.waitForResponse(response => {
     const url = new URL(response.url())
-    return url.pathname === '/api/v1/products/page' && url.searchParams.get('page') === String(pageNumber) &&
+    return url.pathname === '/api/v1/products/browse' && url.searchParams.get('page') === String(pageNumber) &&
       url.searchParams.get('size') === String(size) && url.searchParams.get('search') === search
   })
   await Promise.all([waitForCatalogPage(1, 10), page.getByLabel('每页显示数量').selectOption('10')])
@@ -568,10 +738,31 @@ try {
   assert.equal(await productCards().count(), 1)
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
-  await page.getByText('在售状态', { exact: true }).waitFor()
-  await page.getByRole('cell', { name: '1200 × 600 × 450 mm', exact: true }).waitFor()
-  await page.getByRole('cell', { name: '供应商尺寸原文', exact: true }).waitFor()
-  assert.equal(await page.getByRole('cell', { name: '1400 × 600 mm', exact: true }).count(), 0)
+  await page.getByText('在售', { exact: true }).waitFor()
+  await page.getByText('¥ 1,080.00', { exact: true }).waitFor()
+  const sharedSpecs = page.getByRole('region', { name: '商品规格', exact: true })
+  const sharedDimensions = sharedSpecs.getByTestId('catalog-product-dimensions')
+  assert.equal(await sharedDimensions.innerText(), '1200 × 600 × 450 mm')
+  for (const value of ['PB', '包数', '体积（CBM）', '0.36', '重量（原表值）', '18', '有效']) {
+    await sharedSpecs.getByText(value, { exact: true }).waitFor()
+  }
+  await sharedSpecs.getByRole('combobox', { name: '选择规格' }).selectOption('SUPPLIER')
+  assert.equal(await sharedDimensions.innerText(), '供应商尺寸原文')
+  assert.equal(await sharedSpecs.getByText('包数', { exact: true }).count(), 0)
+  await page.getByRole('button', { name: '查看商品图片 2' }).click()
+  await page.getByRole('button', { name: '放大简约办公桌 2图片' }).click()
+  await page.getByRole('dialog', { name: '简约办公桌 2图片完整预览' }).waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByText('说明与记录', { exact: true }).click()
+  await page.getByText('测试配置说明', { exact: true }).waitFor()
+  await page.getByText('更新时间', { exact: true }).waitFor()
+  await page.setViewportSize({ width: 390, height: 900 })
+  const infoBox = await page.getByRole('region', { name: '商品资料' }).boundingBox()
+  const specBox = await sharedSpecs.boundingBox()
+  assert.ok(specBox.y < infoBox.y, '窄屏优先展示公共商品规格')
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  await page.setViewportSize({ width: 1440, height: 960 })
+  assert.equal(await page.getByRole('link', { name: '编辑商品' }).count(), 0)
   assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
 
   const detailRequests = []
@@ -674,8 +865,9 @@ try {
   assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
   assert.equal(await schemeLink.getAttribute('aria-current'), 'page')
 
+  staffCanEditLocalProducts = true
   await productsLink.click()
-  const localProductsLink = page.getByRole('link', { name: '本地商品', exact: true })
+  const localProductsLink = page.getByRole('link', { name: '管理本地商品', exact: true })
   await localProductsLink.waitFor()
   assert.equal(await localProductsLink.getAttribute('href'), '/products/local')
   assert.equal(await page.getByRole('link', { name: '去 RSDP 管理商品', exact: true }).count(), 0)
@@ -696,6 +888,7 @@ try {
   assert.equal(legacyAuditDetailRequests, 0)
   assert.equal(importRequests, 0)
 
+  includeLocalFixture = false
   listMode = 'error'
   await page.getByRole('button', { name: '刷新商品列表' }).click()
   await heading('商品暂时无法加载')

@@ -1,4 +1,4 @@
-import type { RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
+import type { RenderFurnitureSpacing, RenderPreview, RenderPreviewRequest } from '~/types/renderPreview'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 export function useRenderPreviewApi(floorId?: string) {
@@ -16,6 +16,11 @@ export function useRenderPreviewApi(floorId?: string) {
   return {
     create: (body: RenderPreviewRequest) => request<RenderPreview>('', body),
     list: (zoneId: string) => request<RenderPreview[]>('?zoneId=' + encodeURIComponent(zoneId)),
+    layoutSpacing: (zoneId: string, confirmationId?: string) => {
+      const params = new URLSearchParams({ zoneId })
+      if (confirmationId) params.set('confirmationId', confirmationId)
+      return request<{ snapshot: RenderPreview['snapshot']; spacing: RenderFurnitureSpacing }>('/layout-spacing?' + params)
+    },
     get: (id: string) => request<RenderPreview>('/' + encodeURIComponent(id)),
     imageUrl: (path?: string) => path?.startsWith('/uploads/render-previews/') ? API_BASE + path : '',
   }

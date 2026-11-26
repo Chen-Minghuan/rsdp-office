@@ -99,6 +99,7 @@ create table if not exists office_design_floor (
     project_id varchar(64) not null references office_design_project(project_id),
     name varchar(200) not null,
     sort_order integer not null default 0,
+    reference_images text,
     created_at timestamp not null default now(),
     updated_at timestamp not null default now()
 );

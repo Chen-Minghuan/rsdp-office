@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.ConfirmProjectQuotationRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductDto;
+import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationLatestDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationPreviewDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationRecordDto;
 import com.rsdp.officeproduct.importer.office.dto.QuotationLineDto;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -301,6 +303,31 @@ class ProjectQuotationServiceTest {
         assertEquals(2, draft.getFees().size());
         verify(quotationMapper, never()).insert(any(OfficeQuotation.class));
         verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void latestAnyReturnsMostRecentRecordRegardlessOfStatus() {
+        OfficeQuotation superseded = new OfficeQuotation();
+        superseded.setQuotationId("QT-OLD");
+        superseded.setStatus("SUPERSEDED");
+        superseded.setRevision(3);
+        superseded.setCreatedAt(LocalDateTime.of(2026, 11, 20, 10, 30));
+        when(quotationMapper.selectOne(any())).thenReturn(superseded);
+
+        ProjectQuotationLatestDto latest = service().latestAny(PROJECT_ID);
+
+        assertEquals("QT-OLD", latest.getQuotationId());
+        assertEquals("SUPERSEDED", latest.getStatus());
+        assertEquals(3, latest.getRevision());
+        assertEquals(LocalDateTime.of(2026, 11, 20, 10, 30), latest.getCreatedAt());
+        verify(accessService).requirePermission(PROJECT_ID, OfficeProjectPermission.QUOTE_READ);
+    }
+
+    @Test
+    void latestAnyReturnsNullWithoutRecords() {
+        when(quotationMapper.selectOne(any())).thenReturn(null);
+
+        assertNull(service().latestAny(PROJECT_ID));
     }
 
     private ConfirmProjectQuotationRequest request(String mode, String value, String serviceFee, String logisticsFee,

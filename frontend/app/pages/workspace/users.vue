@@ -201,7 +201,7 @@ function formatTime(value: string | null) {
               <th class="px-3 py-2 font-medium">系统角色</th>
               <th class="px-3 py-2 font-medium">来源</th>
               <th class="px-3 py-2 font-medium">状态</th>
-              <th class="px-3 py-2 font-medium">商品录入</th>
+              <th class="px-3 py-2 font-medium">商品录入与编辑</th>
               <th class="px-3 py-2 font-medium">创建时间</th>
             </tr>
           </thead>

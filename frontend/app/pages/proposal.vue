@@ -4,7 +4,7 @@ import { projectPermissionsFor } from '~/utils/projectPermissions'
 import { money } from '~/utils/helpers'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
-import type { CartItem, FurnitureObject, Product, ZoneObject } from '~/types/office'
+import type { CartItem, FurnitureObject, Product, ProjectQuotationLatest, ProjectQuotationRecord, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
 import type { ProposalConfirmation, RoomSchemeState, SchemeSlot } from '~/types/productScheme'
 import { proposalFurnitureSelectionRoute } from '~/utils/proposalFurnitureGate'
@@ -65,6 +65,10 @@ const selectedDetail = ref<Detail | null>(null)
 const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
 const demoConfirmed = ref(false)
 const savedConfirmation = ref<ProposalConfirmation | null>(null)
+// 最新已确认报价：最终报价取该快照中当前楼层行的小计之和，与报价页同一数据源
+const latestQuotation = ref<ProjectQuotationRecord | null>(null)
+// 最近一条报价记录（任意状态）：最终报价隐藏时在参考金额下方展示上一次报价时间
+const latestQuotationAny = ref<ProjectQuotationLatest | null>(null)
 const checkingCatalog = ref(false)
 const catalogApi = useOfficeApi()
 const notice = ref('')
@@ -106,6 +110,22 @@ watch([previewMode, () => store.initialized, () => store.workspaceId, () => stor
     if (read === confirmationRead) savedConfirmation.value = result
   } catch { /* Confirmation remains unknown and can be requested again. */ }
 }, { immediate: true })
+// 加载项目最新已确认报价与最近一条报价记录；无记录或读取失败时保持空值，页面不显示最终报价行
+let quotationRead = 0
+watch([previewMode, () => store.initialized, () => store.workspaceId, () => workspace.currentProjectId], async ([preview, ready, floorId, projectId]) => {
+  const read = ++quotationRead
+  latestQuotation.value = null
+  latestQuotationAny.value = null
+  if (preview || !ready || !floorId || !projectId || !store.apiReady) return
+  // 任意状态最近记录接口失败不影响已确认报价的加载
+  const [confirmed, anyRecord] = await Promise.allSettled([
+    catalogApi.latestProjectQuotation(projectId),
+    catalogApi.latestProjectQuotationRecord(projectId),
+  ])
+  if (read !== quotationRead) return
+  latestQuotation.value = confirmed.status === 'fulfilled' ? confirmed.value : null
+  latestQuotationAny.value = anyRecord.status === 'fulfilled' ? anyRecord.value : null
+}, { immediate: true })
 const projectPermissions = computed(() => projectPermissionsFor(workspace.currentProject, user.value?.userId))
 const canEdit = computed(() => previewMode.value || !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EDIT'))
 const canExport = computed(() => !authEnabled || user.value?.role === 'DEALER' || projectPermissions.value.includes('EXPORT_PROJECT'))
@@ -130,6 +150,17 @@ function findProduct(id: string) {
 
 function moduleTotal(module: ProposalModule) {
   return (module.product?.price || 0) * module.qty
+}
+
+// 与报价页 amount(grandTotal) 一致的金额格式
+function amount(n: number | null | undefined) {
+  if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—'
+  return `¥${Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// 与报价页 quotes.vue 一致的两位小数取整
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
 function dimensionText(product: Product | null) {
@@ -206,19 +237,6 @@ const spaces = computed<ProposalSpace[]>(() => {
       group.total += moduleTotal(module)
     }
     map.set(key, group)
-  }
-  for (const space of map.values()) {
-    if (space.modules.length) continue
-    const byProduct = new Map<string, ProposalModule>()
-    for (const furniture of space.zone ? store.furnitureForZone(space.zone.id) : []) {
-      const product = findProduct(furniture.productId)
-      const existing = byProduct.get(furniture.productId)
-      if (existing) existing.qty += 1
-      else byProduct.set(furniture.productId, createModule(furniture.id, product?.name || furniture.label || '未绑定模块', product, 1, furniture))
-    }
-    space.modules = Array.from(byProduct.values())
-    space.total = space.modules.reduce((sum, module) => sum + moduleTotal(module), 0)
-    space.layoutObjects = space.zone ? store.furnitureForZone(space.zone.id) : []
   }
   return Array.from(map.values()).filter(space => space.modules.length || space.zone)
 })
@@ -324,6 +342,58 @@ const groups = computed<ProposalGroup[]>(() => {
 
 const totalModules = computed(() => spaces.value.reduce((sum, space) => sum + space.modules.reduce((subtotal, module) => subtotal + module.qty, 0), 0))
 const totalPrice = computed(() => spaces.value.reduce((sum, space) => sum + space.total, 0))
+// 当前楼层的已确认报价行：仅使用 status 为 CONFIRMED 的报价记录；无确认报价或当前楼层无报价行时为 null
+const floorQuoteLines = computed(() => {
+  const record = latestQuotation.value
+  const floorId = store.workspaceId
+  if (!record || record.status !== 'CONFIRMED' || !floorId) return null
+  const lines = record.lines.filter(line => line.floorId === floorId)
+  return lines.length ? lines : null
+})
+// 最终报价：已确认报价快照中当前楼层行的商品小计合计（项目级费用不摊入楼层）
+// subtotal 为 null 的缺价行不计入金额，计入 missingCount 用于提示报价不完整
+const floorQuoteTotal = computed(() => {
+  const lines = floorQuoteLines.value
+  if (!lines) return null
+  const missingCount = lines.filter(line => line.subtotal === null).length
+  const total = roundMoney(lines.reduce((sum, line) => sum + (line.subtotal ?? 0), 0))
+  return { total, missingCount }
+})
+// 缺价行 > 0 时金额仅为已定价商品小计，不作为最终报价展示
+const floorQuoteIncomplete = computed(() => (floorQuoteTotal.value?.missingCount ?? 0) > 0)
+// 页面当前商品（楼层级按 productId 汇总数量）：与报价行同一口径——空间有清单取清单，无清单取画布家具
+const pageProductQuantities = computed(() => {
+  const map = new Map<string, number>()
+  for (const space of spaces.value) {
+    for (const module of space.modules) {
+      const productId = module.cartItem?.productId || module.furniture?.productId
+      if (!productId) continue
+      map.set(productId, (map.get(productId) || 0) + module.qty)
+    }
+  }
+  return map
+})
+// 报价快照与页面商品（含数量）严格一致：报价后修改页面商品或数量时不再展示旧报价
+const quotationMatchesPage = computed(() => {
+  const lines = floorQuoteLines.value
+  if (!lines) return false
+  const quote = new Map<string, number>()
+  for (const line of lines) quote.set(line.productId, (quote.get(line.productId) || 0) + line.qty)
+  const page = pageProductQuantities.value
+  if (quote.size !== page.size) return false
+  for (const [productId, qty] of quote) if (page.get(productId) !== qty) return false
+  return true
+})
+// 有与页面一致的确认报价（或演示模式）才显示最终报价行；此时参考金额加删除线作对比
+const showFinalQuote = computed(() => previewMode.value || (floorQuoteTotal.value !== null && quotationMatchesPage.value))
+// 上一次报价记录：优先当前项目 status 为 CONFIRMED 的报价，没有则取最近一条（任意状态）记录
+const lastQuotation = computed<ProjectQuotationRecord | ProjectQuotationLatest | null>(() =>
+  latestQuotation.value || latestQuotationAny.value)
+// 上一次报价日期：只保留日期部分，hover 版本号行时显示
+const lastQuotationTime = computed(() =>
+  (lastQuotation.value?.createdAt || '').split('T')[0].split(' ')[0])
+// 上一次报价版本号：报价记录在数据库中的 revision 字段
+const lastQuotationRevision = computed(() => lastQuotation.value?.revision ?? null)
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
 const pendingSpaces = computed(() => spaces.value.length - confirmedSpaces.value)
 const confirmedGroups = computed(() => groups.value.filter(group => group.spaces.every(space => space.status === '已确认')).length)
@@ -602,7 +672,7 @@ function detailTitle(detail: Detail | null) {
                             <span class="product-tile-caption"><strong>{{ module.label }}</strong><span>× {{ module.qty }}</span></span>
                           </button>
                         </div>
-                        <div v-else class="product-grid-empty">当前空间还没有绑定商品</div>
+                        <div v-else class="product-grid-empty">当前空间还没有选择商品</div>
                         <div class="preset-panel-foot"><span>{{ space.modules.reduce((sum, item) => sum + item.qty, 0) }} 件 · {{ money(space.total || 0) }}</span><small>点击商品查看详情</small></div>
                       </div>
                       <div v-if="renderJobsFor(space).length" class="preset-panel render-panel">
@@ -801,4 +871,10 @@ function detailTitle(detail: Detail | null) {
 .proposal-scheme-versions button{border:1px solid var(--color-accent-line);border-radius:8px;background:#fff;color:#72675c;font-size:.72rem;font-weight:600;padding:7px 10px;cursor:pointer}
 .proposal-scheme-versions button[aria-pressed=true]{background:var(--color-accent);border-color:var(--color-accent);color:#fff}
 .proposal-scheme-versions button:disabled{opacity:.45;cursor:default}
+/* 参考金额加删除线，突出下方最终报价 */
+.aside-summary .price-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #b2a79c; color: #a89b8e; font-size: 15px; font-weight: 600; }
+/* 最终报价的数据口径说明 */
+.aside-quote-hint { font-size: 10px; color: #a89b8e; margin: -7px 0 0; text-align: right; }
+/* 含缺价行时报价不完整，红色提示 */
+.aside-quote-hint.incomplete { color: #b91c1c; }
 </style>

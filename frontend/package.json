@@ -18,6 +18,7 @@
     "e2e:account-center": "node scripts/e2e-account-center.mjs",
     "e2e:favorites-page": "node scripts/e2e-favorites-page.mjs",
     "test:auto-layout": "node scripts/test-auto-layout.mjs",
+    "test:auto-layout-primary": "node scripts/test-auto-layout-primary.mjs",
     "test:arrangement-presets": "node scripts/test-arrangement-presets.mjs",
     "test:design-corrections": "node scripts/test-design-corrections.mjs",
     "test:uuid": "node scripts/test-uuid.mjs",
@@ -25,6 +26,7 @@
     "test:product-image-preview": "node scripts/test-product-image-preview.mjs",
     "test:furniture-footprint": "node scripts/test-furniture-footprint.mjs",
     "test:cart-line-reduction": "node scripts/test-cart-line-reduction.mjs",
+    "test:layout-reference-task": "node scripts/test-layout-reference-task.mjs",
     "e2e:auto-layout": "node scripts/e2e-auto-layout.mjs",
     "e2e:preview-drag": "node scripts/e2e-preview-drag.mjs",
     "e2e:delete-modules": "node scripts/e2e-delete-modules.mjs",
@@ -63,7 +65,9 @@
     "test:white-model": "node scripts/test-white-model.mjs",
     "test:furniture3d": "node scripts/test-furniture3d.mjs",
     "e2e:white-model": "node scripts/e2e-white-model.mjs",
-    "e2e:proposal-3d": "node scripts/e2e-proposal-3d.mjs"
+    "e2e:proposal-3d": "node scripts/e2e-proposal-3d.mjs",
+    "e2e:proposal-quote": "node scripts/e2e-proposal-quote.mjs",
+    "e2e:floor-references": "node scripts/e2e-floor-references.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

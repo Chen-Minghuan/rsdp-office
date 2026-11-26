@@ -7,6 +7,7 @@ const props = withDefaults(defineProps<{
   alt: string
   size?: 'small' | 'large'
   enableLightbox?: boolean
+  showZoomHint?: boolean
   // 悬浮框放在缩略图左侧时，右边缘与缩略图左边缘的距离（用于与父容器对齐）
   leftGap?: number
   // 可选：将小图悬浮预览限制在指定容器内；未传时使用整个视口
@@ -45,6 +46,7 @@ const displayedSize = ref({ width: 0, height: 0 })
 const imagePoint = ref({ x: 0, y: 0 })
 const pointer = ref({ x: 0, y: 0 })
 const lightboxOpen = ref(false)
+const canOpenLightbox = computed(() => props.clickFallback || (props.enableLightbox && !!props.src && imageLoaded.value))
 const lensSize = 210
 const zoom = 2.5
 
@@ -169,12 +171,12 @@ const enlargedStyle = computed(() => ({
   <div
     ref="stage"
     data-testid="product-image-trigger"
-    class="relative grid h-full w-full place-items-center overflow-hidden bg-white"
+    class="relative grid h-full w-full place-items-center overflow-hidden bg-white focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
     :class="[(enableLightbox || clickFallback) && src && imageLoaded ? 'cursor-zoom-in' : '', hovering && size === 'small' && hasPreviewSide ? 'pip-soft-hover' : '']"
-    :role="clickFallback ? 'button' : undefined"
-    :tabindex="clickFallback ? 0 : undefined"
-    :aria-label="clickFallback ? `${alt}，点击查看完整预览` : undefined"
-    :aria-haspopup="clickFallback ? 'dialog' : undefined"
+    :role="canOpenLightbox ? 'button' : undefined"
+    :tabindex="canOpenLightbox ? 0 : undefined"
+    :aria-label="clickFallback ? `${alt}，点击查看完整预览` : canOpenLightbox ? `放大${alt}` : undefined"
+    :aria-haspopup="canOpenLightbox ? 'dialog' : undefined"
     :data-preview-mode="clickPreviewRequired ? 'click' : 'hover'"
     @pointerenter="showPreview"
     @pointermove="showPreview"
@@ -186,6 +188,10 @@ const enlargedStyle = computed(() => ({
     <img v-if="src" :src="normalizedSrc" :alt="alt" class="absolute inset-0 h-full w-full object-center object-contain" :loading="size === 'small' ? 'lazy' : 'eager'" @load="onImageLoad" @error="imageLoaded = false; hovering = false">
     <div v-else class="flex flex-col items-center gap-2 text-muted"><AppIcon name="cube" :size="size === 'small' ? '5' : '10'" /><span v-if="size === 'large'" class="text-xs">暂无商品图片</span></div>
     <span v-if="clickFallback && clickPreviewRequired && src && imageLoaded" class="pip-click-cue">点击查看</span>
+    <span v-if="showZoomHint && canOpenLightbox" aria-hidden="true"
+      class="pointer-events-none absolute right-2 bottom-2 inline-flex items-center gap-1.5 border border-line bg-white px-2 py-1.5 text-xs font-medium text-muted sm:right-3 sm:bottom-3">
+      <AppIcon name="search" size="3.5" />放大图片
+    </span>
   </div>
   <Teleport to="body">
     <div v-if="hasPreviewSide" class="pip-side-measure" aria-hidden="true"><div ref="sideRef"><slot name="preview-side" /></div></div>

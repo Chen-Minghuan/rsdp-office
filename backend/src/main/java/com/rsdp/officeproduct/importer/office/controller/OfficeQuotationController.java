@@ -2,6 +2,7 @@ package com.rsdp.officeproduct.importer.office.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
 import com.rsdp.officeproduct.importer.office.dto.ConfirmProjectQuotationRequest;
+import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationLatestDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationPreviewDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationRecordDto;
 import com.rsdp.officeproduct.importer.office.service.ProjectQuotationService;
@@ -78,5 +79,11 @@ public class OfficeQuotationController {
     @GetMapping("/latest")
     public Result<ProjectQuotationRecordDto> latest(@PathVariable String projectId) {
         return Result.ok(quotationService.latest(projectId));
+    }
+
+    /** 最近一条报价记录（任意状态）的状态与时间，用于方案确认页展示上一次报价时间；没有报价记录时 data 为空。 */
+    @GetMapping("/latest-record")
+    public Result<ProjectQuotationLatestDto> latestRecord(@PathVariable String projectId) {
+        return Result.ok(quotationService.latestAny(projectId));
     }
 }

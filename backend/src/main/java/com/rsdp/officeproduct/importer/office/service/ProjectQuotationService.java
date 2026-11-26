@@ -3,6 +3,7 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.ConfirmProjectQuotationRequest;
+import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationLatestDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationPreviewDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectQuotationRecordDto;
 import com.rsdp.officeproduct.importer.office.entity.OfficeDesignProject;
@@ -110,6 +111,21 @@ public class ProjectQuotationService {
             record.setMissingPriceLines(null);
         }
         return record;
+    }
+
+    /** 最近一条报价记录（任意状态）的时间信息；没有报价记录时返回 null。 */
+    public ProjectQuotationLatestDto latestAny(String projectId) {
+        accessService.requirePermission(projectId, OfficeProjectPermission.QUOTE_READ);
+        OfficeQuotation quotation = findLatest(projectId, false);
+        if (quotation == null) {
+            return null;
+        }
+        ProjectQuotationLatestDto latest = new ProjectQuotationLatestDto();
+        latest.setQuotationId(quotation.getQuotationId());
+        latest.setStatus(quotation.getStatus());
+        latest.setRevision(quotation.getRevision());
+        latest.setCreatedAt(quotation.getCreatedAt());
+        return latest;
     }
 
     public ProjectQuotationRecordDto latestForExport(String projectId) {

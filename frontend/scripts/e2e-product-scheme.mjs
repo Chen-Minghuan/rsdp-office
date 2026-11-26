@@ -9,7 +9,7 @@ const reservation = createServer()
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
 const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
-const baseUrl = `http://127.0.0.1:${port}`
+const baseUrl = `http://localhost:${port}`
 const app = spawn(process.execPath, ['.output/server/index.mjs'], {
   cwd, env: { ...process.env, NITRO_PORT: String(port), NITRO_HOST: '127.0.0.1' }, stdio: 'ignore',
 })
@@ -55,6 +55,9 @@ try {
     }
     if (path === '/api/v1/products') return ok(catalog)
     if (path === '/api/v1/products/page') return ok({ rows: catalog, total: catalog.length, catalogTotal: catalog.length, activeTotal: catalog.length, page: 1, size: 20 })
+    if (path === '/api/v1/office/workspace/shared-catalog') return ok({ workspaceEnabled: true, effectiveVisible: true })
+    if (path === '/api/v1/products/browse') return ok({ rows: catalog.map(shared => ({ local: null, shared })),
+      total: catalog.length, catalogTotal: catalog.length, activeTotal: catalog.length, localTotal: 0 })
     if (path.endsWith('/products/RSPU')) return ok({ variants: [{ variantId: 'SKU', displayName: product.variant, status: 'active' }] })
     if (path.endsWith('/product-bundles')) {
       if (bundleApiMissing) return route.fulfill({ status: 404, json: { message: 'No static resource api/v1/office/product-bundles' } })

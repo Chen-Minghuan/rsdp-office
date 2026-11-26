@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { LayoutChannel } from '~/types/layoutPlanning'
 import type { SpatialFacilityKind } from '~/types/spatial'
+import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { DEFAULT_CHANNEL_WIDTH_MM } from '~/utils/layoutChannels'
 import { canvasZoneBounds } from '~/utils/officeCanvasView'
 import { uid } from '~/utils/helpers'
 
 const store = useOfficeStore()
+const workspace = useWorkspaceStore()
 const props = defineProps<{ viewRotation?: number; previewInFooter?: boolean }>()
 const showDimensions = defineModel<boolean>('showDimensions', { default: true })
 const snapEnabled = defineModel<boolean>('snapEnabled', { default: true })
@@ -56,11 +58,23 @@ watch(tools, () => {
 const constraintsOpen = ref(false)
 const regionsOpen = ref(false)
 const facilitiesOpen = ref(false)
+/** 楼层参考图列表：数据来自项目总览页上传的楼层参考图，随工作区缓存联动。 */
+const floorReferencesOpen = ref(false)
+const floorReferenceImages = computed(() => workspace.currentFloor?.referenceImages ?? [])
+function toggleFloorReferences() {
+  floorReferencesOpen.value = !floorReferencesOpen.value
+  if (!floorReferencesOpen.value) return
+  constraintsOpen.value = false
+  regionsOpen.value = false
+  facilitiesOpen.value = false
+  channelsOpen.value = false
+}
 function openConstraints() {
   constraintsOpen.value = !constraintsOpen.value
   regionsOpen.value = false
   facilitiesOpen.value = false
   channelsOpen.value = false
+  floorReferencesOpen.value = false
 }
 /** 弹出层互斥：同一时间只展开一个工具面板。 */
 function togglePopover(which: 'regions' | 'facilities' | 'channels') {
@@ -68,6 +82,7 @@ function togglePopover(which: 'regions' | 'facilities' | 'channels') {
   target.value = !target.value
   if (!target.value) return
   constraintsOpen.value = false
+  floorReferencesOpen.value = false
   if (which !== 'regions') regionsOpen.value = false
   if (which !== 'facilities') facilitiesOpen.value = false
   if (which !== 'channels') channelsOpen.value = false
@@ -97,7 +112,7 @@ const channelsOpen = ref(false)
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const channels = computed<LayoutChannel[]>(() => zone.value?.layoutPreferences?.channels || [])
 const zoneBounds = computed(() => zone.value ? canvasZoneBounds(zone.value) : { minX: 0, minY: 0 })
-watch(() => store.designZoneId, () => { channelsOpen.value = false; constraintsOpen.value = false; regionsOpen.value = false; facilitiesOpen.value = false })
+watch(() => store.designZoneId, () => { channelsOpen.value = false; constraintsOpen.value = false; regionsOpen.value = false; facilitiesOpen.value = false; floorReferencesOpen.value = false })
 function saveChannels(next: LayoutChannel[]) {
   if (zone.value) store.updateZoneChannels(zone.value.id, next)
 }
@@ -116,6 +131,14 @@ function removeChannel(id: string) {
 
 <template>
   <div class="relative flex min-h-14 flex-none flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-white px-2.5 py-1">
+    <button type="button"
+      class="flex flex-none flex-col items-center gap-0.5 rounded-none px-2.5 py-1.5 text-[10px] transition"
+      :class="floorReferencesOpen ? 'bg-accent-tint text-accent-ink' : 'text-muted hover:bg-bg'"
+      data-testid="toolbar-floor-references" :aria-expanded="floorReferencesOpen" aria-label="当前楼层参考图列表"
+      @click="toggleFloorReferences">
+      <AppIcon name="reference" size="4" />
+      <span>参考图</span>
+    </button>
     <div class="flex min-w-0 max-w-full flex-wrap items-center gap-2">
       <span class="text-[10px] px-1.5 py-0.5 rounded-none bg-accent-tint text-accent-ink">
         {{ mode === 'design' ? '单空间设计' : '空间总览' }}
@@ -164,6 +187,16 @@ function removeChannel(id: string) {
       <button class="px-2 py-1.5 rounded-none text-[11px] border border-line hover:bg-accent-tint flex items-center gap-1" @click="emit('fit')">
         <AppIcon name="fit" size="4" /> 适屏
       </button>
+    </div>
+    <div v-if="floorReferencesOpen" class="absolute left-0 top-full z-30 w-64 border border-line bg-white p-2 text-[11px] text-[#5f5b56]" data-testid="floor-reference-popover" @click.stop>
+      <strong class="block px-1 pb-1.5 text-xs text-[#4f493f]">楼层参考图 · {{ floorReferenceImages.length }}</strong>
+      <div v-if="floorReferenceImages.length" class="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto">
+        <a v-for="image in floorReferenceImages" :key="image.url" :href="sameOriginAssetUrl(image.url)" target="_blank" rel="noopener noreferrer" class="grid gap-1 hover:underline">
+          <img :src="sameOriginAssetUrl(image.url)" :alt="image.name || '楼层参考图'" loading="lazy" class="aspect-[1.4] w-full border border-line bg-bg object-cover">
+          <span class="truncate">{{ image.name || '参考图' }}</span>
+        </a>
+      </div>
+      <p v-else class="px-1 py-2 text-muted">当前楼层暂无参考图，可在项目总览页上传。</p>
     </div>
     <div v-if="constraintsOpen && zone" class="absolute left-48 top-full z-30 w-40 border border-line bg-white p-2 text-[11px] text-[#5f5b56]" data-testid="constraint-popover" @click.stop>
       <strong class="block px-1 pb-1.5 text-xs text-[#4f493f]">建筑标注</strong>

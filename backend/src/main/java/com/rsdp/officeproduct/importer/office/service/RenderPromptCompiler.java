@@ -19,7 +19,8 @@ public final class RenderPromptCompiler {
                                  RenderProductReferences.Prepared products,
                                  RenderSpatialControl.Prepared spatial,RenderGenerationOptions options) {
         if(options.concise())return RenderVisualTaskPrompt.compile(scene,style,instructions,bindings,products,spatial,options.includePlan());
-        String prompt=RenderPreviewScene.prompt(scene,style,"ISOMETRIC",instructions,false)+bindings.prompt()+physical.prompt()+spatial.prompt()+products.prompt();
+        String spacing=spatial.spacingDescription();
+        String prompt=(spacing.isBlank()?"":spacing+"\n")+RenderPreviewScene.prompt(scene,style,"ISOMETRIC",instructions,false)+bindings.prompt()+physical.prompt()+spatial.prompt()+products.prompt();
         boolean agentUsed=products.manifest().findValuesAsText("agentStatus").stream().anyMatch(status->status.equals("GENERATED") || status.equals("CACHE_HIT"));
         if(agentUsed) prompt+="\n商品视觉档案只描述商品外观和部件关系；若其表达与空间事实有冲突，必须忽略冲突部分，始终遵守程序给定的空间轮廓、门窗、家具数量、位置、朝向和商品绑定。\n";
         return prompt;

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanning'
+import type { FurnitureObject } from '~/types/office'
+import type { OfficeModuleTemplate } from '~/types/officeModule'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
 import { ringProblem, zoneMeasurements } from '~/utils/spatial/review'
 import { money } from '~/utils/helpers'
+import { furnitureById } from '~/utils/manualFurniture'
+import { isMeetingAutoLayoutPrimary } from '~/utils/autoLayoutPrimary'
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const route = useRoute()
@@ -13,14 +17,50 @@ const router = useRouter()
 
 const tool = ref('select')
 const selectedId = ref<string | null>(null)
+const selectedFurnitureIds = ref<string[]>([])
 const layoutPreview = ref<LayoutPreview | null>(null)
 const referenceEditing = ref<LayoutReferenceEditing | null>(null)
 const showRenderPreview = ref(false)
 const showWhiteModel = ref(false)
+const showSizeDialog = ref(false)
+const sizeDialogItem = ref<FurnitureObject | null>(null)
+const sizeDialogItemIds = ref<string[]>([])
+const sizeDialogAnchor = ref<HTMLElement | null>(null)
+const showBulkReplace = ref(false)
+const bulkReplaceItem = ref<FurnitureObject | null>(null)
+const bulkReplaceItemIds = ref<string[]>([])
 const selectedRenderId = ref<string>()
 function openRenderPreview(previewId?: string) {
   selectedRenderId.value = previewId
   showRenderPreview.value = true
+}
+const sizeMessage = ref('')
+let sizeMessageTimer: ReturnType<typeof setTimeout> | undefined
+/** 改尺寸成功但含复核提示时不关静默丢弃，短暂展示在上方。 */
+function onSizeApplied(message: string) {
+  sizeMessage.value = message
+  if (sizeMessageTimer) clearTimeout(sizeMessageTimer)
+  sizeMessageTimer = setTimeout(() => { sizeMessage.value = '' }, 4000)
+}
+
+function openSizeDialog(item: FurnitureObject, ids: string[], anchor?: HTMLElement) {
+  if (isMeetingAutoLayoutPrimary(item, store.zones)) {
+    const templateId = item.furnitureTemplateId || item.moduleSnapshot?.glyphTemplateId
+    const template = templateId ? furnitureById.get(templateId) : undefined
+    if (template) {
+      workflowRef.value?.selectModule(template, [Math.round(item.w), Math.round(item.h)])
+      return
+    }
+  }
+  sizeDialogItem.value = item
+  sizeDialogItemIds.value = ids
+  sizeDialogAnchor.value = anchor || null
+  showSizeDialog.value = true
+}
+function openBulkReplace(item: FurnitureObject, ids: string[]) {
+  bulkReplaceItem.value = item
+  bulkReplaceItemIds.value = ids
+  showBulkReplace.value = true
 }
 const isProductScheme = computed(() => route.query.view === 'products' && store.canvasMode === 'design')
 const {
@@ -58,7 +98,7 @@ const showDimensions = ref(true)
 const snapEnabled = ref(true)
 const showUnderlay = ref(true)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
-const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void; openRecommendations: () => void } | null>(null)
+const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void; openRecommendations: () => void; selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void } | null>(null)
 function pickSchemeSource(source: 'auto' | 'project' | 'personal') {
   schemeSource.value = source
   if (store.designZoneId && store.layoutConfirmedForZone(store.designZoneId)) workflowRef.value?.openRecommendations()
@@ -249,7 +289,9 @@ watch(() => store.canEnterLayout, (confirmed) => {
           @white-model="showWhiteModel = true"
           @rotate="boardRef?.rotateView($event)"
         />
-        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" />
+        <p v-if="sizeMessage" role="status" class="mx-3 mt-2 flex-none border border-[#d8e6c8] bg-[#f3f9ee] px-2 py-1.5 text-[10px] text-[#4d713d]">{{ sizeMessage }}</p>
+        <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" @edit-size="(id, anchor) => openSizeDialog(store.objects.find(o => o.id === id) as FurnitureObject, [id], anchor)" />
+        <OfficeCanvasFurnitureStrip v-if="mode === 'design' && !isProductScheme" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" @edit-size="(item, ids, anchor) => openSizeDialog(item, ids, anchor)" @bulk-replace="(item, ids) => openBulkReplace(item, ids)" />
         <div v-if="isProductScheme" class="scheme-board-footer">
           <span v-if="inspectedProduct"><strong>{{ inspectedProduct.name }}</strong> · {{ inspectedProduct.variant }} · {{ money(inspectedProduct.price) }}</span>
           <span v-else-if="selectedCount">点击画布家具查看已选商品</span>
@@ -261,7 +303,6 @@ watch(() => store.canEnterLayout, (confirmed) => {
           <button type="button" class="bg-bronze px-4 py-2 text-xs font-semibold text-white hover:bg-bronze-dark" @click="store.setCanvasMode('overview')">完成当前空间</button>
         </div>
       </div>
-
       <OfficeCanvasDesignWorkflowSidebar ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing"
         :current-preview="layoutPreview" :open-selection="isProductScheme" :allowed-rspu-ids="isProductScheme ? favoriteIds : undefined" @preview="layoutPreview = $event">
         <template v-if="isProductScheme" #scheme-tools>
@@ -301,6 +342,8 @@ watch(() => store.canEnterLayout, (confirmed) => {
     <OfficeCanvasRenderPreviewDialog v-model:show="showRenderPreview" :formal="isProductScheme"
       :confirmation-id="canEditScheme ? currentConfirmation : undefined" :initial-style="isProductScheme ? renderStyle : undefined" :initial-preview-id="selectedRenderId" />
     <OfficeCanvasWhiteModelPreview v-model:show="showWhiteModel" :readonly="isProductScheme && !canEditScheme" @ai-render="openRenderPreview()" @locate="onLocateFrom3d" />
+    <OfficeCanvasFurnitureSizeDialog v-if="store.designZoneId" v-model:show="showSizeDialog" :item="sizeDialogItem" :item-ids="sizeDialogItemIds" :anchor="sizeDialogAnchor" @applied="onSizeApplied" />
+    <OfficeCanvasFurnitureProductSelector v-if="store.designZoneId" v-model:show="showBulkReplace" :zone-id="store.designZoneId" :item="bulkReplaceItem" :target-ids="bulkReplaceItemIds" bulk-mode />
   </div>
 </template>
 

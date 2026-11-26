@@ -23,7 +23,7 @@ function openFurniture(id: string, fromGroup: boolean) {
   if (activePage.value !== 'recommendations') activePage.value = 'products'
   collapsed.value = false
 }
-defineExpose({ openFurniture, openRecommendations: () => openPage('recommendations') })
+defineExpose({ openFurniture, openRecommendations: () => openPage('recommendations'), selectModule })
 const collapsed = ref(false), autoLayout = ref<AutoLayoutPanel | null>(null), actionMessage = ref('')
 const pages: Array<{ id: WorkflowPage; label: string; testId: string }> = [
   { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },
@@ -78,6 +78,7 @@ function selectModule(module: OfficeModuleTemplate, size?: [number, number]) {
   automaticModuleId.value = module.id
   selectedCategories.value = [module.category === '会议与洽谈' ? 'meeting' : module.category === '接待休闲' ? 'sofa' : module.category === '前台' ? 'bar' : module.category === '收纳' ? 'entry' : 'workstation']
   activePage.value = 'auto'
+  collapsed.value = false
   nextTick(() => autoLayout.value?.selectModule(module, size))
 }
 /** 页签切换保留组合品类选择，已有家具的尺寸重算可显式打开单模块排版。 */

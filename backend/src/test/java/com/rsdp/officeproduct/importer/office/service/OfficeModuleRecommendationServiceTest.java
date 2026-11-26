@@ -166,6 +166,27 @@ class OfficeModuleRecommendationServiceTest {
         assertEquals(before.get(3), after.get(3));
         verify(carts, times(2)).insert(any(OfficeCart.class));
     }
+    @Test void targetIdsLimitBulkSelectionToRequestedModules() {
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
+        when(office.saveCanvas(any())).thenAnswer(call -> {
+            SaveCanvasRequest save = call.getArgument(0); var dto = new CanvasDto(); dto.setObjects(save.getObjects()); dto.setRevision(save.getRevision()); return dto;
+        });
+        var request = request(); request.setApplyToSameModules(true); request.setTargetIds(List.of("B"));
+        var response = service.select("P", request);
+        assertEquals(1, response.getCartItems().size());
+        var after = json.valueToTree(response.getCanvas().getObjects());
+        assertTrue(after.get(1).path("productId").asText().isEmpty());
+        assertEquals("FIT", after.get(2).path("productId").asText());
+        verify(carts, times(1)).insert(any(OfficeCart.class));
+    }
+
+    @Test void targetIdsOutsideSameModuleGroupAreRejected() {
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
+        var request = request(); request.setApplyToSameModules(true); request.setTargetIds(List.of("OTHER"));
+        assertThrows(BusinessException.class, () -> service.select("P", request));
+        verify(carts, never()).insert(any(OfficeCart.class));
+    }
+
     @Test void selectingAgainUpdatesTheBoundLineInsteadOfAddingQuantity() {
         when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
         var line = new OfficeCart();
