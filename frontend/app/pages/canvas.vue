@@ -41,6 +41,8 @@ const selectedSchemeProducts = computed(() => schemeFurniture.value
   .filter(item => item.productSelection && item.productId).map(item => ({ id: item.id, product: item.productSelection!.product })))
 const inspectedProduct = computed(() => selectedSchemeProducts.value.find(item => item.id === selectedId.value)?.product)
 const proposalRoute = computed(() => ({ path: '/proposal', query: { floorId: workspace.currentFloorId } }))
+// Plan B 按需创建：后端 alternativeSaved=true 表示另一方案槽已有保存内容（即 Plan B 已存在）
+const hasPlanB = computed(() => !!schemeState.value?.alternativeSaved)
 async function switchScheme(targetSlot: 'A' | 'B') {
   if (!await changeScheme('activate', { targetSlot })) return
   layoutPreview.value = null
@@ -216,9 +218,15 @@ watch(() => store.canEnterLayout, (confirmed) => {
       <span v-if="schemeArea">{{ schemeArea }} m²</span>
       <span>已选 <strong>{{ selectedCount }}</strong> / {{ schemeFurniture.length }} 件</span>
       <div class="scheme-versions" aria-label="房间方案">
-        <button v-for="slot in (['A', 'B'] as const)" :key="slot" type="button"
-          :aria-pressed="schemeState ? schemeState.activeSlot === slot : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
-          @click="switchScheme(slot)">Plan {{ slot }}</button>
+        <button type="button"
+          :aria-pressed="schemeState ? schemeState.activeSlot === 'A' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
+          @click="switchScheme('A')">Plan A</button>
+        <button v-if="hasPlanB" type="button"
+          :aria-pressed="schemeState ? schemeState.activeSlot === 'B' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
+          @click="switchScheme('B')">Plan B</button>
+        <button v-else type="button" class="scheme-add" aria-label="新建 Plan B" title="以 Plan A 为起点创建 Plan B"
+          :disabled="!schemeState || !canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
+          @click="switchScheme('B')">+</button>
       </div>
       <button type="button" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !canClear" @click="clearScheme">清空选品</button>
       <p v-if="schemeError || schemeMessage" class="scheme-feedback" :role="schemeError ? 'alert' : 'status'">{{ schemeError || schemeMessage }}</p>
@@ -337,6 +345,10 @@ watch(() => store.canEnterLayout, (confirmed) => {
   display: flex;
   gap: .25rem;
   margin-left: auto;
+}
+
+.scheme-add {
+  min-width: 2rem;
 }
 
 .scheme-header button,

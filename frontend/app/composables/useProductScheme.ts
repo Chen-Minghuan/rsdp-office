@@ -106,6 +106,8 @@ export function useProductScheme(active: Ref<boolean>) {
     const floorId = store.workspaceId, zoneId = store.designZoneId
     if (!canEdit.value || !floorId || !zoneId || !store.apiReady || busy.value) return false
     if (action === 'activate' && state.value?.activeSlot === options.targetSlot) return false
+    // 首次激活 B 槽即创建 Plan B（后端以当前 Plan A 内容为起点），提示文案区分创建与切换
+    const creatingPlanB = action === 'activate' && options.targetSlot === 'B' && !state.value?.alternativeSaved
     busy.value = true
     error.value = ''
     message.value = ''
@@ -118,7 +120,8 @@ export function useProductScheme(active: Ref<boolean>) {
       confirmation.value = null
       if (zoneId !== store.designZoneId) return false
       if (result.scheme) state.value = result.scheme
-      message.value = action === 'activate' ? `已切换至 Plan ${result.scheme?.activeSlot}`
+      message.value = creatingPlanB ? '已创建 Plan B，内容与 Plan A 一致'
+        : action === 'activate' ? `已切换至 Plan ${result.scheme?.activeSlot}`
         : action === 'clear-selection' ? '已清空当前房间选品'
           : `已更新当前房间选品，剩余 ${furniture.value.length - selectedCount.value} 件家具待选`
       return true

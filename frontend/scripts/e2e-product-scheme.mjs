@@ -155,8 +155,11 @@ try {
   assert.equal(await backgroundOf(page.getByRole('button', { name: '自动选品', exact: true })), await backgroundOf(currentNav))
   const plan = name => page.getByRole('button', { name: `Plan ${name}`, exact: true })
   await page.locator('button[aria-pressed=true]').filter({ hasText: 'Plan A' }).waitFor()
-  await plan('B').click()
-  await page.getByText('已切换至 Plan B', { exact: true }).waitFor()
+  // Plan B 按需创建：初始只有 Plan A 和「+」按钮
+  assert.equal(await plan('B').count(), 0)
+  await page.getByRole('button', { name: '新建 Plan B' }).click()
+  await page.getByText('已创建 Plan B', { exact: false }).waitFor()
+  await plan('B').waitFor()
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '清空选品' }).click()
   await page.getByText('已清空当前房间选品').waitFor()
