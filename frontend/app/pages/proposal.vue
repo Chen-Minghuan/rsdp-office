@@ -216,19 +216,6 @@ const spaces = computed<ProposalSpace[]>(() => {
     }
     map.set(key, group)
   }
-  for (const space of map.values()) {
-    if (space.modules.length) continue
-    const byProduct = new Map<string, ProposalModule>()
-    for (const furniture of space.zone ? store.furnitureForZone(space.zone.id) : []) {
-      const product = findProduct(furniture.productId)
-      const existing = byProduct.get(furniture.productId)
-      if (existing) existing.qty += 1
-      else byProduct.set(furniture.productId, createModule(furniture.id, product?.name || furniture.label || '未绑定模块', product, 1, furniture))
-    }
-    space.modules = Array.from(byProduct.values())
-    space.total = space.modules.reduce((sum, module) => sum + moduleTotal(module), 0)
-    space.layoutObjects = space.zone ? store.furnitureForZone(space.zone.id) : []
-  }
   return Array.from(map.values()).filter(space => space.modules.length || space.zone)
 })
 
@@ -554,7 +541,7 @@ function detailTitle(detail: Detail | null) {
                             <span class="product-tile-caption"><strong>{{ module.label }}</strong><span>× {{ module.qty }}</span></span>
                           </button>
                         </div>
-                        <div v-else class="product-grid-empty">当前空间还没有绑定商品</div>
+                        <div v-else class="product-grid-empty">当前空间还没有选择商品</div>
                         <div class="preset-panel-foot"><span>{{ space.modules.reduce((sum, item) => sum + item.qty, 0) }} 件 · {{ money(space.total || 0) }}</span><small>点击商品查看详情</small></div>
                       </div>
                       <div v-if="renderJobsFor(space).length" class="preset-panel render-panel">
