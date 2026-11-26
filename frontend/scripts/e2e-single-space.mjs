@@ -53,7 +53,10 @@ try {
     }
     if (path.endsWith(`/office/projects/${encodeURIComponent('OFFICE-PROJECT-001')}/module-recommendations`)) {
       const req = await route.request().postDataJSON()
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { moduleId: req.moduleId, zoneId: req.zoneId, canvasRevision: req.canvasRevision, widthMm: 1200, depthMm: 600, targetCategory: '职员桌', sameModuleCount: 2, missingDimensions: 0, eligibleVariantCount: 1, candidates: [{ product: { id: 'PRODUCT-A', rspuId: 'RSPU-A', rspuCode: 'A', name: '测试商品', widthMm: 1200, depthMm: 600, price: 100 }, tier: 'CLOSE', fitRatio: 1, rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 0, relevanceScore: 95, matchReason: '同品类' }] } }) })
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: { moduleId: req.moduleId, zoneId: req.zoneId, canvasRevision: req.canvasRevision, widthMm: 1200, depthMm: 600, targetCategory: '职员桌', sameModuleCount: 2, missingDimensions: 0, eligibleVariantCount: 2, candidates: [
+        { product: { id: 'PRODUCT-A', rspuId: 'RSPU-A', rspuCode: 'A', name: '测试商品', widthMm: 1200, depthMm: 600, price: 100 }, tier: 'CLOSE', fitRatio: 1, rotationDeg: 0, remainingWidthMm: 0, remainingDepthMm: 0, relevanceScore: 95, matchReason: '同品类' },
+        { product: { id: 'PRODUCT-B', rspuId: 'RSPU-B', rspuCode: 'B', name: '测试商品B', widthMm: 1100, depthMm: 550, price: 200 }, tier: 'CLOSE', fitRatio: 0.9, rotationDeg: 0, remainingWidthMm: 100, remainingDepthMm: 50, relevanceScore: 90, matchReason: '同品类' },
+      ] } }) })
     }
     if (path.endsWith(`/office/projects/${encodeURIComponent('OFFICE-PROJECT-001')}/module-products`)) {
       const body = await route.request().postDataJSON()
@@ -177,7 +180,7 @@ try {
   assert.ok(Math.abs(moved.y - original.y - 15 / zoom) < 3)
   assert.equal(moved.zoneId, 'ROOM-L')
 
-  // 底部家具栏回归：按 label+w+h 分组、单击全选
+  // 底部家具栏回归：按 label+w+h 分组，单击切换全选，取消选择不打开换品
   const strip = page.getByTestId('canvas-furniture-strip')
   await strip.waitFor()
   const groups = strip.locator('> div > div')
@@ -186,6 +189,10 @@ try {
   await groups.first().click()
   const selectedIds = await canvas().locator('.board-element[class*="ring-accent"]').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort())
   assert.deepEqual(selectedIds, ['F-L', 'F-L2'])
+  await groups.first().click()
+  const deselectedIds = await canvas().locator('.board-element[class*="ring-accent"]').evaluateAll(nodes => nodes.map(node => node.dataset.id).sort())
+  assert.deepEqual(deselectedIds, [])
+  assert.equal(await page.getByTestId('white-model-product-dialog').count(), 0)
 
   // 组内碰撞：两件同时放大到互相重叠时整批不写回
   const collision = await page.evaluate(() => {
@@ -222,6 +229,16 @@ try {
   })
   await canvas().locator('[data-id="F-SOFT"]').waitFor({ state: 'detached', timeout: 5000 })
 
+  // 未修改尺寸时只提示无变化，不写回几何，也不显示更新数量
+  const beforeUnchanged = (await state()).objects.find(object => object.id === 'F-L3')
+  await page.locator('[data-id="F-L3"]').click({ button: 'right' })
+  await sizeDialog.waitFor()
+  await sizeDialog.getByRole('button', { name: '应用尺寸' }).click()
+  await sizeDialog.waitFor({ state: 'detached', timeout: 5000 })
+  await page.locator('p[role="status"]').filter({ hasText: '尺寸未变化，无需更新' }).waitFor()
+  assert.deepEqual((await state()).objects.find(object => object.id === 'F-L3'), beforeUnchanged)
+  assert.equal(await page.getByText(/已更新 \d+ 个家具尺寸/).count(), 0)
+
   const expandButton = page.getByRole('button', { name: '展开侧边栏', exact: true }).first()
   if (await expandButton.count() > 0) await expandButton.click()
   await page.getByTestId('auto-confirm-recommend').click()
@@ -235,6 +252,12 @@ try {
   await page.getByTestId('furniture-strip-item-F-L3').dblclick()
   const productDialog = page.getByTestId('white-model-product-dialog')
   await productDialog.waitFor()
+  const currentProductName = await productDialog.locator('h3').textContent()
+  await productDialog.locator('h3').hover()
+  await page.mouse.wheel(0, 300)
+  await page.waitForTimeout(100)
+  assert.equal(await productDialog.locator('h3').textContent(), currentProductName, '滚轮不得切换当前商品')
+  assert.equal(await productDialog.getByText('1 / 2', { exact: true }).count(), 1)
   await productDialog.getByRole('button', { name: '批量绑定该商品' }).click()
   await page.waitForFunction(() => !!window.lastModuleProductRequest, { timeout: 5000 })
   const bulkRequest = await page.evaluate(() => window.lastModuleProductRequest)

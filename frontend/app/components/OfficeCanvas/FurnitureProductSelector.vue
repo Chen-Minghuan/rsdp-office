@@ -43,11 +43,6 @@ function selectIndex(index: number) {
 
 function prev() { selectIndex(selectedIndex.value - 1) }
 function next() { selectIndex(selectedIndex.value + 1) }
-function onWheel(event: WheelEvent) {
-  event.preventDefault()
-  if (event.deltaY > 0 || event.deltaX > 0) next()
-  else prev()
-}
 
 async function refresh() {
   const ticket = ++sequence, current = signature.value
@@ -114,7 +109,7 @@ onBeforeUnmount(() => { sequence++ })
           <p v-else-if="loading" role="status" class="py-6 text-center text-muted">正在读取真实商品规格…</p>
           <p v-if="error" role="alert" class="mb-2 rounded-none bg-red-50 px-3 py-2 text-red-700">{{ error }}</p>
           <template v-if="result && !loading">
-            <div v-if="current" class="flex flex-col gap-3" @wheel.prevent="onWheel">
+            <div v-if="current" class="flex flex-col gap-3">
               <!-- 主图 + 左右箭头 -->
               <div class="relative flex items-center justify-center rounded-none border border-line bg-[#f7f4f0]">
                 <button

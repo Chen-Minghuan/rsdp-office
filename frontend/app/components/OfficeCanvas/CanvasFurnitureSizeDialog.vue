@@ -30,6 +30,14 @@ function apply() {
   if (!props.item) return
   error.value = ''
   const ids = props.itemIds?.length ? props.itemIds : [props.item.id]
+  const idSet = new Set(ids)
+  const selectedItems = store.objects.filter((object): object is FurnitureObject => object.kind === 'furniture' && idSet.has(object.id))
+  const changedCount = selectedItems.filter(item => item.w !== width.value || item.h !== depth.value).length
+  if (selectedItems.length === idSet.size && changedCount === 0) {
+    show.value = false
+    emit('applied', '尺寸未变化，无需更新')
+    return
+  }
   const result = store.resizeFurnitureBatch(ids, width.value, depth.value)
   if (result) {
     if (result.startsWith('已调整尺寸')) {
@@ -41,7 +49,7 @@ function apply() {
     return
   }
   show.value = false
-  emit('applied', `已更新 ${ids.length} 个家具尺寸为 ${width.value}×${depth.value}mm`)
+  emit('applied', `已更新 ${changedCount} 个家具尺寸为 ${width.value}×${depth.value}mm`)
 }
 
 function onBackdropClick() {

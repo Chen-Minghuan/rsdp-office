@@ -40,23 +40,22 @@ function selectGroup(group: FurnitureDisplayGroup) {
   selectedId.value = group.representative.id
 }
 
-let lastClickTime = 0
-let lastClickGroup: FurnitureDisplayGroup | null = null
-
-function onItemClick(event: MouseEvent, group: FurnitureDisplayGroup) {
-  const now = Date.now()
-  const alreadySelected = isGroupFullySelected(group)
-  // 已选中的组再次点击，或 300ms 内快速双击，均打开批量替换
-  if (alreadySelected || (lastClickGroup === group && now - lastClickTime < 300)) {
-    event.preventDefault()
+function onItemClick(group: FurnitureDisplayGroup) {
+  if (!isGroupFullySelected(group)) {
     selectGroup(group)
-    emit('bulkReplace', group.representative, group.items.map(item => item.id))
-    lastClickGroup = null
     return
   }
-  lastClickTime = now
-  lastClickGroup = group
+  const groupIds = new Set(group.items.map(item => item.id))
+  selectedFurnitureIds.value = selectedFurnitureIds.value.filter(id => !groupIds.has(id))
+  if (selectedId.value && groupIds.has(selectedId.value)) {
+    selectedId.value = selectedFurnitureIds.value.length === 1 ? selectedFurnitureIds.value[0]! : null
+  }
+}
+
+function onItemDoubleClick(event: MouseEvent, group: FurnitureDisplayGroup) {
+  event.preventDefault()
   selectGroup(group)
+  emit('bulkReplace', group.representative, group.items.map(item => item.id))
 }
 
 function onItemContextMenu(event: MouseEvent, group: FurnitureDisplayGroup) {
@@ -82,7 +81,8 @@ function glyph(item: FurnitureObject) {
           isGroupFullySelected(group) ? 'border-bronze ring-1 ring-bronze' : 'border-line',
         ]"
         style="min-width: 96px;"
-        @click="onItemClick($event, group)"
+        @click="onItemClick(group)"
+        @dblclick="onItemDoubleClick($event, group)"
         @contextmenu.prevent="onItemContextMenu($event, group)"
       >
         <span class="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-bronze px-1 text-[9px] font-bold text-white">
@@ -95,6 +95,6 @@ function glyph(item: FurnitureObject) {
         <span class="text-[8px] text-muted">{{ Math.round(group.representative.w) }}×{{ Math.round(group.representative.h) }}</span>
       </div>
     </div>
-    <p class="mt-1 text-[10px] text-muted">单击全选，双击替换选品，右键修改尺寸。</p>
+    <p class="mt-1 text-[10px] text-muted">单击选择/取消，双击替换选品，右键修改尺寸。</p>
   </section>
 </template>
