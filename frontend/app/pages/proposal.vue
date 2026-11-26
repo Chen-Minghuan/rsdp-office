@@ -6,7 +6,7 @@ import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
 import type { CartItem, FurnitureObject, Product, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
-import type { ProposalConfirmation } from '~/types/productScheme'
+import type { ProposalConfirmation, RoomSchemeState, SchemeSlot } from '~/types/productScheme'
 import { proposalFurnitureSelectionRoute } from '~/utils/proposalFurnitureGate'
 
 
@@ -75,6 +75,10 @@ const confirmedSpaceIds = ref<Record<string, boolean>>({})
 const renderJobs = ref<Record<string, RenderPreview[]>>({})
 const loadedRenderZones = new Set<string>()
 const renderApi = useRenderPreviewApi()
+// 每个空间（zone）的 Plan A/B 方案状态，切换语义与 canvas 产品方案视图一致。
+const schemeStates = ref<Record<string, RoomSchemeState>>({})
+const schemeBusyId = ref<string | null>(null)
+const loadedSchemeZones = new Set<string>()
 
 const previewMode = computed(() => route.query.preview === '1')
 const selectionIssues = computed(() => previewMode.value ? [] : store.proposalFurnitureCartMismatches)
@@ -257,14 +261,54 @@ async function loadRenderPreviews() {
   renderJobs.value = next
 }
 
+async function loadSchemeStates() {
+  if (previewMode.value || !store.initialized || !store.apiReady) return
+  const floor = store.workspaceId
+  const ids = spaces.value.map(space => space.zoneId).filter(id => !id.startsWith('cart-') && !loadedSchemeZones.has(id))
+  if (!ids.length) return
+  ids.forEach(id => loadedSchemeZones.add(id))
+  const results = await Promise.allSettled(ids.map(async id => ({ id, scheme: await catalogApi.loadRoomScheme(floor, id) })))
+  if (floor !== store.workspaceId) return
+  const next = { ...schemeStates.value }
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value.scheme?.activeSlot) next[result.value.id] = result.value.scheme
+  }
+  schemeStates.value = next
+}
+
+async function switchSpaceScheme(space: ProposalSpace, targetSlot: SchemeSlot) {
+  if (previewMode.value || !space.zone || !canEdit.value || schemeBusyId.value || !store.apiReady) return
+  const floorId = store.workspaceId
+  if (!floorId) return
+  if (schemeStates.value[space.zoneId]?.activeSlot === targetSlot) return
+  schemeBusyId.value = space.zoneId
+  try {
+    const version = await store.flushSchemeCanvas(floorId)
+    const result = await catalogApi.changeRoomScheme(floorId, 'activate', { ...version, zoneId: space.zoneId, targetSlot })
+    if (store.workspaceId !== floorId) return
+    store.applyRoomScheme(result, floorId)
+    if (result.scheme) schemeStates.value = { ...schemeStates.value, [space.zoneId]: result.scheme }
+    loadedRenderZones.delete(space.zoneId)
+    void loadRenderPreviews()
+    setNotice(`已切换至 Plan ${result.scheme?.activeSlot ?? targetSlot}`)
+  } catch (e) {
+    if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案切换失败，请稍后重试')
+  } finally {
+    schemeBusyId.value = null
+  }
+}
+
 watch(() => store.workspaceId, () => {
   loadedRenderZones.clear()
   renderJobs.value = {}
+  loadedSchemeZones.clear()
+  schemeStates.value = {}
+  schemeBusyId.value = null
   confirmedSpaceIds.value = {}
   expandedSpaceIds.value = {}
   selectedDetail.value = null
 })
-watch(() => [store.initialized, store.workspaceId, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
+watch(() => [store.initialized, store.workspaceId, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews(); void loadSchemeStates() }, { immediate: true })
 
 const groups = computed<ProposalGroup[]>(() => {
   const floor = floorLabel()
@@ -536,7 +580,7 @@ function detailTitle(detail: Detail | null) {
                     <span class="space-row-status" :class="space.status === '已确认' ? 'is-confirmed' : 'is-pending'"><span></span>{{ space.status }}</span>
                   </button>
                   <section v-if="isSpaceOpen(group, space)" :id="roomDetailId(space)" class="space-detail-board" :aria-label="space.name + '详情'">
-                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" v-if="canEdit" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
+                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><div v-if="space.zone && !space.preview && canEdit" class="proposal-scheme-versions" aria-label="房间方案" data-testid="proposal-scheme-versions"><button v-for="slot in (['A', 'B'] as const)" :key="slot" type="button" :aria-pressed="schemeStates[space.zoneId] ? schemeStates[space.zoneId].activeSlot === slot : undefined" :disabled="schemeBusyId === space.zoneId || !store.apiReady" @click="switchSpaceScheme(space, slot)">Plan {{ slot }}</button></div><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" v-if="canEdit" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
                     <div class="space-modules preset-space-board">
                       <button type="button" class="preset-panel requirement-panel" @click="openDetail({ kind: 'requirement', space: space })">
                         <div class="preset-panel-title"><span>需求描述</span><AppIcon name="arrowRight" size="3" /></div>
@@ -752,4 +796,9 @@ function detailTitle(detail: Detail | null) {
 .precheck-issue-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .precheck-issue-copy strong{font-size:12px;color:#403932;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .precheck-issue-copy small{font-size:10px;color:#958d84}
+/* 空间级 Plan A/B 方案切换：样式对齐 canvas 产品方案视图的 scheme-versions。 */
+.proposal-scheme-versions{display:flex;gap:.25rem;align-items:center}
+.proposal-scheme-versions button{border:1px solid var(--color-accent-line);border-radius:8px;background:#fff;color:#72675c;font-size:.72rem;font-weight:600;padding:7px 10px;cursor:pointer}
+.proposal-scheme-versions button[aria-pressed=true]{background:var(--color-accent);border-color:var(--color-accent);color:#fff}
+.proposal-scheme-versions button:disabled{opacity:.45;cursor:default}
 </style>
