@@ -10,6 +10,7 @@
 - 恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`OfficeProjectStatusDto`、`OfficeProjectService.updateStatus`（校验 `DESIGNING/DELIVERING/COMPLETED`、更新时间与审计 `PROJECT_STATUS_CHANGED`）、`OfficeProjectAccessService.canManageStatus/requireStatusManager`（实际负责人或所属工作区主号，不沿用可转授的 `MANAGE_MEMBERS`）与 `OfficeProjectDto.canManageStatus`。DB 列与 CHECK 约束（含 `COMPLETED`）沿用 `20261124_project_status.sql` 迁移，无新迁移。
 - 删除读时派生 `derivedStatus`：列表与单项目接口直接读 `office_design_project.status`，新建项目仍默认 `DESIGNING`；`confirmedFloorIds` 批量查询保留，仅用于区域进度（`zoneTotal`/`zoneDelivered`）派生。
 - 前端恢复阶段下拉（`canManageStatus` 为真时可编辑，保存失败回退原值并提示），`ProjectStatus` 恢复 `COMPLETED`；工作台"已完成"看板由占位改为真实计数并参与筛选。
+- 存量项目沿用切换前的显示阶段（2026-11-26 用户确认）：新增一次性回填迁移 `20261126_project_status_backfill.sql`，按原派生口径把"存在楼层且全部楼层有未失效方案确认、仍为默认 `DESIGNING`"的项目置为 `DELIVERING`；经 `office_data_migration` 标记保证只执行一次，重跑不覆盖此后的人工修改，也不动已是 `COMPLETED` 等人工值的行。
 - `e2e-project-status.mjs` 恢复手动维护断言（负责人/主号可改、成员只读、失败回退、刷新持久）；`e2e-project-refresh.mjs` 改为"阶段不随确认自动变化、进度仍派生、外部修改的阶段随重取生效"的断言。
 
 验证结果记录于 [开发进度](../status.md) 2026-11-25 条目。

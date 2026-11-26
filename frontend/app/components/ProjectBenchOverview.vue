@@ -48,7 +48,20 @@ function onProposalDateSave(date: string) {
   showProposalDate.value = false
 }
 
+const todayStamp = ref(new Date().toDateString())
+function refreshToday() { todayStamp.value = new Date().toDateString() }
+let todayTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  todayTimer = setInterval(refreshToday, 60_000)
+  document.addEventListener('visibilitychange', refreshToday)
+})
+onBeforeUnmount(() => {
+  clearInterval(todayTimer)
+  document.removeEventListener('visibilitychange', refreshToday)
+})
+
 const proposalDays = computed(() => {
+  todayStamp.value // 跨日后触发重新计算
   if (!proposalTargetDate.value) return null
   const target = new Date(`${proposalTargetDate.value}T00:00:00`)
   if (Number.isNaN(target.getTime())) return null
