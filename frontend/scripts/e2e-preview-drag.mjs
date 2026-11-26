@@ -34,14 +34,22 @@ try {
     rooms: [{ roomId: 'DRAG-ROOM', label: '开放办公区', roomType: 'OPEN_OFFICE', geometrySource: 'cad_geometry', polygon: [[0, 0], [16000, 0], [16000, 10000], [0, 10000]] }],
   }
   let floorPlanRequests = 0
+  let recognizeCalls = 0
+  let recognizeRelease = null
+  let recognizeRelease2 = null
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
-  await context.route('**/api/v1/**', route => {
+  await context.route('**/api/v1/**', async route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/layout-reference/source')) return route.fulfill({ contentType: 'image/svg+xml', body: decodeURIComponent(source.previewUrl.split(',')[1]) })
     if (path.endsWith('/layout-reference/recognize')) {
       assert.equal(route.request().method(), 'POST')
+      recognizeCalls++
+      // 第 1/4 次识别挂起，模拟用户离开期间仍在进行/完成的识别任务；第 2 次失败，验证重试失败保留上一轮标记。
+      if (recognizeCalls === 1) await new Promise(resolve => { recognizeRelease = resolve })
+      if (recognizeCalls === 2) return route.fulfill({ json: { code: 500, message: 'mock 识别失败' } })
+      if (recognizeCalls === 4) await new Promise(resolve => { recognizeRelease2 = resolve })
       return route.fulfill({ json: { code: 200, data: [
         { templateId: 'desk-straight', categoryId: 'workstation', group: 'office', x: 0.12, y: 0.22, width: 0.16, depth: 0.11, rotation: 0, confidence: 'high' },
         { templateId: 'chair-office', categoryId: 'workstation', group: 'office', x: 0.165, y: 0.35, width: 0.04, depth: 0.05, rotation: 0, confidence: 'low' },
@@ -164,6 +172,65 @@ try {
   assert.equal(await page.getByRole('dialog', { name: '参考原图摆位' }).count(), 0)
   const referenceLayer = page.getByTestId('reference-canvas-layer')
   await referenceLayer.waitFor()
+
+  // 画布已有家具时拦截识别，不发起请求。
+  await page.getByTestId('reference-recognize').click()
+  await page.getByText('请清除当前画布上的家具', { exact: true }).waitFor()
+  assert.equal(recognizeCalls, 0, '画布有家具时不发起识别请求')
+
+  // 清空画布后发起识别；切换标签页不中断任务，回来仍显示正在识别。
+  await page.getByRole('button', { name: '返回组合布局', exact: true }).click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('auto-clear-layout').click()
+  await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
+  await page.getByTestId('reference-recognize').click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…')
+  assert.equal(await page.getByTestId('reference-recognize').isDisabled(), true, '识别进行中按钮禁用')
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…', null, { timeout: 10000 })
+  assert.equal(await page.getByTestId('reference-recognize').isDisabled(), true, '切换标签页后识别继续进行')
+
+  // 离开期间识别完成：结果保留，回到自动布局时面板自动重开并展示标记。
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  recognizeRelease()
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByText('识别到 3 个家具标记，请核对图例、方向和分组', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 3, '离开期间完成的识别结果恢复到画布')
+
+  // 场景 1：结果已展示但未应用就离开页面，回来后仍自动重开并恢复标记与结果文案。
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
+  await page.getByText('识别到 3 个家具标记，请核对图例、方向和分组', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 3, '已展示未应用的识别结果离开页面后仍恢复')
+
+  // 场景 2：重试识别失败，保留上一轮标记并展示错误文案。
+  await page.getByTestId('reference-recognize').click()
+  await page.getByText('mock 识别失败', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 3, '重试失败保留上一轮识别标记')
+  assert.equal(await page.getByTestId('reference-recognize').isDisabled(), false, '识别失败后按钮恢复可用')
+
+  // 结果已展示并显式关闭后不再自动重开。
+  await page.getByRole('button', { name: '返回组合布局', exact: true }).click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('tab-auto-layout').click()
+  await page.waitForTimeout(300)
+  assert.equal(await page.getByTestId('layout-reference-panel').count(), 0, '已展示并关闭的识别结果不再自动重开')
+
+  // 重新打开面板继续既有识别流程（第二次识别请求立即返回）。
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
   await page.getByTestId('reference-recognize').click()
   const suggestedDesk = referenceLayer.locator('[data-reference-index="0"]')
   await suggestedDesk.locator('svg[data-furniture-template="desk-straight"]').waitFor()
@@ -276,8 +343,47 @@ try {
   assert.ok((await state()).objects.filter(item => item.kind === 'furniture' && item.zoneId === cabinetRoom.id).every(item => !item.layoutConfirmed))
   assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true')
 
+  // 场景 3a：识别飞行期间画布摆上家具，结果到达时不得并入旧标记、不得覆盖新排版。
+  await page.getByTestId('tab-auto-layout').click()
+  await page.getByTestId('auto-clear-layout').click()
+  await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
+  await page.getByTestId('reference-recognize').click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…')
+  // 飞行期间直接通过 store 摆上家具（与上方 moveFurnitureGroup 同一先例）。
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.addObject({ kind: 'furniture', id: 'E2E-STALE-FURNITURE', zoneId: store.designZoneId, x: 2000, y: 2000, w: 1200, h: 600, rotation: 0, furnitureTemplateId: 'desk-straight' })
+  })
+  recognizeRelease2()
+  await page.getByText('识别期间画布排版已变化，结果已失效，请清除家具后重新识别', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 0, '排版变化后旧识别结果不并入标记')
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).filter(object => object.kind === 'furniture').length === 1)
+  assert.equal((await state()).objects.filter(object => object.layoutReference).length, 0, '旧识别结果未覆盖飞行期间摆上的家具')
+
+  // 场景 3b：结果展示后画布才摆上家具，应用时被兜底拦截，旧结果不得覆盖。
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.deleteObject('E2E-STALE-FURNITURE')
+  })
+  await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
+  await page.getByTestId('reference-recognize').click()
+  await page.getByText('识别到 3 个家具标记，请核对图例、方向和分组', { exact: true }).waitFor()
+  assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 3)
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    store.addObject({ kind: 'furniture', id: 'E2E-STALE-FURNITURE', zoneId: store.designZoneId, x: 2000, y: 2000, w: 1200, h: 600, rotation: 0, furnitureTemplateId: 'desk-straight' })
+  })
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).filter(object => object.kind === 'furniture').length === 1)
+  await page.getByTestId('reference-apply').click()
+  await page.getByText('请清除当前画布上的家具', { exact: true }).waitFor()
+  assert.equal((await state()).objects.filter(object => object.kind === 'furniture').length, 1, '应用拦截后画布家具未被覆盖')
+  assert.equal((await state()).objects.filter(object => object.layoutReference).length, 0, '兜底拦截后无参考家具写入')
+
   assert.deepEqual(errors, [], '页面无脚本错误')
-  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入。')
+  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入；画布占用拦截识别、识别任务跨标签页保留与结果恢复、已展示未应用结果跨页面恢复、重试失败保留标记、排版变化阻止旧结果覆盖。')
 } finally {
   if (browser) await browser.close()
   app.kill()
