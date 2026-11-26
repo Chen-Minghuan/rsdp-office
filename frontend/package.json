@@ -14,6 +14,7 @@
     "e2e:space-review": "node scripts/e2e-space-review.mjs",
     "e2e:space-obstacles": "node scripts/e2e-space-obstacles.mjs",
     "e2e:workflows": "node scripts/e2e-workflows.mjs",
+    "e2e:product-filters": "node scripts/e2e-product-filters.mjs",
     "e2e:quotes": "node scripts/e2e-quotes.mjs",
     "e2e:account-center": "node scripts/e2e-account-center.mjs",
     "e2e:favorites-page": "node scripts/e2e-favorites-page.mjs",

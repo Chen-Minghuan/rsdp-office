@@ -69,9 +69,9 @@ const products = Array.from({ length: 23 }, (_, index) => ({
   externalCode: `EXTERNAL-${index + 1}`,
   productName: index % 2 ? `简约办公桌 ${index + 1}` : `人体工学椅 ${index + 1}`,
   categoryPath: index < 4 ? ['办公家具', index % 2 ? '办公桌' : '办公椅'] : undefined,
-  colorPrimaryName: index < 4 ? (index < 2 ? '浅木色' : '深木色') : null,
+  colorPrimaryName: index === 2 ? '深木色' : index < 4 ? '胡桃色' : null,
   positioningLabel: '现代办公', primaryImageUrl: null, retailPrice: 980 + index * 100,
-  referencePriceBand: '标准', productLevel: 'L2', warrantyYears: 3,
+  referencePriceBand: '标准', productLevel: 'B', warrantyYears: 3,
   sixDimTags: '{"A":["A1"],"B":["B2"]}', status: index % 3 ? 'active' : 'inactive',
   createdAt: '2026-10-12T08:00:00', updatedAt: '2026-10-12T09:00:00',
 }))

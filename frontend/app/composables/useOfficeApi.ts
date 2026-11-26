@@ -1,7 +1,8 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ProjectQuotationLatest, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductFilters, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import { FILTER_KEYS } from '~/utils/productFilter'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
 import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
@@ -397,11 +398,17 @@ export function useOfficeApi() {
     return await request<ImportedProduct[]>('GET', managed ? '/api/v1/products?managed=true' : '/api/v1/products')
   }
 
-  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean }): Promise<CatalogProductPage> {
+  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean; filters?: CatalogProductFilters; refresh?: boolean }): Promise<CatalogProductPage> {
     const query = new URLSearchParams({ page: String(options.page), size: String(options.size) })
     if (options.search) query.set('search', options.search)
     if (options.status) query.set('status', options.status)
     if (options.managed) query.set('managed', 'true')
+    if (options.refresh) query.set('refresh', 'true')
+    if (options.filters) {
+      for (const key of FILTER_KEYS) {
+        for (const value of options.filters[key]) query.append(key, String(value))
+      }
+    }
     return await request<CatalogProductPage>('GET', `/api/v1/products/page?${query}`)
   }
 
@@ -409,17 +416,21 @@ export function useOfficeApi() {
     return await request('GET', '/api/v1/products/capabilities')
   }
 
-  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string }) {
-    const { page, size, ...filters } = options
+  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string, filters?: CatalogProductFilters }) {
+    const { page, size, filters, ...quickFilters } = options
     const query = new URLSearchParams({ page: String(page), size: String(size) })
-    for (const [name, value] of Object.entries(filters)) {
+    for (const [name, value] of Object.entries(quickFilters)) {
       if (value) query.set(name, value)
     }
+    if (filters) for (const key of FILTER_KEYS) for (const value of filters[key]) query.append(key, String(value))
     return request<CatalogBrowsePage>('GET', `/api/v1/products/browse?${query}`)
   }
 
-  function browseProductFacets() {
-    return request<CatalogBrowseFacets>('GET', '/api/v1/products/browse/facets')
+  function browseProductFacets(options?: { search?: string, status?: string }) {
+    const query = new URLSearchParams()
+    if (options?.search) query.set('search', options.search)
+    if (options?.status) query.set('status', options.status)
+    return request<CatalogBrowseFacets>('GET', `/api/v1/products/browse/facets?${query}`)
   }
 
   async function loadFavoriteFolders(rspuId?: string): Promise<FavoriteFolder[]> {

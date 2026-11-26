@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.dto.response.CatalogFacetsDto;
 import com.rsdp.officeproduct.importer.dto.response.CatalogProductPageDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
@@ -33,6 +34,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -63,8 +65,11 @@ public class RsdpCatalogGateway {
     private static final long OFFICE_PRODUCTS_CACHE_TTL_MS = 30_000;
     private final Map<String, CacheEntry> officeProductsCache = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<CacheEntry>> officeProductsInFlight = new ConcurrentHashMap<>();
+    private final Map<String, FilterSnapshotEntry> filterSnapshotCache = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<FilterSnapshotEntry>> filterSnapshotInFlight = new ConcurrentHashMap<>();
 
     private record CacheEntry(List<OfficeProductDto> data, long fetchedAt) {}
+    private record FilterSnapshotEntry(List<CatalogFilterProduct> rows, long fetchedAt) {}
 
     private record VariantBatch(List<String> ids, JsonNode rows, long fetchedAt) {}
 
@@ -429,6 +434,72 @@ public class RsdpCatalogGateway {
         return readProducts(viewMode, "full".equals(viewMode), null);
     }
 
+    public List<CatalogFilterProduct> listFilterProducts(String viewMode, boolean refresh) {
+        if ("none".equals(viewMode)) return List.of();
+        FilterSnapshotEntry cached = freshFilterSnapshot(viewMode);
+        if (!refresh && cached != null) return cached.rows();
+
+        var nextRefresh = new CompletableFuture<FilterSnapshotEntry>();
+        var activeRefresh = filterSnapshotInFlight.putIfAbsent(viewMode, nextRefresh);
+        if (activeRefresh != null) return joinFilterSnapshot(activeRefresh);
+        try {
+            if (!refresh) cached = freshFilterSnapshot(viewMode);
+            if (cached == null) {
+                cached = new FilterSnapshotEntry(List.copyOf(loadFilterSnapshot(listProducts(viewMode))),
+                    System.currentTimeMillis());
+                filterSnapshotCache.put(viewMode, cached);
+            }
+            nextRefresh.complete(cached);
+            return cached.rows();
+        } catch (RuntimeException | Error failure) {
+            nextRefresh.completeExceptionally(failure);
+            throw failure;
+        } finally {
+            filterSnapshotInFlight.remove(viewMode, nextRefresh);
+        }
+    }
+
+    private FilterSnapshotEntry freshFilterSnapshot(String viewMode) {
+        FilterSnapshotEntry cached = filterSnapshotCache.get(viewMode);
+        return cached != null && System.currentTimeMillis() - cached.fetchedAt() < OFFICE_PRODUCTS_CACHE_TTL_MS
+            ? cached : null;
+    }
+
+    private List<CatalogFilterProduct> joinFilterSnapshot(CompletableFuture<FilterSnapshotEntry> refresh) {
+        try {
+            return refresh.join().rows();
+        } catch (CompletionException failure) {
+            if (failure.getCause() instanceof RuntimeException cause) throw cause;
+            if (failure.getCause() instanceof Error cause) throw cause;
+            throw failure;
+        }
+    }
+
+    private List<CatalogFilterProduct> loadFilterSnapshot(List<ProductListItemDto> summaries) {
+        try (var executor = Executors.newFixedThreadPool(VARIANT_FETCH_MAX_CONCURRENCY, Thread.ofVirtual().factory())) {
+            List<Future<CatalogFilterProduct>> futures = new ArrayList<>();
+            for (ProductListItemDto summary : summaries) {
+                futures.add(executor.submit(() -> {
+                    ProductDetailDto detail = getProductDetail(summary.getRspuId());
+                    return new CatalogFilterProduct(summary, detail.getDescription(), detail.getVariants());
+                }));
+            }
+            List<CatalogFilterProduct> rows = new ArrayList<>();
+            for (Future<CatalogFilterProduct> future : futures) {
+                try {
+                    rows.add(future.get());
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new BusinessException("商品筛选快照读取中断");
+                } catch (ExecutionException failure) {
+                    if (failure.getCause() instanceof RuntimeException cause) throw cause;
+                    throw new BusinessException("商品筛选快照读取失败");
+                }
+            }
+            return rows;
+        }
+    }
+
     public List<ProductListItemDto> listSharedCatalogForBrowse() {
         return readProducts("full", false, null);
     }
@@ -454,7 +525,7 @@ public class RsdpCatalogGateway {
         List<ProductListItemDto> rows = new ArrayList<>();
         result.path("rows").forEach(row -> rows.add(toListItem(row)));
         return new CatalogProductPageDto(result.path("total").asLong(), result.path("catalogTotal").asLong(),
-            result.path("activeTotal").asLong(), page, size, rows);
+            result.path("activeTotal").asLong(), page, size, rows, CatalogFacetsDto.empty());
     }
 
     private CatalogProductPageDto pageLegacyProducts(String viewMode, int page, int size, String search,
@@ -470,7 +541,7 @@ public class RsdpCatalogGateway {
         int start = (int) Math.min((page - 1L) * size, matching.size());
         long active = visible.stream().filter(row -> "active".equals(row.getStatus())).count();
         return new CatalogProductPageDto(matching.size(), visible.size(), active, page, size,
-            matching.subList(start, Math.min(start + size, matching.size())));
+            matching.subList(start, Math.min(start + size, matching.size())), CatalogFacetsDto.empty());
     }
 
     private String queryScope(String viewMode) {
@@ -551,6 +622,7 @@ public class RsdpCatalogGateway {
         dto.setRspuCode(textOrNull(rspu, "rspuCode"));
         dto.setExternalCode(textOrNull(rspu, "externalCode"));
         dto.setProductName(textOrNull(rspu, "productName"));
+        dto.setProductLevel(textOrNull(rspu, "productLevel"));
         dto.setSourceChannel(textOrNull(rspu, "sourceChannel"));
         dto.setSourceFactoryName(textOrNull(detail, "sourceFactoryName"));
         if (rspu.path("ownerVerified").asBoolean()) {
@@ -593,6 +665,8 @@ public class RsdpCatalogGateway {
                 variant.setSizeText(textOrNull(v, "sizeText"));
                 variant.setDimensions(textOrNull(v, "dimensions"));
                 variant.setDimensionsText(formatMainDimensions(v.path("dimensions")));
+                variant.setWidthMm(readMainDimensions(v.path("dimensions"))[0]);
+                variant.setProductLevel(textOrNull(v, "productLevel"));
                 variant.setColorCode(textOrNull(v, "colorCode"));
                 variant.setColorText(textOrNull(v, "colorText"));
                 variant.setMaterialCode(textOrNull(v, "materialCode"));
@@ -650,6 +724,7 @@ public class RsdpCatalogGateway {
         dto.setSourceFactoryName(textOrNull(row, "sourceFactoryName"));
         dto.setOwnerFactoryCode(textOrNull(row, "ownerFactoryCode"));
         dto.setProductName(textOrNull(row, "productName"));
+        dto.setProductLevel(textOrNull(row, "productLevel"));
         dto.setColorPrimaryName(textOrNull(row, "colorPrimaryName"));
         dto.setCategoryPath(textValues(embeddedJson(row.path("categoryPath"))));
         dto.setFurnitureTags(furnitureTags(row.path("sixDimTags")));
