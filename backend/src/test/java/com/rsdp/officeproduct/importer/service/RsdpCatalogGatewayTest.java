@@ -443,4 +443,29 @@ class RsdpCatalogGatewayTest {
         assertNull(result.get(2).getColorPrimaryName());
     }
 
+    @Test
+    void loadsFilterSnapshotAndCachesPerView() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=full&status=active")).thenReturn(json.readTree("""
+            {"total":1,"rows":[{"rspuId":"P1","productName":"1.4米职员台","productLevel":"B","status":"active"}]}
+            """));
+        when(client.get("/api/v1/products/P1")).thenReturn(json.readTree("""
+            {"rspu":{"rspuId":"P1","productName":"1.4米职员台","productLevel":"B","description":"钢脚","status":"active"}}
+            """));
+        when(client.get("/api/v1/products/P1/variants")).thenReturn(json.readTree("""
+            [{"variantId":"V1","productLevel":"B","materialText":"PB","dimensions":"{\\\"w\\\":1400,\\\"unit\\\":\\\"mm\\\"}","status":"active"}]
+            """));
+
+        var first = gateway.listFilterProducts("full", false);
+        var second = gateway.listFilterProducts("full", false);
+
+        assertEquals("B", first.getFirst().summary().getProductLevel());
+        assertEquals("钢脚", first.getFirst().description());
+        assertEquals("PB", first.getFirst().variants().getFirst().getMaterialText());
+        assertEquals(new BigDecimal("1400"), first.getFirst().variants().getFirst().getWidthMm());
+        assertSame(first, second);
+        verify(client, times(1)).get("/api/v1/products/P1");
+    }
+
 }

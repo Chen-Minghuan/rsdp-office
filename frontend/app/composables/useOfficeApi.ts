@@ -1,7 +1,8 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
 import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { CatalogCapabilities, CatalogProductFilters, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import { FILTER_KEYS } from '~/utils/productFilter'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
 import type { LocalProductInput, LocalProductSummary, LocalProductVariant, LocalProductImage } from '~/types/local-products'
@@ -380,11 +381,17 @@ export function useOfficeApi() {
     return await request<ImportedProduct[]>('GET', managed ? '/api/v1/products?managed=true' : '/api/v1/products')
   }
 
-  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean }): Promise<CatalogProductPage> {
+  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean; filters?: CatalogProductFilters; refresh?: boolean }): Promise<CatalogProductPage> {
     const query = new URLSearchParams({ page: String(options.page), size: String(options.size) })
     if (options.search) query.set('search', options.search)
     if (options.status) query.set('status', options.status)
     if (options.managed) query.set('managed', 'true')
+    if (options.refresh) query.set('refresh', 'true')
+    if (options.filters) {
+      for (const key of FILTER_KEYS) {
+        for (const value of options.filters[key]) query.append(key, String(value))
+      }
+    }
     return await request<CatalogProductPage>('GET', `/api/v1/products/page?${query}`)
   }
 

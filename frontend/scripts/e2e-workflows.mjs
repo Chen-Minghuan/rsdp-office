@@ -51,9 +51,9 @@ const products = Array.from({ length: 23 }, (_, index) => ({
   externalCode: `EXTERNAL-${index + 1}`,
   productName: index % 2 ? `简约办公桌 ${index + 1}` : `人体工学椅 ${index + 1}`,
   categoryPath: index < 4 ? ['办公家具', index % 2 ? '办公桌' : '办公椅'] : undefined,
-  colorPrimaryName: index < 4 ? (index < 2 ? '浅木色' : '深木色') : null,
+  colorPrimaryName: index === 2 ? '雅士白' : index < 4 ? '蜜芽胡桃' : null,
   positioningLabel: '现代办公', primaryImageUrl: null, retailPrice: 980 + index * 100,
-  referencePriceBand: '标准', productLevel: 'L2', warrantyYears: 3,
+  referencePriceBand: '标准', productLevel: 'B', warrantyYears: 3,
   sixDimTags: '{"A":["A1"],"B":["B2"]}', status: index % 3 ? 'active' : 'inactive',
   createdAt: '2026-10-12T08:00:00', updatedAt: '2026-10-12T09:00:00',
 }))
@@ -114,11 +114,29 @@ await context.route('**/api/v1/**', async route => {
     const size = Number(url.searchParams.get('size'))
     const search = (url.searchParams.get('search') || '').toLowerCase()
     const status = url.searchParams.get('status')
-    const matches = catalog.filter(product => (
+    const productTypes = url.searchParams.getAll('productTypes')
+    const colors = url.searchParams.getAll('colors')
+    const typeOf = product => product.productName.includes('桌') ? 'DESK' : product.productName.includes('椅') ? 'CHAIR' : 'UNCLASSIFIED'
+    const colorsOf = product => (product.colorPrimaryName || '').split('+').map(part => part.trim()).filter(Boolean)
+    const base = catalog.filter(product => (
       !search || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(search))
     ) && (!status || (status === 'active' ? product.status === 'active' : product.status !== 'active')))
+    const matches = base.filter(product => (!productTypes.length || productTypes.includes(typeOf(product)))
+      && (!colors.length || colorsOf(product).some(color => colors.includes(color))))
+    const typeCounts = base.reduce((map, product) => map.set(typeOf(product), (map.get(typeOf(product)) || 0) + 1), new Map())
+    const colorCounts = base.flatMap(colorsOf).reduce((map, color) => map.set(color, (map.get(color) || 0) + 1), new Map())
+    const option = (code, label, count) => ({ code, label, count, disabled: count === 0 })
     return respond({ page, size, rows: matches.slice((page - 1) * size, page * size), total: matches.length,
-      catalogTotal: catalog.length, activeTotal: catalog.filter(product => product.status === 'active').length })
+      catalogTotal: catalog.length, activeTotal: catalog.filter(product => product.status === 'active').length,
+      facets: { groups: {
+        levels: ['S', 'A', 'B', 'C'].map(level => option(level, `${level}级`, level === 'B' ? base.length : 0)),
+        spaceTypes: [],
+        productTypes: [option('DESK', '桌类', typeCounts.get('DESK') || 0), option('CABINET', '柜类', 0),
+          option('CHAIR', '椅类', typeCounts.get('CHAIR') || 0), option('SOFA', '沙发类', 0)],
+        materials: [],
+        colors: [...colorCounts.keys()].sort().map(color => option(color, color, colorCounts.get(color))),
+        widthRanges: [], legTypes: [], storageTypes: [],
+      } } })
   }
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
@@ -253,15 +271,12 @@ try {
   await page.setViewportSize({ width: 1440, height: 960 })
   const categoryFilter = page.getByRole('combobox', { name: '筛选产品分类' })
   const colorFilter = page.getByRole('combobox', { name: '筛选商品主色' })
-  await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products'),
-    categoryFilter.focus(),
-  ])
-  await categoryFilter.selectOption('办公家具 / 办公椅')
-  assert.equal(await productCards().count(), 2)
-  await colorFilter.selectOption('深木色')
-  assert.equal(await productCards().count(), 1)
+  await categoryFilter.selectOption('CHAIR')
+  await page.waitForFunction(() => document.body.innerText.includes('共 12 件商品'))
+  assert.equal(await productCards().count(), 12)
+  await colorFilter.selectOption('雅士白')
   await productCards().getByText('人体工学椅 3', { exact: true }).waitFor()
+  assert.equal(await productCards().count(), 1)
   await page.getByLabel('搜索商品名称或编码').fill('RSDP-001')
   await heading('没有找到匹配的商品')
   await page.getByRole('button', { name: '清空筛选', exact: true }).click()

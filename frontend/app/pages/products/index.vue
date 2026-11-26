@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import type { CatalogCapabilities, ImportedProduct } from '~/types/imported-products'
+import type { CatalogCapabilities, CatalogFacets, CatalogProductFilters, ImportedProduct } from '~/types/imported-products'
+import { cloneProductFilters, countProductFilters, emptyProductFilters, FILTER_KEYS } from '~/utils/productFilter'
 
 const api = useOfficeApi()
 const workspace = useWorkspaceStore()
 const { storageScope } = useAuth()
-const facetProducts = ref<ImportedProduct[] | null>(null)
+const visibleProducts = ref<ImportedProduct[] | null>(null)
 const serverProducts = ref<ImportedProduct[]>([])
 const serverTotal = ref(0)
 const catalogTotal = ref(0)
 const activeCount = ref(0)
+const facets = ref<CatalogFacets | null>(null)
+const appliedFilters = ref<CatalogProductFilters>(emptyProductFilters())
+const advancedOpen = ref(false)
+const advancedSaving = ref(false)
+const advancedError = ref('')
+let pendingFilters: CatalogProductFilters | null = null
 const collectionItems = ref<ImportedProduct[]>([])
 const loadingCollectionItems = ref(false)
 const failedCollectionItems = ref(false)
@@ -38,8 +45,7 @@ const actionMessage = ref<string | null>(null)
 const search = ref('')
 const submittedSearch = ref('')
 const status = ref('')
-const category = ref('')
-const color = ref('')
+const MULTI_SENTINEL = '__multi__'
 const currentPage = ref(1)
 const pageSize = ref(20)
 const pageInput = ref(1)
@@ -75,30 +81,23 @@ let projectFavoriteStateVersion = 0
 const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
 const savingCatalogStatus = ref(false)
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
-const hasFacet = computed(() => !!(category.value || color.value))
-const catalogRows = computed(() => (facetProducts.value ?? serverProducts.value).map(product => ({
-  product,
-  category: (product.categoryPath || []).map(part => part.trim()).filter(Boolean).join(' / '),
-  color: product.colorPrimaryName?.trim() || '',
-})))
-
-function facetOptions(values: string[]) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'))
-}
-
-const categories = computed(() => facetOptions(catalogRows.value.map(row => row.category)))
-const colors = computed(() => facetOptions(catalogRows.value.map(row => row.color)))
-const filtersApplied = computed(() => !!(search.value || status.value || category.value || color.value))
-const filteredProducts = computed(() => {
-  const query = submittedSearch.value.toLowerCase()
-  return catalogRows.value.filter(row => {
-    const { product } = row
-    const matchesSearch = !query || [product.productName, product.rspuCode, product.externalCode, product.rspuId].some(value => value?.toLowerCase().includes(query))
-    const matchesStatus = !status.value || (status.value === 'active' ? product.status === 'active' : product.status !== 'active')
-    return matchesSearch && matchesStatus && (!category.value || row.category === category.value)
-      && (!color.value || row.color === color.value)
-  }).map(row => row.product)
-})
+const productTypeOptions = computed(() => facets.value?.groups?.productTypes ?? [])
+const colorOptions = computed(() => facets.value?.groups?.colors ?? [])
+const quickProductType = computed(() => appliedFilters.value.productTypes.length === 1
+  ? appliedFilters.value.productTypes[0]!
+  : appliedFilters.value.productTypes.length > 1 ? MULTI_SENTINEL : '')
+const quickColor = computed(() => appliedFilters.value.colors.length === 1
+  ? appliedFilters.value.colors[0]!
+  : appliedFilters.value.colors.length > 1 ? MULTI_SENTINEL : '')
+const filtersApplied = computed(() => !!(search.value || status.value) || countProductFilters(appliedFilters.value) > 0)
+const advancedCount = computed(() => countProductFilters(appliedFilters.value))
+const activeFilterChips = computed(() => FILTER_KEYS.flatMap(key => {
+  const options = facets.value?.groups?.[key] ?? []
+  return appliedFilters.value[key].map(code => {
+    const option = options.find(item => item.code === String(code))
+    return { key: key as string, code: String(code), label: option?.label ?? String(code) }
+  })
+}))
 const collection = computed(() => selectedCollection.value ?? (workspace.currentProjectId ? 'project' : 'personal'))
 const collectionLoading = computed(() => loadingCollectionItems.value
   || (collection.value === 'project' ? projectFavoriteLoading.value : favoriteLoading.value))
@@ -107,14 +106,12 @@ const collectionError = computed(() => failedCollectionItems.value
 const collectionProducts = computed(() => {
   if (!statsAvailable.value) return []
   const ids = collection.value === 'project' ? projectFavoriteProductIds.value : favoriteProductIds.value
-  const visible = managed.value ? facetProducts.value ?? [] : collectionItems.value
+  const visible = managed.value ? visibleProducts.value ?? [] : collectionItems.value
   return visible.filter(product => ids.has(product.rspuId))
 })
-const resultTotal = computed(() => hasFacet.value ? filteredProducts.value.length : serverTotal.value)
+const resultTotal = computed(() => serverTotal.value)
 const pageCount = computed(() => Math.max(1, Math.ceil(resultTotal.value / pageSize.value)))
-const pageProducts = computed(() => hasFacet.value
-  ? filteredProducts.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value)
-  : serverProducts.value)
+const pageProducts = computed(() => serverProducts.value)
 const pageStart = computed(() => resultTotal.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
 const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, resultTotal.value))
 const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
@@ -134,47 +131,118 @@ watch(search, (value, _, onCleanup) => {
   const timeout = setTimeout(() => { submittedSearch.value = value.trim() }, 180)
   onCleanup(() => clearTimeout(timeout))
 })
-watch([submittedSearch, status, category, color, pageSize], () => { currentPage.value = 1 }, { flush: 'sync' })
 watch(currentPage, value => { pageInput.value = value })
-watch([submittedSearch, status, pageSize, currentPage, hasFacet], () => { void loadProducts() })
+watch([submittedSearch, status, pageSize], () => {
+  currentPage.value = 1
+  pageInput.value = 1
+  void loadProducts()
+})
 watch([managed, storageScope], () => { void refreshCatalog() })
 onBeforeUnmount(() => { listRequest++; facetRequest++ })
 
-async function loadProducts() {
+async function loadProducts(options?: { refresh?: boolean }) {
   const request = ++listRequest
-  if (hasFacet.value) {
-    isLoading.value = false
-    listError.value = null
-    void loadFacets()
-    return
-  }
+  const filters = pendingFilters ?? appliedFilters.value
+  const isCandidate = pendingFilters !== null
+  pendingFilters = null
   isLoading.value = true
-  listError.value = null
+  if (!isCandidate) listError.value = null
   try {
     const result = await api.loadImportedProductPage({
-      page: currentPage.value, size: pageSize.value, search: submittedSearch.value, status: status.value, managed: managed.value,
+      page: currentPage.value, size: pageSize.value, search: submittedSearch.value, status: status.value,
+      managed: managed.value, filters, refresh: options?.refresh,
     })
     if (request !== listRequest) return
     serverProducts.value = result.rows
     serverTotal.value = result.total
     catalogTotal.value = result.catalogTotal
     activeCount.value = result.activeTotal
+    facets.value = result.facets ?? null
+    appliedFilters.value = cloneProductFilters(filters)
+    advancedError.value = ''
     if (currentPage.value > pageCount.value) currentPage.value = pageCount.value
   } catch (error) {
-    if (request === listRequest) listError.value = error instanceof Error ? error.message : '商品列表请求失败'
+    if (request !== listRequest) return
+    const message = error instanceof Error ? error.message : '商品列表请求失败'
+    if (isCandidate) advancedError.value = message
+    else listError.value = message
   } finally {
     if (request === listRequest) isLoading.value = false
   }
 }
 
+function changeFilters(next: CatalogProductFilters) {
+  pendingFilters = next
+  currentPage.value = 1
+  pageInput.value = 1
+  return loadProducts()
+}
+
+function onQuickChange(key: 'productTypes' | 'colors', event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === MULTI_SENTINEL) return
+  const next = cloneProductFilters(appliedFilters.value)
+  next[key] = value ? [value] : []
+  void changeFilters(next)
+}
+
+function removeFilterChip(chip: { key: string, code: string }) {
+  const next = cloneProductFilters(appliedFilters.value)
+  const values = next[chip.key as keyof CatalogProductFilters] as Array<string | number>
+  const index = values.findIndex(item => String(item) === chip.code)
+  if (index >= 0) values.splice(index, 1)
+  void changeFilters(next)
+}
+
+async function applyAdvancedFilters(candidate: CatalogProductFilters) {
+  advancedSaving.value = true
+  advancedError.value = ''
+  try {
+    await changeFilters(candidate)
+  } finally {
+    advancedSaving.value = false
+  }
+}
+
+function openAdvancedFilters() {
+  advancedError.value = ''
+  advancedOpen.value = !advancedOpen.value
+}
+
+const filtersForm = ref<HTMLElement | null>(null)
+const drawerTop = ref(0)
+
+function measureDrawerTop() {
+  if (window.innerWidth <= 640) {
+    drawerTop.value = 0
+    return
+  }
+  if (filtersForm.value) drawerTop.value = Math.round(filtersForm.value.getBoundingClientRect().top)
+}
+
+watch(advancedOpen, (open) => {
+  if (open) {
+    nextTick(measureDrawerTop)
+    window.addEventListener('resize', measureDrawerTop)
+  } else {
+    window.removeEventListener('resize', measureDrawerTop)
+  }
+})
+
+watch(appliedFilters, () => {
+  if (advancedOpen.value) nextTick(measureDrawerTop)
+})
+
+onBeforeUnmount(() => window.removeEventListener('resize', measureDrawerTop))
+
 async function loadFacets() {
-  if (facetProducts.value !== null || facetLoading.value) return
+  if (visibleProducts.value !== null || facetLoading.value) return
   const request = ++facetRequest
   facetLoading.value = true
   facetError.value = ''
   try {
     const visible = await api.loadImportedProducts(managed.value)
-    if (request === facetRequest) facetProducts.value = visible
+    if (request === facetRequest) visibleProducts.value = visible
   } catch {
     if (request === facetRequest) facetError.value = '分类和主色暂时无法加载，请重试。'
   } finally {
@@ -184,13 +252,12 @@ async function loadFacets() {
 
 async function refreshCatalog() {
   facetRequest++
-  facetProducts.value = null
+  visibleProducts.value = null
   facetError.value = ''
   facetLoading.value = false
-  category.value = ''
-  color.value = ''
   currentPage.value = 1
-  await loadProducts()
+  pageInput.value = 1
+  await loadProducts({ refresh: true })
   if (managed.value) void loadFacets()
 }
 async function loadCatalogStatus() {
@@ -224,17 +291,23 @@ async function toggleWorkspaceSharedCatalog() {
 }
 
 function resetFilters() {
+  const queryChanged = submittedSearch.value !== '' || status.value !== ''
   search.value = ''
-  submittedSearch.value = ''
   status.value = ''
-  category.value = ''
-  color.value = ''
+  submittedSearch.value = ''
+  pendingFilters = emptyProductFilters()
+  if (!queryChanged) void changeFilters(emptyProductFilters())
 }
 
 function goToPage(value = pageInput.value) {
   const target = Math.min(pageCount.value, Math.max(1, Math.trunc(Number(value) || 1)))
+  if (target === currentPage.value) {
+    pageInput.value = target
+    return
+  }
   currentPage.value = target
   pageInput.value = target
+  void loadProducts()
 }
 
 async function loadFavoriteProductIds() {
@@ -420,9 +493,9 @@ onMounted(() => {
       <span v-if="projectFavoriteStatusError" class="text-red-800">项目收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadProjectFavoriteProductIds()">重试</button></span>
     </div>
 
-    <div class="catalog-split">
+    <div class="catalog-split" :class="{ 'advanced-open': advancedOpen }">
       <section class="catalog-main min-w-0" aria-label="商品列表">
-        <form class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
+        <form ref="filtersForm" class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
           <label class="filter-search grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
             搜索商品
             <span class="relative block">
@@ -432,16 +505,18 @@ onMounted(() => {
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
             产品分类
-            <select v-model="category" aria-label="筛选产品分类" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" @focus="loadFacets" @pointerenter="loadFacets" :disabled="!statsAvailable || !catalogTotal">
+            <select :value="quickProductType" aria-label="筛选产品分类" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" :disabled="!statsAvailable || !catalogTotal" @change="onQuickChange('productTypes', $event)">
               <option value="">全部分类</option>
-              <option v-for="value in categories" :key="value" :value="value">{{ value }}</option>
+              <option v-if="appliedFilters.productTypes.length > 1" :value="MULTI_SENTINEL" disabled>已选 {{ appliedFilters.productTypes.length }} 项</option>
+              <option v-for="option in productTypeOptions" :key="option.code" :value="option.code" :disabled="option.disabled && !appliedFilters.productTypes.includes(option.code)">{{ option.label }}</option>
             </select>
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
             商品主色
-            <select v-model="color" aria-label="筛选商品主色" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" @focus="loadFacets" @pointerenter="loadFacets" :disabled="!statsAvailable || !catalogTotal">
+            <select :value="quickColor" aria-label="筛选商品主色" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" :disabled="!statsAvailable || !catalogTotal" @change="onQuickChange('colors', $event)">
               <option value="">全部主色</option>
-              <option v-for="value in colors" :key="value" :value="value">{{ value }}</option>
+              <option v-if="appliedFilters.colors.length > 1" :value="MULTI_SENTINEL" disabled>已选 {{ appliedFilters.colors.length }} 项</option>
+              <option v-for="option in colorOptions" :key="option.code" :value="option.code" :disabled="option.disabled && !appliedFilters.colors.includes(option.code)">{{ option.label }}</option>
             </select>
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
@@ -451,10 +526,20 @@ onMounted(() => {
             </select>
           </label>
           <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="border border-accent bg-white px-3 py-2.5 text-sm font-semibold text-accent-ink hover:bg-cream" @click="openAdvancedFilters">全部筛选<span v-if="advancedCount" class="ml-1 rounded-full bg-accent px-1.5 text-xs font-bold text-white">{{ advancedCount }}</span></button>
             <button type="button" class="border border-neutral-300 p-2.5 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="refreshCatalog"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
             <button v-if="filtersApplied" type="button" class="px-1 text-xs font-semibold text-accent-ink hover:underline" @click="resetFilters">清空条件</button>
           </div>
         </form>
+
+        <div v-if="activeFilterChips.length" class="flex flex-wrap items-center gap-2 py-2" aria-label="已选筛选条件">
+          <button v-for="chip in activeFilterChips" :key="`${chip.key}:${chip.code}`" type="button"
+            class="active-filter-chip inline-flex items-center gap-1 rounded-full border border-[#d9ccea] bg-[#f4eefa] px-3 py-1 text-xs font-medium text-[#4a3170]"
+            @click="removeFilterChip(chip)">
+            {{ chip.label }}<AppIcon name="close" size="3" />
+          </button>
+          <button type="button" class="text-xs font-semibold text-accent-ink hover:underline" @click="changeFilters(emptyProductFilters())">清空全部</button>
+        </div>
 
         <p v-if="facetError" class="py-2 text-xs text-red-700" role="status">
           {{ facetError }} <button type="button" class="underline" @click="loadFacets">重试</button>
@@ -536,6 +621,10 @@ onMounted(() => {
           </div>
         </div>
       </section>
+      <ProductAdvancedFilterDialog :open="advancedOpen" :filters="appliedFilters" :facets="facets"
+        :top="drawerTop"
+        :saving="advancedSaving" :error="advancedError"
+        @confirm="applyAdvancedFilters" @cancel="advancedOpen = false" />
       <aside :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
         :class="{ 'is-open': collectionOpen }" aria-label="产品库收藏" tabindex="-1">
         <ProductBundlePanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="pageProducts" class="mb-4" />
@@ -587,6 +676,12 @@ onMounted(() => {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 1rem;
+}
+@media (min-width: 1100px) {
+  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px clamp(13rem, 17vw, 18rem); }
+}
+@media (min-width: 641px) and (max-width: 1099px) {
+  .catalog-split.advanced-open { margin-right: 400px; }
 }
 
 .catalog-main { container: catalog / inline-size; }
