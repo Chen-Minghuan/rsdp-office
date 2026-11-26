@@ -32,6 +32,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,6 +77,7 @@ public class OfficeProjectService {
     private final SharedCatalogService sharedCatalogService;
     private final OfficeProposalConfirmationMapper confirmationMapper;
     private final OfficeCanvasMapper canvasMapper;
+    private final OfficeWorkspaceLockMapper workspaceLocks;
 
     public List<OfficeProjectDto> listProjects() {
         return listProjects(true);
@@ -394,6 +396,8 @@ public class OfficeProjectService {
     public OfficeFloorDto updateFloorReferences(String projectId, String floorId, UpdateProjectReferencesRequest request) {
         accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
         requireProject(projectId);
+        // 事务级 advisory lock：串行化同一楼层的并发参考图保存，避免后到的旧请求整体覆盖新列表。
+        if (StringUtils.hasText(floorId)) workspaceLocks.lockWorkspace(floorId);
         OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
         if (floor == null || !projectId.equals(floor.getProjectId())) {
             throw new BusinessException("楼层不存在");

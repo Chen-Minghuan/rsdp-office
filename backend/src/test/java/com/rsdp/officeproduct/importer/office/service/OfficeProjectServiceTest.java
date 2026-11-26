@@ -27,8 +27,10 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -65,6 +67,7 @@ class OfficeProjectServiceTest {
     private SharedCatalogService sharedCatalogService;
     private OfficeProposalConfirmationMapper confirmationMapper;
     private OfficeCanvasMapper canvasMapper;
+    private OfficeWorkspaceLockMapper workspaceLocks;
     private OfficeProjectService service;
 
     @BeforeEach void setup() {
@@ -165,9 +168,11 @@ class OfficeProjectServiceTest {
                     canvas.setObjectsJson(canvasObjectsByFloor.get(floorId));
                     return canvas;
                 }).toList());
+        workspaceLocks = mock(OfficeWorkspaceLockMapper.class);
+        when(workspaceLocks.lockWorkspace(anyString())).thenReturn(1);
         service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
             auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService, confirmationMapper,
-            canvasMapper);
+            canvasMapper, workspaceLocks);
     }
 
     private OfficeUser activeUser(String userId, String username) {
@@ -651,6 +656,16 @@ class OfficeProjectServiceTest {
         assertFalse(floors.get(fixture.floorId()).getReferenceImages().contains("/uploads/images/a.png"));
     }
 
+    @Test void updateFloorReferencesLocksFloorBeforeReading() {
+        var fixture = projectWithFloor();
+        service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
+            referencesRequest(referenceImage("/uploads/images/a.png", "图")));
+        // 先取事务锁再读楼层：并发保存串行执行，后到的旧请求不能覆盖新列表。
+        InOrder order = inOrder(workspaceLocks, floorMapper);
+        order.verify(workspaceLocks).lockWorkspace(fixture.floorId());
+        order.verify(floorMapper).selectById(fixture.floorId());
+    }
+
     @Test void updateFloorReferencesWithNullOrEmptyListClearsImages() {
         var fixture = projectWithFloor();
         service.updateFloorReferences(fixture.projectId(), fixture.floorId(),
@@ -906,9 +921,9 @@ class OfficeProjectServiceTest {
                 OfficeDesignProjectMapper.class, OfficeDesignFloorMapper.class, OfficeProjectMemberMapper.class,
                 OfficeUserMapper.class, OfficeProjectAccessService.class, OfficeAuditService.class, ObjectMapper.class,
                 OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class,
-                OfficeProposalConfirmationMapper.class, OfficeCanvasMapper.class
+                OfficeProposalConfirmationMapper.class, OfficeCanvasMapper.class, OfficeWorkspaceLockMapper.class
             ).newInstance(projectMapper, floorMapper, memberMapper, userMapper, access, auditService, new ObjectMapper(),
-                cartMapper, catalogGateway, sharedCatalogService, confirmationMapper, canvasMapper);
+                cartMapper, catalogGateway, sharedCatalogService, confirmationMapper, canvasMapper, workspaceLocks);
         } catch (NoSuchMethodException missingBudgetDependencies) {
             throw new AssertionError("项目服务尚未提供购物车预算聚合依赖", missingBudgetDependencies);
         } catch (ReflectiveOperationException failed) {
