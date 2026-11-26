@@ -290,7 +290,7 @@ async function switchSpaceScheme(space: ProposalSpace, targetSlot: SchemeSlot) {
     if (result.scheme) schemeStates.value = { ...schemeStates.value, [space.zoneId]: result.scheme }
     loadedRenderZones.delete(space.zoneId)
     void loadRenderPreviews()
-    setNotice(`已切换至 Plan ${result.scheme?.activeSlot ?? targetSlot}`)
+    setNotice(`${space.name} 已切换至 Plan ${result.scheme?.activeSlot ?? targetSlot}`)
   } catch (e) {
     if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案切换失败，请稍后重试')
   } finally {
