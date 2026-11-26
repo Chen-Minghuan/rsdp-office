@@ -351,10 +351,8 @@ try {
   await page.setViewportSize({ width: 1440, height: 960 })
   const categoryFilter = page.getByRole('combobox', { name: '筛选产品分类' })
   const colorFilter = page.getByRole('combobox', { name: '筛选商品颜色' })
-  await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/products/browse/facets'),
-    categoryFilter.focus(),
-  ])
+  await categoryFilter.focus()
+  await categoryFilter.getByRole('option', { name: '办公家具 / 办公椅', exact: true }).waitFor({ state: 'attached' })
   await categoryFilter.selectOption({ label: '办公家具 / 办公椅' })
   await productCards().nth(1).waitFor()
   assert.equal(await productCards().count(), 2)
