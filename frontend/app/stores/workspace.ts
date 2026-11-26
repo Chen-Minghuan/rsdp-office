@@ -17,6 +17,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     currentFloorId: '',
     collapsedProjectIds: [] as string[],
     collapsedFloorIds: [] as string[],
+    statusOverrides: {} as Record<string, { status: import('~/types/workspace').ProjectStatus, at: number }>,
     initialized: false,
     loading: false,
     switching: false,
@@ -33,8 +34,16 @@ export const useWorkspaceStore = defineStore('workspace', {
       const scope = useAuth().storageScope.value
       const updated = await useWorkspaceApi().updateProjectStatus(projectId, status)
       if (scope !== useAuth().storageScope.value) return
+      // 记录保存时间：先于本次保存发出的列表重取响应不得覆盖刚保存的阶段。
+      this.statusOverrides[projectId] = { status: updated.status, at: Date.now() }
       const project = this.projects.find(item => item.projectId === projectId)
       if (project) project.status = updated.status
+    },
+    withStatusOverrides(projects: WorkspaceProject[], requestedAt: number) {
+      return projects.map(project => {
+        const override = this.statusOverrides[project.projectId]
+        return override && override.at >= requestedAt ? { ...project, status: override.status } : project
+      })
     },
     rememberSelection() {
       if (import.meta.client) localStorage.setItem(selectionStorageKey(), JSON.stringify({ projectId: this.currentProjectId, floorId: this.currentFloorId, collapsed: this.collapsedProjectIds, collapsedFloors: this.collapsedFloorIds }))
@@ -80,16 +89,18 @@ export const useWorkspaceStore = defineStore('workspace', {
         }
       }
     },
-    // 派生字段（阶段、区域进度）只能由列表接口给出；进入工作台列表时静默重取，
+    // 派生字段（区域进度）只能由列表接口给出；进入工作台列表时静默重取，
     // 保留现有数据避免闪烁，不触碰 office 画布状态。首次加载仍由 init() 负责。
+    // 重取请求发出后人工保存的阶段以 statusOverrides 为准，不被迟到的旧响应覆盖。
     async refreshProjects() {
       if (!this.initialized || this.loading) return
       this.loading = true
       const scope = useAuth().storageScope.value
+      const requestedAt = Date.now()
       try {
         const projects = await useWorkspaceApi().listProjects()
         if (scope !== useAuth().storageScope.value) return
-        this.projects = projects
+        this.projects = this.withStatusOverrides(projects, requestedAt)
         this.error = ''
       } catch (error) {
         if (scope === useAuth().storageScope.value) this.error = error instanceof Error ? error.message : '项目列表暂时不可用'

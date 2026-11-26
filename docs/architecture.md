@@ -26,7 +26,7 @@
 
 项目列表接口同时返回区域进度字段 `zoneTotal` / `zoneDelivered`：区域为楼层最新画布 `objects_json` 中 `kind=zone` 的对象（每楼层取 `created_at` 最新一行，无画布按 0 计，解析失败按 0 计）；所在楼层方案存在未失效（`retired=false`）确认**且该区域购物车数量合计 > 0**（`office_cart` 按楼层与 `zone_id` 聚合，未分区行不计入）的区域计入 `zoneDelivered`，购物车为 0 的区域视为设计中；前端按 `zoneDelivered / zoneTotal` 计算进度百分比，`zoneTotal` 为 0 时显示占位。
 
-客户端刷新契约：项目列表由应用外壳 `workspace.init()` 拉取一次，此后不随路由自动重取；阶段与区域进度只能由列表接口给出（阶段人工维护、进度读时派生），因此进入工作台项目列表视图时 `workspace.refreshProjects()` 静默重取（保留旧数据避免闪烁、不重置 office 画布状态，首次加载仍由 `init()` 负责）。方案确认、确认失效（画布保存/清单变化）与新增楼层均不主动失效列表，依赖进入列表时的重取获得最新阶段与进度；若未来出现需要实时阶段的其他消费方（如侧栏角标），再引入版本号广播式失效。回归见 `pnpm e2e:project-refresh`。
+客户端刷新契约：项目列表由应用外壳 `workspace.init()` 拉取一次，此后不随路由自动重取；阶段与区域进度只能由列表接口给出（阶段人工维护、进度读时派生），因此进入工作台项目列表视图时 `workspace.refreshProjects()` 静默重取（保留旧数据避免闪烁、不重置 office 画布状态，首次加载仍由 `init()` 负责）。方案确认、确认失效（画布保存/清单变化）与新增楼层均不主动失效列表，依赖进入列表时的重取获得最新阶段与进度；若未来出现需要实时阶段的其他消费方（如侧栏角标），再引入版本号广播式失效。人工保存阶段与重取竞态由 store 的 `statusOverrides` 防护：重取响应发出之后才保存的阶段以人工保存值为准，不被迟到的旧响应覆盖。回归见 `pnpm e2e:project-refresh` 与 `pnpm e2e:project-status`（延迟响应用例）。
 
 ```text
 DesignProject（项目资料与客户需求备注）

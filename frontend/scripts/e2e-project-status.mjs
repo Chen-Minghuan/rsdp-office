@@ -16,12 +16,21 @@ async function scenario(role, canManageStatus) {
     floors: [{ floorId: `F${index + 1}`, projectId: `P${index + 1}`, name: '1F', sortOrder: 1 }],
   }))
   let rejectUpdate = false
+  let delayNextProjects = false
   const mutations = []
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'LEAD', username: 'lead', displayName: '开发账号', role } } }))
   await context.route('**/api/v1/**', route => {
     const request = route.request(), path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ json: { code: 200, data } })
-    if (path === '/api/v1/office/projects') return respond(projects)
+    if (path === '/api/v1/office/projects') {
+      // 延迟响应按请求发出时的快照返回，模拟"列表请求先于阶段保存发出、响应后到"的竞态
+      if (delayNextProjects) {
+        delayNextProjects = false
+        const stale = JSON.parse(JSON.stringify(projects))
+        return new Promise(resolve => setTimeout(() => resolve(route.fulfill({ json: { code: 200, data: stale } })), 800))
+      }
+      return respond(projects)
+    }
     if (path === '/api/v1/office/projects/budgets') return respond({})
     const match = path.match(/^\/api\/v1\/office\/projects\/([^/]+)\/status$/)
     if (match && request.method() === 'PATCH') {
@@ -37,7 +46,7 @@ async function scenario(role, canManageStatus) {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(baseUrl + '/workspace/project-bench', { waitUntil: 'networkidle' })
-  return { page, context, projects, mutations, errors, reject: () => { rejectUpdate = true } }
+  return { page, context, projects, mutations, errors, reject: () => { rejectUpdate = true }, accept: () => { rejectUpdate = false }, delayNextList: () => { delayNextProjects = true } }
 }
 
 try {
@@ -66,6 +75,17 @@ try {
   await list.getByRole('alert').filter({ hasText: '阶段保存失败' }).waitFor()
   assert.equal(await page.getByRole('combobox', { name: '总部办公的项目阶段' }).inputValue(), 'DELIVERING', '失败恢复原值')
   assert.equal(owner.projects[0].status, 'DELIVERING')
+
+  // 延迟响应回归：进入列表触发重取后立即保存阶段，迟到的旧列表响应不得覆盖刚保存的阶段
+  owner.accept()
+  owner.delayNextList()
+  await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '项目工作台', exact: true }).click()
+  await page.getByRole('link', { name: '返回项目列表', exact: true }).click()
+  await page.getByRole('combobox', { name: '总部办公的项目阶段' }).selectOption('COMPLETED')
+  await page.getByRole('combobox', { name: '总部办公的项目阶段' }).waitFor()
+  await page.waitForTimeout(1200)
+  assert.equal(await page.getByRole('combobox', { name: '总部办公的项目阶段' }).inputValue(), 'COMPLETED', '迟到的列表响应不得覆盖刚保存的阶段')
+  assert.equal(owner.projects[0].status, 'COMPLETED')
   await mkdir('/tmp/rsdp-project-status', { recursive: true })
   await page.screenshot({ path: '/tmp/rsdp-project-status/desktop.png' })
   await page.setViewportSize({ width: 390, height: 844 })
@@ -84,7 +104,7 @@ try {
   assert.equal(reader.mutations.length, 0)
   assert.deepEqual(reader.errors, [])
   await reader.context.close()
-  console.log('Project status E2E passed: counts, filters, search, owner/leader editing, read-only members, persisted reload, error rollback and mobile layout. API mocked.')
+  console.log('Project status E2E passed: counts, filters, search, owner/leader editing, read-only members, persisted reload, error rollback, stale refetch race and mobile layout. API mocked.')
 } finally {
   await browser.close()
 }
