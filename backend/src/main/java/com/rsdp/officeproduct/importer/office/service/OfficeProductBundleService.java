@@ -3,14 +3,19 @@ package com.rsdp.officeproduct.importer.office.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProductBundleDtos.*;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProductBundleMapper;
+import com.rsdp.officeproduct.importer.office.product.LocalProductReference;
+import com.rsdp.officeproduct.importer.office.product.LocalProductService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -18,10 +23,23 @@ public class OfficeProductBundleService {
     private final OfficeProductBundleMapper bundles;
     private final CurrentUserService users;
     private final OfficeService office;
+    private final LocalProductService localProducts;
     private final ObjectMapper json;
 
     public List<Bundle> list() {
-        return bundles.list(userId()).stream().map(this::decode).toList();
+        var saved = bundles.list(userId()).stream().map(this::decode).toList();
+        var referencedLocalIds = saved.stream().flatMap(bundle -> bundle.items().stream())
+            .map(SavedItem::rspuId).filter(LocalProductReference::isLocal)
+            .map(LocalProductReference::productId).collect(Collectors.toSet());
+        if (referencedLocalIds.isEmpty()) return saved;
+        Set<String> visibleIds = localProducts.catalogItems(referencedLocalIds).stream()
+            .map(item -> item.id()).collect(Collectors.toSet());
+        return saved.stream().map(bundle -> new Bundle(bundle.bundleId(), bundle.name(), bundle.revision(),
+            bundle.items().stream().map(item -> {
+                if (!LocalProductReference.isLocal(item.rspuId())
+                        || visibleIds.contains(LocalProductReference.productId(item.rspuId()))) return item;
+                return new SavedItem(item.rspuId(), item.variantId(), item.quantity(), null, null, null);
+            }).toList())).toList();
     }
 
     public Bundle save(String bundleId, Save request) {
@@ -31,11 +49,7 @@ public class OfficeProductBundleService {
         String userId = userId();
         String name = request.name().strip();
         validateItems(request.items(), true);
-        List<SavedItem> items = request.items().stream().map(item -> {
-            var product = office.currentProductVariant(item.rspuId(), item.variantId());
-            if (product == null) throw new BusinessException("组合中有商品变体不可用，请移除或替换后再保存");
-            return new SavedItem(item.rspuId(), item.variantId(), item.quantity(), product.getName(), product.getVariant(), product.getImageUrl());
-        }).toList();
+        List<SavedItem> items = request.items().stream().map(this::resolveItem).toList();
         var row = new OfficeProductBundleMapper.Row(bundleId, userId, name, request.revision(), encode(items));
         int writes = request.revision() == 0 ? bundles.create(row) : bundles.update(row);
         if (writes != 1) throw new BusinessException("商品组合已变化，请重新读取后编辑");
@@ -47,13 +61,26 @@ public class OfficeProductBundleService {
         if (bundles.delete(bundleId, userId(), revision) != 1) throw new BusinessException("商品组合已变化或不存在");
     }
 
+    private SavedItem resolveItem(Item item) {
+        if (LocalProductReference.isLocal(item.rspuId())) {
+            var detail = localProducts.detail(LocalProductReference.productId(item.rspuId()));
+            var variant = detail.variants().stream().filter(row -> item.variantId().equals(row.id())).findFirst()
+                .orElseThrow(() -> new BusinessException("组合中有商品变体不可用，请移除或替换后再保存"));
+            String image = detail.images().isEmpty() ? null : LocalProductReference.imagePath(detail.images().get(0).id());
+            return new SavedItem(item.rspuId(), item.variantId(), item.quantity(), detail.product().name(), variant.name(), image);
+        }
+        var product = office.currentProductVariant(item.rspuId(), item.variantId());
+        if (product == null) throw new BusinessException("组合中有商品变体不可用，请移除或替换后再保存");
+        return new SavedItem(item.rspuId(), item.variantId(), item.quantity(), product.getName(), product.getVariant(), product.getImageUrl());
+    }
+
     static void validateItems(List<Item> items, boolean allowEmpty) {
         if (items == null || (!allowEmpty && items.isEmpty()) || items.size() > 50) throw new BusinessException("商品组合明细数量无效");
         var keys = new HashSet<List<String>>();
         int total = 0;
         for (Item item : items) {
             if (item == null) throw new BusinessException("商品组合有无效商品");
-            validId(item.rspuId());
+            validId(LocalProductReference.isLocal(item.rspuId()) ? LocalProductReference.productId(item.rspuId()) : item.rspuId());
             validId(item.variantId());
             if (item.quantity() < 1 || item.quantity() > 200 || !keys.add(List.of(item.rspuId(), item.variantId()))) {
                 throw new BusinessException("组合商品重复或数量无效");
@@ -69,7 +96,9 @@ public class OfficeProductBundleService {
 
     private String userId() {
         var user = users.currentUser();
-        return user == null ? users.ensureLocalFavoriteUser() : user.getUserId();
+        if (user != null) return user.getUserId();
+        if (users.authEnabled()) throw new AccessDeniedException("请先登录");
+        return users.ensureLocalFavoriteUser();
     }
 
     private Bundle decode(OfficeProductBundleMapper.Row row) {

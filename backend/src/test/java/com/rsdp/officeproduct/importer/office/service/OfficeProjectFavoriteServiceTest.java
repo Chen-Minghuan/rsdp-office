@@ -2,7 +2,6 @@ package com.rsdp.officeproduct.importer.office.service;
 
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
-import com.rsdp.officeproduct.importer.dto.response.ProductDetailDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectFavoriteDto;
@@ -13,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -40,7 +40,6 @@ class OfficeProjectFavoriteServiceTest {
     @Test
     void getFavoriteUsesCurrentUserRatherThanRequestOwnedIdentity() {
         authenticate("U1");
-        when(productQueryService.getProduct("C")).thenReturn(new ProductDetailDto());
         OfficeProjectFavoriteItem item = new OfficeProjectFavoriteItem();
         item.setProjectId("P-A");
         item.setUserId("U1");
@@ -56,7 +55,6 @@ class OfficeProjectFavoriteServiceTest {
     @Test
     void saveSelectedProductIsIdempotentWithinCurrentProject() {
         authenticate("U1");
-        when(productQueryService.getProduct("C")).thenReturn(new ProductDetailDto());
 
         OfficeProjectFavoriteDto result = service.saveProjectFavorite("P-A", "C", true);
 
@@ -68,7 +66,6 @@ class OfficeProjectFavoriteServiceTest {
     @Test
     void clearingSelectionOnlyRemovesCurrentProjectAndUserRelation() {
         authenticate("U1");
-        when(productQueryService.getProduct("C")).thenReturn(new ProductDetailDto());
 
         OfficeProjectFavoriteDto result = service.saveProjectFavorite("P-A", "C", false);
 
@@ -80,7 +77,6 @@ class OfficeProjectFavoriteServiceTest {
     @Test
     void anotherMemberHasIndependentProjectFavoriteState() {
         authenticate("U2");
-        when(productQueryService.getProduct("C")).thenReturn(new ProductDetailDto());
         when(itemMapper.findOne("P-A", "U2", "C")).thenReturn(null);
 
         assertFalse(service.getProjectFavorite("P-A", "C").selected());
@@ -100,7 +96,7 @@ class OfficeProjectFavoriteServiceTest {
     @Test
     void hiddenProductCannotBeAddedToProject() {
         authenticate("U1");
-        when(productQueryService.getProduct("C")).thenThrow(new BusinessException("商品不可见"));
+        doThrow(new BusinessException("商品不可见")).when(productQueryService).requireVisibleCollectionProduct("C");
 
         assertThrows(BusinessException.class, () -> service.saveProjectFavorite("P-A", "C", true));
         verify(itemMapper, never()).insertIgnore(anyString(), anyString(), anyString());
@@ -121,8 +117,8 @@ class OfficeProjectFavoriteServiceTest {
         when(itemMapper.findItems("P-A", "U1")).thenReturn(List.of(
             projectItem("P-A", "U1", "C", "2026-11-20T10:00:00"),
             projectItem("P-A", "U1", "B", "2026-11-22T10:00:00")));
-        when(productQueryService.listProducts(false)).thenReturn(List.of(
-            product("B", "办公椅"), product("C", "会议桌"), product("D", "未收藏商品")));
+        when(productQueryService.collectionProducts(anyCollection())).thenReturn(Map.of(
+            "B", product("B", "办公椅"), "C", product("C", "会议桌"), "D", product("D", "未收藏商品")));
 
         List<ProductListItemDto> result = service.listProjectFavoriteItems("P-A");
 
@@ -140,7 +136,7 @@ class OfficeProjectFavoriteServiceTest {
         when(itemMapper.findItems("P-A", "U1")).thenReturn(List.of(
             projectItem("P-A", "U1", "C", "2026-11-20T10:00:00"),
             projectItem("P-A", "U1", "B", "2026-11-22T10:00:00")));
-        when(productQueryService.listProducts(false)).thenReturn(List.of(product("C", "会议桌")));
+        when(productQueryService.collectionProducts(anyCollection())).thenReturn(Map.of("C", product("C", "会议桌")));
 
         List<ProductListItemDto> result = service.listProjectFavoriteItems("P-A");
 
