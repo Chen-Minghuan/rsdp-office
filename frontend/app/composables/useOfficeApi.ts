@@ -1,6 +1,6 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
-import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
+import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ProjectQuotationLatest, ConfirmQuotationRequest } from '~/types/office'
 import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
@@ -380,6 +380,11 @@ export function useOfficeApi() {
     return await request<ProjectQuotationRecord | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest`)
   }
 
+  /** 最近一条报价记录（任意状态）的状态与时间；没有报价记录时返回 null。 */
+  async function latestProjectQuotationRecord(projectId: string): Promise<ProjectQuotationLatest | null> {
+    return await request<ProjectQuotationLatest | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest-record`)
+  }
+
   async function catalogImportHistory<T>(): Promise<T> {
     return await request<T>('GET', '/api/v1/products/import-batches')
   }
@@ -626,6 +631,7 @@ export function useOfficeApi() {
     exportProjectQuotation,
     exportLatestProjectQuotation,
     latestProjectQuotation,
+    latestProjectQuotationRecord,
     resetProject,
     loadImportedProducts,
     loadImportedProductPage,

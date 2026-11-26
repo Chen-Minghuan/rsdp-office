@@ -32,6 +32,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,6 +77,7 @@ public class OfficeProjectService {
     private final SharedCatalogService sharedCatalogService;
     private final OfficeProposalConfirmationMapper confirmationMapper;
     private final OfficeCanvasMapper canvasMapper;
+    private final OfficeWorkspaceLockMapper workspaceLocks;
 
     public List<OfficeProjectDto> listProjects() {
         return listProjects(true);
@@ -314,7 +316,8 @@ public class OfficeProjectService {
         floor.setName(name);
         floor.setUpdatedAt(LocalDateTime.now());
         try {
-            floorMapper.updateById(floor);
+            // 只写名称列：与参考图等其它列的并发保存互不覆盖（整行 updateById 会用旧快照覆盖对方）。
+            floorMapper.updateName(floorId, floor.getName(), floor.getUpdatedAt());
         } catch (DuplicateKeyException e) {
             throw new BusinessException("楼层名称不能重复");
         }
@@ -386,6 +389,27 @@ public class OfficeProjectService {
 
     private String memberAuditText(OfficeProjectMember member) {
         return member.getRole() + ":" + member.getUserId() + "=" + OfficeProjectPermission.assigned(member.getPermissionFlags());
+    }
+
+    /** 楼层级参考图：整体替换，复用项目级参考图的地址与数量校验。 */
+    @Transactional
+    public OfficeFloorDto updateFloorReferences(String projectId, String floorId, UpdateProjectReferencesRequest request) {
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
+        requireProject(projectId);
+        // 事务级 advisory lock：串行化同一楼层的并发参考图保存，避免后到的旧请求整体覆盖新列表。
+        if (StringUtils.hasText(floorId)) workspaceLocks.lockWorkspace(floorId);
+        OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
+        if (floor == null || !projectId.equals(floor.getProjectId())) {
+            throw new BusinessException("楼层不存在");
+        }
+        if (request == null) {
+            throw new BusinessException("参考图片参数不能为空");
+        }
+        floor.setReferenceImages(writeReferenceImages(validateReferenceImages(request.getReferenceImages())));
+        floor.setUpdatedAt(LocalDateTime.now());
+        // 只写参考图列：与改名等其它列的并发保存互不覆盖（整行 updateById 会用旧快照覆盖对方）。
+        floorMapper.updateReferenceImages(floorId, floor.getReferenceImages(), floor.getUpdatedAt());
+        return toFloorDto(floor);
     }
 
     @Transactional
@@ -766,6 +790,7 @@ public class OfficeProjectService {
         dto.setProjectId(floor.getProjectId());
         dto.setName(floor.getName());
         dto.setSortOrder(floor.getSortOrder());
+        dto.setReferenceImages(readReferenceImages(floor.getReferenceImages()));
         dto.setCreatedAt(floor.getCreatedAt());
         dto.setUpdatedAt(floor.getUpdatedAt());
         return dto;

@@ -14,6 +14,8 @@
 
 2026-11-26 [本地商品收藏和组合](tasks/INTEG-003-office-product-review.md#本地商品收藏和组合) 商品库的两类卡片共用个人收藏、项目收藏和自选组合。关闭公共库的普通员工浏览器模拟、隔离 PostgreSQL 持久化和工作区校验、前端构建及 Java 回归通过。本机前后端已更新。
 
+2026-11-25 [PROJECT-005 保存回归](tasks/PROJECT-005-floor-reference-images.md#验证记录) 补两组楼层保存回归：连续编辑后重新读取保留最后一次修改；参考图保存与楼层改名并发时两边都保留。并发组暴露出真实丢失更新——改名与参考图两条写路径均为读整行→改单字段→整行 `updateById` 写回，交错时用旧快照互覆盖；已按 `updateRequirements` 先例改为 `OfficeDesignFloorMapper.updateName`/`updateReferenceImages` 按列定点更新。`OfficeProjectServiceTest` 新增 4 用例（连续参考图重读、连续改名+交错重读、栅栏模拟并发交错保留、按列写契约），反向验证临时改回整行写后并发与契约两用例确定性失败；新增 `OfficeFloorSavePostgresTest`（RSDP_TEST_POSTGRES_URL 门控）固化真实库交错读写。Java 全量 433 运行/0 失败/11 跳过（跳过均为 Postgres 门控，含本次新增集成测试未真实执行）。项目级改名与项目参考图存在同类整行写风险，列为后续观察项。
+
 2026-11-25 [WORKSPACE-006 恢复人工维护阶段](tasks/WORKSPACE-006-project-status.md#决策变更2026-11-25恢复人工维护阶段) 项目阶段由"按方案确认读时派生"改回负责人/所属工作区主号人工维护：恢复 `PATCH /api/v1/office/projects/{projectId}/status` 端点、`canManageStatus` 权限字段与前端阶段下拉（设计中/交付中/已完成），其他成员只读；删除 `derivedStatus`，`office_design_project.status` 恢复为唯一事实来源；区域进度（zoneTotal/zoneDelivered）保留按方案确认派生。工作台"已完成"看板由占位改为真实计数并参与筛选。`e2e-project-status` 恢复手动维护断言，`e2e-project-refresh` 改为阶段不随确认自动变化、进度仍派生的断言。实际执行（2026-11-25 本机）：`mvn -f backend/pom.xml test` 422 项、0 失败、0 错误、10 跳过（含未配置 `RSDP_TEST_POSTGRES_URL` 而跳过的 PostgreSQL 专项，不计为数据库验收）；`pnpm build` 通过；dev server（3001）上 `e2e:project-status`、`e2e:workflows`、`MOCK_API=1 e2e:smoke` 与自起服务的 `e2e:project-refresh` 均通过（均拦截 API）；`git diff --check` 通过。未做真实后端联调与真实角色页面验收。
 
 2026-11-25 [LAYOUT-048 家具重叠定位](tasks/LAYOUT-048-furniture-overlap-feedback.md) 排版画布实时显示冲突家具对并支持定位，保存与生图校验指出房间、家具和坐标。前端构建、排版与模拟 UI 回归、Java 全量测试通过。
