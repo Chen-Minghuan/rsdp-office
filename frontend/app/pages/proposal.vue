@@ -337,12 +337,14 @@ const quotationMatchesPage = computed(() => {
 })
 // 有与页面一致的确认报价（或演示模式）才显示最终报价行；此时参考金额加删除线作对比
 const showFinalQuote = computed(() => previewMode.value || (floorQuoteTotal.value !== null && quotationMatchesPage.value))
-// 上一次报价日期：优先任意状态最近一条记录，接口不可用时回退已确认报价记录；只保留日期部分
+// 上一次报价记录：优先当前项目 status 为 CONFIRMED 的报价，没有则取最近一条（任意状态）记录
+const lastQuotation = computed<ProjectQuotationRecord | ProjectQuotationLatest | null>(() =>
+  latestQuotation.value || latestQuotationAny.value)
+// 上一次报价日期：只保留日期部分，hover 版本号行时显示
 const lastQuotationTime = computed(() =>
-  (latestQuotationAny.value?.createdAt || latestQuotation.value?.createdAt || '').split('T')[0].split(' ')[0])
+  (lastQuotation.value?.createdAt || '').split('T')[0].split(' ')[0])
 // 上一次报价版本号：报价记录在数据库中的 id（office_quotation 主键 quotation_id）
-const lastQuotationId = computed(() =>
-  latestQuotationAny.value?.quotationId || latestQuotation.value?.quotationId || '')
+const lastQuotationId = computed(() => lastQuotation.value?.quotationId || '')
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
 const pendingSpaces = computed(() => spaces.value.length - confirmedSpaces.value)
 const confirmedGroups = computed(() => groups.value.filter(group => group.spaces.every(space => space.status === '已确认')).length)
