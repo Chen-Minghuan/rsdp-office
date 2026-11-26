@@ -1,24 +1,27 @@
 <script setup lang="ts">
-import type { CatalogCapabilities, ImportedProduct } from '~/types/imported-products'
-import { catalogSourceLabel } from '~/utils/catalogSource'
+import type { CatalogBrowseFacets, CatalogBrowseRow, ImportedProduct } from '~/types/imported-products'
+import { localProductId, localProductReference } from '~/utils/catalogProductReference'
 
 const api = useOfficeApi()
 const workspace = useWorkspaceStore()
-const pageProducts = ref<ImportedProduct[]>([])
+const { storageScope } = useAuth()
+const catalogFacets = ref<CatalogBrowseFacets | null>(null)
+const localCategoryLabels = shallowRef(new Map<string, string>())
+const serverProducts = ref<CatalogBrowseRow[]>([])
+const resultTotal = ref(0)
 const catalogTotal = ref(0)
 const activeCount = ref(0)
-const filteredTotal = ref(0)
-const capabilities = ref<CatalogCapabilities | null>(null)
-const managed = ref(false)
+const localTotal = ref(0)
+const canManageLocal = ref(false)
+const sharedUnavailable = ref(false)
+let localCategoriesRequested = false
+const collectionItems = ref<ImportedProduct[]>([])
+const loadingCollectionItems = ref(false)
+const failedCollectionItems = ref(false)
+const facetLoading = ref(false)
+const facetError = ref('')
+let facetRequest = 0
 let listRequest = 0
-
-async function loadCapabilities() {
-  try {
-    capabilities.value = await api.loadCatalogCapabilities()
-  } catch {
-    capabilities.value = null
-  }
-}
 
 const isLoading = ref(true)
 const listError = ref<string | null>(null)
@@ -27,13 +30,12 @@ const actionMessage = ref<string | null>(null)
 const search = ref('')
 const submittedSearch = ref('')
 const status = ref('')
+const category = ref('')
+const color = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 const pageInput = ref(1)
-const reloadVersion = ref(0)
 const pageSizeOptions = [10, 20, 50, 100]
-const selectedProduct = ref<ImportedProduct | null>(null)
-const detailDialog = ref<HTMLDialogElement | null>(null)
 const removingFavoriteProduct = ref<ImportedProduct | null>(null)
 const removingFavorite = ref(false)
 const removeFavoriteError = ref<string | null>(null)
@@ -42,18 +44,80 @@ const favoriteProductIds = ref<Set<string>>(new Set())
 const projectFavoriteProductIds = ref<Set<string>>(new Set())
 const favoriteStatusError = ref<string | null>(null)
 const projectFavoriteStatusError = ref<string | null>(null)
+const favoriteLoading = ref(true)
+const projectFavoriteLoading = ref(false)
+const collectionOpen = ref(false)
+const bundlesAvailable = ref(false)
+const collectionId = useId()
+const collectionPanel = ref<HTMLElement | null>(null)
+const selectedCollection = ref<'project' | 'personal'>()
 const favoriteDialog = ref<{ open: (product: ImportedProduct, section?: 'project' | 'personal') => Promise<void> } | null>(null)
+const bundlePanel = ref<{ addProduct: (product: ImportedProduct) => Promise<void> } | null>(null)
+
+function addToBundle(product: ImportedProduct) {
+  collectionOpen.value = true
+  void bundlePanel.value?.addProduct(product)
+  nextTick(() => collectionPanel.value?.focus())
+}
 let favoriteIdsRequest = 0
 let favoriteStateVersion = 0
 let projectFavoriteIdsRequest = 0
 let projectFavoriteStateVersion = 0
 /** 公共库工作区级开关状态（仅经销商主号可切换；成员无个人开关，完全跟随主号设置） */
 const catalogStatus = ref<{ workspaceEnabled: boolean; dealer: boolean; effectiveVisible: boolean } | null>(null)
+const catalogStatusReady = ref(false)
+const localOnly = computed(() => catalogStatus.value?.effectiveVisible === false)
 const savingCatalogStatus = ref(false)
+let statusRequest = 0
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredTotal.value / pageSize.value)))
-const pageStart = computed(() => filteredTotal.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
-const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, filteredTotal.value))
+const categories = computed(() => [
+  ...(catalogFacets.value?.localCategories ?? []).map(code => ({ value: 'local:' + code, label: localCategoryLabel(code) })),
+  ...(catalogFacets.value?.sharedCategories ?? []).map(label => ({ value: 'shared:' + label, label })),
+].sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')))
+const colors = computed(() => [...(catalogFacets.value?.colors ?? [])].sort((a, b) => a.localeCompare(b, 'zh-CN')))
+const filtersApplied = computed(() => !!(search.value || status.value || category.value || color.value))
+
+function localCategoryLabel(code: string) {
+  const label = localCategoryLabels.value.get(code)
+  return label ? `${label} · ${code}` : code
+}
+
+function loadLocalCategoryLabels() {
+  if (localCategoriesRequested) return
+  localCategoriesRequested = true
+  void api.listLocalProductCategories().then(labels => {
+    localCategoryLabels.value = new Map(labels.map(item => [item.dictCode, item.dictName]))
+  }).catch(() => { localCategoriesRequested = false })
+}
+
+const collection = computed(() => selectedCollection.value ?? (workspace.currentProjectId ? 'project' : 'personal'))
+const collectionLoading = computed(() => loadingCollectionItems.value
+  || (collection.value === 'project' ? projectFavoriteLoading.value : favoriteLoading.value))
+const collectionError = computed(() => failedCollectionItems.value
+  || !!(collection.value === 'project' ? projectFavoriteStatusError.value : favoriteStatusError.value))
+const collectionProducts = computed(() => {
+  const ids = collection.value === 'project' ? projectFavoriteProductIds.value : favoriteProductIds.value
+  return collectionItems.value.filter(product => ids.has(product.rspuId) && (!localOnly.value || localProductId(product.rspuId)))
+})
+const pageCount = computed(() => Math.max(1, Math.ceil(resultTotal.value / pageSize.value)))
+const pageProducts = computed<ImportedProduct[]>(() => serverProducts.value.flatMap(row => {
+  if (!row.local) return !localOnly.value && row.shared ? [row.shared] : []
+  const item = row.local
+  return [{
+    rspuId: localProductReference(item.id),
+    rspuCode: item.factoryModel,
+    externalCode: null,
+    productName: item.name,
+    categoryPath: [localCategoryLabel(item.categoryCode)],
+    primaryImageUrl: item.primaryImageId ? api.localProductImagePath(item.primaryImageId) : null,
+    retailPrice: null,
+    status: 'active',
+    createdAt: '',
+    updatedAt: '',
+  }]
+}))
+const pageStart = computed(() => resultTotal.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
+const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, resultTotal.value))
 const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   const total = pageCount.value
   const current = currentPage.value
@@ -67,34 +131,43 @@ const paginationItems = computed<Array<number | 'ellipsis'>>(() => {
   })
   return items
 })
-watch(search, (value, _previous, onCleanup) => {
-  const timeout = setTimeout(() => {
-    const term = value.trim()
-    if (term === submittedSearch.value) return
-    currentPage.value = 1
-    submittedSearch.value = term
-  }, 180)
+watch(search, (value, _, onCleanup) => {
+  const timeout = setTimeout(() => { submittedSearch.value = value.trim() }, 180)
   onCleanup(() => clearTimeout(timeout))
 })
-watch([status, pageSize, managed], () => {
-  currentPage.value = 1
-})
+watch([submittedSearch, status, category, color, pageSize], () => { currentPage.value = 1 }, { flush: 'sync' })
 watch(currentPage, value => { pageInput.value = value })
-watch([submittedSearch, status, pageSize, managed, currentPage, reloadVersion], () => { void loadProducts() })
-onBeforeUnmount(() => { listRequest++ })
+watch([submittedSearch, status, category, color, pageSize, currentPage, catalogStatusReady, localOnly], () => { void loadProducts() })
+watch(localOnly, () => {
+  listRequest++
+  isLoading.value = true
+  status.value = ''
+  invalidateFacets()
+  currentPage.value = 1
+}, { flush: 'sync' })
+watch(storageScope, () => { void loadCatalogContext() })
+onBeforeUnmount(() => { listRequest++; facetRequest++; statusRequest++ })
 
 async function loadProducts() {
+  if (!catalogStatusReady.value) return
   const request = ++listRequest
   isLoading.value = true
   listError.value = null
   try {
-    const result = await api.loadImportedProductPage({ page: currentPage.value, size: pageSize.value,
-      search: submittedSearch.value, status: status.value, managed: managed.value })
+    const result = await api.browseProductCatalog({
+      page: currentPage.value, size: pageSize.value, search: submittedSearch.value,
+      status: status.value, category: category.value, color: color.value,
+    })
     if (request !== listRequest) return
-    filteredTotal.value = result.total
+    serverProducts.value = result.rows
+    resultTotal.value = result.total
     catalogTotal.value = result.catalogTotal
     activeCount.value = result.activeTotal
-    pageProducts.value = result.rows
+    localTotal.value = result.localTotal
+    canManageLocal.value = result.canManageLocal
+    sharedUnavailable.value = result.sharedUnavailable
+    if (result.localTotal) loadLocalCategoryLabels()
+    if (result.sharedUnavailable && !result.localTotal) listError.value = '公共库暂时无法加载'
     if (currentPage.value > pageCount.value) currentPage.value = pageCount.value
   } catch (error) {
     if (request === listRequest) listError.value = error instanceof Error ? error.message : '商品列表请求失败'
@@ -103,50 +176,85 @@ async function loadProducts() {
   }
 }
 
-async function loadCatalogStatus() {
+async function loadFacets() {
+  if (!catalogStatusReady.value || facetLoading.value || (catalogFacets.value && !catalogFacets.value.sharedUnavailable)) return
+  const request = ++facetRequest
+  facetLoading.value = true
+  facetError.value = ''
   try {
-    catalogStatus.value = await api.getSharedCatalogStatus()
+    const facets = await api.browseProductFacets()
+    if (request === facetRequest) {
+      catalogFacets.value = facets
+      if (facets.sharedUnavailable) facetError.value = '公共库的分类和颜色暂时无法加载。'
+      if (facets.localCategories.length) loadLocalCategoryLabels()
+    }
   } catch {
-    // 状态拉取失败不阻断商品列表，提示不展示
-    catalogStatus.value = null
+    if (request === facetRequest) facetError.value = '分类和颜色暂时无法加载，请重试。'
+  } finally {
+    if (request === facetRequest) facetLoading.value = false
+  }
+}
+
+function invalidateFacets() {
+  facetRequest++
+  catalogFacets.value = null
+  facetError.value = ''
+  facetLoading.value = false
+  category.value = ''
+  color.value = ''
+}
+
+function refreshCatalog() {
+  const filtersChange = category.value || color.value || currentPage.value !== 1
+  invalidateFacets()
+  currentPage.value = 1
+  if (!filtersChange) void loadProducts()
+}
+
+async function loadCatalogContext() {
+  const request = ++statusRequest
+  listRequest++
+  catalogStatusReady.value = false
+  catalogStatus.value = null
+  canManageLocal.value = false
+  invalidateFacets()
+  currentPage.value = 1
+  try {
+    const current = await api.getSharedCatalogStatus()
+    if (request === statusRequest) catalogStatus.value = current
+  } catch {
+    // The browse endpoint independently checks workspace visibility.
+  } finally {
+    if (request === statusRequest) catalogStatusReady.value = true
   }
 }
 
 async function toggleWorkspaceSharedCatalog() {
   const current = catalogStatus.value
   if (!current?.dealer || savingCatalogStatus.value) return
+  const request = statusRequest
 
   savingCatalogStatus.value = true
   actionError.value = null
   actionMessage.value = null
   try {
     const updated = await api.setWorkspaceSharedCatalog(!current.workspaceEnabled)
+    if (request !== statusRequest) return
     catalogStatus.value = updated
-    managed.value = false
-    currentPage.value = 1
     actionMessage.value = updated.workspaceEnabled ? '公共库已开启，对整个工作区生效' : '公共库已关闭，对整个工作区生效'
-    reloadVersion.value++
   } catch (error) {
-    actionError.value = error instanceof Error ? error.message : '公共库开关切换失败'
+    if (request === statusRequest) actionError.value = error instanceof Error ? error.message : '公共库开关切换失败'
   } finally {
     savingCatalogStatus.value = false
   }
-}
-
-function formatPrice(price: number | null) {
-  return price == null ? '—' : `¥ ${price.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-function formatDate(date: string) {
-  const timestamp = new Date(date)
-  return Number.isNaN(timestamp.getTime()) ? '—' : timestamp.toLocaleDateString('zh-CN')
 }
 
 function resetFilters() {
   search.value = ''
   submittedSearch.value = ''
   status.value = ''
-  currentPage.value = 1
+  category.value = ''
+  color.value = ''
 }
 
 function goToPage(value = pageInput.value) {
@@ -155,20 +263,10 @@ function goToPage(value = pageInput.value) {
   pageInput.value = target
 }
 
-function onProductDragStart(product: ImportedProduct, event: DragEvent) {
-  event.dataTransfer?.setData('text/plain', product.rspuId)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-}
-
-async function showDetails(product: ImportedProduct) {
-  selectedProduct.value = product
-  await nextTick()
-  detailDialog.value?.showModal()
-}
-
 async function loadFavoriteProductIds() {
   const request = ++favoriteIdsRequest
   const version = favoriteStateVersion
+  favoriteLoading.value = true
   try {
     const ids = await api.loadFavoriteProductIds()
     if (request !== favoriteIdsRequest || version !== favoriteStateVersion) return
@@ -178,6 +276,8 @@ async function loadFavoriteProductIds() {
     if (request === favoriteIdsRequest && version === favoriteStateVersion) {
       favoriteStatusError.value = error instanceof Error ? error.message : '收藏状态加载失败'
     }
+  } finally {
+    if (request === favoriteIdsRequest && version === favoriteStateVersion) favoriteLoading.value = false
   }
 }
 
@@ -187,6 +287,7 @@ async function loadProjectFavoriteProductIds(preserveCurrent = false) {
   const projectId = workspace.currentProjectId
   if (!preserveCurrent) projectFavoriteProductIds.value = new Set()
   projectFavoriteStatusError.value = null
+  projectFavoriteLoading.value = !!projectId
   if (!projectId) return
   try {
     const ids = await api.loadProjectFavoriteProductIds(projectId)
@@ -196,15 +297,50 @@ async function loadProjectFavoriteProductIds(preserveCurrent = false) {
     if (request === projectFavoriteIdsRequest && version === projectFavoriteStateVersion && workspace.currentProjectId === projectId) {
       projectFavoriteStatusError.value = error instanceof Error ? error.message : '项目收藏状态加载失败'
     }
+  } finally {
+    if (request === projectFavoriteIdsRequest && version === projectFavoriteStateVersion && workspace.currentProjectId === projectId) projectFavoriteLoading.value = false
   }
 }
 
-watch(() => workspace.currentProjectId, () => {
-  void loadProjectFavoriteProductIds()
-}, { immediate: true })
+watch([() => workspace.currentProjectId, catalogStatusReady], () => {
+  if (catalogStatusReady.value) void loadProjectFavoriteProductIds()
+})
+watch(catalogStatusReady, ready => {
+  if (ready) void loadFavoriteProductIds()
+})
 
 function openFavorites(product: ImportedProduct, section: 'project' | 'personal' = 'personal') {
   void favoriteDialog.value?.open(product, section)
+}
+
+const collectionVersion = ref(0)
+watch([collection, () => workspace.currentProjectId, storageScope, collectionVersion, catalogStatusReady, localOnly],
+  async ([section, projectId], _, onCleanup) => {
+    if (!catalogStatusReady.value) return
+    let current = true
+    onCleanup(() => { current = false })
+    collectionItems.value = []
+    loadingCollectionItems.value = true
+    failedCollectionItems.value = false
+    try {
+      const rows = section === 'project' ? (projectId ? await api.loadProjectFavoriteItems(projectId) : []) : await api.loadFavoriteItems()
+      if (current) collectionItems.value = rows
+    } catch {
+      if (current) failedCollectionItems.value = true
+    } finally {
+      if (current) loadingCollectionItems.value = false
+    }
+  }, { immediate: true })
+
+function reloadCollection() {
+  collectionVersion.value++
+  if (collection.value === 'project') return loadProjectFavoriteProductIds(true)
+  return loadFavoriteProductIds()
+}
+
+function toggleCollection() {
+  collectionOpen.value = !collectionOpen.value
+  if (collectionOpen.value) nextTick(() => collectionPanel.value?.focus())
 }
 
 function togglePersonalFavorite(product: ImportedProduct) {
@@ -250,6 +386,7 @@ async function confirmRemoveFavorite() {
 }
 
 function favoriteSaved(payload: { rspuId: string, folderIds: string[] }) {
+  collectionVersion.value++
   favoriteStateVersion++
   const next = new Set(favoriteProductIds.value)
   if (payload.folderIds.length) next.add(payload.rspuId)
@@ -260,6 +397,7 @@ function favoriteSaved(payload: { rspuId: string, folderIds: string[] }) {
 }
 
 function projectFavoriteSaved(payload: { rspuId: string, projectId: string, selected: boolean }) {
+  collectionVersion.value++
   if (payload.projectId !== workspace.currentProjectId) return
   projectFavoriteStateVersion++
   const next = new Set(projectFavoriteProductIds.value)
@@ -270,162 +408,177 @@ function projectFavoriteSaved(payload: { rspuId: string, projectId: string, sele
   void loadProjectFavoriteProductIds(true)
 }
 
-onMounted(() => {
-  loadProducts()
-  loadCatalogStatus()
-  loadCapabilities()
-  loadFavoriteProductIds()
-})
+onMounted(loadCatalogContext)
 </script>
 
 <template>
-  <div class="flex h-full min-h-0">
-    <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-    <div class="flex-none">
-      <div class="mb-3 text-xs text-muted">商品资源 / 商品库</div>
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 class="mb-2 text-[25px] font-bold tracking-tight">商品库</h1>
-          <p class="text-xs text-muted">从 RSDP 读取商品，供空间设计、选品和报价使用。</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <NuxtLink to="/products/local" class="inline-flex items-center rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
-            本地商品
-          </NuxtLink>
-          <button v-if="catalogStatus?.dealer" type="button" role="switch" aria-label="公共库"
-            :aria-checked="catalogStatus.workspaceEnabled" :disabled="savingCatalogStatus"
-            class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream disabled:opacity-60"
-            @click="toggleWorkspaceSharedCatalog">
-            <span>公共库</span>
-            <span class="rounded px-1.5 py-0.5 text-xs" :class="catalogStatus.workspaceEnabled ? 'bg-green/10 text-green' : 'bg-bg text-muted'">
-              {{ savingCatalogStatus ? '保存中' : catalogStatus.workspaceEnabled ? '已开启' : '已关闭' }}
-            </span>
-          </button>
-        </div>
+  <div class="grid min-w-0 content-start gap-4 p-3 sm:p-4">
+    <header class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-2xl font-bold tracking-tight">商品库</h1>
+      <div class="flex flex-wrap items-center gap-2">
+        <button v-if="catalogStatus?.dealer" type="button" role="switch" aria-label="公共库"
+          :aria-checked="catalogStatus.workspaceEnabled" :disabled="savingCatalogStatus"
+          class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream disabled:opacity-60"
+          @click="toggleWorkspaceSharedCatalog">
+          <span>公共库</span>
+          <span class="rounded px-1.5 py-0.5 text-xs" :class="catalogStatus.workspaceEnabled ? 'bg-green/10 text-green' : 'bg-bg text-muted'">
+            {{ savingCatalogStatus ? '保存中' : catalogStatus.workspaceEnabled ? '已开启' : '已关闭' }}
+          </span>
+        </button>
+        <NuxtLink v-if="canManageLocal" to="/products/local" class="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-cream">
+          管理本地商品
+        </NuxtLink>
+        <button v-if="catalogStatusReady" type="button" class="collection-toggle border border-neutral-300 px-3 py-2 text-sm font-semibold text-accent-ink"
+          :aria-controls="collectionId" :aria-expanded="collectionOpen" @click="toggleCollection">收藏夹</button>
       </div>
-    </div>
+    </header>
 
-    <nav v-if="capabilities?.managed && catalogStatus?.workspaceEnabled" class="mb-3 flex gap-2" aria-label="商品库范围">
-      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': !managed }" :aria-pressed="!managed" @click="managed = false">共享商品</button>
-      <button type="button" class="rounded-md border border-line px-3 py-2 text-sm" :class="{ 'bg-cream font-semibold': managed }" :aria-pressed="managed" @click="managed = true">本厂录入</button>
-    </nav>
+    <p v-if="localOnly" class="text-xs text-muted">公共库已关闭</p>
+    <p v-if="actionError" role="alert" class="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{{ actionError }}</p>
+    <p v-if="actionMessage" role="status" class="rounded-lg bg-green/10 px-4 py-2 text-sm text-green">{{ actionMessage }}</p>
+    <p v-if="!catalogStatusReady" role="status" class="text-sm text-muted">加载中…</p>
+    <template v-else>
     <div class="flex flex-none flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted" aria-live="polite">
       <span>商品总数 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? catalogTotal : '—' }}</strong></span>
-      <span>在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
-      <span v-if="catalogStatus && !catalogStatus.workspaceEnabled">公共库已被工作区主号关闭，当前仅显示本厂商品</span>
+      <span>本地商品 <strong class="ml-1 text-sm text-ink">{{ statsAvailable ? localTotal : '—' }}</strong></span>
+      <span v-if="!localOnly">在售商品 <strong class="ml-1 text-sm text-green">{{ statsAvailable ? activeCount : '—' }}</strong></span>
       <span v-if="favoriteStatusError" class="text-red-800">收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadFavoriteProductIds">重试</button></span>
       <span v-if="projectFavoriteStatusError" class="text-red-800">项目收藏状态加载失败 <button type="button" class="font-semibold underline" @click="loadProjectFavoriteProductIds()">重试</button></span>
     </div>
 
-    <section class="flex-none overflow-hidden rounded-xl border border-line bg-white shadow-panel" aria-label="商品列表">
-      <div class="flex flex-wrap items-center gap-3 border-b border-line p-4">
-        <div class="relative min-w-0 flex-[1_1_240px]">
-          <AppIcon name="search" size="4" class="absolute left-3 top-3 text-muted" />
-          <input v-model="search" type="search" aria-label="搜索商品名称或编码" placeholder="搜索商品名称、编码" maxlength="120" class="w-full rounded-lg border border-line bg-bg py-2.5 pl-9 pr-3 text-sm outline-bronze" :disabled="!!listError">
+    <p v-if="sharedUnavailable && !listError && !isLoading" role="status" class="text-sm text-amber-800">
+      公共库暂时无法加载，当前显示本地商品。
+    </p>
+    <div class="catalog-split">
+      <section class="catalog-main min-w-0" aria-label="商品列表">
+        <form class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
+          <label class="filter-search grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
+            搜索商品
+            <span class="relative block">
+              <AppIcon name="search" size="4" class="absolute left-3 top-3 text-muted" />
+              <input v-model="search" type="search" maxlength="120" aria-label="搜索商品名称或编码" placeholder="商品名称、编码" class="w-full border border-neutral-300 bg-white py-2.5 pl-9 pr-2 text-sm" :disabled="!statsAvailable">
+            </span>
+          </label>
+          <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
+            产品分类
+            <select v-model="category" aria-label="筛选产品分类" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" @focus="loadFacets" @pointerenter="loadFacets" :disabled="!statsAvailable || !catalogTotal">
+              <option value="">全部分类</option>
+              <option v-for="value in categories" :key="value.value" :value="value.value">{{ value.label }}</option>
+            </select>
+          </label>
+          <label class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
+            商品颜色
+            <select v-model="color" aria-label="筛选商品颜色" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" @focus="loadFacets" @pointerenter="loadFacets" :disabled="!statsAvailable || !catalogTotal">
+              <option value="">全部颜色</option>
+              <option v-for="value in colors" :key="value" :value="value">{{ value }}</option>
+            </select>
+          </label>
+          <label v-if="!localOnly" class="grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
+            在售状态
+            <select v-model="status" aria-label="筛选商品状态" class="min-w-0 border border-neutral-300 bg-white px-2 py-2.5 text-sm" :disabled="!statsAvailable">
+              <option value="">全部状态</option><option value="active">在售</option><option value="other">非在售</option>
+            </select>
+          </label>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="border border-neutral-300 p-2.5 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="refreshCatalog"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
+            <button v-if="filtersApplied" type="button" class="px-1 text-xs font-semibold text-accent-ink hover:underline" @click="resetFilters">清空条件</button>
+          </div>
+        </form>
+
+        <p v-if="facetError" class="py-2 text-xs text-red-700" role="status">
+          {{ facetError }} <button type="button" class="underline" @click="loadFacets">重试</button>
+        </p>
+
+        <div v-if="isLoading" class="py-3" role="status" aria-label="正在加载商品">
+          <div class="sr-only">加载商品数据中…</div>
+          <ProductCatalogGrid aria-hidden="true">
+            <li v-for="card in 10" :key="card" class="min-w-0 animate-pulse border border-neutral-200">
+              <div class="aspect-square bg-neutral-100" />
+              <div class="space-y-2 p-3"><div class="h-4 w-2/3 bg-neutral-100" /><div class="h-3 w-1/2 bg-neutral-100" /></div>
+            </li>
+          </ProductCatalogGrid>
         </div>
-        <select v-model="status" aria-label="筛选商品状态" class="min-w-0 rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-bronze" :disabled="!!listError">
-          <option value="">全部状态</option><option value="active">在售</option><option value="other">非在售</option>
-        </select>
-        <button type="button" class="rounded-lg border border-line p-2.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="loadProducts"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
-      </div>
 
-      <div v-if="actionError" class="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{{ actionError }}</div>
-      <div v-if="actionMessage" class="border-b border-green/20 bg-green/10 px-4 py-3 text-sm text-green" role="status">{{ actionMessage }}</div>
-
-      <div v-if="isLoading" class="p-4 sm:p-5" role="status" aria-label="正在加载商品">
-        <div class="sr-only">加载商品数据中…</div>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-8" aria-hidden="true">
-          <div v-for="card in 10" :key="card" class="animate-pulse overflow-hidden rounded-xl border border-line">
-            <div class="aspect-[4/3] bg-cream" />
-            <div class="space-y-3 p-4"><div class="h-4 w-2/3 rounded bg-cream" /><div class="h-3 w-1/2 rounded bg-bg" /><div class="h-5 w-24 rounded bg-cream" /><div class="h-3 w-32 rounded bg-bg" /><div class="h-8 rounded-md bg-cream" /></div>
+        <div v-else-if="listError" class="grid min-h-[320px] place-items-center p-6" role="alert">
+          <div class="w-full max-w-md text-center">
+            <div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-red-50 text-red-700"><AppIcon name="warning" size="6" /></div>
+            <h2 class="mb-2 text-base font-bold">商品暂时无法加载</h2>
+            <p class="mb-5 text-sm text-muted">请检查服务连接后重试，商品数量暂不可用。</p>
+            <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark" @click="refreshCatalog"><AppIcon name="reset" size="4" />重新加载</button>
+            <details class="mt-5 text-left text-xs text-muted"><summary class="cursor-pointer text-center">技术详情</summary><p class="mt-3 break-all rounded-lg bg-bg p-3">{{ listError }}</p></details>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="listError" class="grid min-h-[320px] place-items-center p-6" role="alert">
-        <div class="w-full max-w-md text-center">
-          <div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-red-50 text-red-700"><AppIcon name="warning" size="6" /></div>
-          <h2 class="mb-2 text-base font-bold">商品暂时无法加载</h2>
-          <p class="mb-5 text-sm text-muted">请检查服务连接后重试，商品数量暂不可用。</p>
-          <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-bronze px-5 py-2.5 text-sm font-semibold text-white hover:bg-bronze-dark" @click="loadProducts"><AppIcon name="reset" size="4" />重新加载</button>
-          <details class="mt-5 text-left text-xs text-muted"><summary class="cursor-pointer text-center">技术详情</summary><p class="mt-3 break-all rounded-lg bg-bg p-3">{{ listError }}</p></details>
+        <div v-else-if="catalogTotal === 0" class="grid min-h-[320px] place-items-center p-6">
+          <div class="text-center"><div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-cream text-bronze"><AppIcon name="cube" size="6" /></div><h2 class="mb-2 text-base font-bold">商品库还是空的</h2><p class="text-sm text-muted">当前范围没有可读取的商品。</p></div>
         </div>
-      </div>
 
-      <div v-else-if="catalogTotal === 0" class="grid min-h-[320px] place-items-center p-6">
-        <div class="text-center"><div class="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-cream text-bronze"><AppIcon name="cube" size="6" /></div><h2 class="mb-2 text-base font-bold">商品库还是空的</h2><p class="text-sm text-muted">当前范围没有可读取的商品。</p></div>
-      </div>
+        <div v-else-if="resultTotal === 0" class="grid min-h-[280px] place-items-center p-6">
+          <div class="text-center"><h2 class="mb-2 text-base font-bold">没有找到匹配的商品</h2><p class="mb-4 text-sm text-muted">试试其他关键词，或调整筛选条件。</p><button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark" @click="resetFilters">清空筛选</button></div>
+        </div>
 
-      <div v-else-if="filteredTotal === 0" class="grid min-h-[280px] place-items-center p-6">
-        <div class="text-center"><h2 class="mb-2 text-base font-bold">没有找到匹配的商品</h2><p class="mb-4 text-sm text-muted">试试其他关键词，或调整筛选条件。</p><button type="button" class="rounded-lg bg-cream px-4 py-2 text-sm font-semibold text-bronze-dark" @click="resetFilters">清空筛选</button></div>
-      </div>
+        <ProductCatalogGrid v-else>
+          <ProductCatalogCard v-for="product in pageProducts" :key="product.rspuId" :product="product"
+            :local-category="product.categoryPath?.[0]"
+            :personal-favorite="favoriteProductIds.has(product.rspuId)"
+            :project-favorite="projectFavoriteProductIds.has(product.rspuId)"
+            :project-available="!!workspace.currentProjectId"
+            :bundle-available="bundlesAvailable"
+            @personal="togglePersonalFavorite(product)" @project="openFavorites(product, 'project')" @bundle="addToBundle(product)"
+          />
+        </ProductCatalogGrid>
 
-      <div v-else class="p-4 sm:p-5">
-        <ul aria-label="商品卡片列表" class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-8">
-          <li v-for="product in pageProducts" :key="product.rspuId" :data-testid="`product-card-${product.rspuId}`"
-            draggable="true" @dragstart="onProductDragStart(product, $event)"
-            class="group flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-white transition duration-200 hover:-translate-y-0.5 hover:border-bronze/60 hover:shadow-panel">
-            <div class="relative shrink-0">
-              <NuxtLink :to="`/products/${product.rspuId}`" class="relative block aspect-[4/3] overflow-hidden border-b border-line bg-white outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bronze" :aria-label="`查看${product.productName || '商品'}详情`">
-                <ProductImagePreview :src="product.primaryImageUrl" alt="" size="small" />
-                <span class="absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm" :class="product.status === 'active' ? 'bg-green/10 text-green' : 'bg-bg text-muted'">{{ product.status === 'active' ? '在售' : '非在售' }}</span>
-              </NuxtLink>
-              <button type="button" class="favorite-action absolute right-14 top-3 z-10 grid h-9 w-9 place-items-center rounded-full border shadow-sm transition hover:bg-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2 disabled:cursor-not-allowed" :class="[projectFavoriteProductIds.has(product.rspuId) ? 'border-bronze bg-bronze text-white' : 'border-line bg-white/95 text-bronze-dark']" :aria-label="`项目收藏${product.productName || '商品'}`" :aria-pressed="projectFavoriteProductIds.has(product.rspuId)" :disabled="!workspace.currentProjectId" :title="workspace.currentProjectId ? (projectFavoriteProductIds.has(product.rspuId) ? '已加入当前项目，点击调整' : '收藏到当前项目') : '请先选择项目'" @click="openFavorites(product, 'project')">
-                <AppIcon name="plus" size="5" />
-              </button>
-              <button type="button" class="favorite-action absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full border border-line bg-white/95 text-bronze-dark shadow-sm transition hover:bg-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2" :aria-label="`个人收藏${product.productName || '商品'}`" :aria-pressed="favoriteProductIds.has(product.rspuId)" :title="favoriteProductIds.has(product.rspuId) ? '已收藏，点击取消收藏' : '添加到个人收藏夹'" @click="togglePersonalFavorite(product)">
-                <AppIcon :name="favoriteProductIds.has(product.rspuId) ? 'heartSolid' : 'heart'" size="5" />
-              </button>
+        <div v-if="statsAvailable && resultTotal" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="text-xs text-muted" aria-live="polite">
+              正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ resultTotal }}</strong> 件商品
             </div>
-            <div class="flex flex-1 flex-col p-4">
-              <NuxtLink :to="`/products/${product.rspuId}`" class="line-clamp-2 min-h-10 text-sm font-semibold leading-5 outline-none transition hover:text-bronze-dark focus-visible:rounded focus-visible:ring-2 focus-visible:ring-bronze" :title="product.productName || undefined">{{ product.productName || '未命名商品' }}</NuxtLink>
-              <div class="mt-1 truncate text-xs text-muted">{{ product.rspuCode || product.externalCode || product.rspuId }}</div>
-              <div v-if="product.sourceChannel || managed" class="mt-1 truncate text-xs text-muted">{{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}</div>
-              <div class="mt-4 text-lg font-semibold tabular-nums text-bronze-dark">{{ formatPrice(product.retailPrice) }}</div>
-              <div class="mt-3 flex items-center justify-between gap-2 text-xs text-muted"><span>更新日期</span><time :datetime="product.updatedAt">{{ formatDate(product.updatedAt) }}</time></div>
-              <div class="mt-auto pt-4">
-                <NuxtLink :to="`/products/${product.rspuId}`" class="flex items-center justify-center rounded-md border-t border-line bg-cream px-3 py-2 text-xs font-semibold text-bronze-dark outline-none transition hover:bg-bronze hover:text-white focus-visible:ring-2 focus-visible:ring-bronze focus-visible:ring-offset-2" :aria-label="`查看${product.productName || '商品'}详情`">查看详情</NuxtLink>
-              </div>
+
+            <div class="flex min-w-0 flex-wrap items-center gap-3">
+              <label class="flex items-center gap-2 text-xs text-muted">
+                每页显示
+                <select v-model.number="pageSize" aria-label="每页显示数量" class="rounded-lg border border-line bg-white px-2.5 py-2 text-xs font-medium text-ink outline-bronze">
+                  <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }} 条</option>
+                </select>
+              </label>
+
+              <nav class="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto" aria-label="商品列表页码">
+                <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === 1" aria-label="第一页" @click="goToPage(1)">首页</button>
+                <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === 1" aria-label="上一页" @click="goToPage(currentPage - 1)">上一页</button>
+                <template v-for="(item, index) in paginationItems" :key="`${item}-${index}`">
+                  <span v-if="item === 'ellipsis'" class="grid h-9 w-8 shrink-0 place-items-center text-xs text-muted" aria-hidden="true">…</span>
+                  <button v-else type="button" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border text-xs font-medium transition" :class="item === currentPage ? 'border-bronze bg-bronze text-white' : 'border-line bg-white text-ink hover:bg-cream'" :aria-current="item === currentPage ? 'page' : undefined" :aria-label="`第${item}页`" @click="goToPage(item)">{{ item }}</button>
+                </template>
+                <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === pageCount" aria-label="下一页" @click="goToPage(currentPage + 1)">下一页</button>
+                <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === pageCount" aria-label="最后一页" @click="goToPage(pageCount)">末页</button>
+              </nav>
+
+              <label class="flex items-center gap-2 text-xs text-muted">
+                跳至
+                <input v-model.number="pageInput" type="number" min="1" :max="pageCount" class="h-9 w-16 rounded-lg border border-line bg-white px-2 text-center text-xs text-ink outline-bronze" aria-label="跳转到页码" @keyup.enter="goToPage()">
+                <span>页</span>
+                <button type="button" class="h-9 rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream" @click="goToPage()">跳转</button>
+              </label>
             </div>
-          </li>
-        </ul>
-      </div>
-
-      <div v-if="statsAvailable && filteredTotal" class="border-t border-line bg-[#fcfbfa] px-4 py-4 sm:px-5" aria-label="商品分页">
-        <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div class="text-xs text-muted" aria-live="polite">
-            正在显示 <strong class="font-semibold text-ink">{{ pageStart }}–{{ pageEnd }}</strong> 条，共 <strong class="font-semibold text-ink">{{ filteredTotal }}</strong> 件商品
-          </div>
-
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-            <label class="flex items-center gap-2 text-xs text-muted">
-              每页显示
-              <select v-model.number="pageSize" aria-label="每页显示数量" class="rounded-lg border border-line bg-white px-2.5 py-2 text-xs font-medium text-ink outline-bronze">
-                <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }} 条</option>
-              </select>
-            </label>
-
-            <nav class="flex items-center gap-1 overflow-x-auto" aria-label="商品列表页码">
-              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === 1" aria-label="第一页" @click="goToPage(1)">首页</button>
-              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === 1" aria-label="上一页" @click="goToPage(currentPage - 1)">上一页</button>
-              <template v-for="(item, index) in paginationItems" :key="`${item}-${index}`">
-                <span v-if="item === 'ellipsis'" class="grid h-9 w-8 shrink-0 place-items-center text-xs text-muted" aria-hidden="true">…</span>
-                <button v-else type="button" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border text-xs font-medium transition" :class="item === currentPage ? 'border-bronze bg-bronze text-white' : 'border-line bg-white text-ink hover:bg-cream'" :aria-current="item === currentPage ? 'page' : undefined" :aria-label="`第${item}页`" @click="goToPage(item)">{{ item }}</button>
-              </template>
-              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === pageCount" aria-label="下一页" @click="goToPage(currentPage + 1)">下一页</button>
-              <button type="button" class="inline-flex h-9 shrink-0 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-40" :disabled="currentPage === pageCount" aria-label="最后一页" @click="goToPage(pageCount)">末页</button>
-            </nav>
-
-            <label class="flex items-center gap-2 text-xs text-muted">
-              跳至
-              <input v-model.number="pageInput" type="number" min="1" :max="pageCount" class="h-9 w-16 rounded-lg border border-line bg-white px-2 text-center text-xs text-ink outline-bronze" aria-label="跳转到页码" @keyup.enter="goToPage()">
-              <span>页</span>
-              <button type="button" class="h-9 rounded-lg border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-cream" @click="goToPage()">跳转</button>
-            </label>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+      <aside :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
+        :class="{ 'is-open': collectionOpen }" aria-label="产品库收藏" tabindex="-1">
+        <ProductComboPanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="pageProducts" class="mb-4" />
+        <ProductCatalogFavorites
+          :section="collection"
+          :project-name="workspace.currentProject?.projectName || ''"
+          :products="collectionProducts.slice(0, 6)"
+          :total="collectionProducts.length"
+          :loading="collectionLoading"
+          :error="collectionError"
+          @select="selectedCollection = $event"
+          @retry="reloadCollection"
+          @open="openFavorites($event, collection)"
+        />
+      </aside>
+    </div>
 
     <FavoriteFolderDialog ref="favoriteDialog" @saved="favoriteSaved" @project-saved="projectFavoriteSaved" />
 
@@ -441,7 +594,7 @@ onMounted(() => {
         </div>
         <p class="mb-5 text-xs leading-5 text-muted">其他收藏夹中的收藏不受影响，可随时在商品库重新收藏。若只想换分组，可点下方「调整收藏夹」。</p>
         <div v-if="removeFavoriteError" class="mb-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">{{ removeFavoriteError }}</div>
-        <div class="flex items-center justify-between gap-3 border-t border-line pt-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
           <button type="button" class="rounded-lg border border-line px-5 py-2.5 text-sm disabled:opacity-50" :disabled="removingFavorite" @click="adjustFavoriteFolders">调整收藏夹</button>
           <div class="flex gap-3">
             <button type="button" class="rounded-lg border border-line px-5 py-2.5 text-sm disabled:opacity-50" :disabled="removingFavorite" @click="cancelRemoveFavorite">取消</button>
@@ -451,31 +604,33 @@ onMounted(() => {
       </div>
     </dialog>
 
-    <dialog ref="detailDialog" class="m-auto max-h-[85dvh] w-[min(560px,calc(100%_-_32px))] overflow-y-auto rounded-2xl border border-line bg-white p-6 text-ink shadow-panel backdrop:bg-black/30" aria-labelledby="product-detail-title" @close="selectedProduct = null" @click="event => { if (event.target === event.currentTarget) detailDialog?.close() }">
-      <template v-if="selectedProduct">
-        <div class="mb-5 flex items-start justify-between gap-4"><div><div class="mb-1 text-xs text-muted">商品详情</div><h2 id="product-detail-title" class="text-lg font-bold">{{ selectedProduct.productName || '未命名商品' }}</h2></div><form method="dialog"><button type="submit" class="rounded-lg p-2 text-muted hover:bg-cream" aria-label="关闭商品详情"><AppIcon name="close" size="5" /></button></form></div>
-        <dl class="grid grid-cols-[90px_minmax(0,1fr)] gap-x-3 gap-y-4 text-sm"><dt class="text-muted">商品编码</dt><dd class="break-all">{{ selectedProduct.rspuCode || selectedProduct.rspuId }}</dd><dt class="text-muted">外部编码</dt><dd class="break-all">{{ selectedProduct.externalCode || '—' }}</dd><dt class="text-muted">零售价</dt><dd class="font-semibold text-bronze-dark">{{ formatPrice(selectedProduct.retailPrice) }}</dd><dt class="text-muted">更新日期</dt><dd>{{ formatDate(selectedProduct.updatedAt) }}</dd></dl>
-      </template>
-    </dialog>
-    </div>
-    <ProductComboPanel class="hidden md:flex" />
+    </template>
   </div>
 </template>
 
 <style scoped>
-.favorite-action {
-  opacity: 0;
+.catalog-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
 }
 
-.group:hover .favorite-action,
-.group:focus-within .favorite-action,
-.favorite-action:focus-visible {
-  opacity: 1;
+.catalog-main { container: catalog / inline-size; }
+.catalog-collections { display: none; min-width: 0; }
+.catalog-collections.is-open { display: block; grid-row: 1; }
+.catalog-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.filter-search { grid-column: 1 / -1; }
+
+@media (min-width: 1100px) {
+  .catalog-split { grid-template-columns: minmax(0, 1fr) clamp(13rem, 17vw, 18rem); }
+  .catalog-collections,
+  .catalog-collections.is-open { display: block; grid-row: auto; }
+  .collection-toggle { display: none; }
 }
 
-@media (hover: none) {
-  .favorite-action {
-    opacity: 1;
-  }
+@container catalog (min-width: 760px) {
+  .catalog-filters { grid-template-columns: minmax(12rem, 1.5fr) minmax(0, 1fr) minmax(0, .9fr) minmax(0, .75fr) auto; }
+  .filter-search { grid-column: auto; }
 }
 </style>

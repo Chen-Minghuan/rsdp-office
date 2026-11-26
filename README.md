@@ -45,6 +45,8 @@ mvn spring-boot:run
 
 后端监听 `http://localhost:8082`，默认连接上述 PostgreSQL。
 
+需要以打包 JAR 运行时，在仓库根目录执行 `scripts/run-local-backend.sh`（Java 21；跳过构建可加 `--skip-build`）。脚本将构建产物复制到独立的 `output/local-runtime/backend.*` 目录再启动；再次打包不会覆盖运行中的 JAR。更新版本前先停止旧进程，再重新运行脚本；不从 `backend/target/` 直接运行常驻服务。
+
 本版移除了“项目信息”表单及专用资料表 `office_project`。下次启动新版 Java 时自动执行事务迁移，删除资料表和指向它的外键，保留现有画布、识别、模板、清单和预览数据；无需重建数据库或删除数据卷。应停止旧版 Java 后再启动新版。接口中的 projectId 继续作为设计隔离键，详见 [迁移记录](docs/tasks/WORKSPACE-001-remove-project-info.md)。
 
 前端在 `frontend/` 执行：

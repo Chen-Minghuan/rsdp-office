@@ -1,3 +1,5 @@
+import type { LocalProductCatalogItem } from './local-products'
+
 export interface CatalogCapabilities {
   managed: boolean
 }
@@ -10,6 +12,8 @@ export interface ImportedProduct {
   rspuCode: string | null
   externalCode: string | null
   productName: string | null
+  categoryPath?: string[] | null
+  colorPrimaryName?: string | null
   primaryImageUrl: string | null
   retailPrice: number | null
   status: string | null
@@ -118,4 +122,23 @@ export interface CatalogProductPage {
   activeTotal: number
   page: number
   size: number
+}
+
+export type CatalogBrowseRow = { local: LocalProductCatalogItem, shared: null } | { local: null, shared: ImportedProduct }
+
+export interface CatalogBrowsePage {
+  rows: CatalogBrowseRow[]
+  total: number
+  catalogTotal: number
+  activeTotal: number
+  localTotal: number
+  canManageLocal: boolean
+  sharedUnavailable: boolean
+}
+
+export interface CatalogBrowseFacets {
+  localCategories: string[]
+  sharedCategories: string[]
+  colors: string[]
+  sharedUnavailable: boolean
 }

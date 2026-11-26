@@ -6,8 +6,10 @@ import { money } from '~/utils/helpers'
 import { colorToneLabel, matchesProductColorSearch, primaryColorName, productColorTone } from '~/utils/productColor'
 
 const selectedId = defineModel<string | null>('selectedId')
+const props = defineProps<{ allowedRspuIds?: string[] }>()
 const store = useOfficeStore()
 const api = useOfficeApi()
+const saveRecommendationDraft = useRecommendationDraft()
 const allowRotation = ref(true)
 const applyToSameModules = ref(false)
 const tier = ref('ALL')
@@ -77,9 +79,15 @@ function groupOptionValue(group: ModuleDisplayGroup): string {
 
 const sameModuleCount = computed(() => result.value?.sameModuleCount || 0)
 const allConfirmed = computed(() => modules.value.length > 0 && modules.value.every(item => item.layoutConfirmed))
-const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.designZoneId, store.canvasRevision, allConfirmed.value]))
+const layoutContext = computed(() => JSON.stringify([store.workspaceId, store.schemeToken, store.designZoneId, store.canvasRevision, allConfirmed.value]))
 const signature = computed(() => JSON.stringify([layoutContext.value, module.value?.id, allowRotation.value]))
-const sizeCandidates = computed(() => (result.value?.candidates || []).filter(item => tier.value === 'ALL' || item.tier === tier.value))
+const sourceCandidates = computed(() => {
+  const candidates = result.value?.candidates || []
+  if (!props.allowedRspuIds) return candidates
+  const ids = new Set(props.allowedRspuIds)
+  return candidates.filter(item => item.product.rspuId && ids.has(item.product.rspuId))
+})
+const sizeCandidates = computed(() => sourceCandidates.value.filter(item => tier.value === 'ALL' || item.tier === tier.value))
 const colorInfo = (candidate: ModuleProductCandidate) => ({
   primary: primaryColorName(candidate.product.colorPrimaryName),
   tone: productColorTone(candidate.product.colorPrimaryName),
@@ -140,8 +148,7 @@ async function refresh() {
   const revision = store.canvasRevision, zoneId = item.zoneId, rotation = allowRotation.value
   try {
     // Flush the exact reviewed draft; the server reads saved geometry and checks its revision.
-    await api.saveCanvas({ objects: JSON.parse(JSON.stringify(store.objects)), files: store.files, mode: store.canvasMode,
-      designZoneId: store.designZoneId, revision, blank: store.blank })
+    await saveRecommendationDraft()
     if (ticket !== sequence || current !== signature.value) return
     const response = await api.recommendModule({ zoneId, moduleId: item.id, canvasRevision: revision, allowRotation: rotation })
     if (ticket !== sequence || current !== signature.value) return
@@ -220,7 +227,7 @@ async function choose(candidate: ModuleProductCandidate) {
         <label><input v-model="allowRotation" type="checkbox" :disabled="applying"> 允许旋转 90°</label>
         <label v-if="sameModuleCount > 1"><input v-model="applyToSameModules" type="checkbox" :disabled="applying"> 同步 {{ sameModuleCount }} 个同规格模块</label>
       </div>
-      <div v-if="result" class="flex flex-nowrap gap-1" data-testid="tier-row"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-[#f7f4f0] text-muted']" @click="tier = entry.key" :title="entry.name">{{ entry.short }} <span>({{ entry.key === 'ALL' ? result.candidates.length : result.candidates.filter(item => item.tier === entry.key).length }})</span></button></div>
+      <div v-if="result" class="flex flex-nowrap gap-1" data-testid="tier-row"><button v-for="entry in tiers" :key="entry.key" :class="['px-2 py-1 rounded-none text-[10px]', tier === entry.key ? 'bg-bronze text-white' : 'bg-bg text-muted']" @click="tier = entry.key" :title="entry.name">{{ entry.short }} <span>({{ entry.key === 'ALL' ? sourceCandidates.length : sourceCandidates.filter(item => item.tier === entry.key).length }})</span></button></div>
       <p v-if="module" class="text-[10px] text-muted">按品类相关性和尺寸贴合度排序。上方档位筛选尺寸贴合度，取宽、深占比中的较低值。</p>
     </div>
     <div :key="module?.id" class="flex-1 min-h-[160px] overflow-auto p-3 space-y-2" :aria-busy="loading || applying">
@@ -236,7 +243,7 @@ async function choose(candidate: ModuleProductCandidate) {
           <div class="flex items-center justify-between pt-1 text-[11px] font-semibold text-muted" data-testid="color-group"><span>{{ group.label }}</span><span>{{ group.items.length }} 件</span></div>
         <article v-for="candidate in group.items" :key="candidate.product.id" :data-product-id="candidate.product.id" class="border border-line rounded-none p-2.5 space-y-1.5">
           <div class="flex gap-2">
-            <div class="h-14 w-14 shrink-0 overflow-hidden bg-[#f7f4f0]">
+            <div class="h-14 w-14 shrink-0 overflow-hidden bg-bg">
               <ProductImagePreview :src="candidate.product.imageUrl" :alt="candidate.product.name || '商品图片'" size="small" :left-gap="23" preview-boundary-selector="[data-testid='office-design-canvas']" click-fallback>
                 <template #preview-side>
                   <div class="flex flex-col text-xs text-ink">
@@ -267,7 +274,7 @@ async function choose(candidate: ModuleProductCandidate) {
         <div v-if="!candidates.length" class="text-xs text-muted py-5 space-y-2">
           <p v-if="result.targetCategory === null">当前家具品类未确定。可回到「产品选型」选择对应的家具图例，再确认排版。</p>
           <template v-else-if="result.eligibleVariantCount === 0"><p>暂无符合推荐条件的在售规格，请核对商品和规格的在售状态。</p><NuxtLink to="/products" class="text-bronze underline">查看商品库</NuxtLink></template>
-          <p v-else-if="!result.candidates.length">暂无品类相关且尺寸可容纳的在售商品。</p>
+          <p v-else-if="!sourceCandidates.length">{{ props.allowedRspuIds ? '此收藏中暂无匹配当前家具的在售商品。' : '暂无品类相关且尺寸可容纳的在售商品。' }}</p>
           <p v-else-if="!sizeCandidates.length">该尺寸档暂无商品，可切换其他档位。</p>
           <p v-else>当前颜色或搜索条件下无商品。<button class="text-bronze underline" @click="clearColorFilters">清空颜色与搜索</button></p>
         </div>

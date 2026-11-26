@@ -10,6 +10,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import static com.rsdp.officeproduct.importer.office.product.LocalProductModels.*;
 
@@ -19,10 +21,13 @@ import static com.rsdp.officeproduct.importer.office.product.LocalProductModels.
 public class LocalProductController {
     private final LocalProductService products;
     private final LocalProductWorkbook workbook;
+    private final LocalProductImportAssistant assistant;
+    private final WorkbookPreviewCache previewCache;
 
     @GetMapping
-    public Result<Page> list(@RequestParam(defaultValue = "1") int page) {
-        return Result.ok(products.list(page));
+    public Result<Page> list(@RequestParam(defaultValue = "1") int page,
+                             @RequestParam(defaultValue = "") String search) {
+        return Result.ok(products.list(page, search));
     }
 
     @GetMapping("/{productId}")
@@ -36,8 +41,31 @@ public class LocalProductController {
     }
 
     @PostMapping("/excel-preview")
-    public Result<LocalProductWorkbook.Preview> preview(@RequestPart("file") MultipartFile file) {
-        return Result.ok(workbook.preview(file));
+    public Result<LocalProductWorkbook.Preview> preview(@RequestPart("file") MultipartFile file,
+            @RequestParam(defaultValue = "false") boolean imageReferences,
+            @RequestPart(value = "mapping", required = false) SupplierWorkbookMapping.Selection mapping) {
+        return Result.ok(workbook.preview(file, mapping, imageReferences));
+    }
+
+    @GetMapping("/excel-preview/{previewId}/images/{key}")
+    public ResponseEntity<byte[]> previewImage(@PathVariable UUID previewId, @PathVariable String key) {
+        var image = previewCache.read(previewId, key, products.requireWriter());
+        return imageResponse(image);
+    }
+
+    @PostMapping("/excel-field-suggestions")
+    public Result<Map<SupplierWorkbookMapping.Field, Integer>> suggestFields(@RequestBody LocalProductImportAssistant.HeaderRequest request) {
+        return Result.ok(assistant.suggestFields(request));
+    }
+
+    @PostMapping("/excel-category-suggestions")
+    public Result<Map<Integer, String>> suggestCategories(@RequestBody LocalProductImportAssistant.CategoryRequest request) {
+        return Result.ok(assistant.suggestCategories(request));
+    }
+
+    @PostMapping("/excel-material-suggestions")
+    public Result<Map<Integer, String>> suggestMaterials(@RequestBody LocalProductImportAssistant.MaterialRequest request) {
+        return Result.ok(assistant.suggestMaterials(request));
     }
 
     @GetMapping("/excel-template")
@@ -49,7 +77,10 @@ public class LocalProductController {
 
     @GetMapping("/images/{imageId}")
     public ResponseEntity<byte[]> image(@PathVariable String imageId) {
-        ImageInput image = products.image(imageId);
+        return imageResponse(products.image(imageId));
+    }
+
+    private ResponseEntity<byte[]> imageResponse(ImageInput image) {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(image.mediaType()))
             .header("X-Content-Type-Options", "nosniff").cacheControl(CacheControl.noStore()).body(image.content());
     }

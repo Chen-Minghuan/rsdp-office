@@ -229,6 +229,35 @@ await shot('04-design-with-cart')
 // 5. 整体方案
 console.log('Step 5: proposal')
 await page.click('text=生成整体方案')
+if (process.env.MOCK_API === '1') {
+  await page.waitForURL(url => url.pathname === '/proposal')
+  await page.getByRole('heading', { name: '整体方案与清单' }).waitFor()
+  assert.equal(await page.getByRole('dialog').count(), 0, '项目清单入口直接打开独立页面')
+  // 用演示清单核对有稳定名称的房间和行内详情。
+  const previewUrl = new URL('/proposal', baseUrl)
+  previewUrl.searchParams.set('preview', '1')
+  const floorId = new URL(page.url()).searchParams.get('floorId')
+  if (floorId) previewUrl.searchParams.set('floorId', floorId)
+  await page.goto(previewUrl.toString(), { waitUntil: 'networkidle' })
+  await page.getByText('方案演示', { exact: true }).waitFor()
+  const firstRoom = page.getByRole('button', { name: /^总裁办公室/ })
+  const secondRoom = page.getByRole('button', { name: /^开放办公区/ })
+  const firstDetail = page.getByRole('region', { name: '总裁办公室详情' })
+  const secondDetail = page.getByRole('region', { name: '开放办公区详情' })
+  await firstDetail.waitFor()
+  if (!await firstRoom.evaluate(row => row.nextElementSibling?.id === row.getAttribute('aria-controls'))) {
+    throw new Error('首个房间的详情必须紧跟房间行')
+  }
+  await secondRoom.click()
+  await secondDetail.waitFor()
+  await firstDetail.waitFor({ state: 'hidden' })
+  if (!await secondRoom.evaluate(row => row.nextElementSibling?.id === row.getAttribute('aria-controls'))) {
+    throw new Error('切换后的详情必须紧跟新的房间行')
+  }
+  await secondRoom.click()
+  await secondDetail.waitFor({ state: 'hidden' })
+  console.log('  proposal opens directly; room details expand in place')
+}
 await page.waitForURL(url => url.pathname === '/proposal', { timeout: 10000 })
 await page.waitForSelector('h1:has-text("整体方案与清单")', { timeout: 10000 })
 await shot('05-proposal')

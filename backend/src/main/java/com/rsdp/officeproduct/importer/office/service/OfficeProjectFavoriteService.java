@@ -14,7 +14,6 @@ import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -35,8 +34,8 @@ public class OfficeProjectFavoriteService {
     public List<ProductListItemDto> listProjectFavoriteItems(String projectId) {
         String userId = requireProjectAccess(projectId);
         List<OfficeProjectFavoriteItem> items = itemMapper.findItems(projectId, userId);
-        Map<String, ProductListItemDto> products = productQueryService.listProducts(false).stream()
-            .collect(Collectors.toMap(ProductListItemDto::getRspuId, product -> product, (a, b) -> a));
+        var references = items.stream().map(OfficeProjectFavoriteItem::getRspuId).collect(Collectors.toSet());
+        var products = productQueryService.collectionProducts(references);
         return items.stream()
             .sorted(Comparator.comparing(OfficeProjectFavoriteItem::getCreatedAt,
                 Comparator.nullsFirst(Comparator.naturalOrder())).reversed())
@@ -78,7 +77,7 @@ public class OfficeProjectFavoriteService {
         if (!StringUtils.hasText(rspuId)) {
             throw new BusinessException("商品不能为空");
         }
-        productQueryService.getProduct(rspuId);
+        productQueryService.requireVisibleCollectionProduct(rspuId);
     }
 
     private String requireUserId() {

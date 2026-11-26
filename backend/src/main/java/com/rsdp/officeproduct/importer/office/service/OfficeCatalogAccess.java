@@ -31,9 +31,12 @@ public class OfficeCatalogAccess {
     }
 
     private boolean isBound(OfficeUser user) {
-        return user != null
-            && StringUtils.hasText(properties.getCatalogFactoryCode())
+        return user != null && boundFactoryCode(user.getWorkspaceId()) != null;
+    }
+
+    public String boundFactoryCode(String workspaceId) {
+        return StringUtils.hasText(properties.getCatalogFactoryCode())
             && StringUtils.hasText(properties.getCatalogWorkspaceId())
-            && properties.getCatalogWorkspaceId().equals(user.getWorkspaceId());
+            && properties.getCatalogWorkspaceId().equals(workspaceId) ? properties.getCatalogFactoryCode() : null;
     }
 }

@@ -122,6 +122,32 @@ class OfficeModuleRecommendationServiceTest {
         verify(office).currentProductVariant("MASTER", "FIT");
     }
 
+    @Test void appliesBundleOnlyWhenAllRequestedVariantsFitWithoutOverwritingAnExistingSelection() {
+        canvas.setProjectId("P");
+        canvas.setSchemeToken("CURRENT");
+        canvas.setObjects(new ArrayList<>(canvas.getObjects().subList(0, 3)));
+        ((Map<String,Object>) canvas.getObjects().getFirst()).put("reviewConfirmation", Map.of("status", "CONFIRMED"));
+        var existing = (Map<String,Object>) canvas.getObjects().get(2);
+        existing.put("productId", "KEEP");
+        existing.put("productSelection", Map.of("product", Map.of("id", "KEEP")));
+        when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
+        var item = new OfficeProductBundleDtos.Item("MASTER", "FIT", 1);
+        var expired = new OfficeProductBundleDtos.Apply("Z", 7, "OLD", false, List.of(item));
+        var excessive = new OfficeProductBundleDtos.Apply("Z", 7, "CURRENT", false, List.of(new OfficeProductBundleDtos.Item("MASTER", "FIT", 2)));
+        assertThrows(BusinessException.class, () -> service.applyRoomProducts("P", expired));
+        assertThrows(BusinessException.class, () -> service.applyRoomProducts("P", excessive));
+        verifyNoInteractions(carts);
+
+        service.applyRoomProducts("P", new OfficeProductBundleDtos.Apply("Z", 7, "CURRENT", false, List.of(item)));
+        var saved = org.mockito.ArgumentCaptor.forClass(SaveCanvasRequest.class);
+        verify(office).replaceSchemeCanvas(saved.capture());
+        var objects = json.valueToTree(saved.getValue().getObjects());
+        assertEquals("FIT", objects.get(1).path("productId").asText());
+        assertEquals("KEEP", objects.get(2).path("productId").asText());
+        assertEquals(1200, objects.get(1).path("w").asInt());
+        verify(carts, times(1)).insert(any(OfficeCart.class));
+    }
+
     @Test void bindsSameModulesWithoutMovingOrResizingAndKeepsOtherRooms() {
         when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
         var request = request(); request.setApplyToSameModules(true);
@@ -142,7 +168,9 @@ class OfficeModuleRecommendationServiceTest {
     }
     @Test void selectingAgainUpdatesTheBoundLineInsteadOfAddingQuantity() {
         when(office.currentProductVariant("MASTER", "FIT")).thenReturn(sku("FIT", "1200", "600"));
-        var line = new OfficeCart(); when(carts.selectById(anyString())).thenReturn(line);
+        var line = new OfficeCart();
+        line.setProjectId("P");
+        when(carts.selectById(anyString())).thenReturn(line);
         when(office.saveCanvas(any())).thenReturn(canvas);
         service.select("P", request());
         verify(carts).updateById(line); verify(carts, never()).insert(any(OfficeCart.class)); assertEquals(1, line.getQty());

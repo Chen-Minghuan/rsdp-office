@@ -143,7 +143,7 @@ function applyCurrent() {
     </div>
     <div class="border-t border-line px-3 py-2">
       <p v-if="problem" class="mb-2 text-[10px] text-[#a65e4c]" role="status">{{ problem }}</p>
-      <button type="button" data-testid="reference-apply" class="w-full bg-[#83d94f] px-3 py-2 text-xs font-semibold disabled:opacity-50" :disabled="busy || !editing?.crop || !editing.marks.length" @click="applyCurrent">应用当前方案</button>
+      <button type="button" data-testid="reference-apply" class="w-full bg-accent px-3 py-2 text-xs font-semibold disabled:opacity-50" :disabled="busy || !editing?.crop || !editing.marks.length" @click="applyCurrent">应用当前方案</button>
     </div>
   </section>
 </template>

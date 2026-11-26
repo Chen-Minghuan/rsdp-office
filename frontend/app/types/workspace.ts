@@ -36,13 +36,23 @@ export interface AssignableUser {
 export interface WorkspaceProject {
   projectId: string
   projectName: string
+  /** 由项目负责人或所属工作区主号人工维护。 */
+  status: ProjectStatus
+  /** 当前用户是否可修改项目阶段（负责人或工作区主号），由后端按成员关系计算。 */
+  canManageStatus: boolean
   customerRequirements: string
   requirementsRevision: number
   leader: WorkspaceMember | null
   collaborators: WorkspaceMember[]
   referenceImages: ProjectReferenceImage[]
   floors: WorkspaceFloor[]
+  /** 所有楼层区域(kind=zone)总数；仅项目列表返回，单项目接口为 null。 */
+  zoneTotal: number | null
+  /** 所在楼层方案已确认（交付中）的区域数；仅项目列表返回。 */
+  zoneDelivered: number | null
 }
+
+export type ProjectStatus = 'DESIGNING' | 'DELIVERING' | 'COMPLETED'
 
 export interface WorkspaceRequirementsSummary {
   keyPoints: string[]

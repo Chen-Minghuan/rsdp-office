@@ -71,3 +71,17 @@ RSDP_AUTH_COOKIE_SECURE=true
 - 按用户要求去掉开发测试账号登录名的 `dev_` 前缀。脚本通过原用户 ID 识别旧种子账号并原地改名，保留密码和角色。本机账号和密码文件已同步更新。
 
 仍待执行：公网 HTTPS 反向代理部署与正式环境数据库迁移；多用户管理和角色权限不在首期范围；上述本地核对不等于正式业务验收。
+
+## 2026-11-25 登录页主题改版
+
+- 登录页复用工作区紫色主色、浅紫背景和键盘焦点样式。桌面并排展示办公空间配图和登录表单，窄屏改为上下布局。验证码刷新可用键盘操作，密码可显隐。
+- 办公空间配图由内置 ImageGen 生成，压缩为约 94 kB 的 [WebP](../../frontend/app/assets/login-office.webp)，随前端构建分发。生成提示词见下方。
+- `pnpm build`、`pnpm e2e:workflows`、`MOCK_API=1 pnpm e2e:smoke`、`pnpm e2e:workspace-isolation` 通过。账号隔离回归首轮因商品目录模拟仍使用旧接口而超时，补齐公共库开关和目录浏览响应后复跑通过。
+- Chromium 核对 1440、390、320 px 布局，无横向溢出。模拟认证覆盖紫色键盘焦点、密码切换、记住我、提交中、错误反馈、验证码刷新和成功后返回原页面。本地真实后端核对匿名请求返回 401 并跳到新版登录页，真实账号提交和公网部署未执行。
+
+<details>
+<summary>配图生成提示词</summary>
+
+> Use case: photorealistic-natural. Create a single photorealistic interior architecture photograph for the left visual panel of a Chinese professional office space design platform login page. Portrait 4:5 or 3:4 framing, full-bleed image. A refined, practical modern workplace with a clear sightline and real task furniture: long shared workbench in light natural oak, charcoal ergonomic mesh task chairs, muted smoky aubergine/lavender acoustic dividers and upholstery, slender black mullions and tall side windows, warm off-white plaster, pale concrete floor, and a low-key plant. Editorial architectural photography, straight verticals, natural side light, tactile matte surfaces, restrained contrast, spatial depth, carefully composed diagonal perspective. Aim for cool-tinted muted violet notes balanced by tactile warm neutrals. Eye-level 28mm architectural lens. Keep the top and bottom portions visually calm so the page can overlay its own wordmark and text. No people, lettering, logos, watermark, interface, annotations, diagram lines, or frame.
+
+</details>

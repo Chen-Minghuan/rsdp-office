@@ -22,6 +22,12 @@
 
 ## 2. 核心数据关系（目标模型）
 
+项目阶段由项目负责人或所属工作区主号人工维护（`PATCH /api/v1/office/projects/{projectId}/status`，后端核验权限并记录审计），`office_design_project.status` 是唯一事实来源，取值为 `DESIGNING / DELIVERING / COMPLETED`，新建项目默认 `DESIGNING`；项目列表返回 `canManageStatus`，仅负责人/主号可见修改下拉，其他成员只读。区域进度仍按方案确认读时派生，见下段。详见 [WORKSPACE-006](tasks/WORKSPACE-006-project-status.md)。
+
+项目列表接口同时返回区域进度字段 `zoneTotal` / `zoneDelivered`：区域为楼层最新画布 `objects_json` 中 `kind=zone` 的对象（每楼层取 `created_at` 最新一行，无画布按 0 计，解析失败按 0 计）；所在楼层方案存在未失效（`retired=false`）确认**且该区域购物车数量合计 > 0**（`office_cart` 按楼层与 `zone_id` 聚合，未分区行不计入）的区域计入 `zoneDelivered`，购物车为 0 的区域视为设计中；前端按 `zoneDelivered / zoneTotal` 计算进度百分比，`zoneTotal` 为 0 时显示占位。
+
+客户端刷新契约：项目列表由应用外壳 `workspace.init()` 拉取一次，此后不随路由自动重取；阶段与区域进度只能由列表接口给出（阶段人工维护、进度读时派生），因此进入工作台项目列表视图时 `workspace.refreshProjects()` 静默重取（保留旧数据避免闪烁、不重置 office 画布状态，首次加载仍由 `init()` 负责）。方案确认、确认失效（画布保存/清单变化）与新增楼层均不主动失效列表，依赖进入列表时的重取获得最新阶段与进度；若未来出现需要实时阶段的其他消费方（如侧栏角标），再引入版本号广播式失效。人工保存阶段与重取竞态由 store 的 `statusOverrides` 防护：重取响应发出之后才保存的阶段以人工保存值为准，不被迟到的旧响应覆盖。回归见 `pnpm e2e:project-refresh` 与 `pnpm e2e:project-status`（延迟响应用例）。
+
 ```text
 DesignProject（项目资料与客户需求备注）
   └─ DesignFloor（floorId 作为既有 projectId 工作区隔离键）
@@ -140,7 +146,7 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 2026-10-15 新增用户明确要求的单空间二维**概念效果预览**，作为排版后的辅助入口，允许未确认排版/未选商品，不替代下述正式方案效果图契约。
 后端以保存画布中的空间和家具投影生成不可变 `CONCEPT_PREVIEW` 快照与 PNG 参考图，调用 Qwen-Image-3.0 原生异步接口；独立 `office_render_preview` 表和本地图片目录保存结果。
 前后端比较当前空间的轮廓、家具位置/尺寸/旋转、商品与目录快照，旧图标记历史，不写回当前画布；仅视图和其他空间变化不影响此预览。
-接口、配置、幂等、失败恢复与窗口轮询的时限见 [生图配置](render-configuration.md)；正式已确认方案的生成仍待后续 RENDER-001。
+接口、配置、幂等、失败恢复与窗口轮询的时限见 [生图配置](render-configuration.md)。楼层确认后的效果图继续使用此任务管线，详见 [FLOW-007](tasks/FLOW-007-product-scheme.md)。
 
 家具布局单元先保存 `placementId`、`spaceId`、类型、需求宽深/高度、位置、旋转和占地轮廓。
 推荐前允许 `productId/variantId` 为空；推荐后另建选择映射，不能把商品 ID 当作布局单元 ID。
@@ -154,13 +160,17 @@ Y 轴方向、平移、缩放、旋转使用明确可逆变换处理，不能各
 
 Office 本地商品、规格和图片表沿用 RSDP 的款式与变体模型及毫米尺寸口径。Office 本地保存时同事务记录待发送数据，由后台向已配置的接入端自动推送。RSDP 每次录入或导入建立一张审核单，按商品保存候选和审核决定。每个获准商品独立写入正式主档、变体和来源映射。现有共享目录仍以 RSDP 正式主档为准。表结构、来源、版本和接口权限见 [INTEG-003](tasks/INTEG-003-office-product-review.md)。
 
+本地商品列表的 `search` 按名称和厂内型号匹配，分页行返回主图 ID，图片内容由单独的图片接口读取。列表、详情和图片继续按工作区隔离。列表和详情响应中的 `canWrite` 供界面显示录入和编辑操作，保存按当前服务端权限独立核验。
+
+商品库浏览入口 `GET /api/v1/products/browse` 统一返回本地和公共商品的分页结果。它从会话确定本地工作区，并按当前公共库开关决定是否读取 RSDP。两类商品按各自目录顺序交错，在一类读尽后继续另一类。分页结果保留各自的稳定 ID 和详情入口。RSDP 读取失败时接口仍返回符合筛选的本地商品，并附公共库不可用状态。
+
 审核单以最后一件商品处理完成的时间起算，满 7 天由 RSDP 数据保留任务整单清理。接收回执和精简结论与删除同事务保存，支持清理后的批次幂等回包及来源版本校验。
 
-个人商品收藏按服务端会话用户隔离：`office_favorite_folder` 保存默认分组与用户自建分组，`office_favorite_item` 以 `(folder_id,rspu_id)` 保存多分组商品关系。`rspu_id` 是 RSDP 商品弱关联，不建本地商品外键；下架不删除收藏。接口提供当前用户分组/数量/商品选择、自建分组、完整勾选事务保存及已收藏商品 ID，保存时独立核验商品可见性和分组归属。详见 [CAT-008](tasks/CAT-008-personal-favorites.md)。
+个人商品收藏按服务端会话用户隔离：`office_favorite_folder` 保存默认分组与用户自建分组，`office_favorite_item` 以 `(folder_id,rspu_id)` 保存多分组商品关系。`rspu_id` 保存商品弱关联，RSDP 编号沿用旧值，Office 本地编号带 `OFFICE-LOCAL-` 前缀。接口提供当前用户分组/数量/商品选择、自建分组、完整勾选事务保存及已收藏商品 ID，保存时独立核验商品可见性和分组归属。详见 [CAT-008](tasks/CAT-008-personal-favorites.md)。
 项目商品收藏使用独立的 `office_project_favorite_item`，以 `(project_id,user_id,rspu_id)` 联合主键实现每个成员在每个项目下各自收藏，不与个人分组混用。项目切换只刷新项目收藏状态；个人爱心跨项目保留。服务端从会话取得用户并逐次核验项目访问权和商品可见性。统一收藏弹窗只合并交互，不合并两套数据。详见 [CAT-009](tasks/CAT-009-project-favorites.md)。
 收藏中心 `/favorites` 对所有登录角色开放：侧栏账号浮层新增「收藏」直达入口，工作区账号仅主号可管理，报价入口按项目授权展示。个人与项目收藏各新增只读商品列表接口（`/favorites/items`、`/projects/{projectId}/favorites/items`），按收藏时间倒序，复用商品可见性过滤，他人收藏夹与无权限项目分别返回 403；自定义收藏夹可经 `DELETE /favorites/folders/{folderId}` 事务删除（默认夹保护、归属校验）。认证关闭的本地开发使用固定 `LOCAL-DEV` 用户读写收藏；数据库结构不变。详见 [CAT-010](tasks/CAT-010-favorites-center-page.md)。
 
-自选组合按会话用户隔离，单表 `office_combo` 保存组合（同用户名唯一、每账号≤10 个），`rspu_ids` 数组默认空、顺序即展示顺序，数据库约束数组≤5 项。`/api/v1/office/combos` 提供列表/创建/改名/删除组合，以及 `POST /{id}/items` 增量添加（锁内重读最新数组、去重、只校验新增商品可见性）和 `DELETE /{id}/items/{rspuId}` 单件移除，连续添加不互相覆盖，组内失效旧条目标注 `available=false` 且不影响其他商品编辑。商品库页右侧栏支持拖拽商品卡或空位＋选品弹窗加入。详见 [CAT-011](tasks/CAT-011-self-select-combo.md)。
+自选组合复用 `/api/v1/office/product-bundles`（真实/本地商品、变体、数量、revision 乐观锁、可应用房间方案），不存在独立组合表。商品库收藏侧栏的 `ProductComboPanel` 在旧面板基础上提供多组合卡片管理：命名创建/重命名、删除确认、缩略图网格拼贴（失效标注）、展开/收起明细、拖拽与空位＋选品弹窗（规格选择）。保存成功后仅用返回的 revision 结果更新本地，不整表回拉，创建/改名/增删不会被慢回拉覆盖；每账号 10 组合、每组 5 商品的限制在 UI 层执行。详见 [CAT-011](tasks/CAT-011-self-select-combo.md)。
 Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `widthCm/depthCm` 数据继续兼容。画布旧候选的厘米字段由毫米向上取整，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
 商品详情的 `variants[].dimensionsText` 复用同一尺寸转换，提供可空的毫米显示文本。页面优先显示供应商尺寸原文，再读取结构化尺寸及旧尺寸编码。见 [CAT-009](tasks/CAT-009-structured-variant-dimensions.md)。
 本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订以及商品和变体的在售状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
@@ -202,6 +212,12 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 ### 5.2 项目报价存储（QUOTE-001）
 
 报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
+
+### 5.3 房间方案和楼层确认（FLOW-007）
+
+活动房间版本沿用楼层画布和清单。每个房间在 `office_room_scheme` 另存非活动版本的家具、清单与对应的空间快照。切换与清空选品持有同一个楼层事务锁并轮换 `schemeToken`，拒绝计划切换前发出的画布和清单写入。
+
+个人商品组合记录主库商品、变体和数量。应用时重新核验可见性、报价、品类与毫米尺寸，只填充已确认的空闲家具模块。正式确认在 `office_proposal_confirmation` 保存楼层修订、空间与选品快照。正式生图记录带 `confirmationId`，输入变化或确认失效后，任务记录保留为历史。
 
 ## 6. 几何约束与版本失效
 
@@ -263,3 +279,21 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 RENDER-004 更新：RenderProductReferences 按有效商品的 rspuId 从 image_assets 读取公共/当前变体图片，主图优先、内容去重、每款最多 4 个角度；每款参考块合图后仍限制为两板。版本 selected-products-multiview-v2，保存每张来源与摘要及实际使用张数。provider 第一张图片改为 RenderSceneGuide 的无文字立体代理图，原 referencePng 仅供平面核对；实际引导 URL 随任务保存并响应 layoutGuideUrl。正向与负向提示共同限定完整场景，不能将图纸或清单绘入场景。见 [RENDER-004](tasks/RENDER-004-multiview-products-and-scene-guide.md)。
 
 RENDER-005 更新：RenderLayoutContext 从不可变当前设计计算多边形净面积、旋转外包离墙/相邻净距、主模块行列与朝向，并按项目/空间稳定 ID/来源修订/图片摘要关联原识别记录。原始轮廓不覆盖用户几何，来源不可用可降级，门窗未知明确标记。汇总提示替代逐件大坐标清单；RenderSceneGuide 支持 L 型与镜像。测量存于服务端附件、响应 layoutContext，客户端 snapshot 投影包含排版角色/分组/设置及来源比例字段。见 [RENDER-005](tasks/RENDER-005-physical-layout-context.md)。
+
+RENDER-009 更新：RenderFurnitureBindings 从后端校验后的scene统一分配逐件F编号和按productId共享的P编号，方位由旋转外包中心与房间边界计算。RenderSceneGuide 保留45°几何；生图输入使用无文字结构图，内部审核另存带F标签版本。RenderProductReferences 将无P文字参考板按商品组顺序映射到F家具；2D工具栏和3D白模AI入口均只提交ISOMETRIC，不再上传白模相机截图，历史whiteModelView仍可读取。生成PNG后由RenderProductAuditService和QwenVisionClient做一次非权威性视觉核对，qualityAudit写回snapshot_json附件；SUCCEEDED不等于商品精确还原，不自动重新生图。静态提示词实验进一步将通用画质提示与空间数据分离：生图文字不携带毫米尺寸、商品规格或旋转角度，真实数值仍保存在任务附件；固定使用简洁的照片级3D室内效果图品质提示。见 [RENDER-009](tasks/RENDER-009-furniture-product-bindings.md)。
+
+## 生图前商品视觉理解与建筑标注（RENDER-010，实验）
+
+`experiment/render-product-agent` 在不改变 RenderPreview 三个 API 和手动生成方式的前提下，加入商品视觉档案。`ProductVisualUnderstandingService` 只输出经硬校验的商品可见证据；`RenderReferencePlanner` 决定实际选图；`RenderPromptCompiler` 决定哪些外观描述可以进入最终提示词。档案按商品/变体、原图哈希、视觉模型和协议版本缓存，任务快照保存实际档案和选图。失败回退静态 v6，不自动重试生图。
+
+`RenderArchitecturalOpenings` 是后端唯一门窗贴墙计算，`RenderLayoutContext` 的事实、`RenderSceneGuide` 的洞口和生成后建筑审核共同读取它。门窗高度仍是示意估计，未解析门洞不成为生成事实。详见 [RENDER-010](tasks/RENDER-010-product-visual-agent.md)。
+
+RENDER-010 2026-11-24 更新：新生图任务的首图、页面核对和生成后审核统一使用带 F 编号的 RenderSceneGuide，商品参考板绘制 P 编号，提示词逐件携带 F→P；平面图仍仅供人工核对。商品理解升级为 product-visual-profile-v2/reference-understanding-v2-target-audit，system 固定“商品构成→目标识别→参考适用性→目标外观”职责，user 携带动态商品记录。套组必须显式报警；可靠目标框经 RenderSubjectCropper 确定性裁剪后才可进入生图，无法可靠定位时阻断，目标裁剪不等于像素级分割且必须保留人工复核提示。原图与生成图摘要、目标框和隔离方式写入 manifest，缓存按新协议失效，历史快照不回填。详见 [RENDER-010](tasks/RENDER-010-product-visual-agent.md#2026-11-24-fp-显式生图与商品目标隔离跟进)。
+
+## 三图空间控制与位置几何审核（RENDER-011，实验）
+
+v9 曾将带F的图1/图2送入生图；真实样本出现编号和椅子复制后，v10 改为无F编号的45°结构图和平面控制图，带F白模只供审核，图3仍为带P商品板。`RenderSpatialControl` 统一世界毫米、`z=0`地面轮廓和两套`0～1000`投影坐标；`RenderLayoutSemantics` 从坐标生成两排直线、顺序、间距、旋转和头尾关系，视觉智能体不得决定这些事实。`RenderGeometryAuditService` 不再向观测模型提供预期数量或坐标，只要求其从结果图穷举实例；随后由 `RenderGeometryMetrics` 独立进行一对一匹配，计算中心偏移和地面IoU，类别不覆盖几何。所有输入、映射和审核保存在原任务快照，不新增映射表，不自动重试收费生图。详见 [RENDER-011](tasks/RENDER-011-spatial-layout-control.md)。
+
+## 提示词与参考图对照实验（RENDER-012，实验）
+
+RenderGenerationOptions 显式定义 A/B/C/D/E；缺省使用正式 E（完整技术提示词＋Direct）。RenderVisualTaskPrompt 从同一 RenderLayoutSemantics 结构化事实生成无坐标 JSON 的精简任务，Java 仍保存完整空间事实。C 只从生图输入移除平面图，审核继续使用；D/E 使用 prompt_extend=direct，其中 E 保留 A 的完整技术提示词。实验参数、seed、实际图片角色与哈希进入原任务快照并参与幂等，不新增表、不自动批量收费生图。任务快照另存 generationTiming 时间戳，接口计算准备、提交、服务生成和图片下载耗时，页面实时显示等待及最终耗时；Direct 改写包含在服务生成阶段，当前不能单独拆分。详见 [RENDER-012](tasks/RENDER-012-prompt-ab-experiment.md)。

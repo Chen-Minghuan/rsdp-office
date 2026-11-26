@@ -57,6 +57,7 @@
 | 前端构建 | 在 `frontend/` 执行 `pnpm build` | 已安装依赖；不代替独立类型检查或业务验收 |
 | UI 工作流 | 在 `frontend/` 执行 `pnpm e2e:workflows` | 前端服务运行、浏览器可用；拦截 API，验证已有 UI 用例 |
 | UI 冒烟 | 在 `frontend/` 执行 `MOCK_API=1 pnpm e2e:smoke` | 前端运行；接口隔离模式，不代表真实服务结果 |
+| 项目列表刷新回归 | 在 `frontend/` 执行 `pnpm e2e:project-refresh` | 先 `pnpm build`；脚本自起 `.output` 服务并拦截 API，验证确认/失效/新增楼层后阶段与进度刷新 |
 | Java 测试 | `mvn -f backend/pom.xml test` | Java/Maven 和测试依赖可用 |
 | CAD 测试 | `dotnet test backend/cad-parser/tests/RsdpCadParser.Tests/RsdpCadParser.Tests.csproj` | 当前目标 `net7.0`；核对金样本是否实际存在 |
 | 差异检查 | `git diff --check`，检查相关文件差异 | 不混入无关、临时和生成文件 |

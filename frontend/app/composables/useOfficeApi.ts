@@ -1,11 +1,14 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
-import type { OfficeObject, CartItem, Product, ProjectFile, DesignBrief, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
+import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
-import type { ProductCombo } from '~/types/combos'
 import type { WorkspaceType } from '~/utils/workspaceType'
-import type { LocalProductInput, LocalProductSummary, LocalProductVariant, LocalProductImage } from '~/types/local-products'
+import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
+import type {
+  LocalProductInput, LocalProductCatalogItem, LocalProductDetail, LocalProductWorkbookPreview,
+  WorkbookCategoryItem, WorkbookFieldColumns, WorkbookMappingSelection,
+} from '~/types/local-products'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082'
 
@@ -19,11 +22,18 @@ interface CanvasDto {
   canvasId: number
   projectId: string
   revision: number
+  schemeToken?: string | null
   mode: 'overview' | 'design'
   designZoneId: string | null
   objects: OfficeObject[]
   files: ProjectFile[]
   blank: boolean
+}
+
+type CartDto = Omit<CartItem, 'id'> & { lineId: string }
+
+function cartItem({ lineId, ...row }: CartDto): CartItem {
+  return { id: lineId, ...row }
 }
 
 interface SpaceReviewConfirmItem {
@@ -103,12 +113,19 @@ function apiUrl(path: string) {
   return `${API_BASE}${path}`
 }
 
-async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>, timeout?: number): Promise<T> {
   const res = await $fetch<ApiResponse<T>>(apiUrl(path), {
     method: method as any,
     body: body as any,
     credentials: 'include',
+    timeout,
+    retry: timeout === undefined ? undefined : 0,
     headers: { 'Content-Type': 'application/json', ...headers },
+  }).catch((failure) => {
+    if (failure?.cause?.name === 'TimeoutError' || failure?.name === 'TimeoutError') {
+      throw new Error('服务响应超时，请重试')
+    }
+    throw failure
   })
   if (res.code !== 200) {
     throw new Error(res.message || '请求失败')
@@ -123,6 +140,10 @@ export function useOfficeApi() {
     const projectId = selectedProjectId()
     if (!projectId) throw new Error('请先创建或选择项目与楼层')
     return projectId
+  }
+  function schemeTokenFor(floorId: string) {
+    const store = useOfficeStore()
+    return store.workspaceId === floorId ? store.schemeToken : null
   }
 
   async function recognizeLayoutReference(image: Blob, analysisId: string, revision: number) {
@@ -143,7 +164,7 @@ export function useOfficeApi() {
     })
   }
 
-  async function loadCanvas(): Promise<{ objects: OfficeObject[]; files: ProjectFile[]; mode: 'overview' | 'design'; designZoneId: string | null; revision: number; blank: boolean } | null> {
+  async function loadCanvas() {
     const dto = await request<CanvasDto | null>('GET', `/api/v1/office/projects/${requireProjectId()}/canvas`)
     if (!dto) return null
     return {
@@ -152,6 +173,7 @@ export function useOfficeApi() {
       mode: dto.mode || 'overview',
       designZoneId: dto.designZoneId || null,
       revision: dto.revision || 1,
+      schemeToken: dto.schemeToken ?? null,
       blank: dto.blank || false,
     }
   }
@@ -162,20 +184,57 @@ export function useOfficeApi() {
     mode: 'overview' | 'design'
     designZoneId: string | null
     revision: number
+    schemeToken?: string | null
     blank: boolean
   }, workspaceId?: string): Promise<CanvasDto | null> {
     // 调用方可能传入空字符串（尚未选择项目/楼层），此时回退到当前楼层；
     // 仍然为空则抛出明确提示，避免拼出 /projects//canvas 这类 404 地址。
     const targetProjectId = workspaceId || requireProjectId()
+    const token = payload.schemeToken !== undefined ? payload.schemeToken : schemeTokenFor(targetProjectId)
     return await request<CanvasDto>('PUT', `/api/v1/office/projects/${encodeURIComponent(targetProjectId)}/canvas`, {
       projectId: targetProjectId,
       revision: payload.revision,
+      ...(token ? { schemeToken: token } : {}),
       mode: payload.mode,
       designZoneId: payload.designZoneId,
       objects: payload.objects,
       files: payload.files,
       blank: payload.blank,
-    })
+    }, undefined, 15_000)
+  }
+
+  const schemePath = (floorId: string) => `/api/v1/office/floors/${encodeURIComponent(floorId)}/room-scheme`
+  const confirmationPath = (floorId: string) => `/api/v1/office/floors/${encodeURIComponent(floorId)}/proposal-confirmation`
+  const bundlesPath = '/api/v1/office/product-bundles'
+
+  function loadRoomScheme(floorId: string, zoneId: string) {
+    return request<RoomSchemeState>('GET', `${schemePath(floorId)}?zoneId=${encodeURIComponent(zoneId)}`)
+  }
+
+  async function changeRoomScheme(floorId: string, action: 'activate' | 'clear-selection' | 'apply-products',
+    payload: SchemeVersion & { zoneId: string; targetSlot?: SchemeSlot; automatic?: boolean; items?: BundleItem[] }): Promise<RoomSchemeResult> {
+    const result = await request<{ canvas: CanvasDto; cart: CartDto[]; scheme: RoomSchemeState | null }>('POST', `${schemePath(floorId)}/${action}`, payload)
+    return { ...result, canvas: { ...result.canvas, schemeToken: result.canvas.schemeToken ?? null }, cart: result.cart.map(cartItem) }
+  }
+
+  function loadProposalConfirmation(floorId: string) {
+    return request<ProposalConfirmation | null>('GET', confirmationPath(floorId))
+  }
+
+  function confirmProposal(floorId: string, version: SchemeVersion) {
+    return request<ProposalConfirmation>('POST', confirmationPath(floorId), { canvasRevision: version.revision, schemeToken: version.schemeToken })
+  }
+
+  function loadProductBundles() {
+    return request<ProductBundle[]>('GET', bundlesPath)
+  }
+
+  function saveProductBundle(bundleId: string, payload: { name: string; revision: number; items: BundleItem[] }) {
+    return request<ProductBundle>('PUT', `${bundlesPath}/${encodeURIComponent(bundleId)}`, payload)
+  }
+
+  function deleteProductBundle(bundleId: string, revision: number) {
+    return request<void>('DELETE', `${bundlesPath}/${encodeURIComponent(bundleId)}?revision=${revision}`)
   }
 
   /** 设计复核确认（SPACE_REVIEW）：服务端基于当前画布签发凭据，baseCanvasRevision 必须等于服务端当前修订。 */
@@ -196,38 +255,42 @@ export function useOfficeApi() {
   }
 
   async function loadCart(): Promise<CartItem[]> {
-    const list = await request<Array<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>>('GET', `/api/v1/office/projects/${requireProjectId()}/cart`)
-    return list.map(c => ({ id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }))
+    const list = await request<CartDto[]>('GET', `/api/v1/office/projects/${requireProjectId()}/cart`)
+    return list.map(cartItem)
   }
 
-  async function addCartItem(item: CartItem, workspaceId?: string): Promise<CartItem> {
+  function cartHeaders(floorId: string, schemeToken?: string | null): Record<string, string> {
+    const token = schemeToken === undefined ? schemeTokenFor(floorId) : schemeToken
+    return token ? { 'X-Office-Scheme': token } : {}
+  }
+
+  async function addCartItem(item: CartItem, workspaceId?: string, schemeToken?: string | null): Promise<CartItem> {
     const targetFloorId = workspaceId || requireProjectId()
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number }>('POST', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`, {
+    const c = await request<CartDto>('POST', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`, {
       lineId: item.id,
       projectId: item.projectId,
       zoneId: item.zoneId,
       zoneName: item.zoneName,
       productId: item.productId,
       qty: item.qty,
-    })
-    return { id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }
+    }, cartHeaders(targetFloorId, schemeToken))
+    return cartItem(c)
   }
 
-  async function updateCartItemQty(lineId: string, qty: number, workspaceId?: string): Promise<CartItem | null> {
+  async function updateCartItemQty(lineId: string, qty: number, workspaceId?: string, schemeToken?: string | null): Promise<CartItem | null> {
     const targetFloorId = workspaceId || requireProjectId()
-    const c = await request<{ lineId: string; projectId: string; zoneId: string | null; zoneName: string; productId: string; qty: number } | null>('PUT', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart/${lineId}?qty=${qty}`, {})
-    if (!c) return null
-    return { id: c.lineId, projectId: c.projectId, zoneId: c.zoneId, zoneName: c.zoneName, productId: c.productId, qty: c.qty }
+    const c = await request<CartDto | null>('PUT', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart/${encodeURIComponent(lineId)}?qty=${qty}`, {}, cartHeaders(targetFloorId, schemeToken))
+    return c ? cartItem(c) : null
   }
 
-  async function deleteCartItem(lineId: string, workspaceId?: string): Promise<void> {
+  async function deleteCartItem(lineId: string, workspaceId?: string, schemeToken?: string | null): Promise<void> {
     const targetFloorId = workspaceId || requireProjectId()
-    await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart/${lineId}`)
+    await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart/${encodeURIComponent(lineId)}`, undefined, cartHeaders(targetFloorId, schemeToken))
   }
 
   async function clearCart(workspaceId?: string): Promise<void> {
     const targetFloorId = workspaceId || requireProjectId()
-    await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`)
+    await request<void>('DELETE', `/api/v1/office/projects/${encodeURIComponent(targetFloorId)}/cart`, undefined, cartHeaders(targetFloorId))
   }
 
   async function loadProducts(): Promise<Product[]> {
@@ -248,15 +311,15 @@ export function useOfficeApi() {
   }
 
   async function recommendModule(requestBody: ModuleRecommendationRequest): Promise<ModuleRecommendation> {
-    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody)
+    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-recommendations`, requestBody, undefined, 15_000)
   }
 
   async function selectModuleProduct(requestBody: ModuleRecommendationRequest): Promise<ModuleProductSelection> {
-    return await request('POST', `/api/v1/office/projects/${requireProjectId()}/module-products`, requestBody)
-  }
-
-  async function checkProposalCatalog(): Promise<void> {
-    return await request<void>('POST', '/api/v1/office/projects/' + encodeURIComponent(requireProjectId()) + '/proposal/catalog-check')
+    const floorId = requireProjectId()
+    const schemeToken = schemeTokenFor(floorId)
+    return await request('POST', `/api/v1/office/projects/${encodeURIComponent(floorId)}/module-products`, {
+      ...requestBody, ...(schemeToken ? { schemeToken } : {}),
+    })
   }
 
   async function exportProposal(): Promise<Blob> {
@@ -323,6 +386,10 @@ export function useOfficeApi() {
     return await request<T>('GET', `/api/v1/products/import-batches/${encodeURIComponent(batchId)}/status`)
   }
 
+  async function loadImportedProducts(managed = false): Promise<ImportedProduct[]> {
+    return await request<ImportedProduct[]>('GET', managed ? '/api/v1/products?managed=true' : '/api/v1/products')
+  }
+
   async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean }): Promise<CatalogProductPage> {
     const query = new URLSearchParams({ page: String(options.page), size: String(options.size) })
     if (options.search) query.set('search', options.search)
@@ -333,6 +400,19 @@ export function useOfficeApi() {
 
   async function loadCatalogCapabilities(): Promise<CatalogCapabilities> {
     return await request('GET', '/api/v1/products/capabilities')
+  }
+
+  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string }) {
+    const { page, size, ...filters } = options
+    const query = new URLSearchParams({ page: String(page), size: String(size) })
+    for (const [name, value] of Object.entries(filters)) {
+      if (value) query.set(name, value)
+    }
+    return request<CatalogBrowsePage>('GET', `/api/v1/products/browse?${query}`)
+  }
+
+  function browseProductFacets() {
+    return request<CatalogBrowseFacets>('GET', '/api/v1/products/browse/facets')
   }
 
   async function loadFavoriteFolders(rspuId?: string): Promise<FavoriteFolder[]> {
@@ -358,30 +438,6 @@ export function useOfficeApi() {
     return await request<string[]>('GET', '/api/v1/office/favorites/product-ids')
   }
 
-  async function loadCombos(): Promise<ProductCombo[]> {
-    return await request<ProductCombo[]>('GET', '/api/v1/office/combos')
-  }
-
-  async function createCombo(name: string): Promise<ProductCombo> {
-    return await request<ProductCombo>('POST', '/api/v1/office/combos', { name })
-  }
-
-  async function renameCombo(comboId: string, name: string): Promise<void> {
-    await request<void>('PATCH', `/api/v1/office/combos/${encodeURIComponent(comboId)}`, { name })
-  }
-
-  async function addComboItems(comboId: string, rspuIds: string[]): Promise<void> {
-    await request<void>('POST', `/api/v1/office/combos/${encodeURIComponent(comboId)}/items`, { rspuIds })
-  }
-
-  async function removeComboItem(comboId: string, rspuId: string): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/combos/${encodeURIComponent(comboId)}/items/${encodeURIComponent(rspuId)}`)
-  }
-
-  async function deleteCombo(comboId: string): Promise<void> {
-    await request<void>('DELETE', `/api/v1/office/combos/${encodeURIComponent(comboId)}`)
-  }
-
   async function loadFavoriteItems(folderId?: string): Promise<ImportedProduct[]> {
     const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : ''
     return await request<ImportedProduct[]>('GET', `/api/v1/office/favorites/items${query}`)
@@ -402,11 +458,6 @@ export function useOfficeApi() {
   async function saveProjectFavorite(projectId: string, rspuId: string, selected: boolean): Promise<ProjectFavoriteState> {
     return await request<ProjectFavoriteState>('PUT', `/api/v1/office/projects/${encodeURIComponent(projectId)}/favorites/${encodeURIComponent(rspuId)}`, { selected })
   }
-
-
-
-
-
 
   async function parseCad(file: File): Promise<unknown> {
     const formData = new FormData()
@@ -481,21 +532,32 @@ export function useOfficeApi() {
   }
 
   const localProductsPath = '/api/v1/office/local-products'
-  const listLocalProducts = (page: number) => request<{ canWrite: boolean, products: LocalProductSummary[], hasMore: boolean }>(
-    'GET', `${localProductsPath}?page=${page}`)
-  const getLocalProduct = (id: string) => request<{
-    product: LocalProductSummary, variants: LocalProductVariant[], images: LocalProductImage[]
-  }>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
-  const saveLocalProducts = (batchId: string, products: LocalProductInput[]) => request<{ id: string, name: string, revision: number }[]>(
-    'POST', localProductsPath, { batchId, products })
-  const localProductImageUrl = (id: string) => apiUrl(`${localProductsPath}/images/${encodeURIComponent(id)}`)
+  function listLocalProducts(page: number, search = '') {
+    const query = new URLSearchParams({ page: String(page) })
+    if (search) query.set('search', search)
+    return request<{ canWrite: boolean, products: LocalProductCatalogItem[], hasMore: boolean }>('GET', `${localProductsPath}?${query}`)
+  }
+  const getLocalProduct = (id: string) => request<LocalProductDetail>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
+  const saveLocalProducts = (batchId: string, products: LocalProductInput[], previewId?: string | null) => request<{ id: string, name: string, revision: number }[]>(
+    'POST', localProductsPath, { batchId, products, previewId })
+  const localProductImagePath = (id: string) => `${localProductsPath}/images/${encodeURIComponent(id)}`
+  const workbookPreviewImageUrl = (id: string, key: string) => apiUrl(`${localProductsPath}/excel-preview/${encodeURIComponent(id)}/images/${encodeURIComponent(key)}`)
   const localProductTemplateUrl = () => apiUrl(`${localProductsPath}/excel-template`)
   const listLocalProductCategories = () => request<{ dictCode: string, dictName: string }[]>('GET', '/api/v1/dicts/category')
 
-  async function previewLocalProductWorkbook(file: File) {
+  const suggestWorkbookFields = (headers: Record<number, string>) => request<WorkbookFieldColumns>(
+    'POST', `${localProductsPath}/excel-field-suggestions`, { headers })
+  const suggestWorkbookCategories = (candidates: string[], products: WorkbookCategoryItem[]) => request<Record<number, string>>(
+    'POST', `${localProductsPath}/excel-category-suggestions`, { candidates, products })
+  const suggestWorkbookMaterials = (descriptions: string[]) => request<Record<number, string>>(
+    'POST', `${localProductsPath}/excel-material-suggestions`, { descriptions })
+
+  async function previewLocalProductWorkbook(file: File, mapping?: WorkbookMappingSelection) {
     const form = new FormData()
     form.set('file', file)
-    const response = await $fetch<ApiResponse<{ products: LocalProductInput[], errors: { row: number, message: string }[] }>>(
+    form.set('imageReferences', 'true')
+    if (mapping) form.set('mapping', new Blob([JSON.stringify(mapping)], { type: 'application/json' }))
+    const response = await $fetch<ApiResponse<LocalProductWorkbookPreview>>(
       apiUrl(`${localProductsPath}/excel-preview`), { method: 'POST', body: form, credentials: 'include' })
     if (response.code !== 200) throw new Error(response.message || 'Excel 预览失败')
     return response.data
@@ -525,6 +587,13 @@ export function useOfficeApi() {
     get projectId() { return selectedProjectId() },
     loadCanvas,
     saveCanvas,
+    loadRoomScheme,
+    changeRoomScheme,
+    loadProposalConfirmation,
+    confirmProposal,
+    loadProductBundles,
+    saveProductBundle,
+    deleteProductBundle,
     confirmSpaceReview,
     confirmAllSpaceReviews,
     loadCart,
@@ -536,26 +605,22 @@ export function useOfficeApi() {
     recommendModule,
     selectModuleProduct,
     exportProposal,
-    checkProposalCatalog,
-    previewProjectQuotation,
+      previewProjectQuotation,
     confirmProjectQuotation,
     exportProjectQuotation,
     exportLatestProjectQuotation,
     latestProjectQuotation,
     resetProject,
+    loadImportedProducts,
     loadImportedProductPage,
+    browseProductCatalog,
+    browseProductFacets,
     loadCatalogCapabilities,
     loadFavoriteFolders,
     createFavoriteFolder,
     saveProductFavoriteFolders,
     deleteFavoriteFolder,
     loadFavoriteProductIds,
-    loadCombos,
-    createCombo,
-    renameCombo,
-    addComboItems,
-    removeComboItem,
-    deleteCombo,
     loadFavoriteItems,
     loadProjectFavoriteProductIds,
     loadProjectFavoriteItems,
@@ -578,10 +643,14 @@ export function useOfficeApi() {
     listLocalProducts,
     getLocalProduct,
     saveLocalProducts,
-    localProductImageUrl,
+    localProductImagePath,
+    workbookPreviewImageUrl,
     localProductTemplateUrl,
     listLocalProductCategories,
     previewLocalProductWorkbook,
+    suggestWorkbookFields,
+    suggestWorkbookCategories,
+    suggestWorkbookMaterials,
     createWorkspaceUser,
     getSharedCatalogStatus,
     setWorkspaceSharedCatalog,

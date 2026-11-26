@@ -7,7 +7,6 @@ export const TONES = {
   purple: { stroke: '#b39de4', fill: '#ae9ce648' },
   pink: { stroke: '#e8a4b8', fill: '#edb8c44f' },
 }
-
 export const ZONE_TYPES: [string, string][] = [
   ['OPEN_OFFICE', '开放办公区'],
   ['MEETING_ROOM', '会议室'],

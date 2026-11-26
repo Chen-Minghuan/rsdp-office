@@ -1,6 +1,7 @@
 package com.rsdp.officeproduct.importer.office.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.rsdp.officeproduct.importer.config.JsonbTypeHandler;
@@ -15,6 +16,8 @@ public class OfficeDesignProject {
     @TableId
     private String projectId;
     private String name;
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private String status;
     private String customerRequirements;
     private Integer requirementsRevision;
 
