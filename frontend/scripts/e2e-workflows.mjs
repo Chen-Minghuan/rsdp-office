@@ -17,6 +17,7 @@ let rejectCatalogChange = false
 const catalogUpdates = []
 const localProduct = { id: 'LOCAL-TEA-TABLE', revision: 1, name: '本地样品茶几', categoryCode: 'CODE-1', factoryModel: 'LOCAL-001' }
 const localImageId = 'LOCAL-IMAGE'
+const localSideImageId = 'LOCAL-SIDE-IMAGE'
 let staffCanEditLocalProducts = false
 let catalogPageRequests = 0
 let importRequests = 0
@@ -100,10 +101,12 @@ await context.route('**/api/v1/**', async route => {
   }
   if (url.pathname === `/api/v1/office/local-products/${localProduct.id}`) {
     return respond({ product: localProduct, variants: [
-      { name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, material: 'PB' },
-    ], images: [{ id: localImageId, mediaType: 'image/png' }], canWrite: catalogDealer || staffCanEditLocalProducts })
+      { id: 'STANDARD', name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, color: '胡桃色', material: 'PB' },
+      { id: 'LARGE', name: '加长规格', widthMm: 1400, depthMm: 600, heightMm: 450, color: '深木色', material: '碳晶板' },
+    ], images: [localImageId, localSideImageId].map(id => ({ id, mediaType: 'image/png' })),
+    canWrite: catalogDealer || staffCanEditLocalProducts })
   }
-  if (url.pathname === `/api/v1/office/local-products/images/${localImageId}`) {
+  if ([localImageId, localSideImageId].some(id => url.pathname === `/api/v1/office/local-products/images/${id}`)) {
     return route.fulfill({ contentType: 'image/png', body: Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9GQAAAAASUVORK5CYII=', 'base64') })
   }
@@ -161,8 +164,11 @@ await context.route('**/api/v1/**', async route => {
   if (url.pathname.startsWith('/api/v1/products/PRODUCT-') && request.method() === 'GET') {
     const rspuId = url.pathname.split('/').at(-1)
     const product = products.find(item => item.rspuId === rspuId)
-    return respond({ ...product, images: [], variants: [
-      { variantId: 'STRUCTURED', displayName: '默认规格', dimensionsText: '1200 × 600 × 450 mm', status: 'active' },
+    return respond({ ...product, description: '测试配置说明', images: [localImageId, localSideImageId].map((id, index) => ({
+      imageId: id, storageUrl: `/api/v1/office/local-products/images/${id}`, primary: index === 0,
+    })), variants: [
+      { variantId: 'STRUCTURED', displayName: '默认规格', dimensionsText: '1200 × 600 × 450 mm', materialCode: 'PB',
+        packageCount: 2, packageVolumeCbm: 0.36, grossWeight: 18, status: 'active' },
       { variantId: 'SUPPLIER', displayName: '供应商规格', sizeText: '供应商尺寸原文', dimensionsText: '1400 × 600 mm', status: 'active' },
     ] })
   }
@@ -617,7 +623,27 @@ try {
   await localCard.waitFor()
   await localCard.click()
   await heading(localProduct.name)
-  await page.getByRole('cell', { name: '1200 × 600 × 450 mm', exact: true }).waitFor()
+  const localDimensions = page.getByTestId('catalog-product-dimensions')
+  assert.equal(await localDimensions.innerText(), '1200 × 600 × 450 mm')
+  await page.getByRole('combobox', { name: '选择规格' }).selectOption('LARGE')
+  assert.equal(await localDimensions.innerText(), '1400 × 600 × 450 mm')
+  await page.getByText('碳晶板', { exact: true }).waitFor()
+  const secondaryImage = page.getByRole('button', { name: '查看商品图片 2' })
+  await secondaryImage.click()
+  assert.equal(await secondaryImage.getAttribute('aria-pressed'), 'true')
+  const enlargeImage = page.getByRole('button', { name: `放大${localProduct.name}图片` })
+  await enlargeImage.waitFor()
+  await enlargeImage.focus()
+  await page.keyboard.press('Enter')
+  const zoomDialog = page.getByRole('dialog', { name: `${localProduct.name}图片完整预览` })
+  await zoomDialog.waitFor()
+  await page.keyboard.press('Escape')
+  await zoomDialog.waitFor({ state: 'hidden' })
+  assert.equal(await enlargeImage.evaluate(element => document.activeElement === element), true)
+  await page.setViewportSize({ width: 390, height: 900 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  assert.equal(await localDimensions.innerText(), '1400 × 600 × 450 mm')
+  await page.setViewportSize({ width: 1440, height: 960 })
   assert.equal(await page.getByRole('link', { name: '编辑商品' }).count(), 0)
   assert.equal(await page.getByLabel('宽（mm）').count(), 0)
   await page.waitForFunction(name => Array.from(document.images).some(img => img.alt === name && img.naturalWidth > 0), localProduct.name + '图片')
@@ -629,8 +655,8 @@ try {
   await page.goto(`${baseUrl}/products/local/${localProduct.id}?from=catalog`)
   await page.getByRole('link', { name: '编辑商品' }).click()
   await heading('编辑商品')
-  assert.equal(await page.getByLabel('宽（mm）').inputValue(), '1200')
-  assert.equal(await page.getByLabel('宽（mm）').isEnabled(), true)
+  assert.equal(await page.getByLabel('宽（mm）').first().inputValue(), '1200')
+  assert.equal(await page.getByLabel('宽（mm）').first().isEnabled(), true)
   await page.getByRole('button', { name: '保存', exact: true }).waitFor()
   staffCanEditLocalProducts = false
   await page.goto(`${baseUrl}/products`)
@@ -664,10 +690,31 @@ try {
   assert.equal(await productCards().count(), 1)
   await page.getByRole('link', { name: '查看简约办公桌 2详情' }).first().click()
   await heading('简约办公桌 2')
-  await page.getByText('在售状态', { exact: true }).waitFor()
-  await page.getByRole('cell', { name: '1200 × 600 × 450 mm', exact: true }).waitFor()
-  await page.getByRole('cell', { name: '供应商尺寸原文', exact: true }).waitFor()
-  assert.equal(await page.getByRole('cell', { name: '1400 × 600 mm', exact: true }).count(), 0)
+  await page.getByText('在售', { exact: true }).waitFor()
+  await page.getByText('¥ 1,080.00', { exact: true }).waitFor()
+  const sharedSpecs = page.getByRole('region', { name: '商品规格', exact: true })
+  const sharedDimensions = sharedSpecs.getByTestId('catalog-product-dimensions')
+  assert.equal(await sharedDimensions.innerText(), '1200 × 600 × 450 mm')
+  for (const value of ['PB', '包数', '体积（CBM）', '0.36', '重量（原表值）', '18', '有效']) {
+    await sharedSpecs.getByText(value, { exact: true }).waitFor()
+  }
+  await sharedSpecs.getByRole('combobox', { name: '选择规格' }).selectOption('SUPPLIER')
+  assert.equal(await sharedDimensions.innerText(), '供应商尺寸原文')
+  assert.equal(await sharedSpecs.getByText('包数', { exact: true }).count(), 0)
+  await page.getByRole('button', { name: '查看商品图片 2' }).click()
+  await page.getByRole('button', { name: '放大简约办公桌 2图片' }).click()
+  await page.getByRole('dialog', { name: '简约办公桌 2图片完整预览' }).waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByText('说明与记录', { exact: true }).click()
+  await page.getByText('测试配置说明', { exact: true }).waitFor()
+  await page.getByText('更新时间', { exact: true }).waitFor()
+  await page.setViewportSize({ width: 390, height: 900 })
+  const infoBox = await page.getByRole('region', { name: '商品资料' }).boundingBox()
+  const specBox = await sharedSpecs.boundingBox()
+  assert.ok(specBox.y < infoBox.y, '窄屏优先展示公共商品规格')
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  await page.setViewportSize({ width: 1440, height: 960 })
+  assert.equal(await page.getByRole('link', { name: '编辑商品' }).count(), 0)
   assert.equal(await page.getByText('审核状态', { exact: true }).count(), 0)
 
   const detailRequests = []
