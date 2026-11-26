@@ -18,6 +18,7 @@
     "e2e:account-center": "node scripts/e2e-account-center.mjs",
     "e2e:favorites-page": "node scripts/e2e-favorites-page.mjs",
     "test:auto-layout": "node scripts/test-auto-layout.mjs",
+    "test:auto-layout-primary": "node scripts/test-auto-layout-primary.mjs",
     "test:arrangement-presets": "node scripts/test-arrangement-presets.mjs",
     "test:design-corrections": "node scripts/test-design-corrections.mjs",
     "test:uuid": "node scripts/test-uuid.mjs",

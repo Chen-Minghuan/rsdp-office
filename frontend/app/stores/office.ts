@@ -795,6 +795,51 @@ export const useOfficeStore = defineStore('office', {
       return warning ? `已调整尺寸；请复核：${warning}` : null
     },
 
+    resizeFurnitureBatch(ids: string[], widthMm: number, depthMm: number): string | null {
+      if (!Array.isArray(ids) || ids.length === 0) return '未选择要调整尺寸的家具'
+      if (!Number.isFinite(widthMm) || !Number.isFinite(depthMm) || widthMm < 10 || depthMm < 10) return '家具尺寸无效'
+      const items: FurnitureObject[] = []
+      for (const id of ids) {
+        const item = this.objects.find((object): object is FurnitureObject => object.kind === 'furniture' && object.id === id)
+        if (!item) return '所选家具不存在'
+        items.push(item)
+      }
+      const zoneId = items[0]?.zoneId
+      if (!zoneId || items.some(item => item.zoneId !== zoneId)) return '批量调整尺寸的家具必须在同一空间'
+      const zone = this.zones.find(zone => zone.id === zoneId)
+      if (!zone) return '家具所属空间无效'
+      const current = this.furnitureForZone(zone.id)
+      const resizedMap = new Map<string, FurnitureObject>()
+      for (const item of items) {
+        if (item.w === widthMm && item.h === depthMm) continue
+        const resized = { ...item, w: widthMm, h: depthMm }
+        const before = officeFurnitureFootprint(item)
+        const after = officeFurnitureFootprint(resized)
+        resized.x += before.x - after.x
+        resized.y += before.y - after.y
+        resizedMap.set(item.id, resized)
+      }
+      if (resizedMap.size === 0) return null
+      const final = current.map(item => resizedMap.get(item.id) ?? item)
+      const zeroSpacing: OfficeLayoutSpacing = { wallMm: 0, gapMm: 0, aisleMm: 0 }
+      for (const item of final) {
+        const others = final.filter(other => other.id !== item.id)
+        const problem = officePlacementHardProblem(zone, item, others, zeroSpacing)
+        if (problem) return problem
+      }
+      this.lastManualFurnitureEdit = { zoneId: zone.id, at: Date.now() }
+      this.objectUpdate(() => {
+        for (const [id, resized] of resizedMap) {
+          const item = items.find(i => i.id === id)
+          if (item) Object.assign(item, { x: resized.x, y: resized.y, w: resized.w, h: resized.h })
+        }
+        current.forEach(entry => { entry.layoutConfirmed = false })
+      })
+      const resizedItems = Array.from(resizedMap.values())
+      const warning = officeFurnitureMoveWarning(zone, resizedItems)
+      return warning ? `已调整尺寸；请复核：${warning}` : null
+    },
+
     replaceFurnitureModule(id: string, templateId: string): string | null {
       const item = this.objects.find((object): object is FurnitureObject => object.kind === 'furniture' && object.id === id)
       const template = this.customModules.find(module => module.id === templateId) || furnitureById.get(templateId)
