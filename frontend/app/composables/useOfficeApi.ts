@@ -1,12 +1,15 @@
 import type { ModuleRecommendation, ModuleRecommendationRequest, ModuleProductSelection } from '~/types/moduleRecommendation'
 import type { LayoutReferenceMark } from '~/types/layoutPlanning'
-import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ConfirmQuotationRequest } from '~/types/office'
-import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import type { OfficeObject, CartItem, Product, ProjectFile, ProjectQuotationPreview, QuotationPricingMode, ProjectQuotationRecord, ProjectQuotationLatest, ConfirmQuotationRequest } from '~/types/office'
+import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, CatalogProductFilters, CatalogProductPage, ImportedProduct, ProductDetail } from '~/types/imported-products'
+import { FILTER_KEYS } from '~/utils/productFilter'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
-import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
+import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeSlots, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
 import type {
   LocalProductInput, LocalProductCatalogItem, LocalProductDetail, LocalProductWorkbookPreview,
+  LocalProductImportDetail, LocalProductImportRecord,
+  LocalProductCapacity,
   WorkbookCategoryItem, WorkbookFieldColumns, WorkbookMappingSelection,
 } from '~/types/local-products'
 
@@ -128,7 +131,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers?
     throw failure
   })
   if (res.code !== 200) {
-    throw new Error(res.message || '请求失败')
+    throw Object.assign(new Error(res.message || '请求失败'), { code: res.code })
   }
   return res.data
 }
@@ -215,6 +218,14 @@ export function useOfficeApi() {
     payload: SchemeVersion & { zoneId: string; targetSlot?: SchemeSlot; automatic?: boolean; items?: BundleItem[] }): Promise<RoomSchemeResult> {
     const result = await request<{ canvas: CanvasDto; cart: CartDto[]; scheme: RoomSchemeState | null }>('POST', `${schemePath(floorId)}/${action}`, payload)
     return { ...result, canvas: { ...result.canvas, schemeToken: result.canvas.schemeToken ?? null }, cart: result.cart.map(cartItem) }
+  }
+
+  function loadRoomSchemeSlots(floorId: string, zoneId: string) {
+    return request<RoomSchemeSlots>('GET', `${schemePath(floorId)}/slots?zoneId=${encodeURIComponent(zoneId)}`)
+  }
+
+  function changeRoomSchemeChoice(floorId: string, action: 'confirm-choice' | 'cancel-choice', payload: SchemeVersion & { zoneId: string; targetSlot: SchemeSlot }) {
+    return request<RoomSchemeState>('POST', `${schemePath(floorId)}/${action}`, payload)
   }
 
   function loadProposalConfirmation(floorId: string) {
@@ -378,6 +389,11 @@ export function useOfficeApi() {
     return await request<ProjectQuotationRecord | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest`)
   }
 
+  /** 最近一条报价记录（任意状态）的状态与时间；没有报价记录时返回 null。 */
+  async function latestProjectQuotationRecord(projectId: string): Promise<ProjectQuotationLatest | null> {
+    return await request<ProjectQuotationLatest | null>('GET', `/api/v1/office/projects/${projectId}/quotation/latest-record`)
+  }
+
   async function catalogImportHistory<T>(): Promise<T> {
     return await request<T>('GET', '/api/v1/products/import-batches')
   }
@@ -390,11 +406,17 @@ export function useOfficeApi() {
     return await request<ImportedProduct[]>('GET', managed ? '/api/v1/products?managed=true' : '/api/v1/products')
   }
 
-  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean }): Promise<CatalogProductPage> {
+  async function loadImportedProductPage(options: { page: number; size: number; search: string; status: string; managed: boolean; filters?: CatalogProductFilters; refresh?: boolean }): Promise<CatalogProductPage> {
     const query = new URLSearchParams({ page: String(options.page), size: String(options.size) })
     if (options.search) query.set('search', options.search)
     if (options.status) query.set('status', options.status)
     if (options.managed) query.set('managed', 'true')
+    if (options.refresh) query.set('refresh', 'true')
+    if (options.filters) {
+      for (const key of FILTER_KEYS) {
+        for (const value of options.filters[key]) query.append(key, String(value))
+      }
+    }
     return await request<CatalogProductPage>('GET', `/api/v1/products/page?${query}`)
   }
 
@@ -402,17 +424,21 @@ export function useOfficeApi() {
     return await request('GET', '/api/v1/products/capabilities')
   }
 
-  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string }) {
-    const { page, size, ...filters } = options
+  function browseProductCatalog(options: { page: number, size: number, search: string, status: string, category: string, color: string, filters?: CatalogProductFilters }) {
+    const { page, size, filters, ...quickFilters } = options
     const query = new URLSearchParams({ page: String(page), size: String(size) })
-    for (const [name, value] of Object.entries(filters)) {
+    for (const [name, value] of Object.entries(quickFilters)) {
       if (value) query.set(name, value)
     }
+    if (filters) for (const key of FILTER_KEYS) for (const value of filters[key]) query.append(key, String(value))
     return request<CatalogBrowsePage>('GET', `/api/v1/products/browse?${query}`)
   }
 
-  function browseProductFacets() {
-    return request<CatalogBrowseFacets>('GET', '/api/v1/products/browse/facets')
+  function browseProductFacets(options?: { search?: string, status?: string }) {
+    const query = new URLSearchParams()
+    if (options?.search) query.set('search', options.search)
+    if (options?.status) query.set('status', options.status)
+    return request<CatalogBrowseFacets>('GET', `/api/v1/products/browse/facets?${query}`)
   }
 
   async function loadFavoriteFolders(rspuId?: string): Promise<FavoriteFolder[]> {
@@ -543,6 +569,15 @@ export function useOfficeApi() {
     return request<{ canWrite: boolean, products: LocalProductCatalogItem[], hasMore: boolean }>('GET', `${localProductsPath}?${query}`)
   }
   const getLocalProduct = (id: string) => request<LocalProductDetail>('GET', `${localProductsPath}/${encodeURIComponent(id)}`)
+  const getLocalProductCapacity = () => request<LocalProductCapacity>('GET', `${localProductsPath}/capacity`)
+  function listLocalProductImports(page: number, search = '') {
+    const query = new URLSearchParams({ page: String(page) })
+    if (search) query.set('search', search)
+    return request<{ canWrite: boolean, hasMore: boolean, records: LocalProductImportRecord[] }>(
+      'GET', `${localProductsPath}/imports?${query}`)
+  }
+  const getLocalProductImport = (id: string) =>
+    request<LocalProductImportDetail>('GET', `${localProductsPath}/imports/${encodeURIComponent(id)}`)
   const saveLocalProducts = (batchId: string, products: LocalProductInput[], previewId?: string | null) => request<{ id: string, name: string, revision: number }[]>(
     'POST', localProductsPath, { batchId, products, previewId })
   const localProductImagePath = (id: string) => `${localProductsPath}/images/${encodeURIComponent(id)}`
@@ -594,6 +629,8 @@ export function useOfficeApi() {
     saveCanvas,
     loadRoomScheme,
     changeRoomScheme,
+    loadRoomSchemeSlots,
+    changeRoomSchemeChoice,
     loadProposalConfirmation,
     confirmProposal,
     loadProductBundles,
@@ -615,6 +652,7 @@ export function useOfficeApi() {
     exportProjectQuotation,
     exportLatestProjectQuotation,
     latestProjectQuotation,
+    latestProjectQuotationRecord,
     resetProject,
     loadImportedProducts,
     loadImportedProductPage,
@@ -646,6 +684,9 @@ export function useOfficeApi() {
     listWorkspaceUsers,
     setWorkspaceProductEntry,
     listLocalProducts,
+    getLocalProductCapacity,
+    listLocalProductImports,
+    getLocalProductImport,
     getLocalProduct,
     saveLocalProducts,
     localProductImagePath,

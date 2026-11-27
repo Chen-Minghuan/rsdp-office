@@ -30,6 +30,9 @@ public class OfficeQuotation {
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String feesJson;
 
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private String proposalConfirmationsJson;
+
     private String createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime supersededAt;

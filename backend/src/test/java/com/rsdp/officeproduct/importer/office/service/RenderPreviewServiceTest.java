@@ -251,8 +251,10 @@ class RenderPreviewServiceTest {
         assertTrue(prompt.contains("照片级写实的3D室内效果图"));assertTrue(prompt.contains("材质真实细腻"));assertTrue(prompt.contains("不输出文字、标注、图表或拼贴"));assertTrue(prompt.contains("只输出一个完整空间画面"));assertFalse(prompt.contains("商品清单"));
     }
     @Test void overlappingFurnitureIsRejectedAndForeignProjectCannotReadTasks() {
-        objects.add(objects.get(1).deepCopy()); ((ObjectNode)objects.get(2)).put("id","F2");
-        assertThrows(BusinessException.class,()->RenderPreviewScene.validate(RenderPreviewScene.snapshot(objects,"ROOM")));
+        objects.add(objects.get(1).deepCopy()); ((ObjectNode)objects.get(2)).put("id","F2").put("label","收纳柜");
+        var overlap = assertThrows(BusinessException.class,()->RenderPreviewScene.validate(RenderPreviewScene.snapshot(objects,"ROOM")));
+        assertTrue(overlap.getMessage().contains("「办公桌」"));
+        assertTrue(overlap.getMessage().contains("「收纳柜」"));
         assertThrows(BusinessException.class,()->service.get("OTHER","RPRE-UNKNOWN"));
     }
 

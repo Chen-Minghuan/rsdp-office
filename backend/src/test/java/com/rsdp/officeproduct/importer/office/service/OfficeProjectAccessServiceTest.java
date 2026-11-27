@@ -147,6 +147,32 @@ class OfficeProjectAccessServiceTest {
         assertEquals("W1", access.workspaceForProjectCreation());
     }
 
+    @Test void onlyOwningMainAccountOrActualReadableProjectLeaderCanManageStatus() {
+        addWorkspace("W1", "OWNER");
+        addWorkspace("W2", "OTHER-OWNER");
+        addProject("P1", "W1");
+        addMember("P1", "LEAD", "LEADER");
+        addMember("P1", "STAFF", "COLLABORATOR");
+        members.get(1).setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.MANAGE_MEMBERS)));
+        enforcementOn("OWNER", "W1");
+        currentUser.currentUser().setRole("DEALER");
+        assertDoesNotThrow(() -> access.requireStatusManager("P1"));
+        enforcementOn("LEAD", "W1");
+        assertDoesNotThrow(() -> access.requireStatusManager("P1"));
+        members.getFirst().setPermissionFlags(0);
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+        enforcementOn("STAFF", "W1");
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+        enforcementOn("OTHER-OWNER", "W2");
+        currentUser.currentUser().setRole("DEALER");
+        addMember("P1", "OTHER-OWNER", "LEADER");
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+        enforcementOn("ADMIN", "W1");
+        currentUser.currentUser().setRole("ADMIN");
+        assertThrows(AccessDeniedException.class, () -> access.requireStatusManager("P1"));
+    }
+
     @Test void memberAndLeaderChecksFollowMembership() {
         addProject("P1", null);
         enforcementOn("USR-1");
@@ -169,6 +195,29 @@ class OfficeProjectAccessServiceTest {
         enforcementOn("USR-9");
         assertEquals("无权访问该项目", assertThrows(AccessDeniedException.class,
             () -> access.requireMember("P1")).getMessage());
+    }
+
+    @Test void requirePermissionFollowsGrantedBitsForQuoteAndExport() {
+        addProject("P1", null);
+        enforcementOn("USR-1");
+        addMember("P1", "USR-1", "COLLABORATOR");
+        // 只授 项目查看+报价查看：其余权限位逐一拒绝
+        members.getFirst().setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.QUOTE_READ)));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.READ));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.QUOTE_READ));
+        for (OfficeProjectPermission denied : List.of(OfficeProjectPermission.EDIT,
+            OfficeProjectPermission.MARGIN_READ, OfficeProjectPermission.EXPORT_PROJECT,
+            OfficeProjectPermission.EXPORT_QUOTE, OfficeProjectPermission.MANAGE_MEMBERS)) {
+            assertThrows(AccessDeniedException.class, () -> access.requirePermission("P1", denied));
+        }
+        // 补授毛利查看与报价导出后放行
+        members.getFirst().setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.QUOTE_READ,
+                OfficeProjectPermission.MARGIN_READ, OfficeProjectPermission.EXPORT_QUOTE)));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.MARGIN_READ));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.EXPORT_QUOTE));
+        assertThrows(AccessDeniedException.class, () -> access.requirePermission("P1", OfficeProjectPermission.EDIT));
     }
 
     @Test void floorAccessResolvesOwningProjectBeforeMembershipCheck() {

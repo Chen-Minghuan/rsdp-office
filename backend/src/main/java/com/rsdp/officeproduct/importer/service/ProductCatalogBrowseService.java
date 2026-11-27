@@ -2,6 +2,8 @@ package com.rsdp.officeproduct.importer.service;
 
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.dto.request.CatalogProductPageRequest;
+import com.rsdp.officeproduct.importer.dto.response.CatalogFacetsDto;
 import com.rsdp.officeproduct.importer.dto.response.CatalogProductPageDto;
 import com.rsdp.officeproduct.importer.dto.response.ProductListItemDto;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
@@ -29,13 +31,14 @@ public class ProductCatalogBrowseService {
     private final SharedCatalogService visibility;
     private final LocalCatalogReader local;
     private final RsdpCatalogGateway rsdp;
+    private final CatalogProductFilterService advancedFilters;
     private SharedSnapshot sharedSnapshot;
 
     public record Row(CatalogItem local, ProductListItemDto shared) {}
     public record Page(long total, long catalogTotal, long activeTotal, long localTotal, boolean canManageLocal, boolean sharedUnavailable,
                        List<Row> rows) {}
     public record Facets(List<String> localCategories, List<String> sharedCategories, List<String> colors,
-                         boolean sharedUnavailable) {}
+                         boolean sharedUnavailable, CatalogFacetsDto advanced) {}
     private record SharedWindow(long total, long catalogTotal, long activeTotal, boolean unavailable,
                                 List<ProductListItemDto> rows) {
         private static SharedWindow empty(boolean unavailable) {
@@ -44,7 +47,10 @@ public class ProductCatalogBrowseService {
     }
     private record SharedSnapshot(long expiresAt, List<ProductListItemDto> products) {}
 
-    public Page page(int page, int size, String search, String status, String category, String color) {
+    public Page page(int page, int size, String search, String status, String category, String color,
+                     CatalogProductPageRequest advanced) {
+        boolean advancedActive = advanced.hasAdvancedFilters();
+        if (advancedActive) advanced.validate();
         if (page < 1 || size < 1 || size > 100 || search.length() > 120 || category.length() > 1000 || color.length() > 256
                 || !List.of("", "active", "other").contains(status)
                 || !(category.isEmpty() || category.startsWith(LOCAL_CATEGORY) || category.startsWith(SHARED_CATEGORY))) {
@@ -54,13 +60,14 @@ public class ProductCatalogBrowseService {
         String workspace = user == null ? null : user.getWorkspaceId();
         String keyword = search.strip();
         String localCategory = category.startsWith(LOCAL_CATEGORY) ? category.substring(LOCAL_CATEGORY.length()) : "";
-        boolean matchLocal = status.isEmpty() && !category.startsWith(SHARED_CATEGORY);
+        boolean matchLocal = status.isEmpty() && !category.startsWith(SHARED_CATEGORY) && !advancedActive;
         LocalCatalogReader.Counts localCounts = workspace == null ? new LocalCatalogReader.Counts(0, 0)
             : local.counts(workspace, keyword, localCategory, color);
         long localMatches = matchLocal ? localCounts.matching() : 0;
         long start = (page - 1L) * size;
         SharedWindow shared = visibility.canViewSharedCatalog(user)
-            ? sharedWindow(start, size, localMatches, keyword, status, category, color) : SharedWindow.empty(false);
+            ? sharedWindow(start, size, localMatches, keyword, status, category, color,
+                advancedActive ? advanced.toFilter() : null) : SharedWindow.empty(false);
         long total = localMatches + shared.total();
         long end = Math.min(start + size, total);
         long localStart = localBefore(Math.min(start, total), localMatches, shared.total());
@@ -71,12 +78,14 @@ public class ProductCatalogBrowseService {
             LocalProductService.canWrite(user), shared.unavailable(), merge(localRows, shared.rows(), start));
     }
 
-    public Facets facets() {
+    public Facets facets(String search, String status) {
         OfficeUser user = users.currentUser();
         String workspace = user == null ? null : user.getWorkspaceId();
         List<String> localCategories = workspace == null ? List.of() : local.categories(workspace);
         List<String> localColors = workspace == null ? List.of() : local.colors(workspace);
-        if (!visibility.canViewSharedCatalog(user)) return new Facets(localCategories, List.of(), localColors, false);
+        if (!visibility.canViewSharedCatalog(user)) {
+            return new Facets(localCategories, List.of(), localColors, false, CatalogFacetsDto.empty());
+        }
 
         try {
             List<ProductListItemDto> shared = sharedProducts();
@@ -85,17 +94,21 @@ public class ProductCatalogBrowseService {
             List<String> colors = Stream.concat(localColors.stream(), shared.stream()
                 .map(ProductListItemDto::getColorPrimaryName).filter(Objects::nonNull).map(String::strip))
                 .filter(value -> !value.isEmpty()).distinct().toList();
-            return new Facets(localCategories, sharedCategories, colors, false);
+            CatalogProductPageRequest scoped = new CatalogProductPageRequest();
+            scoped.setSearch(search == null ? "" : search);
+            scoped.setStatus(status == null ? "" : status);
+            return new Facets(localCategories, sharedCategories, colors, false,
+                advancedFilters.facets("full", scoped, false));
         } catch (BusinessException | AccessDeniedException error) {
-            return new Facets(localCategories, List.of(), localColors, true);
+            return new Facets(localCategories, List.of(), localColors, true, CatalogFacetsDto.empty());
         }
     }
 
     private SharedWindow sharedWindow(long start, int size, long localMatches, String search,
-                                      String status, String category, String color) {
+                                      String status, String category, String color, ProductFilter filter) {
         try {
-            if (!category.isEmpty() || !color.isEmpty()) {
-                return filteredSharedWindow(start, size, localMatches, search, status, category, color);
+            if (filter != null || !category.isEmpty() || !color.isEmpty()) {
+                return filteredSharedWindow(start, size, localMatches, search, status, category, color, filter);
             }
 
             // Start with the likely downstream page. If the requested window crosses its boundary, read one more page.
@@ -123,8 +136,11 @@ public class ProductCatalogBrowseService {
     }
 
     private SharedWindow filteredSharedWindow(long start, int size, long localMatches, String search,
-                                              String status, String category, String color) {
-        List<ProductListItemDto> all = sharedProducts();
+                                              String status, String category, String color, ProductFilter filter) {
+        List<ProductListItemDto> all = filter == null ? sharedProducts()
+            : rsdp.listFilterProducts("full", false).stream()
+                .filter(row -> ProductFilterSupport.attributes(toSource(row)).matches(filter))
+                .map(CatalogFilterProduct::summary).toList();
         long active = all.stream().filter(row -> "active".equals(row.getStatus())).count();
         String keyword = search.toLowerCase(Locale.ROOT);
         String sharedCategory = category.startsWith(SHARED_CATEGORY) ? category.substring(SHARED_CATEGORY.length()) : "";
@@ -148,6 +164,15 @@ public class ProductCatalogBrowseService {
             sharedSnapshot = new SharedSnapshot(System.nanoTime() + TimeUnit.SECONDS.toNanos(30), products);
         }
         return sharedSnapshot.products();
+    }
+
+    private ProductFilterSupport.Source toSource(CatalogFilterProduct row) {
+        var summary = row.summary();
+        return new ProductFilterSupport.Source(summary.getProductLevel(), summary.getProductName(),
+            summary.getColorPrimaryName(), row.description(),
+            row.variants().stream()
+                .map(variant -> new ProductFilterSupport.Source.Variant(variant.getMaterialText(), variant.getWidthMm()))
+                .toList());
     }
 
     private String categoryPath(ProductListItemDto row) {

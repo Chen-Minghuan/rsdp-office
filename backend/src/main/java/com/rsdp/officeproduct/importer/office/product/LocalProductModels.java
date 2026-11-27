@@ -28,6 +28,7 @@ public final class LocalProductModels {
                               String factoryModel, String primaryImageId) {}
     public record Detail(Summary product, List<Variant> variants, List<ImageRef> images, boolean canWrite) {}
     public record Page(boolean canWrite, List<CatalogItem> products, boolean hasMore) {}
+    public record Capacity(long used, int limit) {}
 
     record Dimensions(BigDecimal w, BigDecimal d, BigDecimal h, String unit) {}
     record SubmittedVariant(String id, String name, Dimensions dimensions, String sizeText, String color, String material) {}

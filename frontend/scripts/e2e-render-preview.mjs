@@ -232,7 +232,25 @@ try {
   await page.keyboard.press('Escape')
   await page.getByRole('dialog', { name: '单空间效果预览' }).waitFor({ state: 'hidden' })
   assert.equal(await page.getByRole('dialog', { name: '单空间效果预览' }).count(), 0)
-  console.log('Render preview mock UI passed: snapshot, pending/reload, stale result, download, failure/retry, query recovery')
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const original = store.objects.find(item => item.id === 'F1')
+    store.objects.push({ ...original, id: 'F2', label: '测试收纳柜', x: original.x + 400, layoutConfirmed: false, productId: '', productSelection: undefined })
+  })
+  const overlapAlert = page.getByTestId('canvas-furniture-overlaps')
+  await overlapAlert.getByText('1 对家具占地重叠', { exact: true }).waitFor()
+  await overlapAlert.getByRole('button', { name: /职员直线桌.*测试收纳柜.*定位/ }).click()
+  assert.equal(await page.locator('[data-id="F1"][data-overlap-focused="true"]').count(), 1)
+  assert.equal(await page.locator('[data-id="F2"][data-overlap-focused="true"]').count(), 1)
+  await page.evaluate(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    const original = store.objects.find(item => item.id === 'F1')
+    store.objects.find(item => item.id === 'F2').x = original.x + original.h
+  })
+  await overlapAlert.waitFor({ state: 'hidden' })
+  assert.equal(await page.locator('[data-overlap="true"]').count(), 0, '零间距贴边不显示重叠提示')
+  assert.deepEqual(pageErrors, [])
+  console.log('Render preview and canvas overlap mock UI passed')
 } catch (error) {
   if (page) await page.screenshot({ path: '../output/validation/e2e-render-preview-failure.png', fullPage: true })
   throw error

@@ -17,6 +17,7 @@ public class ProductListItemDto {
     private String rspuCode;
     private String externalCode;
     private String productName;
+    private String productLevel;
     private String sourceChannel;
     private String ownerFactoryCode;
     private String sourceFactoryName;

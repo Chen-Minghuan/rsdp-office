@@ -37,6 +37,8 @@ try {
   let exportFails = false
   let confirmFails = false
   let downloads = 0
+  // 楼层方案确认状态：null = 从未确认；current:false = 已失效；current:true = 有效
+  let proposalConfirmation = null
   page.on('pageerror', error => errors.push(error.message))
   page.on('download', () => { downloads++ })
 
@@ -46,6 +48,7 @@ try {
     collaborators: [], referenceImages: [],
     floors: [{ projectId: 'PROJ-1', floorId: 'FLOOR-1', name: '1F', sortOrder: 1 }],
   }
+  let previewSources
   const preview = {
     projectId: 'PROJ-1', projectName: '报价测试项目', pricingMode: 'COEFFICIENT', pricingValue: 1.2,
     generatedAt: '2026-11-18T15:00:00',
@@ -70,7 +73,7 @@ try {
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
     if (path === '/api/v1/office/projects' && request.method() === 'GET') return respond([project])
-    if (path === '/api/v1/office/projects/PROJ-1/quotation/preview') return respond(preview)
+    if (path === '/api/v1/office/projects/PROJ-1/quotation/preview') return respond({ ...preview, proposalConfirmationIds: previewSources ?? (proposalConfirmation?.current ? { 'FLOOR-1': proposalConfirmation.confirmationId } : {}) })
     if (path === '/api/v1/office/projects/PROJ-1/quotation/latest') return respond(null)
     if (path === '/api/v1/office/projects/PROJ-1/quotation/export' && request.method() === 'POST') {
       exportBodies.push(request.postDataJSON())
@@ -83,6 +86,7 @@ try {
     if (path === '/api/v1/office/projects/PROJ-1/quotation/confirm' && request.method() === 'POST') {
       const body = request.postDataJSON()
       confirmBodies.push(body)
+      if (body.proposalConfirmationIds?.['FLOOR-1'] !== proposalConfirmation?.confirmationId) return route.fulfill({ json: { code: 400, message: '方案已变化，请重新试算' } })
       if (confirmFails) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 400, message: '模拟确认失败' }) })
       return respond({
         quotationId: 'QT-MOCK-1', projectId: 'PROJ-1', projectName: '报价测试项目', revision: 1, status: 'CONFIRMED',
@@ -92,6 +96,7 @@ try {
       })
     }
     if (path === '/api/v1/office/projects/PROJ-1') return respond(project)
+    if (path.endsWith('/proposal-confirmation')) return respond(proposalConfirmation)
     if (path.endsWith('/canvas') || path.endsWith('/workspace/me')) return respond(null)
     return respond([])
   })
@@ -99,6 +104,30 @@ try {
   await page.goto(`${baseUrl}/workspace/quotes`, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: '商品报价', exact: true }).waitFor()
   await page.getByText('1.2米单人位职员台', { exact: true }).waitFor()
+
+  // 方案确认门禁：从未确认 → 已失效 → 有效，三种状态分别断言横幅与按钮
+  const confirmButton = page.getByRole('button', { name: '确认报价', exact: true })
+  const blockers = page.getByTestId('quote-confirmation-blockers')
+  await blockers.waitFor()
+  assert.match(await blockers.innerText(), /1F/)
+  assert.match(await blockers.innerText(), /尚未确认方案/)
+  assert.match(await blockers.innerText(), /去项目清单确认/)
+  assert.equal(await confirmButton.isDisabled(), true, '楼层方案未确认时确认报价按钮禁用')
+
+  proposalConfirmation = { confirmationId: 'PROP-1', canvasRevision: 1, confirmedAt: '2026-11-18T14:00:00', current: false }
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByText('1.2米单人位职员台', { exact: true }).waitFor()
+  await blockers.waitFor()
+  assert.match(await blockers.innerText(), /已失效，需重新确认/)
+  assert.equal(await confirmButton.isDisabled(), true, '方案确认已失效时确认报价按钮禁用')
+
+  proposalConfirmation = { confirmationId: 'PROP-1', canvasRevision: 2, confirmedAt: '2026-11-18T14:30:00', current: true }
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByText('1.2米单人位职员台', { exact: true }).waitFor()
+  await confirmButton.waitFor()
+  assert.equal(await blockers.count(), 0, '方案确认有效时不显示阻塞横幅')
+  assert.equal(await confirmButton.isDisabled(), false, '方案确认有效后确认报价按钮启用')
+
   await page.getByLabel('费用金额 1', { exact: true }).fill('100')
   await page.getByLabel('费用金额 2', { exact: true }).fill('50')
   await page.getByRole('button', { name: '＋ 添加其他费用', exact: true }).click()
@@ -134,6 +163,7 @@ try {
   })
   assert.match(await dialog.innerText(), /¥613\.40/, '弹窗金额不随背景编辑变化')
   const expectedPayload = {
+    proposalConfirmationIds: { 'FLOOR-1': 'PROP-1' },
     pricingMode: 'COEFFICIENT', pricingValue: 1.2,
     fees: [
       { name: '服务费', amount: 100 },
@@ -175,6 +205,28 @@ try {
   confirmFails = false
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
 
+  // 冻结草稿后别处重新确认方案：提交保持旧 ID，服务端拒绝；重新试算才绑定新 ID。
+  await confirmButton.click()
+  await dialog.waitFor()
+  proposalConfirmation = { ...proposalConfirmation, confirmationId: 'PROP-2', canvasRevision: 9 }
+  await dialog.getByRole('button', { name: '确认', exact: true }).click()
+  await dialog.getByRole('alert').filter({ hasText: '方案已变化，请重新试算' }).waitFor()
+  assert.equal(confirmBodies.at(-1).proposalConfirmationIds['FLOOR-1'], 'PROP-1')
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  previewSources = {}
+  await page.getByRole('button', { name: '重新试算', exact: true }).click()
+  await blockers.waitFor()
+  assert.match(await blockers.innerText(), /请重新试算/)
+  assert.equal(await confirmButton.isDisabled(), true, '缺少试算快照 ID 时不能确认')
+  previewSources = undefined
+  await page.getByRole('button', { name: '重新试算', exact: true }).click()
+  await blockers.waitFor({ state: 'detached' })
+  await confirmButton.click()
+  await dialog.waitFor()
+  await dialog.getByRole('button', { name: '确认', exact: true }).click()
+  await dialog.waitFor({ state: 'detached' })
+  assert.equal(confirmBodies.at(-1).proposalConfirmationIds['FLOOR-1'], 'PROP-2')
+
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: '确认报价', exact: true }).click()
   await dialog.waitFor()
@@ -183,7 +235,7 @@ try {
   await page.screenshot({ path: `${outDir}/02-quotation-mobile.png`, animations: 'disabled' })
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
   assert.deepEqual(errors, [])
-  console.log('报价 UI 通过：多项费用增删与合计、居中 Excel 预览、冻结草稿、下载/确认同载荷、取消与失败保留、窄屏可用。全部 API 模拟。')
+  console.log('报价 UI 通过：方案确认门禁（未确认/已失效禁用确认）、多项费用增删与合计、居中 Excel 预览、冻结草稿、下载/确认同载荷、取消与失败保留、窄屏可用。全部 API 模拟。')
 } catch (failure) {
   throw failure
 } finally {

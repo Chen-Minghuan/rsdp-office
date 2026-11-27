@@ -4,6 +4,7 @@ import com.rsdp.officeproduct.importer.office.controller.OfficeProjectController
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
+import com.rsdp.officeproduct.importer.office.dto.ProjectReferenceImage;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -20,6 +21,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class OfficeProjectControllerTest {
+    @Test void projectStatusEndpointReturnsThePersistedStage() throws Exception {
+        var service = mock(OfficeProjectService.class);
+        when(service.updateStatus("P1", "DELIVERING")).thenReturn("DELIVERING");
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
+        mvc.perform(patch("/api/v1/office/projects/P1/status").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"DELIVERING\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("DELIVERING"));
+    }
+    @Test void replaceMembersRoutePassesPermissionsToService() throws Exception {
+        var service = mock(OfficeProjectService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
+        mvc.perform(put("/api/v1/office/projects/OPRJ-1/members").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"leaderUserId\":\"U1\",\"collaboratorUserIds\":[\"U2\"],"
+                    + "\"permissions\":{\"U2\":[\"READ\",\"QUOTE_READ\"]}}"))
+            .andExpect(status().isOk());
+        // JSON body 中的权限数组必须反序列化为枚举 Map 并透传给 service（前端 PUT 契约的最后一环）
+        verify(service).replaceMembers(eq("OPRJ-1"), argThat(request ->
+            request.getPermissions() != null
+                && List.of(OfficeProjectPermission.READ, OfficeProjectPermission.QUOTE_READ)
+                    .equals(request.getPermissions().get("U2"))
+                && "U1".equals(request.getLeaderUserId())
+                && List.of("U2").equals(request.getCollaboratorUserIds())));
+    }
+
     private final OfficeProjectService projects = mock(OfficeProjectService.class);
     private final org.springframework.test.web.servlet.MockMvc mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(projects)).build();
 

@@ -5,7 +5,8 @@ import { TONES } from '~/utils/sample'
 import type { OfficeObject, ZoneObject, FurnitureObject } from '~/types/office'
 import type { FloorPlanAnalysisResponse, FloorPlanDrawingBounds } from '~/types/floorPlan'
 import { normalizePolygon, roomsBounds } from '~/utils/floorPlan'
-import { manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint, OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
+import { layoutFurnitureName, manualOfficeFurniture, officePlacementHardProblem, officeFurnitureMoveProblem, officeFurnitureFootprint, OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
+import { furnitureOverlapPairs } from '~/utils/meetingFurnitureCollision'
 import { snapFurnitureEdges, FURNITURE_SNAP_TOLERANCE_MM } from '~/utils/furnitureSnap'
 import { officeFurnitureTemplateId, officeFurnitureShowsSeat } from '~/utils/officeFurniture'
 import { chairActivityRect } from '~/utils/layoutPlanning'
@@ -25,7 +26,7 @@ import { useCanvasSpacePan } from '~/composables/useCanvasSpacePan'
 
 const store = useOfficeStore()
 const props = defineProps<{ updatingScheme?: boolean }>()
-const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean] }>()
+const emit = defineEmits<{ editFurniture: [id: string, fromGroup: boolean]; editSize: [id: string, anchor?: HTMLElement] }>()
 const layoutPreview = defineModel<LayoutPreview | null>('layoutPreview', { default: null })
 const activePreview = computed(() => layoutPreview.value?.zoneId === store.designZoneId ? layoutPreview.value : null)
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { default: null })
@@ -364,6 +365,29 @@ const dimensionFurniture = computed(() => {
     return item
   })
 })
+const collisionFurniture = computed(() => [...displayedFurniture.value, ...(activePreview.value?.furniture || [])])
+const overlaps = computed(() => activeReference.value ? [] : furnitureOverlapPairs(collisionFurniture.value))
+const overlappingIds = computed(() => new Set(overlaps.value.flatMap(pair => pair.map(item => item.id))))
+const focusedOverlap = ref<[string, string] | null>(null)
+const focusedOverlapIds = computed(() => {
+  const focus = focusedOverlap.value
+  return new Set(focus && overlaps.value.some(([a, b]) => a.id === focus[0] && b.id === focus[1]) ? focus : [])
+})
+const layoutFurnitureNumbers = computed(() => new Map(collisionFurniture.value.map((item, index) => [item.id, index + 1])))
+
+function overlapOutline(id: string) {
+  if (!overlappingIds.value.has(id)) return undefined
+  const focused = focusedOverlapIds.value.has(id)
+  return `${(focused ? 3 : 2) / store.zoom}px ${focused ? 'solid' : 'dashed'} #b74032`
+}
+
+function locateOverlap([first, second]: [FurnitureObject, FurnitureObject]) {
+  focusedOverlap.value = [first.id, second.id]
+  const [a, b] = [officeFurnitureFootprint(first), officeFurnitureFootprint(second)]
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y)
+  fitZone({ x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y }, 420)
+}
+watch(() => store.designZoneId, () => { focusedOverlap.value = null })
 
 // While a pending proposal preview is shown, hide the auto-group pieces it will
 // replace: the canvas shows the post-apply state instead of stacking the new
@@ -489,7 +513,7 @@ function fitBoard() {
   placeBoard()
 }
 
-function fitZone(z: ZoneObject, padding = 80) {
+function fitZone(z: Parameters<typeof fitCanvasZone>[0], padding = 80) {
   const v = canvasWindow.value
   if (!v || !v.clientWidth || !v.clientHeight) return
   const camera = fitCanvasZone(z, worldBounds.value, Math.max(80, v.clientWidth - 110), Math.max(80, v.clientHeight - 110), padding, viewRotation.value)
@@ -543,7 +567,7 @@ interface DragState {
 
 const drag = ref<DragState | null>(null)
 const selectedFurniture = computed(() => furniture.value.find(item => item.id === selectedId.value) || null)
-const selectedFurnitureIds = ref<string[]>([])
+const selectedFurnitureIds = defineModel<string[]>('selectedFurnitureIds', { default: () => [] })
 const selectedChannelId = ref<string | null>(null)
 const selectedFurnitureItems = computed(() => furniture.value.filter(item => selectedFurnitureIds.value.includes(item.id)))
 const moveProblem = ref('')
@@ -574,7 +598,9 @@ function dragFurnitureItem(item: FurnitureObject) {
 }
 const dragSnapGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
 watch(selectedId, id => {
-  if (id && furniture.value.some(item => item.id === id)) selectedFurnitureIds.value = [id]
+  if (id && furniture.value.some(item => item.id === id) && !selectedFurnitureIds.value.includes(id)) {
+    selectedFurnitureIds.value = [id]
+  }
 })
 const lastDeletedFurnitureId = ref<string | null>(null)
 const deleteFeedback = computed(() => lastDeletedFurnitureId.value && !store.objects.some(item => item.id === lastDeletedFurnitureId.value) ? '已删除模块，可点击工具栏撤销恢复' : '')
@@ -983,7 +1009,7 @@ function onReferencePointerDown(index: number, e: PointerEvent) {
 function beginFurnitureDrag(e: PointerEvent, p: { x: number; y: number }, ids: string[], target: { id: string } | { referenceMark: LayoutReferenceMark }) {
   canvasWindow.value?.focus({ preventScroll: true })
   drag.value = { mode: 'furniture', cx: p.x, cy: p.y, ids, dx: 0, dy: 0, ...target }
-  canvasWindow.value?.setPointerCapture(e.pointerId)
+  try { canvasWindow.value?.setPointerCapture(e.pointerId) } catch {}
   moveProblem.value = ''
 }
 
@@ -1078,6 +1104,13 @@ function finishViewportPan(pointerId?: number) {
   if (current.pointerId !== undefined && viewport?.hasPointerCapture(current.pointerId)) viewport.releasePointerCapture(current.pointerId)
 }
 
+function onFurnitureContextMenu(f: FurnitureObject, event: MouseEvent) {
+  if (mode.value !== 'design') return
+  selectedId.value = f.id
+  selectedFurnitureIds.value = [f.id]
+  emit('editSize', f.id, event.currentTarget as HTMLElement | undefined)
+}
+
 function onPointerDown(e: PointerEvent) {
   if (e.button !== 0 || !canvasWindow.value || tool.value === 'pan' || drag.value?.mode === 'pan') return
   const target = e.target as HTMLElement
@@ -1155,9 +1188,10 @@ function onPointerDown(e: PointerEvent) {
           selectedId.value = selectedFurnitureIds.value.length === 1 ? selectedFurnitureIds.value[0]! : null
           return
         }
-        if (!selectedFurnitureIds.value.includes(id)) selectedFurnitureIds.value = [id]
-        selectedId.value = selectedFurnitureIds.value.length === 1 ? id : null
-        beginFurnitureDrag(e, p, [...selectedFurnitureIds.value], { id })
+        const ids = selectedFurnitureIds.value.includes(id) ? [...selectedFurnitureIds.value] : [id]
+        selectedFurnitureIds.value = ids
+        selectedId.value = ids.length === 1 ? id : null
+        beginFurnitureDrag(e, p, ids, { id })
         return
       }
       selectedFurnitureIds.value = []
@@ -2252,14 +2286,17 @@ function furnitureProduct(o: FurnitureObject) {
           v-for="f in displayedFurniture"
           :key="f.id"
           :data-id="f.id"
+          :data-overlap="overlappingIds.has(f.id) || undefined"
+          :data-overlap-focused="focusedOverlapIds.has(f.id) || undefined"
           class="board-element pointer-events-auto absolute cursor-move select-none"
           :title="`${f.label || furnitureProduct(f)?.name || '家具'} · ${Math.round(f.w)} × ${Math.round(f.h)} mm`"
           :class="[
             selectedFurnitureIds.includes(f.id) ? 'ring-[3px] ring-accent/30 z-10' : '',
             mode === 'overview' ? 'opacity-50' : 'opacity-100',
           ]"
-          :style="{ ...furnitureStyle(dragFurnitureItem(f)), outline: drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined }"
+          :style="{ ...furnitureStyle(dragFurnitureItem(f)), outline: overlapOutline(f.id) || (drag?.mode === 'furniture' && drag.ids?.includes(f.id) && moveProblem ? `${2 / store.zoom}px dashed #c45c4c` : undefined) }"
           @pointerdown.stop="onPointerDown"
+          @contextmenu.prevent="onFurnitureContextMenu(f, $event)"
         >
           <OfficeCanvasFurniturePreview v-if="officeFurnitureTemplateId(f, furnitureProduct(f))"
             :template-id="officeFurnitureTemplateId(f, furnitureProduct(f))!" :width-mm="f.w" :depth-mm="f.h"
@@ -2273,9 +2310,10 @@ function furnitureProduct(o: FurnitureObject) {
         <template v-for="item in activePreview.furniture" :key="'activity-' + item.id">
           <div v-if="chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)" :style="{ position: 'absolute', left: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.x + 'px', top: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.y + 'px', width: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.w + 'px', height: chairActivityRect(previewDragItem(item), activePreview.seatClearanceMm)?.h + 'px', border: `${1 / store.zoom}px dotted var(--color-accent)`, opacity: 0.35 }" />
         </template>
-        <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id" class="absolute opacity-50"
+        <div v-for="item in activePreview.furniture" :key="item.id" :data-preview-id="item.id"
+          :data-overlap="overlappingIds.has(item.id) || undefined" :data-overlap-focused="focusedOverlapIds.has(item.id) || undefined" class="absolute opacity-50"
           :class="tool === 'select' ? 'pointer-events-auto cursor-move' : 'pointer-events-none'"
-          :style="{ ...furnitureStyle(previewDragItem(item)), outline: `${1.5 / store.zoom}px dashed ${drag?.mode === 'preview-furniture' && drag.id === item.id && moveProblem ? '#c45c4c' : 'var(--color-accent)'}` }"
+          :style="{ ...furnitureStyle(previewDragItem(item)), outline: overlapOutline(item.id) || `${1.5 / store.zoom}px dashed ${drag?.mode === 'preview-furniture' && drag.id === item.id && moveProblem ? '#c45c4c' : 'var(--color-accent)'}` }"
           @pointerdown.stop="onPreviewPointerDown(item, $event)">
           <OfficeCanvasFurniturePreview :template-id="officeFurnitureTemplateId(item)!" :width-mm="item.w" :depth-mm="item.h" :wing-width-mm="item.wingWidthMm" :stroke-scale="1 / store.zoom" :show-seat="officeFurnitureShowsSeat(item)" />
         </div>
@@ -2329,6 +2367,20 @@ function furnitureProduct(o: FurnitureObject) {
       <button class="flex-none rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="Delete / Backspace" @click.stop="deleteSelection">删除选中模块</button>
     </div>
     <div v-if="mode === 'design' && designZone" class="absolute left-4 top-4 rounded-lg border border-line bg-white/90 px-3 py-2 text-xs text-[#56636e] pointer-events-none">{{ designZone.name }}</div>
+    <details v-if="overlaps.length" open class="absolute left-4 top-14 z-20 max-w-[min(340px,55%)] rounded-lg border border-red-200 bg-red-50/95 p-2.5 text-xs text-red-900 shadow-sm"
+      data-testid="canvas-furniture-overlaps" @pointerdown.stop @wheel.stop>
+      <summary class="cursor-pointer font-semibold">{{ overlaps.length }} 对家具占地重叠</summary>
+      <ul class="mt-1.5 max-h-36 space-y-1 overflow-y-auto">
+        <li v-for="pair in overlaps.slice(0, 12)" :key="pair[0].id + ':' + pair[1].id">
+          <button type="button" class="flex w-full items-start justify-between gap-2 rounded px-1.5 py-1 text-left hover:bg-red-100" @click="locateOverlap(pair)"
+            :aria-pressed="pair.every(item => focusedOverlapIds.has(item.id))">
+            <span class="min-w-0 break-words">{{ layoutFurnitureName(pair[0]) }} #{{ layoutFurnitureNumbers.get(pair[0].id) }} 与 {{ layoutFurnitureName(pair[1]) }} #{{ layoutFurnitureNumbers.get(pair[1].id) }}</span>
+            <span class="shrink-0 underline">定位</span>
+          </button>
+        </li>
+      </ul>
+      <p v-if="overlaps.length > 12" class="mt-1 text-[10px]">先显示前 12 对，调整后自动更新。</p>
+    </details>
     <div :role="placing || deleteFeedback ? 'status' : undefined" class="absolute left-4 bottom-3.5 bg-white/90 border border-line rounded-lg px-3 py-2 text-[11px] text-[#79736d] z-10">
       {{ hintText }}
     </div>

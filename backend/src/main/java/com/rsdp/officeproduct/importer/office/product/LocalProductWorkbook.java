@@ -100,15 +100,18 @@ public class LocalProductWorkbook {
         try {
             upload = Files.createTempFile("office-product-workbook-", ".xlsx");
             file.transferTo(upload);
-            try (var cached = imageReferences ? previewCache.open(actor) : null;
+            try (var cached = imageReferences ? previewCache.open(actor, workbookSource(file)) : null;
                  var archive = OPCPackage.open(upload.toFile(), PackageAccess.READ);
                  var workbook = new XSSFWorkbook(archive)) {
                 var preview = previewWorkbook(workbook, workspace, boundFactory, mapping, cached);
                 if (cached == null) return preview;
                 var sizes = cached.sizes();
-                cached.keep();
+                boolean hasProducts = !preview.products().isEmpty()
+                    || preview.supplier() != null && !preview.supplier().products().isEmpty();
+                boolean keepPreview = hasProducts || !sizes.isEmpty();
+                if (keepPreview) cached.keep();
                 return new Preview(preview.products(), preview.errors(), preview.supplier(), preview.mappingSheets(),
-                    sizes.isEmpty() ? null : cached.id(), sizes);
+                    keepPreview ? cached.id() : null, sizes);
             }
         } catch (IOException | InvalidFormatException | POIXMLException | UnsupportedFileFormatException e) {
             throw new BusinessException("文件无法读取，请提供有效的 .xlsx 工作簿");
@@ -121,6 +124,15 @@ public class LocalProductWorkbook {
                 }
             }
         }
+    }
+
+    private WorkbookPreviewCache.WorkbookSource workbookSource(MultipartFile file) {
+        String original = file.getOriginalFilename();
+        String path = original == null ? "" : original.replace('\\', '/');
+        String name = path.substring(path.lastIndexOf('/') + 1).replaceAll("\\p{Cntrl}", "").strip();
+        if (name.isBlank()) name = "Excel 工作簿.xlsx";
+        int nameLength = Math.min(255, name.codePointCount(0, name.length()));
+        return new WorkbookPreviewCache.WorkbookSource(name.substring(0, name.offsetByCodePoints(0, nameLength)), file.getSize());
     }
 
     private Preview previewWorkbook(XSSFWorkbook workbook, String workspace, String boundFactory, SupplierWorkbookMapping.Selection mapping,

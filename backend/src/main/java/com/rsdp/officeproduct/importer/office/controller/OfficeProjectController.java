@@ -6,6 +6,7 @@ import com.rsdp.officeproduct.importer.office.dto.CreateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.OfficeFloorDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectBudgetDto;
 import com.rsdp.officeproduct.importer.office.dto.OfficeProjectDto;
+import com.rsdp.officeproduct.importer.office.dto.OfficeProjectStatusDto;
 import com.rsdp.officeproduct.importer.office.dto.ProjectMemberDto;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeProjectRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateOfficeRequirementsRequest;
@@ -59,6 +60,13 @@ public class OfficeProjectController {
         return Result.ok(projectService.updateProject(projectId, request));
     }
 
+    @PatchMapping("/{projectId}/status")
+    public Result<OfficeProjectStatusDto> updateStatus(@PathVariable String projectId,
+                                                      @RequestBody OfficeProjectStatusDto request) {
+        return Result.ok(new OfficeProjectStatusDto(projectService.updateStatus(projectId,
+            request == null ? null : request.status())));
+    }
+
     @PatchMapping("/{projectId}/floors/{floorId}")
     public Result<OfficeFloorDto> updateFloor(@PathVariable String projectId, @PathVariable String floorId,
                                                @RequestBody CreateOfficeFloorRequest request) {
@@ -80,6 +88,12 @@ public class OfficeProjectController {
     public Result<OfficeProjectDto> replaceMembers(@PathVariable String projectId,
                                                     @RequestBody UpdateProjectMembersRequest request) {
         return Result.ok(projectService.replaceMembers(projectId, request));
+    }
+
+    @PutMapping("/{projectId}/floors/{floorId}/references")
+    public Result<OfficeFloorDto> updateFloorReferences(@PathVariable String projectId, @PathVariable String floorId,
+                                                        @RequestBody UpdateProjectReferencesRequest request) {
+        return Result.ok(projectService.updateFloorReferences(projectId, floorId, request));
     }
 
     @PatchMapping("/{projectId}/references")

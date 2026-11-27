@@ -9,7 +9,9 @@ export function canvasObjectsForView(objects: OfficeObject[], mode: 'overview' |
   return objects.filter(object => object.kind === 'zone' ? object.id === zoneId : 'zoneId' in object && object.zoneId === zoneId)
 }
 
-export function canvasZoneBounds(zone: ZoneObject) {
+type CanvasBoundsSource = Pick<ZoneObject, 'x' | 'y' | 'w' | 'h' | 'polygon'>
+
+export function canvasZoneBounds(zone: CanvasBoundsSource) {
   return polygonBoundsMm(zone.polygon) || { minX: zone.x, minY: zone.y, maxX: zone.x + zone.w, maxY: zone.y + zone.h }
 }
 
@@ -25,7 +27,7 @@ export function canvasDrawingRect(bounds: FloorPlanDrawingBounds, scale: number,
 }
 
 /** Camera values are screen pixels; all bounds and geometry remain in world units. */
-export function fitCanvasZone(zone: ZoneObject, world: { minX: number; minY: number; width: number; height: number }, viewportWidth: number, viewportHeight: number, padding = 80, rotation = 0) {
+export function fitCanvasZone(zone: CanvasBoundsSource, world: { minX: number; minY: number; width: number; height: number }, viewportWidth: number, viewportHeight: number, padding = 80, rotation = 0) {
   const bounds = canvasZoneBounds(zone)
   const angle = rotation * Math.PI / 180
   const w = bounds.maxX - bounds.minX + padding * 2, h = bounds.maxY - bounds.minY + padding * 2

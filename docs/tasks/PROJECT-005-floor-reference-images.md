@@ -1,0 +1,76 @@
+# PROJECT-005 楼层参考图与历史楼层商品小计
+
+状态：已实现待验收（单元测试与模拟 API 的 UI 回归通过；真实后端 + 数据库联调未执行）
+更新日期：2026-11-26
+负责人：开发 A（Claude 实施）
+基线/交付版本：PR #22（`4632cf8`），远端合并提交 `46bb590`；合并后修复见下文。
+关联：[PROJECT-004](PROJECT-004-project-members.md)（项目级参考图与成员权限）、[QUOTE-001](QUOTE-001-project-quotation.md)（报价快照来源）、[FLOW-007](FLOW-007-product-scheme.md)（方案页）
+
+## 目标与验收
+
+触发：楼层需要自己的参考图（与项目级参考图分开）；方案页在存在已确认报价时展示历史楼层商品小计。
+结果：楼层参考图经 `PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references` 整体替换保存；项目总览页上传/删除/刷新恢复，上传与保存期间禁用交错编辑，完成后可继续操作并刷新恢复，只读成员无编辑入口；画布工具栏弹层展示当前楼层参考图。方案页历史楼层小计取最新 CONFIRMED 报价快照中当前楼层行小计合计，缺价行（subtotal 为 null）不计入并红色提示，报价行与页面商品（productId+数量）严格一致时才展示，并标为历史快照，显示报价版本和确认时间。
+范围：楼层参考图复用项目级校验与上传接口，不新建附件表；报价展示为只读展示，不改变报价生成与确认流程。
+
+- [x] `office_design_floor.reference_images` 迁移（text 列，幂等）并注册 SchemaInitializer
+- [x] PUT 接口整体替换；上限 10 张、仅本站 `/uploads/images/` 前缀、拒绝 `..`、名称 ≤200 字符；null/空列表即清空
+- [x] 接口要求项目 EDIT 权限；楼层不存在或跨项目楼层拒绝且不产生写入
+- [x] 项目总览页上传→保存→刷新恢复；上传期间禁用删除和重复上传，保存期间禁用编辑；连续编辑后刷新恢复；保存失败显示 role=alert
+- [x] 只读成员（无 EDIT 权限）不显示上传/删除入口，后端仍独立鉴权
+- [x] 画布工具栏「参考图」弹层展示当前楼层参考图
+- [x] 方案页历史楼层小计/缺价提示/无报价/商品数量变化/同楼层换房/版本与时间/演示模式的展示口径
+- [ ] 真实后端 + PostgreSQL 的端到端联调（本次未执行）
+
+## 2026-11-26 合并后修复
+
+- 上传尚未结束时，删除已有图片会先触发保存，随后上传结果曾被保存中保护直接丢弃。共用编辑器在上传期间同时禁用重复上传与删除，事件处理也核验上传状态；沿用父级保存期间的禁用策略，完成后恢复编辑。
+- 历史楼层小计不再显示为“最终报价”，完整时显示“最近确认的楼层商品小计”，缺价时显示“最近确认的已报价商品小计”。始终显示对应报价版本、确认时间和历史快照提示；当前参考金额保留，演示模式不伪造确认报价。完整方案版本失效联动仍属 QUOTE-001 待办。
+- `e2e:floor-references` 按新禁用策略更新，覆盖上传期间删除被拦截、保存期间无编辑入口、连续新增/删除后刷新回读、失败重试与只读权限。`e2e:proposal-quote` 补同楼层换房、版本和时间、过期记录与演示场景。
+
+实际验证：`pnpm build`、`e2e:floor-references`、`e2e:proposal-quote`、`e2e:project-floors`、自建预览服务上的 `e2e:workflows` 与 `MOCK_API=1 e2e:smoke` 均通过（浏览器测试全部拦截 API）。Java 专项 `OfficeProjectServiceTest,OfficeProjectControllerTest,ProjectQuotationServiceTest,OfficeFloorSavePostgresTest` 共 54 项，53 通过、1 跳过；数据库专项因未设置 `RSDP_TEST_POSTGRES_URL` 未运行，不能视为真实数据库验收。`git diff --check` 通过，真实后端联调未执行。
+
+## 现状与依赖
+
+- 项目级参考图契约与 `validateReferenceImages` 校验来自 [PROJECT-004](PROJECT-004-project-members.md)，楼层级整体复用。
+- 报价快照来自 `GET /api/v1/office/projects/{projectId}/quotation/latest`（QUOTE-001）；页面商品口径为空间有清单取清单、无清单取画布家具。
+- 前端 `ProjectReferenceImagesEditor` 为通用编辑器（grid/names/hidden 三种列表模式），持久化由父组件负责。
+
+## 实施步骤
+
+- [x] 迁移 + 实体/DTO 字段 + SchemaInitializer 注册
+- [x] Service `updateFloorReferences`（鉴权→楼层归属→校验→JSON 序列化落库）与 Controller 端点
+- [x] 前端 `useWorkspaceApi.updateFloorReferences`、总览页编辑器接入（单调序号防乱序、请求前固定项目/楼层 ID）、工具栏弹层、权限门控
+- [x] 方案页最终报价展示（缺价口径、快照一致性判定）
+- [x] Java 单测与 e2e 补充、验证记录
+- [x] 更新进度表与架构文档
+
+## 决策与过程
+
+| 日期 | 发现/决定 | 原因或证据 | 对下一步的影响 |
+| --- | --- | --- | --- |
+| 2026-11-25 | 楼层参考图存 `text` 列（项目级为 JSONB），同一 `[{url,name}]` JSON 契约由服务层 Jackson 序列化 | 迁移 `20261124_office_floor_reference_images.sql`；读写异常按空列表降级 | 文档写明列类型差异，避免后续误改 |
+| 2026-11-25 | 前端保存用按 `projectId/floorId` 的单调序号防乱序，请求前固定 ID | 5e5402c 修复响应乱序覆盖与切楼层串写 | e2e 场景 2 固化该回归 |
+| 2026-11-25 | 最终报价仅在报价行与页面商品严格一致时展示；缺价行不计入合计但计入提示 | c15356b/128b78a；防止报价后改商品仍显示旧价 | e2e-proposal-quote 场景 5 固化 |
+| 2026-11-25 | 既有 e2e-proposal-quote 报价行（P1/P2/P3）与页面商品（仅 P1）不一致，严格一致性判定下无法通过 | 按 productId 汇总比较，种类数不同即不一致 | 修正各场景页面商品集合后通过 |
+| 2026-11-25 | 楼层改名与参考图保存改为按列定点更新（`updateName`/`updateReferenceImages`），不再整行 `updateById` | 两条写路径都是读整行→改单字段→整行写回，并发交错时后写者用旧快照覆盖先写者的列；反向验证（临时改回整行写）两个并发用例确定性失败 | 沿用 `OfficeDesignProjectMapper.updateRequirements` 先例；项目级改名/参考图同类风险记为后续观察项 |
+
+## 验证记录
+
+| 日期 | 版本/环境/样本 | 命令或操作 | 结果及证据 | 未覆盖项 |
+| --- | --- | --- | --- | --- |
+| 2026-11-25 | 工作区 | `mvn -f backend/pom.xml test` | 通过：373 运行 / 0 失败 / 9 跳过；含新增 `OfficeProjectServiceTest` 楼层参考图 9 用例（替换/清空/未知楼层/跨项目/null 请求/非法地址/超 10 张/名称超长/EDIT 鉴权，定向运行 31 项通过）与 `OfficeProjectControllerTest` PUT 端点用例（定向 3 项通过） | 9 项跳过为 Postgres 门控测试（无 RSDP_TEST_POSTGRES_URL） |
+| 2026-11-25 | 工作区 | `pnpm build`（frontend） | 通过（13.2s） | - |
+| 2026-11-25 | 工作区 | `pnpm e2e:proposal-quote` | 通过：完整报价、部分缺价、全部缺价、无确认报价、快照与页面商品不一致五场景 | UI 为模拟 API |
+| 2026-11-25 | 工作区 | `pnpm e2e:floor-references`（新增脚本） | 通过：上传保存恢复、乱序防覆盖、失败提示、只读禁用、工具栏弹层五场景 | UI 为模拟 API |
+| 2026-11-25 | 工作区 | `MOCK_API=1 pnpm e2e:smoke` | 通过 | UI 为模拟 API |
+| 2026-11-25 | 工作区 | `pnpm e2e:workflows` | 通过 | UI 为模拟 API |
+| 2026-11-25 | 工作区 | `git diff --check` | 通过（仅 LF/CRLF 提示） | - |
+| 2026-11-25 | 工作区 | `mvn -f backend/pom.xml test` | 通过：433 运行 / 0 失败 / 11 跳过；新增保存回归 4 用例（连续参考图编辑重读、连续改名+交错编辑重读、并发改名与参考图保留、按列写契约）与 `OfficeFloorSavePostgresTest` 交错读写集成测试；反向验证：临时改回整行 `updateById` 后并发与契约两用例确定性失败，恢复后全绿 | 11 项跳过为 Postgres 门控测试（无 RSDP_TEST_POSTGRES_URL），含新增 `OfficeFloorSavePostgresTest` 未真实执行 |
+
+## 交付与下一步
+
+- 后端：`20261124_office_floor_reference_images.sql` 迁移、`OfficeDesignFloor.referenceImages`、`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references`、`OfficeFloorDto.referenceImages`。
+- 前端：`useWorkspaceApi.updateFloorReferences`、`ProjectReferenceImagesEditor` 可配置化（heading/listMode/disabled）、项目总览页楼层参考图编辑器（权限门控 + 乱序防护）、画布工具栏参考图弹层、方案页最终报价展示。
+- 测试：`OfficeProjectServiceTest`/`OfficeProjectControllerTest` 新增用例；`e2e-floor-references.mjs`（注册 `pnpm e2e:floor-references`）；`e2e-proposal-quote.mjs` 修正数据并新增一致性场景。
+- 保存回归（2026-11-25 补充）：`OfficeDesignFloorMapper.updateName`/`updateReferenceImages` 按列定点更新替代整行写；`OfficeProjectServiceTest` 新增连续编辑重读、并发保留、按列写契约 4 用例；`OfficeFloorSavePostgresTest`（RSDP_TEST_POSTGRES_URL 门控）固化真实数据库交错读写两列保留。
+- 下一步：真实后端 + 数据库的楼层参考图读写联调（含 `OfficeFloorSavePostgresTest` 实际执行）；认证开启下只读成员的真实链路验收；报价与正式方案快照的失效联动仍属 QUOTE-001 待办；项目级改名与项目参考图的同类整行写风险待评估。

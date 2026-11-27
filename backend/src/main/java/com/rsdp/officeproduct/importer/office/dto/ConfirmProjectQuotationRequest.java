@@ -14,6 +14,8 @@ public class ConfirmProjectQuotationRequest {
     private BigDecimal pricingValue;
     private List<Fee> fees = new ArrayList<>();
     private List<Line> lines = new ArrayList<>();
+    /** 试算时各楼层依据的方案确认 ID；最终确认必须与当前快照一致。 */
+    private java.util.Map<String, String> proposalConfirmationIds = new java.util.LinkedHashMap<>();
 
     @Data
     public static class Fee {

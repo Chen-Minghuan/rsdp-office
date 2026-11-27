@@ -249,6 +249,7 @@ export interface QuotationTotals {
 }
 
 export interface ProjectQuotationPreview {
+  proposalConfirmationIds?: Record<string, string>
   projectId: string
   projectName: string
   pricingMode: QuotationPricingMode
@@ -302,6 +303,14 @@ export interface ProjectQuotationRecord {
   lines: QuotationRecordLine[]
 }
 
+/** 最近一条报价记录（任意状态）的摘要：用于方案确认页展示上一次报价时间。 */
+export interface ProjectQuotationLatest {
+  quotationId: string
+  status: 'CONFIRMED' | 'SUPERSEDED' | 'STALE'
+  revision: number
+  createdAt: string
+}
+
 export interface ConfirmQuotationLine {
   floorId: string
   zoneId: string | null
@@ -312,6 +321,7 @@ export interface ConfirmQuotationLine {
 }
 
 export interface ConfirmQuotationRequest {
+  proposalConfirmationIds: Record<string, string>
   pricingMode: QuotationPricingMode
   pricingValue: number
   fees: QuotationFee[]

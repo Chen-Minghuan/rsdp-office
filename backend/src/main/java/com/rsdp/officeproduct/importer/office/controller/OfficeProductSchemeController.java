@@ -47,6 +47,24 @@ public class OfficeProductSchemeController {
         return Result.ok(recommendations.applyRoomProducts(floorId, apply));
     }
 
+    @GetMapping("/floors/{floorId}/room-scheme/slots")
+    public Result<OfficeSchemeDtos.Slots> slots(@PathVariable String floorId, @RequestParam String zoneId) {
+        access.requireFloorAccess(floorId);
+        return Result.ok(rooms.slots(floorId, zoneId));
+    }
+
+    @PostMapping("/floors/{floorId}/room-scheme/confirm-choice")
+    public Result<OfficeSchemeDtos.State> confirmChoice(@PathVariable String floorId, @RequestBody OfficeSchemeDtos.Change change) {
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
+        return Result.ok(rooms.confirmChoice(floorId, change));
+    }
+
+    @PostMapping("/floors/{floorId}/room-scheme/cancel-choice")
+    public Result<OfficeSchemeDtos.State> cancelChoice(@PathVariable String floorId, @RequestBody OfficeSchemeDtos.Change change) {
+        access.requireFloorPermission(floorId, OfficeProjectPermission.EDIT);
+        return Result.ok(rooms.cancelChoice(floorId, change));
+    }
+
     @GetMapping("/floors/{floorId}/proposal-confirmation")
     public Result<OfficeProposalConfirmationService.Status> latest(@PathVariable String floorId) {
         return Result.ok(confirmations.latest(floorId));

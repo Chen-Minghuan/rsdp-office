@@ -32,6 +32,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,6 +77,7 @@ public class OfficeProjectService {
     private final SharedCatalogService sharedCatalogService;
     private final OfficeProposalConfirmationMapper confirmationMapper;
     private final OfficeCanvasMapper canvasMapper;
+    private final OfficeWorkspaceLockMapper workspaceLocks;
 
     public List<OfficeProjectDto> listProjects() {
         return listProjects(true);
@@ -99,7 +101,7 @@ public class OfficeProjectService {
             .map(project -> {
                 List<OfficeDesignFloor> projectFloors = floorsByProject.getOrDefault(project.getProjectId(), List.of());
                 OfficeProjectDto dto = toProjectDto(project, projectFloors,
-                    membersByProject.getOrDefault(project.getProjectId(), List.of()), usersById, confirmedFloorIds);
+                    membersByProject.getOrDefault(project.getProjectId(), List.of()), usersById);
                 dto.setZoneTotal(projectFloors.stream()
                     .mapToInt(floor -> zoneIdsByFloor.getOrDefault(floor.getFloorId(), List.of()).size()).sum());
                 int zoneDelivered = 0;
@@ -247,7 +249,7 @@ public class OfficeProjectService {
         if (leaderUserId != null) {
             members = insertMembers(project.getProjectId(), leaderUserId, collaboratorIds, now, Map.of());
         }
-        return toProjectDto(project, floors, members, usersById(members), Set.of());
+        return toProjectDto(project, floors, members, usersById(members));
     }
 
     @Transactional
@@ -281,7 +283,21 @@ public class OfficeProjectService {
         projectMapper.updateById(project);
         List<OfficeDesignFloor> floors = floors(projectId);
         List<OfficeProjectMember> members = members(projectId);
-        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
+        return toProjectDto(project, floors, members, usersById(members));
+    }
+
+    @Transactional
+    public String updateStatus(String projectId, String status) {
+        accessService.requireStatusManager(projectId);
+        requireProject(projectId);
+        if (status == null || !Set.of("DESIGNING", "DELIVERING", "COMPLETED").contains(status)) {
+            throw new BusinessException("项目阶段必须为设计中、交付中或已完成");
+        }
+        if (projectMapper.updateStatus(projectId, status, LocalDateTime.now()) != 1) {
+            throw new BusinessException("项目不存在，请刷新项目列表");
+        }
+        auditService.record("PROJECT_STATUS_CHANGED", "PROJECT", projectId, "status=" + status);
+        return status;
     }
 
     @Transactional
@@ -300,7 +316,8 @@ public class OfficeProjectService {
         floor.setName(name);
         floor.setUpdatedAt(LocalDateTime.now());
         try {
-            floorMapper.updateById(floor);
+            // 只写名称列：与参考图等其它列的并发保存互不覆盖（整行 updateById 会用旧快照覆盖对方）。
+            floorMapper.updateName(floorId, floor.getName(), floor.getUpdatedAt());
         } catch (DuplicateKeyException e) {
             throw new BusinessException("楼层名称不能重复");
         }
@@ -318,7 +335,7 @@ public class OfficeProjectService {
         OfficeDesignProject project = requireProject(projectId);
         List<OfficeDesignFloor> floors = floors(projectId);
         List<OfficeProjectMember> members = members(projectId);
-        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
+        return toProjectDto(project, floors, members, usersById(members));
     }
 
     public List<ProjectMemberDto> listMembers(String projectId) {
@@ -367,11 +384,32 @@ public class OfficeProjectService {
         auditService.record("MEMBERS_REPLACED", "PROJECT", projectId,
             "before=" + before + "; after=" + after);
         List<OfficeDesignFloor> floors = floors(projectId);
-        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
+        return toProjectDto(project, floors, members, usersById(members));
     }
 
     private String memberAuditText(OfficeProjectMember member) {
         return member.getRole() + ":" + member.getUserId() + "=" + OfficeProjectPermission.assigned(member.getPermissionFlags());
+    }
+
+    /** 楼层级参考图：整体替换，复用项目级参考图的地址与数量校验。 */
+    @Transactional
+    public OfficeFloorDto updateFloorReferences(String projectId, String floorId, UpdateProjectReferencesRequest request) {
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
+        requireProject(projectId);
+        // 事务级 advisory lock：串行化同一楼层的并发参考图保存，避免后到的旧请求整体覆盖新列表。
+        if (StringUtils.hasText(floorId)) workspaceLocks.lockWorkspace(floorId);
+        OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
+        if (floor == null || !projectId.equals(floor.getProjectId())) {
+            throw new BusinessException("楼层不存在");
+        }
+        if (request == null) {
+            throw new BusinessException("参考图片参数不能为空");
+        }
+        floor.setReferenceImages(writeReferenceImages(validateReferenceImages(request.getReferenceImages())));
+        floor.setUpdatedAt(LocalDateTime.now());
+        // 只写参考图列：与改名等其它列的并发保存互不覆盖（整行 updateById 会用旧快照覆盖对方）。
+        floorMapper.updateReferenceImages(floorId, floor.getReferenceImages(), floor.getUpdatedAt());
+        return toFloorDto(floor);
     }
 
     @Transactional
@@ -387,7 +425,7 @@ public class OfficeProjectService {
         projectMapper.updateById(project);
         List<OfficeDesignFloor> floors = floors(projectId);
         List<OfficeProjectMember> members = members(projectId);
-        return toProjectDto(project, floors, members, usersById(members), confirmedFloorIds(floors));
+        return toProjectDto(project, floors, members, usersById(members));
     }
 
     /** 搜索可作为项目成员的有效用户；认证开启时只返回当前账号同工作区的在用用户。 */
@@ -597,17 +635,9 @@ public class OfficeProjectService {
     }
 
     /**
-     * 项目阶段由方案确认数据派生：项目全部楼层在 office_proposal_confirmation
-     * 存在未失效(retired=false)记录 → DELIVERING，否则 DESIGNING；无楼层项目为设计中。
+     * 项目阶段由负责人/工作区主号人工维护，直接读 office_design_project.status；
+     * confirmedFloorIds 仅用于区域进度（zoneDelivered）派生。
      */
-    private String derivedStatus(List<OfficeDesignFloor> floors, Set<String> confirmedFloorIds) {
-        if (floors.isEmpty()) {
-            return "DESIGNING";
-        }
-        return floors.stream().allMatch(floor -> confirmedFloorIds.contains(floor.getFloorId()))
-            ? "DELIVERING" : "DESIGNING";
-    }
-
     private Set<String> confirmedFloorIds(List<OfficeDesignFloor> floors) {
         List<String> floorIds = floors.stream().map(OfficeDesignFloor::getFloorId).toList();
         return floorIds.isEmpty() ? Set.of() : new HashSet<>(confirmationMapper.confirmedFloorIds(floorIds));
@@ -695,12 +725,12 @@ public class OfficeProjectService {
     }
 
     private OfficeProjectDto toProjectDto(OfficeDesignProject project, List<OfficeDesignFloor> floors,
-                                          List<OfficeProjectMember> members, Map<String, OfficeUser> usersById,
-                                          Set<String> confirmedFloorIds) {
+                                          List<OfficeProjectMember> members, Map<String, OfficeUser> usersById) {
         OfficeProjectDto dto = new OfficeProjectDto();
         dto.setProjectId(project.getProjectId());
         dto.setName(project.getName());
-        dto.setStatus(derivedStatus(floors, confirmedFloorIds));
+        dto.setStatus(project.getStatus() == null ? "DESIGNING" : project.getStatus());
+        dto.setCanManageStatus(accessService.canManageStatus(project, members));
         dto.setCustomerRequirements(project.getCustomerRequirements());
         dto.setRequirementsRevision(project.getRequirementsRevision());
         dto.setReferenceImages(readReferenceImages(project.getReferenceImages()));
@@ -760,6 +790,7 @@ public class OfficeProjectService {
         dto.setProjectId(floor.getProjectId());
         dto.setName(floor.getName());
         dto.setSortOrder(floor.getSortOrder());
+        dto.setReferenceImages(readReferenceImages(floor.getReferenceImages()));
         dto.setCreatedAt(floor.getCreatedAt());
         dto.setUpdatedAt(floor.getUpdatedAt());
         return dto;

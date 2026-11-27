@@ -1,16 +1,23 @@
 <script setup lang="ts">
-import type { CatalogBrowseFacets, CatalogBrowseRow, ImportedProduct } from '~/types/imported-products'
+import type { CatalogBrowseFacets, CatalogBrowseRow, CatalogFacets, CatalogProductFilters, ImportedProduct } from '~/types/imported-products'
+import { cloneProductFilters, countProductFilters, emptyProductFilters, FILTER_KEYS } from '~/utils/productFilter'
 import { localProductId, localProductReference } from '~/utils/catalogProductReference'
 
 const api = useOfficeApi()
 const workspace = useWorkspaceStore()
 const { storageScope } = useAuth()
-const catalogFacets = ref<CatalogBrowseFacets | null>(null)
-const localCategoryLabels = shallowRef(new Map<string, string>())
 const serverProducts = ref<CatalogBrowseRow[]>([])
 const resultTotal = ref(0)
 const catalogTotal = ref(0)
 const activeCount = ref(0)
+const catalogFacets = ref<CatalogBrowseFacets | null>(null)
+const facets = computed(() => catalogFacets.value?.advanced ?? null)
+const appliedFilters = ref<CatalogProductFilters>(emptyProductFilters())
+const advancedOpen = ref(false)
+const advancedSaving = ref(false)
+const advancedError = ref('')
+let pendingFilters: CatalogProductFilters | null = null
+const localCategoryLabels = shallowRef(new Map<string, string>())
 const localTotal = ref(0)
 const canManageLocal = ref(false)
 const sharedUnavailable = ref(false)
@@ -21,6 +28,8 @@ const failedCollectionItems = ref(false)
 const facetLoading = ref(false)
 const facetError = ref('')
 let facetRequest = 0
+let loadingFacetKey: string | null = null
+let loadedFacetKey: string | null = null
 let listRequest = 0
 
 const isLoading = ref(true)
@@ -70,12 +79,20 @@ const localOnly = computed(() => catalogStatus.value?.effectiveVisible === false
 const savingCatalogStatus = ref(false)
 let statusRequest = 0
 const statsAvailable = computed(() => !isLoading.value && !listError.value)
+const advancedCount = computed(() => countProductFilters(appliedFilters.value))
+const activeFilterChips = computed(() => FILTER_KEYS.flatMap(key => {
+  const options = facets.value?.groups?.[key] ?? []
+  return appliedFilters.value[key].map(code => {
+    const option = options.find(item => item.code === String(code))
+    return { key: key as string, code: String(code), label: option?.label ?? String(code) }
+  })
+}))
 const categories = computed(() => [
   ...(catalogFacets.value?.localCategories ?? []).map(code => ({ value: 'local:' + code, label: localCategoryLabel(code) })),
   ...(catalogFacets.value?.sharedCategories ?? []).map(label => ({ value: 'shared:' + label, label })),
 ].sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')))
 const colors = computed(() => [...(catalogFacets.value?.colors ?? [])].sort((a, b) => a.localeCompare(b, 'zh-CN')))
-const filtersApplied = computed(() => !!(search.value || status.value || category.value || color.value))
+const filtersApplied = computed(() => !!(search.value || status.value || category.value || color.value) || countProductFilters(appliedFilters.value) > 0)
 
 function localCategoryLabel(code: string) {
   const label = localCategoryLabels.value.get(code)
@@ -135,9 +152,15 @@ watch(search, (value, _, onCleanup) => {
   const timeout = setTimeout(() => { submittedSearch.value = value.trim() }, 180)
   onCleanup(() => clearTimeout(timeout))
 })
-watch([submittedSearch, status, category, color, pageSize], () => { currentPage.value = 1 }, { flush: 'sync' })
 watch(currentPage, value => { pageInput.value = value })
-watch([submittedSearch, status, category, color, pageSize, currentPage, catalogStatusReady, localOnly], () => { void loadProducts() })
+watch([submittedSearch, status, category, color, pageSize], () => {
+  currentPage.value = 1
+  pageInput.value = 1
+}, { flush: 'sync' })
+watch([submittedSearch, status, category, color, pageSize, currentPage, catalogStatusReady, localOnly], () => {
+  void loadProducts()
+  void loadFacets()
+})
 watch(localOnly, () => {
   listRequest++
   isLoading.value = true
@@ -151,18 +174,23 @@ onBeforeUnmount(() => { listRequest++; facetRequest++; statusRequest++ })
 async function loadProducts() {
   if (!catalogStatusReady.value) return
   const request = ++listRequest
+  const filters = pendingFilters ?? appliedFilters.value
+  const isCandidate = pendingFilters !== null
+  pendingFilters = null
   isLoading.value = true
-  listError.value = null
+  if (!isCandidate) listError.value = null
   try {
     const result = await api.browseProductCatalog({
       page: currentPage.value, size: pageSize.value, search: submittedSearch.value,
-      status: status.value, category: category.value, color: color.value,
+      status: status.value, category: category.value, color: color.value, filters,
     })
     if (request !== listRequest) return
     serverProducts.value = result.rows
     resultTotal.value = result.total
     catalogTotal.value = result.catalogTotal
     activeCount.value = result.activeTotal
+    appliedFilters.value = cloneProductFilters(filters)
+    advancedError.value = ''
     localTotal.value = result.localTotal
     canManageLocal.value = result.canManageLocal
     sharedUnavailable.value = result.sharedUnavailable
@@ -170,33 +198,109 @@ async function loadProducts() {
     if (result.sharedUnavailable && !result.localTotal) listError.value = '公共库暂时无法加载'
     if (currentPage.value > pageCount.value) currentPage.value = pageCount.value
   } catch (error) {
-    if (request === listRequest) listError.value = error instanceof Error ? error.message : '商品列表请求失败'
+    if (request !== listRequest) return
+    const message = error instanceof Error ? error.message : '商品列表请求失败'
+    if (isCandidate) advancedError.value = message
+    else listError.value = message
   } finally {
     if (request === listRequest) isLoading.value = false
   }
 }
 
-async function loadFacets() {
-  if (!catalogStatusReady.value || facetLoading.value || (catalogFacets.value && !catalogFacets.value.sharedUnavailable)) return
+function changeFilters(next: CatalogProductFilters) {
+  pendingFilters = next
+  pageInput.value = 1
+  if (currentPage.value !== 1) {
+    currentPage.value = 1
+    return Promise.resolve()
+  }
+  return loadProducts()
+}
+
+function removeFilterChip(chip: { key: string, code: string }) {
+  const next = cloneProductFilters(appliedFilters.value)
+  const values = next[chip.key as keyof CatalogProductFilters] as Array<string | number>
+  const index = values.findIndex(item => String(item) === chip.code)
+  if (index >= 0) values.splice(index, 1)
+  void changeFilters(next)
+}
+
+async function applyAdvancedFilters(candidate: CatalogProductFilters) {
+  advancedSaving.value = true
+  advancedError.value = ''
+  try {
+    await changeFilters(candidate)
+  } finally {
+    advancedSaving.value = false
+  }
+}
+
+function openAdvancedFilters() {
+  advancedError.value = ''
+  advancedOpen.value = !advancedOpen.value
+}
+
+const filtersForm = ref<HTMLElement | null>(null)
+const drawerTop = ref(0)
+
+function measureDrawerTop() {
+  if (window.innerWidth <= 640) {
+    drawerTop.value = 0
+    return
+  }
+  if (filtersForm.value) drawerTop.value = Math.round(filtersForm.value.getBoundingClientRect().top)
+}
+
+watch(advancedOpen, (open) => {
+  if (open) {
+    nextTick(measureDrawerTop)
+    window.addEventListener('resize', measureDrawerTop)
+  } else {
+    window.removeEventListener('resize', measureDrawerTop)
+  }
+})
+
+watch(appliedFilters, () => {
+  if (advancedOpen.value) nextTick(measureDrawerTop)
+})
+
+onBeforeUnmount(() => window.removeEventListener('resize', measureDrawerTop))
+
+function currentFacetKey() {
+  return JSON.stringify([storageScope.value, localOnly.value, submittedSearch.value, status.value])
+}
+
+async function loadFacets(force: boolean | Event = false) {
+  if (!catalogStatusReady.value) return
+  const key = currentFacetKey()
+  if (force !== true && (facetLoading.value && loadingFacetKey === key
+    || loadedFacetKey === key && catalogFacets.value && !catalogFacets.value.sharedUnavailable)) return
   const request = ++facetRequest
+  loadingFacetKey = key
   facetLoading.value = true
   facetError.value = ''
   try {
-    const facets = await api.browseProductFacets()
-    if (request === facetRequest) {
+    const facets = await api.browseProductFacets({ search: submittedSearch.value, status: status.value })
+    if (request === facetRequest && key === currentFacetKey()) {
       catalogFacets.value = facets
+      loadedFacetKey = key
       if (facets.sharedUnavailable) facetError.value = '公共库的分类和颜色暂时无法加载。'
       if (facets.localCategories.length) loadLocalCategoryLabels()
     }
   } catch {
-    if (request === facetRequest) facetError.value = '分类和颜色暂时无法加载，请重试。'
+    if (request === facetRequest && key === currentFacetKey()) facetError.value = '分类和颜色暂时无法加载，请重试。'
   } finally {
-    if (request === facetRequest) facetLoading.value = false
+    if (request === facetRequest) {
+      facetLoading.value = false
+      loadingFacetKey = null
+    }
   }
 }
 
 function invalidateFacets() {
   facetRequest++
+  loadingFacetKey = null
+  loadedFacetKey = null
   catalogFacets.value = null
   facetError.value = ''
   facetLoading.value = false
@@ -208,6 +312,7 @@ function refreshCatalog() {
   const filtersChange = category.value || color.value || currentPage.value !== 1
   invalidateFacets()
   currentPage.value = 1
+  void loadFacets()
   if (!filtersChange) void loadProducts()
 }
 
@@ -250,15 +355,22 @@ async function toggleWorkspaceSharedCatalog() {
 }
 
 function resetFilters() {
+  const queryChanged = submittedSearch.value !== '' || status.value !== '' || category.value !== '' || color.value !== ''
   search.value = ''
-  submittedSearch.value = ''
   status.value = ''
+  submittedSearch.value = ''
   category.value = ''
   color.value = ''
+  pendingFilters = emptyProductFilters()
+  if (!queryChanged) void changeFilters(emptyProductFilters())
 }
 
 function goToPage(value = pageInput.value) {
   const target = Math.min(pageCount.value, Math.max(1, Math.trunc(Number(value) || 1)))
+  if (target === currentPage.value) {
+    pageInput.value = target
+    return
+  }
   currentPage.value = target
   pageInput.value = target
 }
@@ -449,9 +561,9 @@ onMounted(loadCatalogContext)
     <p v-if="sharedUnavailable && !listError && !isLoading" role="status" class="text-sm text-amber-800">
       公共库暂时无法加载，当前显示本地商品。
     </p>
-    <div class="catalog-split">
+    <div class="catalog-split" :class="{ 'advanced-open': advancedOpen }">
       <section class="catalog-main min-w-0" aria-label="商品列表">
-        <form class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
+        <form ref="filtersForm" class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
           <label class="filter-search grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
             搜索商品
             <span class="relative block">
@@ -480,10 +592,20 @@ onMounted(loadCatalogContext)
             </select>
           </label>
           <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="border border-accent bg-white px-3 py-2.5 text-sm font-semibold text-accent-ink hover:bg-cream" @click="openAdvancedFilters">全部筛选<span v-if="advancedCount" class="ml-1 rounded-full bg-accent px-1.5 text-xs font-bold text-white">{{ advancedCount }}</span></button>
             <button type="button" class="border border-neutral-300 p-2.5 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50" aria-label="刷新商品列表" :disabled="isLoading" @click="refreshCatalog"><AppIcon name="reset" size="4" :class="{ 'animate-spin': isLoading }" /></button>
             <button v-if="filtersApplied" type="button" class="px-1 text-xs font-semibold text-accent-ink hover:underline" @click="resetFilters">清空条件</button>
           </div>
         </form>
+
+        <div v-if="activeFilterChips.length" class="flex flex-wrap items-center gap-2 py-2" aria-label="已选筛选条件">
+          <button v-for="chip in activeFilterChips" :key="`${chip.key}:${chip.code}`" type="button"
+            class="active-filter-chip inline-flex items-center gap-1 rounded-full border border-[#d9ccea] bg-[#f4eefa] px-3 py-1 text-xs font-medium text-[#4a3170]"
+            @click="removeFilterChip(chip)">
+            {{ chip.label }}<AppIcon name="close" size="3" />
+          </button>
+          <button type="button" class="text-xs font-semibold text-accent-ink hover:underline" @click="changeFilters(emptyProductFilters())">清空全部</button>
+        </div>
 
         <p v-if="facetError" class="py-2 text-xs text-red-700" role="status">
           {{ facetError }} <button type="button" class="underline" @click="loadFacets">重试</button>
@@ -563,6 +685,10 @@ onMounted(loadCatalogContext)
           </div>
         </div>
       </section>
+      <ProductAdvancedFilterDialog :open="advancedOpen" :filters="appliedFilters" :facets="facets"
+        :top="drawerTop"
+        :saving="advancedSaving" :error="advancedError"
+        @confirm="applyAdvancedFilters" @cancel="advancedOpen = false" />
       <aside :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
         :class="{ 'is-open': collectionOpen }" aria-label="产品库收藏" tabindex="-1">
         <ProductBundlePanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="pageProducts" class="mb-4" />
@@ -614,6 +740,12 @@ onMounted(loadCatalogContext)
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 1rem;
+}
+@media (min-width: 1100px) {
+  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px clamp(13rem, 17vw, 18rem); }
+}
+@media (min-width: 641px) and (max-width: 1099px) {
+  .catalog-split.advanced-open { margin-right: 400px; }
 }
 
 .catalog-main { container: catalog / inline-size; }
