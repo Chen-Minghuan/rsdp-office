@@ -743,7 +743,7 @@ onMounted(loadCatalogContext)
   gap: 1rem;
 }
 @media (min-width: 1100px) {
-  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px clamp(13rem, 17vw, 18rem); }
+  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px var(--collection-width, clamp(13rem, 17vw, 18rem)); }
 }
 @media (min-width: 641px) and (max-width: 1099px) {
   .catalog-split.advanced-open { margin-right: 400px; }

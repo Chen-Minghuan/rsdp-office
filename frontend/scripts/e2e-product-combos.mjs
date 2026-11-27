@@ -25,7 +25,8 @@ function bundleDto(combo) {
     revision: combo.revision,
     items: combo.items.map(item => ({
       ...item,
-      name: products[item.rspuId]?.productName ?? null,
+      name: products[item.rspuId]?.productName ?? item.name ?? null,
+      available: !!products[item.rspuId],
       variant: '默认规格',
       imageUrl: null,
     })),
@@ -54,7 +55,7 @@ async function openPage(initialCombos = []) {
       if ((body.revision || 0) !== (existing?.revision || 0)) return reject('商品组合已变化，请重新读取后编辑')
       const combo = existing || { bundleId: bundleMatch[1], name: body.name, revision: 0, items: [] }
       combo.name = body.name
-      combo.items = body.items
+      combo.items = body.items.map(item => ({ ...combo.items.find(old => old.rspuId === item.rspuId && old.variantId === item.variantId), ...item }))
       combo.revision = (existing?.revision || 0) + 1
       if (!existing) state.combos.push(combo)
       state.saves.push({ bundleId: combo.bundleId, name: combo.name, revision: combo.revision, items: combo.items })
@@ -72,6 +73,7 @@ async function openPage(initialCombos = []) {
     if (productMatch && products[productMatch[1]]) {
       return respond({ variants: [{ variantId: 'V1', displayName: '默认规格', status: 'active' }] })
     }
+    if (path === '/api/v1/products/browse/facets') return respond({ localCategories: [], sharedCategories: [], colors: [], sharedUnavailable: false, advanced: { groups: {} } })
     if (path === '/api/v1/products/browse') {
       const rows = Object.values(products).map(product => ({ local: null, shared: product }))
       return respond({
@@ -183,6 +185,13 @@ try {
   const afterWidth = (await rail.boundingBox()).width
   assert.ok(afterWidth > beforeWidth + 50, `拖宽应联动外层布局（${beforeWidth}→${afterWidth}）`)
 
+  // 打开高级筛选后仍使用同一条收藏栏宽度，不能退回固定轨道。
+  await page.getByRole('button', { name: '全部筛选', exact: true }).click()
+  const advanced = page.getByRole('dialog', { name: '全部筛选', exact: true })
+  await advanced.waitFor({ state: 'visible' })
+  assert.ok(Math.abs((await rail.boundingBox()).width - afterWidth) < 2, '高级筛选保留组合栏拖宽')
+  await advanced.getByRole('button', { name: '关闭全部筛选' }).click()
+
   // 删除需确认
   await reloadedCard.getByRole('button', { name: '删除', exact: true }).click()
   const deleteDialog = page.getByRole('dialog', { name: '删除组合' })
@@ -196,19 +205,27 @@ try {
   // 组内含失效商品：标注已失效，仍可添加其他商品，也可移除失效条目
   const invalid = await openPage([{
     bundleId: 'CB-1', name: '含失效商品组合', revision: 1,
-    items: [{ rspuId: 'P-GONE', variantId: 'V1', quantity: 1 }],
+    items: [{ rspuId: 'P-GONE', variantId: 'V1', quantity: 1, name: '保留名称的旧商品', variant: '旧规格' }],
   }])
   const invCard = invalid.page.getByTestId('combo-card').first()
   await invCard.waitFor({ state: 'visible' })
   assert.match(await invCard.innerText(), /已失效/)
+  await invCard.getByRole('button', { name: '展开商品' }).click()
+  assert.match(await invCard.innerText(), /保留名称的旧商品/)
+  assert.equal(await invCard.getByRole('link', { name: '保留名称的旧商品' }).count(), 0, '有名称的失效条目也不能当正常商品链接')
+  await invCard.getByRole('button', { name: '收起商品' }).click()
   await invCard.getByRole('button', { name: '添加商品', exact: true }).click()
   const invPicker = invalid.page.getByRole('dialog', { name: '选择商品' })
   await invPicker.getByRole('checkbox', { name: products.P1.productName, exact: true }).check()
   await invPicker.getByRole('button', { name: '确认加入', exact: true }).click()
   await invPicker.waitFor({ state: 'hidden' })
   assert.match(await invCard.innerText(), /2\/5/)
+  assert.match(await invCard.innerText(), /已失效/, '保存其他商品后仍保留失效标记')
+  await invalid.page.reload({ waitUntil: 'networkidle' })
+  await invCard.waitFor()
+  assert.match(await invCard.innerText(), /已失效/, '刷新后重新核验失效状态')
   await invCard.getByRole('button', { name: '展开商品' }).click()
-  await invCard.getByRole('button', { name: '移除P-GONE', exact: true }).click()
+  await invCard.getByRole('button', { name: '移除保留名称的旧商品', exact: true }).click()
   await invalid.page.waitForFunction(() => document.querySelector('[data-testid="combo-card"]')?.textContent?.includes('1/5'))
   assert.deepEqual(invalid.state.saves.at(-1).items.map(item => item.rspuId), ['P1'])
   assert.deepEqual(invalid.errors, [])

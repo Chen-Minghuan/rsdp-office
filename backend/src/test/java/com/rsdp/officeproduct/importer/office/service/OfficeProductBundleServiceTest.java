@@ -42,6 +42,8 @@ class OfficeProductBundleServiceTest {
         assertEquals(2, result.items().size());
         assertEquals("旧茶几", result.items().get(0).name(), "失效旧条目保留原展示信息");
         assertEquals("新商品", result.items().get(1).name());
+        assertFalse(result.items().get(0).available());
+        assertTrue(result.items().get(1).available());
     }
 
     @Test
@@ -75,6 +77,67 @@ class OfficeProductBundleServiceTest {
 
         assertThrows(BusinessException.class,
             () -> service.save("B1", new Save("组合", 1, List.of(item("P-OLD")))));
+    }
+
+    @Test void renameAndListCannotRevealAnotherWorkspaceSnapshot() throws Exception {
+        authenticate();
+        String localId = "OFFICE-LOCAL-LOCAL-A";
+        String secret = savedItemJson(localId, "V1", "工作区A保密商品", "保密材质");
+        previousRow("B1", 1, secret);
+        when(bundles.list("U1")).thenReturn(List.of(new OfficeProductBundleMapper.Row("B1", "U1", "组合", 1, secret)));
+        when(localProducts.detail("LOCAL-A")).thenThrow(new BusinessException(404, "商品不存在"));
+        when(bundles.update(any())).thenReturn(1);
+        var listed = service.list().getFirst().items().getFirst();
+        var renamed = service.save("B1", new Save("改名", 1, List.of(item(localId)))).items().getFirst();
+        for (var result : List.of(listed, renamed)) {
+            assertEquals(localId, result.rspuId());
+            assertNull(result.name()); assertNull(result.variant()); assertNull(result.imageUrl());
+            assertFalse(result.available());
+        }
+        var write = org.mockito.ArgumentCaptor.forClass(OfficeProductBundleMapper.Row.class);
+        verify(bundles).update(write.capture());
+        assertFalse(write.getValue().itemsJson().contains("保密"));
+        assertThrows(BusinessException.class, () -> service.save("NEW", new Save("新组合", 0, List.of(item(localId)))));
+    }
+
+    @Test void unavailableVisibleLocalVariantKeepsAuthorizedNameAndExplicitFlag() throws Exception {
+        authenticate();
+        String localId = "OFFICE-LOCAL-L1";
+        previousRow("B1", 1, savedItemJson(localId, "V1", "旧名称", "旧规格"));
+        when(localProducts.detail("L1")).thenReturn(new com.rsdp.officeproduct.importer.office.product.LocalProductModels.Detail(
+            new com.rsdp.officeproduct.importer.office.product.LocalProductModels.Summary("L1", 2, "当前可见商品", "C", "F", "M"),
+            List.of(), List.of(), false));
+        when(bundles.update(any())).thenReturn(1);
+        var item = service.save("B1", new Save("组合", 1, List.of(new Item(localId, "V1", 2)))).items().getFirst();
+        assertFalse(item.available());
+        assertEquals("当前可见商品", item.name());
+        assertEquals("旧规格", item.variant());
+        assertEquals(2, item.quantity());
+    }
+
+    @Test void listRechecksLegacySnapshotsAndDeduplicatesReferencedVariants() throws Exception {
+        authenticate();
+        String legacy = "[{\"rspuId\":\"OLD\",\"variantId\":\"V1\",\"quantity\":1,\"name\":\"旧商品\",\"variant\":\"旧规格\",\"imageUrl\":null}]";
+        when(bundles.list("U1")).thenReturn(List.of(
+            new OfficeProductBundleMapper.Row("B1", "U1", "一组", 1, legacy),
+            new OfficeProductBundleMapper.Row("B2", "U1", "二组", 1, legacy)));
+        when(office.currentProductVariant("OLD", "V1")).thenReturn(null);
+        var result = service.list();
+        assertFalse(result.getFirst().items().getFirst().available());
+        assertEquals("旧商品", result.getFirst().items().getFirst().name());
+        verify(office, times(1)).currentProductVariant("OLD", "V1");
+        verify(bundles, never()).update(any());
+    }
+
+    @Test void accessDeniedExistingLocalItemIsRedactedButNewOneStillRejected() throws Exception {
+        authenticate();
+        previousRow("B1", 1, savedItemJson("OFFICE-LOCAL-L1", "V1", "旧名称", "旧规格"));
+        when(localProducts.detail("L1")).thenThrow(new com.rsdp.officeproduct.importer.common.AccessDeniedException("未分配工作区"));
+        when(bundles.update(any())).thenReturn(1);
+        var result = service.save("B1", new Save("改名", 1, List.of(item("OFFICE-LOCAL-L1")))).items().getFirst();
+        assertNull(result.name()); assertFalse(result.available());
+        assertThrows(com.rsdp.officeproduct.importer.common.AccessDeniedException.class,
+            () -> service.save("NEW", new Save("新增", 0, List.of(item("OFFICE-LOCAL-L1")))));
     }
 
     private void authenticate() {

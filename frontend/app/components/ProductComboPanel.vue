@@ -409,7 +409,7 @@ defineExpose({ addProduct })
             <div v-for="item in bundle.items" :key="`${item.rspuId}-${item.variantId}`"
               class="relative aspect-[4/3] overflow-hidden rounded-lg border border-line bg-bg" :title="item.name || item.rspuId">
               <ProductImagePreview :src="item.imageUrl" :alt="item.name || ''" size="small" />
-              <span v-if="!item.name" class="absolute inset-x-0 bottom-0 bg-black/50 py-0.5 text-center text-[10px] text-white">已失效</span>
+              <span v-if="item.available === false || !item.name" class="absolute inset-x-0 bottom-0 bg-black/50 py-0.5 text-center text-[10px] text-white">已失效</span>
             </div>
             <button v-if="bundle.items.length < 5" type="button" aria-label="添加商品"
               class="grid aspect-[4/3] place-items-center rounded-lg border border-dashed border-line text-xl text-muted transition hover:border-bronze hover:text-bronze-dark"
@@ -427,8 +427,8 @@ defineExpose({ addProduct })
               </div>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-xs font-semibold">
-                  <NuxtLink v-if="item.name" :to="catalogProductPath(item.rspuId)" class="hover:text-bronze-dark hover:underline">{{ item.name }}</NuxtLink>
-                  <span v-else>{{ item.rspuId }}<span class="ml-1 text-red-800">（已失效）</span></span>
+                  <NuxtLink v-if="item.available !== false && item.name" :to="catalogProductPath(item.rspuId)" class="hover:text-bronze-dark hover:underline">{{ item.name }}</NuxtLink>
+                  <span v-else>{{ item.name || item.rspuId }}<span class="ml-1 text-red-800">（已失效）</span></span>
                 </p>
                 <p class="text-xs text-muted">{{ item.variant || '默认规格' }} · 数量 ×{{ item.quantity }}</p>
               </div>

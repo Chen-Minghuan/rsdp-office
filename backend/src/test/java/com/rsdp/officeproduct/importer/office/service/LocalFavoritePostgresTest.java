@@ -178,7 +178,10 @@ class LocalFavoritePostgresTest {
         assertTrue(project.listProjectFavoriteItems("PROJECT").isEmpty());
         assertThrows(BusinessException.class, () -> personal.saveProductFolders(localReference, List.of(folder)));
         assertThrows(BusinessException.class, () -> project.saveProjectFavorite("PROJECT", localReference, true));
-        assertThrows(BusinessException.class, () -> bundles.save("BUNDLE", new Save("其他工作区", 2, List.of(localItem))));
+        var hidden = bundles.save("BUNDLE", new Save("其他工作区", 2, List.of(localItem))).items().getFirst();
+        assertFalse(hidden.available());
+        assertNull(hidden.name()); assertNull(hidden.variant()); assertNull(hidden.imageUrl());
+        assertThrows(BusinessException.class, () -> bundles.save("NEW-BUNDLE", new Save("新增不可见商品", 0, List.of(localItem))));
         assertNull(bundles.list().get(0).items().get(0).name());
         assertNull(bundles.list().get(0).items().get(0).variant());
     }

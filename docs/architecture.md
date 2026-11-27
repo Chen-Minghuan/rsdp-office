@@ -308,3 +308,6 @@ RenderGenerationOptions 显式定义 A/B/C/D/E；缺省使用正式 E（完整�
 
 
 2026-11-27 报价与方案快照绑定：试算返回楼层 `proposalConfirmationIds`，冻结的确认请求必须携带同一映射；正式确认在项目各楼层按 ID 排序的共同事务锁内核验有效性和确认 ID，来源写入 `office_quotation.proposal_confirmations_json`。房间选择确认/取消校验画布修订、切换令牌和目标槽，并退役旧楼层确认；删除空间留下的方案行不参与当前楼层门禁。详见 [QUOTE-002](tasks/QUOTE-002-quotation-proposal-gate.md)。
+
+
+2026-11-27 个人组合条目返回明确的 `available`，读取和保存时按当前目录及会话工作区重新核验，不从名称或历史标记推断可用性。失效公共商品保留历史展示信息；不可访问的本地商品仅保留引用及数量，列表和保存响应均隐藏名称、规格和图片地址。旧组合 JSON 兼容读取，新增无效商品仍拒绝。详见 [商品库自选组合](tasks/CAT-011-self-select-combo.md#2026-11-27-合并后修复)。
