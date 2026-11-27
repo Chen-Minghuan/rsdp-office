@@ -1,4 +1,4 @@
-import { projectBenchPath, projectOverviewRoute } from '~/utils/projectBenchRoutes'
+import { productSchemeRoute, projectBenchPath, projectOverviewRoute } from '~/utils/projectBenchRoutes'
 
 export function useWorkspaceNavigation() {
   const route = useRouter().currentRoute
@@ -26,7 +26,7 @@ export function useWorkspaceNavigation() {
       { id: 'workbench', label: '项目工作台', to: floorId ? projectOverviewRoute(floorId) : projectBenchPath },
       { id: 'products', label: '产品库', to: '/products' },
       { id: 'space', label: '空间设计', to: { path: '/canvas', query: { floorId } } },
-      { id: 'scheme', label: '产品方案', to: { path: '/canvas', query: { floorId, mode: 'design', view: 'products', zoneId } } },
+      { id: 'scheme', label: '产品选型', to: productSchemeRoute(floorId, zoneId) },
       { id: 'proposal', label: '项目清单', to: { path: '/proposal', query: { floorId } } },
     ]
   })

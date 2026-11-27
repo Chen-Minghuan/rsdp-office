@@ -509,7 +509,7 @@ try {
 
   const benchLink = mainNav.getByRole('link', { name: '项目工作台', exact: true })
   const overviewStep = mainNav.getByRole('link', { name: '空间设计', exact: true })
-  const layoutStep = mainNav.getByRole('link', { name: '产品方案', exact: true })
+  const layoutStep = mainNav.getByRole('link', { name: '产品选型', exact: true })
   const budgetStep = mainNav.getByRole('link', { name: '项目清单', exact: true })
   const budget = page.locator('.proposal-page')
   async function verifyProjectSteps(active, other) {
