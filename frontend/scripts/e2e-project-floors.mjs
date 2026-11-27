@@ -558,8 +558,23 @@ try {
   await selectionIssues.getByText(floorTreeTarget.name, { exact: true }).waitFor()
   await selectionIssues.getByText('家具 1 件 · 清单 2 件', { exact: true }).waitFor()
   assert.equal(await selectionIssues.getByText(first.name, { exact: true }).count(), 0, '不能显示来源楼层的核对结果')
-  assert.equal(await page.getByRole('button', { name: '确认方案', exact: true }).isDisabled(), true)
+  const confirmProposalButton = page.getByRole('button', { name: '确认方案', exact: true })
+  assert.equal(await confirmProposalButton.isEnabled(), true, '存在待核对选品时确认方案按钮保持可点击')
   assert.equal(await page.getByRole('dialog').count(), 0)
+  await confirmProposalButton.click()
+  const precheckModal = page.getByTestId('proposal-precheck-modal')
+  await precheckModal.waitFor()
+  await precheckModal.getByText('选品数量不一致', { exact: true }).waitFor()
+  await precheckModal.getByText(floorTreeTarget.name, { exact: true }).waitFor()
+  await precheckModal.getByText('家具 1 件 · 清单 2 件', { exact: true }).waitFor()
+  assert.equal(await precheckModal.getByText(first.name, { exact: true }).count(), 0, '弹窗不能显示来源楼层的核对结果')
+  await precheckModal.getByRole('button').filter({ hasText: floorTreeTarget.name }).first().click()
+  await page.waitForURL(url => url.pathname === '/canvas'
+    && url.searchParams.get('floorId') === floorTreeTarget.floorId
+    && url.searchParams.get('zoneId') === floorTreeTarget.zoneId
+    && url.searchParams.get('mode') === 'design'
+    && url.searchParams.get('view') === 'products')
+  assert.equal(await page.getByRole('dialog').count(), 0, '跳转后弹窗应关闭')
   scopedCarts.set(floorTreeTarget.floorId, [{ lineId: `cart-${floorTreeTarget.floorId}`, projectId: floorTreeTarget.floorId, zoneId: floorTreeTarget.zoneId, zoneName: floorTreeTarget.name, productId: 'SAMPLE-OF-03', qty: floorTreeTarget.qty }])
 
   // 已配齐来源楼层时，直达另一楼层仍应只展示目标的核对结果。

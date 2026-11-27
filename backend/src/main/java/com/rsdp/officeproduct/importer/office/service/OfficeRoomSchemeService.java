@@ -53,6 +53,9 @@ public class OfficeRoomSchemeService {
         var currentState = state(saved);
         var allCart = office.listCart(floorId);
         if (currentState.activeSlot().equals(change.targetSlot())) return new OfficeSchemeDtos.Result(canvas, allCart, currentState);
+        if (saved != null && saved.confirmedSlot() != null) {
+            throw new BusinessException("当前空间已确认使用 Plan " + saved.activeSlot() + "，请先取消确认");
+        }
 
         JsonNode geometry = OfficeSpaceReviewSupport.snapshot(json, room.zone());
         Slot outgoing = new Slot(geometry, room.furniture(),
@@ -78,7 +81,7 @@ public class OfficeRoomSchemeService {
         for (CartItemDto line : incoming.cart()) restoreCart(floorId, change.zoneId(), room.zone().path("name").asText(), line);
         CanvasDto updated = persist(canvas, next);
         schemes.save(floorId, change.zoneId(), change.targetSlot(), encode(outgoing));
-        return new OfficeSchemeDtos.Result(updated, office.listCart(floorId), new OfficeSchemeDtos.State(change.targetSlot(), true));
+        return new OfficeSchemeDtos.Result(updated, office.listCart(floorId), new OfficeSchemeDtos.State(change.targetSlot(), true, null));
     }
 
     @Transactional
@@ -92,6 +95,53 @@ public class OfficeRoomSchemeService {
         clearRoomCart(floorId, change.zoneId());
         CanvasDto updated = persist(canvas, room.objects());
         return new OfficeSchemeDtos.Result(updated, office.listCart(floorId), state(schemes.find(floorId, change.zoneId())));
+    }
+
+    /**
+     * 确认使用当前激活的方案（Plan A 或 Plan B）：确认后 activate 被拒绝，须先取消确认。
+     * 不改变画布内容，仅锁定选择，因此无需校验画布版本。
+     */
+    @Transactional
+    public OfficeSchemeDtos.State confirmChoice(String floorId, OfficeSchemeDtos.Change change) {
+        if (change == null || change.zoneId() == null) throw new BusinessException("缺少当前房间");
+        locks.lockWorkspace(floorId);
+        room(office.getCanvas(floorId), change.zoneId());
+        var saved = schemes.find(floorId, change.zoneId());
+        if (saved == null) throw new BusinessException("当前空间还没有可确认的方案");
+        if (saved.confirmedSlot() != null) return state(saved);
+        schemes.setConfirmedSlot(floorId, change.zoneId(), saved.activeSlot());
+        return new OfficeSchemeDtos.State(saved.activeSlot(), true, saved.activeSlot());
+    }
+
+    /** 取消方案选择确认，恢复 Plan A/B 切换。 */
+    @Transactional
+    public OfficeSchemeDtos.State cancelChoice(String floorId, OfficeSchemeDtos.Change change) {
+        if (change == null || change.zoneId() == null) throw new BusinessException("缺少当前房间");
+        locks.lockWorkspace(floorId);
+        var saved = schemes.find(floorId, change.zoneId());
+        if (saved == null) throw new BusinessException("当前空间还没有方案记录");
+        if (saved.confirmedSlot() == null) return state(saved);
+        schemes.setConfirmedSlot(floorId, change.zoneId(), null);
+        return new OfficeSchemeDtos.State(saved.activeSlot(), true, null);
+    }
+
+    /** 方案对比：激活槽家具取自画布，另一槽家具取自 inactive_json（无方案行时为空）。 */
+    public OfficeSchemeDtos.Slots slots(String floorId, String zoneId) {
+        CanvasDto canvas = office.getCanvas(floorId);
+        Room room = room(canvas, zoneId);
+        var saved = schemes.find(floorId, zoneId);
+        String activeSlot = saved == null ? "A" : saved.activeSlot();
+        List<OfficeSchemeDtos.SlotFurniture> inactive = saved == null ? List.of()
+            : decode(saved.inactiveJson()).furniture().stream().map(OfficeRoomSchemeService::summarize).toList();
+        return new OfficeSchemeDtos.Slots(activeSlot,
+            room.furniture().stream().map(OfficeRoomSchemeService::summarize).toList(), inactive);
+    }
+
+    private static OfficeSchemeDtos.SlotFurniture summarize(JsonNode item) {
+        String label = item.path("label").isTextual() ? item.path("label").asText() : null;
+        JsonNode productName = item.path("productSelection").path("product").path("name");
+        return new OfficeSchemeDtos.SlotFurniture(item.path("id").asText(), label,
+            productName.isTextual() ? productName.asText() : null, item.path("w").asInt(), item.path("h").asInt());
     }
 
     private CanvasDto lockCurrent(String floorId, OfficeSchemeDtos.Change change) {
@@ -123,7 +173,8 @@ public class OfficeRoomSchemeService {
     }
 
     private OfficeSchemeDtos.State state(OfficeRoomSchemeMapper.Row saved) {
-        return saved == null ? new OfficeSchemeDtos.State("A", false) : new OfficeSchemeDtos.State(saved.activeSlot(), true);
+        return saved == null ? new OfficeSchemeDtos.State("A", false, null)
+            : new OfficeSchemeDtos.State(saved.activeSlot(), true, saved.confirmedSlot());
     }
 
     private void clearRoomCart(String floorId, String zoneId) {

@@ -6,7 +6,7 @@ import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { PRODUCTS } from '~/utils/sample'
 import type { CartItem, FurnitureObject, Product, ProjectQuotationLatest, ProjectQuotationRecord, ZoneObject } from '~/types/office'
 import type { RenderPreview } from '~/types/renderPreview'
-import type { ProposalConfirmation } from '~/types/productScheme'
+import type { ProposalConfirmation, RoomSchemeSlots, RoomSchemeState, SchemeSlot, SchemeSlotFurniture } from '~/types/productScheme'
 import { proposalFurnitureSelectionRoute } from '~/utils/proposalFurnitureGate'
 
 
@@ -47,6 +47,14 @@ type Detail =
   | { kind: 'module'; space: ProposalSpace; module: ProposalModule }
   | { kind: 'comment'; space: ProposalSpace }
 
+type PrecheckIssue = {
+  key: string
+  kindLabel: string
+  zoneName: string
+  description: string
+  route: { path: string; query: Record<string, string> }
+}
+
 const store = useOfficeStore()
 const workspace = useWorkspaceStore()
 const { user } = useAuth()
@@ -71,9 +79,26 @@ const confirmedSpaceIds = ref<Record<string, boolean>>({})
 const renderJobs = ref<Record<string, RenderPreview[]>>({})
 const loadedRenderZones = new Set<string>()
 const renderApi = useRenderPreviewApi()
+// 每个空间（zone）的 Plan A/B 方案状态，切换语义与 canvas 产品方案视图一致。
+const schemeStates = ref<Record<string, RoomSchemeState>>({})
+const schemeBusyId = ref<string | null>(null)
+const loadedSchemeZones = new Set<string>()
+// 有 Plan B 的空间的两个方案家具摘要，用于待确认方案横幅对比。
+const schemeSlots = ref<Record<string, RoomSchemeSlots>>({})
+const loadedSlotZones = new Set<string>()
 
 const previewMode = computed(() => route.query.preview === '1')
 const selectionIssues = computed(() => previewMode.value ? [] : store.proposalFurnitureCartMismatches)
+// 方案确认前置条件：空间复核确认（服务端签发）与排版确认（逐家具 layoutConfirmed）。
+// 排版只统计有家具的空间，无家具空间不算阻塞（对齐后端确认语义）。
+const pendingReviewZones = computed(() => previewMode.value ? [] : store.pendingReviewZones)
+const layoutPendingZones = computed(() => {
+  if (previewMode.value) return []
+  return store.zones.filter((zone) => {
+    const items = store.furnitureForZone(zone.id)
+    return items.length > 0 && !items.every((item) => item.layoutConfirmed)
+  })
+})
 const confirmed = computed(() => previewMode.value ? demoConfirmed.value
   : !!savedConfirmation.value?.current && savedConfirmation.value.canvasRevision === store.canvasRevision)
 const cartSignature = computed(() => JSON.stringify(store.cart.map(item => [item.id, item.zoneId, item.productId, item.qty])))
@@ -257,14 +282,139 @@ async function loadRenderPreviews() {
   renderJobs.value = next
 }
 
+async function loadSchemeStates() {
+  if (previewMode.value || !store.initialized || !store.apiReady) return
+  const floor = store.workspaceId
+  const ids = spaces.value.map(space => space.zoneId).filter(id => !id.startsWith('cart-') && !loadedSchemeZones.has(id))
+  if (!ids.length) return
+  ids.forEach(id => loadedSchemeZones.add(id))
+  const results = await Promise.allSettled(ids.map(async id => ({ id, scheme: await catalogApi.loadRoomScheme(floor, id) })))
+  if (floor !== store.workspaceId) return
+  const next = { ...schemeStates.value }
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value.scheme?.activeSlot) next[result.value.id] = result.value.scheme
+  }
+  schemeStates.value = next
+}
+
+// 有 Plan B 的空间才需要对比两个方案的家具；确认/取消不改变家具内容，切换方案后需重新加载。
+async function loadSchemeSlots() {
+  if (previewMode.value || !store.initialized || !store.apiReady) return
+  const floor = store.workspaceId
+  const ids = spaces.value.map(space => space.zoneId)
+    .filter(id => !id.startsWith('cart-') && schemeStates.value[id]?.alternativeSaved && !loadedSlotZones.has(id))
+  if (!ids.length) return
+  ids.forEach(id => loadedSlotZones.add(id))
+  const results = await Promise.allSettled(ids.map(async id => ({ id, slots: await catalogApi.loadRoomSchemeSlots(floor, id) })))
+  if (floor !== store.workspaceId) return
+  const next = { ...schemeSlots.value }
+  for (const result of results) {
+    if (result.status === 'fulfilled') next[result.value.id] = result.value.slots
+  }
+  schemeSlots.value = next
+}
+watch(schemeStates, () => { void loadSchemeSlots() })
+
+// 已创建 Plan B 但尚未确认使用哪个方案的空间：阻塞楼层方案确认。
+const unconfirmedSchemeZones = computed(() => previewMode.value ? []
+  : spaces.value.filter((space) => {
+    const state = schemeStates.value[space.zoneId]
+    return !!state?.alternativeSaved && !state.confirmedSlot
+  }))
+
+function schemeLocked(space: ProposalSpace) {
+  return !!schemeStates.value[space.zoneId]?.confirmedSlot
+}
+
+function slotFurnitureFor(space: ProposalSpace, slot: SchemeSlot): SchemeSlotFurniture[] | null {
+  const slots = schemeSlots.value[space.zoneId]
+  if (!slots) return null
+  return slots.activeSlot === slot ? slots.active : slots.inactive
+}
+
+function furnitureSummary(items: SchemeSlotFurniture[]) {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const name = item.productName || item.label || '未命名家具'
+    counts.set(name, (counts.get(name) || 0) + 1)
+  }
+  return [...counts.entries()].map(([name, count]) => ({ name, count }))
+}
+
+async function confirmSchemeChoice(space: ProposalSpace) {
+  if (previewMode.value || !space.zone || !canEdit.value || schemeBusyId.value || !store.apiReady) return
+  const floorId = store.workspaceId
+  const state = schemeStates.value[space.zoneId]
+  if (!floorId || !state?.alternativeSaved || state.confirmedSlot) return
+  schemeBusyId.value = space.zoneId
+  try {
+    const result = await catalogApi.changeRoomSchemeChoice(floorId, 'confirm-choice', space.zoneId)
+    if (store.workspaceId !== floorId) return
+    schemeStates.value = { ...schemeStates.value, [space.zoneId]: result }
+    setNotice(`${space.name} 已确认使用 Plan ${result.confirmedSlot}`)
+  } catch (e) {
+    if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案确认失败，请稍后重试')
+  } finally {
+    schemeBusyId.value = null
+  }
+}
+
+async function cancelSchemeChoice(space: ProposalSpace) {
+  if (previewMode.value || !space.zone || !canEdit.value || schemeBusyId.value || !store.apiReady) return
+  const floorId = store.workspaceId
+  if (!floorId || !schemeStates.value[space.zoneId]?.confirmedSlot) return
+  schemeBusyId.value = space.zoneId
+  try {
+    const result = await catalogApi.changeRoomSchemeChoice(floorId, 'cancel-choice', space.zoneId)
+    if (store.workspaceId !== floorId) return
+    schemeStates.value = { ...schemeStates.value, [space.zoneId]: result }
+    setNotice(`${space.name} 已取消方案确认，可重新切换`)
+  } catch (e) {
+    if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '取消失败，请稍后重试')
+  } finally {
+    schemeBusyId.value = null
+  }
+}
+
+async function switchSpaceScheme(space: ProposalSpace, targetSlot: SchemeSlot) {
+  if (previewMode.value || !space.zone || !canEdit.value || schemeBusyId.value || !store.apiReady) return
+  const floorId = store.workspaceId
+  if (!floorId) return
+  if (schemeStates.value[space.zoneId]?.activeSlot === targetSlot) return
+  // 已确认方案选择的空间被后端拒绝切换，UI 同步拦截
+  if (schemeStates.value[space.zoneId]?.confirmedSlot) return
+  schemeBusyId.value = space.zoneId
+  try {
+    const version = await store.flushSchemeCanvas(floorId)
+    const result = await catalogApi.changeRoomScheme(floorId, 'activate', { ...version, zoneId: space.zoneId, targetSlot })
+    if (store.workspaceId !== floorId) return
+    store.applyRoomScheme(result, floorId)
+    if (result.scheme) schemeStates.value = { ...schemeStates.value, [space.zoneId]: result.scheme }
+    loadedRenderZones.delete(space.zoneId)
+    void loadRenderPreviews()
+    loadedSlotZones.delete(space.zoneId)
+    void loadSchemeSlots()
+    setNotice(`${space.name} 已切换至 Plan ${result.scheme?.activeSlot ?? targetSlot}`)
+  } catch (e) {
+    if (store.workspaceId === floorId) setNotice(e instanceof Error ? e.message : '方案切换失败，请稍后重试')
+  } finally {
+    schemeBusyId.value = null
+  }
+}
+
 watch(() => store.workspaceId, () => {
   loadedRenderZones.clear()
   renderJobs.value = {}
+  loadedSchemeZones.clear()
+  schemeStates.value = {}
+  loadedSlotZones.clear()
+  schemeSlots.value = {}
+  schemeBusyId.value = null
   confirmedSpaceIds.value = {}
   expandedSpaceIds.value = {}
   selectedDetail.value = null
 })
-watch(() => [store.initialized, store.workspaceId, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews() }, { immediate: true })
+watch(() => [store.initialized, store.workspaceId, previewMode.value, spaces.value.map(space => space.zoneId).join(',')], () => { void loadRenderPreviews(); void loadSchemeStates() }, { immediate: true })
 
 const groups = computed<ProposalGroup[]>(() => {
   const floor = floorLabel()
@@ -426,7 +576,8 @@ function confirmGroup(group: ProposalGroup) {
 }
 
 async function confirmProposal() {
-  if (!canEdit.value || checkingCatalog.value || selectionIssues.value.length) return
+  if (!canEdit.value || checkingCatalog.value || selectionIssues.value.length || confirmed.value
+    || pendingReviewZones.value.length || layoutPendingZones.value.length || unconfirmedSchemeZones.value.length) return
   if (previewMode.value) {
     demoConfirmed.value = true
     setNotice('已在演示中确认')
@@ -447,6 +598,74 @@ async function confirmProposal() {
   } finally {
     checkingCatalog.value = false
   }
+}
+
+// 确认方案前的阻塞项：选品数量不一致、排版未确认、空间待复核，统一在一个弹窗列表中展示。
+const precheckModalOpen = ref(false)
+
+const precheckIssues = computed<PrecheckIssue[]>(() => {
+  if (previewMode.value) return []
+  const floorId = workspace.currentFloorId
+  return [
+    ...selectionIssues.value.map(issue => ({
+      key: `selection-${issue.zoneId}`,
+      kindLabel: '选品数量不一致',
+      zoneName: issue.zoneName,
+      description: `家具 ${issue.furnitureCount} 件 · 清单 ${issue.cartQuantity} 件`,
+      route: proposalFurnitureSelectionRoute(floorId, issue.zoneId, store.canEnterLayout),
+    })),
+    ...layoutPendingZones.value.map(zone => ({
+      key: `layout-${zone.id}`,
+      kindLabel: '排版未确认',
+      zoneName: zone.name,
+      description: '空间内还有家具排版未确认',
+      route: { path: '/canvas', query: { mode: 'design', floorId, zoneId: zone.id } },
+    })),
+    ...pendingReviewZones.value.map(zone => ({
+      key: `review-${zone.id}`,
+      kindLabel: '待复核确认',
+      zoneName: zone.name,
+      description: '空间复核确认未完成',
+      route: { path: '/canvas', query: { floorId, zoneId: zone.id } },
+    })),
+    ...unconfirmedSchemeZones.value.map(space => ({
+      key: `scheme-${space.zoneId}`,
+      kindLabel: '方案选择未确认',
+      zoneName: space.name,
+      description: '已创建 Plan B，尚未确认使用 Plan A 还是 Plan B',
+      route: { path: '/proposal', query: { floorId } },
+    })),
+  ]
+})
+
+function onConfirmClick() {
+  if (precheckIssues.value.length) {
+    precheckModalOpen.value = true
+    return
+  }
+  void confirmProposal()
+}
+
+function goToPrecheckIssue(issue: PrecheckIssue) {
+  precheckModalOpen.value = false
+  // 方案选择确认在本页完成：展开对应空间并滚动到方案按钮，而不是跳转页面
+  if (issue.key.startsWith('scheme-')) {
+    const zoneId = issue.key.slice('scheme-'.length)
+    const group = groups.value.find(item => item.spaces.some(space => space.zoneId === zoneId))
+    if (group) {
+      if (collapsedGroups.value.has(group.id)) {
+        const next = new Set(collapsedGroups.value)
+        next.delete(group.id)
+        collapsedGroups.value = next
+      }
+      expandedSpaceIds.value = { ...expandedSpaceIds.value, [group.id]: zoneId }
+      void nextTick(() => {
+        document.querySelector(`[data-zone-id="${CSS.escape(zoneId)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
+    }
+    return
+  }
+  router.push(issue.route)
 }
 
 async function exportProposal() {
@@ -494,6 +713,54 @@ function detailTitle(detail: Detail | null) {
       </ul>
     </details>
 
+    <details v-if="pendingReviewZones.length || layoutPendingZones.length" class="proposal-selection" data-testid="proposal-precheck-issues">
+      <summary>
+        <template v-if="pendingReviewZones.length && layoutPendingZones.length">{{ pendingReviewZones.length }} 个空间待复核确认 · {{ layoutPendingZones.length }} 个空间排版未确认</template>
+        <template v-else-if="pendingReviewZones.length">{{ pendingReviewZones.length }} 个空间待复核确认</template>
+        <template v-else>{{ layoutPendingZones.length }} 个空间排版未确认</template>
+      </summary>
+      <ul class="proposal-selection-list">
+        <li v-for="zone in pendingReviewZones" :key="`review-${zone.id}`">
+          <div>
+            <strong>{{ zone.name }}</strong>
+            <div>空间复核确认未完成，确认方案前需要先完成复核</div>
+          </div>
+          <NuxtLink :to="{ path: '/canvas', query: { floorId: workspace.currentFloorId, zoneId: zone.id } }" class="text-accent-ink font-semibold hover:underline">去复核空间</NuxtLink>
+        </li>
+        <li v-for="zone in layoutPendingZones" :key="`layout-${zone.id}`">
+          <div>
+            <strong>{{ zone.name }}</strong>
+            <div>空间内还有家具排版未确认，确认方案前需要先确认全部排版</div>
+          </div>
+          <NuxtLink :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId, zoneId: zone.id } }" class="text-accent-ink font-semibold hover:underline">去排版确认</NuxtLink>
+        </li>
+      </ul>
+    </details>
+
+    <details v-if="unconfirmedSchemeZones.length" class="proposal-selection" data-testid="proposal-scheme-choice-issues">
+      <summary>{{ unconfirmedSchemeZones.length }} 个空间待确认方案</summary>
+      <ul class="proposal-selection-list">
+        <li v-for="space in unconfirmedSchemeZones" :key="`scheme-${space.zoneId}`">
+          <div class="scheme-choice-space">
+            <strong>{{ space.name }}</strong>
+            <div>已创建 Plan B，请确认使用哪个方案</div>
+          </div>
+          <div class="scheme-choice-plans">
+            <div v-for="slot in (['A', 'B'] as const)" :key="slot" class="scheme-choice-plan">
+              <strong>Plan {{ slot }}</strong>
+              <template v-if="slotFurnitureFor(space, slot)">
+                <span>{{ slotFurnitureFor(space, slot)!.length }} 件家具</span>
+                <ul>
+                  <li v-for="entry in furnitureSummary(slotFurnitureFor(space, slot)!)" :key="entry.name">{{ entry.name }} × {{ entry.count }}</li>
+                </ul>
+              </template>
+              <span v-else>方案家具加载中…</span>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </details>
+
     <div v-if="!spaces.length" class="proposal-empty"><div class="proposal-empty-icon"><AppIcon name="table" size="7" /></div><h2>还没有可确认的空间方案</h2><p>请先完成空间确认、家具排版和商品选择，再进入方案确认页。</p><NuxtLink :to="overviewRoute" class="proposal-primary">返回空间总览 <AppIcon name="arrowRight" size="3.5" /></NuxtLink></div>
 
     <div v-else class="proposal-layout">
@@ -510,6 +777,7 @@ function detailTitle(detail: Detail | null) {
                   <button type="button" class="space-row" :class="{ active: isSpaceOpen(group, space) }"
                     :aria-expanded="isSpaceOpen(group, space)"
                     :aria-controls="isSpaceOpen(group, space) ? roomDetailId(space) : undefined"
+                    :data-zone-id="space.zoneId"
                     @click="toggleSpace(group, space, $event)">
                     <span class="space-row-chevron" aria-hidden="true">{{ isSpaceOpen(group, space) ? '▼' : '▶' }}</span>
                     <strong>{{ space.name }}</strong>
@@ -519,7 +787,7 @@ function detailTitle(detail: Detail | null) {
                     <span class="space-row-status" :class="space.status === '已确认' ? 'is-confirmed' : 'is-pending'"><span></span>{{ space.status }}</span>
                   </button>
                   <section v-if="isSpaceOpen(group, space)" :id="roomDetailId(space)" class="space-detail-board" :aria-label="space.name + '详情'">
-                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" v-if="canEdit" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
+                    <div class="space-detail-heading"><div><span class="section-kicker">CURRENT SPACE</span><h3>{{ space.name }}</h3><p>{{ areaText(space.zone, space.preview) }} · {{ space.modules.length }} 类模块</p></div><div class="space-detail-actions"><div v-if="space.zone && !space.preview && canEdit && schemeStates[space.zoneId]?.alternativeSaved" class="proposal-scheme-versions" aria-label="房间方案" data-testid="proposal-scheme-versions"><button v-for="slot in (['A', 'B'] as const)" :key="slot" type="button" :aria-pressed="schemeStates[space.zoneId] ? schemeStates[space.zoneId].activeSlot === slot : undefined" :disabled="schemeBusyId === space.zoneId || !store.apiReady || schemeLocked(space)" @click="switchSpaceScheme(space, slot)">Plan {{ slot }}</button><button v-if="!schemeLocked(space)" type="button" class="scheme-choice-confirm" data-testid="scheme-choice-confirm" :disabled="schemeBusyId === space.zoneId || !store.apiReady" @click="confirmSchemeChoice(space)">确认</button><button v-else type="button" class="scheme-choice-cancel" data-testid="scheme-choice-cancel" :disabled="schemeBusyId === space.zoneId || !store.apiReady" @click="cancelSchemeChoice(space)">取消</button></div><button v-if="space.zone && !space.preview" type="button" class="space-detail-status" data-testid="open-3d-view" @click="openRenderDetail(space, 'model')"><span></span>3D 交互效果</button><button type="button" class="space-detail-status" @click="openDetail({ kind: 'requirement', space: space })"><span></span>{{ space.status }} · 查看需求</button><button type="button" v-if="canEdit" class="space-confirm-button" :disabled="space.status === '已确认'" @click="confirmSpace(space)"><AppIcon name="check" size="3" />{{ space.status === '已确认' ? '空间已确认' : '确认空间' }}</button></div></div>
                     <div class="space-modules preset-space-board">
                       <button type="button" class="preset-panel requirement-panel" @click="openDetail({ kind: 'requirement', space: space })">
                         <div class="preset-panel-title"><span>需求描述</span><AppIcon name="arrowRight" size="3" /></div>
@@ -568,7 +836,7 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price" :class="{ 'price-strike': showFinalQuote }">{{ money(totalPrice) }}</strong></div><div v-if="showFinalQuote" class="aside-summary"><span>{{ !previewMode && floorQuoteIncomplete ? '已报价商品小计' : '最终报价' }}</span><strong class="price">{{ amount(previewMode ? totalPrice : floorQuoteTotal?.total) }}</strong></div><div v-if="!previewMode && showFinalQuote && floorQuoteIncomplete" class="aside-quote-hint incomplete">含缺价 {{ floorQuoteTotal?.missingCount }} 行（未计入），报价不完整</div><div v-else-if="!previewMode && showFinalQuote" class="aside-quote-hint">取自已确认报价单 · 当前楼层商品合计，不含项目级费用</div><div v-if="!previewMode && !showFinalQuote && lastQuotationRevision !== null" class="aside-summary" :title="lastQuotationTime ? `上一次报价日期：${lastQuotationTime}` : undefined"><span>上一次报价版本号</span><strong>{{ lastQuotationRevision }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || !!selectionIssues.length" @click="confirmProposal"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || confirmed" @click="onConfirmClick"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -601,6 +869,7 @@ function detailTitle(detail: Detail | null) {
       </template>
       <template v-else><label class="comment-editor">客户批注<textarea :value="selectedDetail.space.note" rows="6" placeholder="记录客户对空间、材质或预算的补充要求"></textarea></label><p class="drawer-hint">批注会和空间一起进入方案快照，便于后续复核。</p><button v-if="canEdit" type="button" class="proposal-primary full" @click="closeDetail">保存批注</button></template>
     </aside></div>
+    <div v-if="precheckModalOpen" class="detail-backdrop" data-testid="proposal-precheck-modal" @click.self="precheckModalOpen = false"><aside class="detail-drawer precheck-dialog" role="dialog" aria-modal="true" aria-label="方案确认前待处理"><div class="detail-header"><div><span class="section-kicker">方案确认前待处理</span><h2>{{ precheckIssues.length }} 个空间需要先处理</h2></div><button type="button" class="detail-close" aria-label="关闭" @click="precheckModalOpen = false"><AppIcon name="close" size="5" /></button></div><p class="drawer-hint">以下空间存在待处理事项，完成后才能确认方案；点击条目跳转到对应空间。</p><ul class="precheck-issue-list"><li v-for="issue in precheckIssues" :key="issue.key"><button type="button" class="precheck-issue" @click="goToPrecheckIssue(issue)"><span class="precheck-issue-tag">{{ issue.kindLabel }}</span><span class="precheck-issue-copy"><strong>{{ issue.zoneName }}</strong><small>{{ issue.description }}</small></span><AppIcon name="arrowRight" size="3" /></button></li></ul></aside></div>
   </div>
 </template>
 
@@ -648,7 +917,7 @@ function detailTitle(detail: Detail | null) {
   color: var(--color-ink);
 }
 
-.proposal-page{display:flex;flex-direction:column;gap:0;min-height:100%;color:#332f2a}.proposal-heading{display:flex;justify-content:space-between;gap:24px;align-items:flex-end}.proposal-eyebrow{font-size:11px;color:#9b8d7d;margin-bottom:7px}.proposal-title-line{display:flex;align-items:center;gap:9px}.proposal-heading h1{font-size:24px;font-weight:800;letter-spacing:-.04em}.proposal-heading p{font-size:12px;color:#958d84;margin-top:6px}.proposal-file{font-size:11px;color:#8d7c68;background:var(--color-accent-tint);border:1px solid var(--color-line);border-radius:6px;padding:5px 9px}.heading-status{display:flex;align-items:center;gap:7px;color:#a47745;font-size:11px;font-weight:700}.heading-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.preview-banner{display:flex;gap:8px;align-items:center;padding:10px 13px;border:1px solid #e4d4bc;background:#fbf5ec;color:#8e704f;border-radius:10px;font-size:11px}.proposal-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:0;align-items:start}.proposal-main{min-width:0;display:flex;flex-direction:column;gap:0}.proposal-overview-card,.group-list,.aside-card{background:#fff;border:1px solid var(--color-line);border-radius:16px;box-shadow:0 12px 30px rgba(82,58,35,.045)}.proposal-overview-card{padding:20px}.section-title-row,.group-list-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.section-kicker{display:block;color:#aa7d50;letter-spacing:.16em;font-size:9px;font-weight:800;margin-bottom:4px}.section-title-row h2,.group-list-heading h2{font-size:18px;font-weight:800;letter-spacing:-.02em}.section-help{font-size:11px;color:#958d84;line-height:1.7;margin-top:7px}.prototype-tag{display:flex;gap:5px;align-items:center;color:#5a8eb8;background:#edf6ff;border-radius:5px;padding:5px 8px;font-size:10px;white-space:nowrap}.overview-metrics{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:10px;margin-top:18px}.overview-metrics>div{background:#faf8f5;border-radius:11px;padding:13px 15px}.overview-metrics span,.overview-metrics small{display:block;color:#948b82;font-size:10px}.overview-metrics strong{display:block;font-size:23px;line-height:1.15;margin:8px 0 5px;letter-spacing:-.04em}.overview-metrics .accent strong{color:var(--color-accent-ink)}.group-list{padding:20px}.group-list-heading{align-items:end;margin-bottom:12px}.group-list-heading>span{font-size:11px;color:#9b9289}.group-card{border:1px solid var(--color-line);border-radius:12px;overflow:hidden;margin-top:12px;background:#fff}.group-card.collapsed{background:var(--color-bg)}.group-header{display:grid;grid-template-columns:38px auto 20px minmax(0,1fr) auto;align-items:center;gap:9px;width:100%;padding:13px 15px;text-align:left;background:var(--color-bg)}.group-header:hover{background:var(--color-accent-tint)}.floor-badge{display:grid;place-items:center;width:30px;height:30px;border-radius:6px;background:var(--color-accent);color:#fff;font-size:11px;font-weight:800}.group-name{display:inline-flex;align-items:center;min-width:100px;padding:6px 14px;border-radius:8px;background:#d7d7d7;color:#3f3b36;font-size:13px;font-weight:800}.group-chevron{color:#8f877e;font-size:11px}.group-meta{font-size:11px;color:#6d6258}.group-meta i{font-style:normal;color:#b2a79c;margin:0 5px}.group-status,.space-row-status,.space-detail-status{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:800;white-space:nowrap}.group-status>span,.space-row-status>span,.space-detail-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.is-confirmed{color:#438064}.is-confirmed>span{background:#65b38b}.is-pending{color:#a3783d}.group-body{padding:0 12px 12px}.space-rows{display:flex;flex-direction:column;gap:5px;padding:10px 0 8px;border-bottom:1px solid var(--color-line)}.space-row{display:grid;grid-template-columns:20px minmax(130px,1.4fr) .8fr .9fr .8fr auto;align-items:center;gap:10px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;text-align:left;font-size:11px;color:#6e655d}.space-row:hover,.space-row.active{background:var(--color-accent-tint);border-color:var(--color-accent-line)}.space-row strong{font-size:12px;color:#403932}.space-row-chevron{color:var(--color-accent-ink)}.space-row-status{justify-self:end}.space-detail-board{padding:15px 4px 2px}.space-detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:0 5px 12px}.space-detail-heading h3{font-size:16px;font-weight:800}.space-detail-heading p{font-size:10px;color:#968c82;margin-top:4px}.space-detail-status{padding:7px 10px;border-radius:8px;border:1px solid var(--color-line);background:#fff}.space-modules{display:grid;grid-template-columns:1.05fr 1.15fr 1.15fr 1fr .9fr;gap:0;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line)}.space-module{min-width:0;text-align:left;padding:12px 10px;border-right:1px solid var(--color-line);transition:background .16s,transform .16s}.space-module:last-child{border-right:0}.space-module:hover{background:var(--color-bg);transform:translateY(-1px)}.module-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#5b5148}.module-label>span:nth-child(2){flex:1}.module-label>svg{color:#ad9a89}.module-icon{width:24px;height:24px;border-radius:7px;display:grid;place-items:center}.module-icon.blue{background:#e4f0fb;color:#4d83b4}.module-icon.sand{background:#f4eadc;color:#a87542}.module-icon.green{background:#e4f1e9;color:#4e8a6c}.module-icon.purple{background:#eee7f7;color:#8167ad}.module-icon.yellow{background:#fbf0ce;color:#ad8330}.space-module p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:10px;line-height:1.65;color:#877d73;margin-top:10px;min-height:48px}.space-module small,.module-foot small{display:block;color:#ad9f93;font-size:9px;margin-top:8px}.layout-thumb{height:76px;margin-top:10px;border-radius:8px;overflow:hidden;background:#f7f2ea}.layout-thumb img{display:block;width:100%;height:100%;object-fit:contain}.layout-thumb svg{display:block;width:100%;height:100%}.layout-empty{height:100%;display:grid;place-items:center;color:#a3988d;font-size:10px}.module-foot{display:flex;justify-content:space-between;gap:5px;align-items:end;margin-top:8px;font-size:10px;color:#6d6258}.module-foot small{margin:0;white-space:nowrap}.product-strip{display:flex;gap:5px;margin-top:16px;min-height:34px;align-items:center}.product-thumb{display:grid;place-items:center;width:31px;height:31px;border-radius:7px;background:#f1e9df;color:#ae9172;overflow:hidden}.product-thumb :deep(svg){width:23px;height:23px}.product-thumb :deep(.relative){width:100%;height:100%}.product-no-image{font-size:9px;color:#a89b8e;white-space:nowrap}.product-more{font-size:10px;color:#9b8d80}.render-thumb{height:76px;margin-top:10px;border-radius:8px;background:linear-gradient(135deg,#e4d9cc,#a8866b 52%,#413d39);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;letter-spacing:.12em;text-shadow:0 1px 2px #0008;overflow:hidden}.render-thumb img{display:block;width:100%;height:100%;object-fit:cover}.render-thumb span{font-size:10px}.render-thumb b{font-size:18px;margin-top:4px}.comment-module{background:#fffbeb}.proposal-aside{min-width:0}.sticky-card{position:sticky;top:0;padding:18px;display:flex;flex-direction:column;gap:11px}.aside-title{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:800}.aside-title.small{font-size:12px}.aside-summary{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#8d8379;padding:4px 0}.aside-summary strong{font-size:12px;color:#4e4741}.aside-summary .price{font-size:18px;color:var(--color-accent-ink)}.aside-divider{height:1px;background:var(--color-line);margin:3px 0}.confirm-state{display:flex;gap:9px;padding:11px;border-radius:10px;background:#fbf5ec}.confirm-state.confirmed{background:#eef8f1}.state-dot{width:9px;height:9px;border-radius:50%;background:#dda94a;margin-top:4px;flex:none}.confirm-state.confirmed .state-dot{background:#58a87d}.confirm-state strong{font-size:11px}.confirm-state p{font-size:10px;color:#91867c;margin-top:4px;line-height:1.5}.proposal-primary,.proposal-secondary{display:flex;justify-content:center;align-items:center;gap:6px;border-radius:8px;padding:10px 12px;font-size:11px;font-weight:700;transition:background .16s,transform .16s}.proposal-primary{background:var(--color-accent);color:#fff}.proposal-primary:hover{background:var(--color-accent-ink);transform:translateY(-1px)}.proposal-secondary{border:1px solid var(--color-line);color:#72675c;background:#fff}.proposal-secondary:hover{background:var(--color-bg)}.proposal-primary.full,.proposal-secondary.full{width:100%}.aside-note{display:flex;gap:6px;color:#a39a91;font-size:10px;line-height:1.6;margin-top:7px}.proposal-empty{flex:1;min-height:430px;display:grid;place-items:center;text-align:center;background:#fff;border:1px solid var(--color-line);border-radius:16px;padding:40px}.proposal-empty-icon{width:60px;height:60px;display:grid;place-items:center;background:var(--color-accent-tint);color:var(--color-accent);border-radius:16px;margin:0 auto 14px}.proposal-empty h2{font-size:18px;font-weight:800}.proposal-empty p{font-size:12px;color:#958d84;margin:8px 0 18px}.proposal-toast{position:fixed;right:26px;bottom:26px;z-index:100;background:#382f28;color:#fff;border-radius:9px;padding:11px 15px;font-size:11px;box-shadow:0 12px 28px #0002}.detail-backdrop{position:fixed;inset:0;z-index:90;background:#2c241c55;display:flex;justify-content:flex-end}.detail-drawer{width:min(520px,94vw);height:100%;overflow:auto;background:#fff;padding:24px;box-shadow:-18px 0 45px #0002}.detail-header{display:flex;justify-content:space-between;gap:15px;margin-bottom:24px}.detail-header h2{font-size:21px;font-weight:800}.detail-close{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:#81776c}.detail-close:hover{background:#f6f1eb}.detail-hero{display:flex;gap:12px;align-items:center;padding:16px;border-radius:12px}.detail-hero.blue{background:#edf5fc;color:#467eae}.detail-hero strong,.detail-hero span{display:block}.detail-hero strong{font-size:14px;color:#4d433b}.detail-hero span{font-size:11px;color:#8c8177;margin-top:5px}.detail-list{display:flex;flex-direction:column;margin-top:18px}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;border-bottom:1px solid var(--color-line);padding:13px 0;font-size:12px}.detail-list dt{color:#968b81}.detail-list dd{color:#514943;line-height:1.7}.drawer-layout{background:#faf7f2;border-radius:12px;padding:10px}.drawer-layout img,.drawer-layout svg{display:block;width:100%;max-height:520px;height:auto;object-fit:contain}.detail-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.detail-stat-grid>div{background:#faf8f5;border-radius:10px;padding:13px}.detail-stat-grid span{display:block;color:#948b82;font-size:10px}.detail-stat-grid strong{display:block;font-size:18px;margin-top:7px}.drawer-product-list{display:flex;flex-direction:column;gap:8px}.drawer-product{width:100%;display:flex;align-items:center;gap:9px;padding:10px;border:1px solid var(--color-line);border-radius:10px;text-align:left}.drawer-product:hover{background:#faf7f2;border-color:#d8c4ad}.drawer-product-art{width:38px;height:38px;border-radius:8px;background:#f1e9df;display:grid;place-items:center;overflow:hidden}.drawer-product-art :deep(svg){width:27px;height:27px}.drawer-product-art :deep(.relative){width:100%;height:100%}.drawer-product-copy{flex:1;min-width:0}.drawer-product-copy strong,.drawer-product-copy small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.drawer-product-copy strong{font-size:11px}.drawer-product-copy small{font-size:10px;color:#958b82;margin-top:4px}.drawer-product-qty{font-size:11px;color:#887c70}.drawer-total{display:flex;justify-content:space-between;border-top:1px solid #ece5dc;margin-top:16px;padding-top:14px;font-size:12px}.drawer-total strong,.detail-price{color:var(--color-accent-ink);font-size:17px;font-weight:800}.detail-product-hero{display:flex;gap:13px;padding:14px;background:#faf7f2;border-radius:12px}.large-product-art{width:58px;height:58px;display:grid;place-items:center;background:#f0e5d7;border-radius:10px;overflow:hidden}.large-product-art :deep(svg){width:42px;height:42px}.large-product-art :deep(.relative){width:100%;height:100%}.detail-product-hero h3{font-size:16px;font-weight:800}.detail-product-hero p{font-size:11px;color:#8f857b;line-height:1.6;margin-top:5px}.qty-control{display:flex;align-items:center;gap:12px}.qty-control button{width:26px;height:26px;border:1px solid #e3dbd1;border-radius:6px;color:#9a704c}.drawer-render{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:14px;background:linear-gradient(135deg,#ece0d2,#a48268 55%,#363331);color:#fff;padding:30px}.drawer-render img{display:block;width:100%;max-height:430px;object-fit:contain;border-radius:10px}.drawer-render-image{gap:12px}.drawer-render span{font-size:10px;letter-spacing:.2em}.drawer-render strong{font-size:21px;margin-top:13px}.drawer-render p{max-width:280px;font-size:11px;line-height:1.7;color:#f0e6db;margin-top:10px}.comment-editor{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:700}.comment-editor textarea{width:100%;resize:vertical;border:1px solid #e1d9cf;border-radius:9px;padding:11px;font:inherit;font-size:12px;font-weight:400;line-height:1.7}.drawer-hint{font-size:11px;color:#968c82;line-height:1.7;margin:12px 0 18px}@media(max-width:1100px){.proposal-heading{align-items:flex-start;flex-direction:column}.proposal-layout{grid-template-columns:minmax(0,1fr)}.proposal-aside{order:-1}.sticky-card{position:static}.group-header{grid-template-columns:34px auto 18px 1fr auto}.group-meta{font-size:10px}.space-modules{grid-template-columns:repeat(2,minmax(0,1fr))}.space-module:nth-child(2n){border-right:0}.space-module:nth-child(n+3){border-top:1px solid var(--color-line)}}@media(max-width:700px){.proposal-page{gap:0}.proposal-heading h1{font-size:21px}.group-header{grid-template-columns:30px 1fr 16px auto}.group-meta{grid-column:2 / -1}.space-row{grid-template-columns:18px 1fr auto}.space-row>span:nth-child(3),.space-row>span:nth-child(4),.space-row>span:nth-child(5){display:none}.space-modules{grid-template-columns:1fr}.space-module{border-right:0;border-bottom:1px solid var(--color-line)}.space-module:last-child{border-bottom:0}.space-module:nth-child(n+3){border-top:0}.detail-drawer{padding:18px}}
+.proposal-page{display:flex;flex-direction:column;gap:0;min-height:100%;color:#332f2a}.proposal-heading{display:flex;justify-content:space-between;gap:24px;align-items:flex-end}.proposal-eyebrow{font-size:11px;color:#9b8d7d;margin-bottom:7px}.proposal-title-line{display:flex;align-items:center;gap:9px}.proposal-heading h1{font-size:24px;font-weight:800;letter-spacing:-.04em}.proposal-heading p{font-size:12px;color:#958d84;margin-top:6px}.proposal-file{font-size:11px;color:#8d7c68;background:var(--color-accent-tint);border:1px solid var(--color-line);border-radius:6px;padding:5px 9px}.heading-status{display:flex;align-items:center;gap:7px;color:#a47745;font-size:11px;font-weight:700}.heading-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.preview-banner{display:flex;gap:8px;align-items:center;padding:10px 13px;border:1px solid #e4d4bc;background:#fbf5ec;color:#8e704f;border-radius:10px;font-size:11px}.proposal-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:0;align-items:start}.proposal-main{min-width:0;display:flex;flex-direction:column;gap:0}.proposal-overview-card,.group-list,.aside-card{background:#fff;border:1px solid var(--color-line);border-radius:16px;box-shadow:0 12px 30px rgba(82,58,35,.045)}.proposal-overview-card{padding:20px}.section-title-row,.group-list-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.section-kicker{display:block;color:#aa7d50;letter-spacing:.16em;font-size:9px;font-weight:800;margin-bottom:4px}.section-title-row h2,.group-list-heading h2{font-size:18px;font-weight:800;letter-spacing:-.02em}.section-help{font-size:11px;color:#958d84;line-height:1.7;margin-top:7px}.prototype-tag{display:flex;gap:5px;align-items:center;color:#5a8eb8;background:#edf6ff;border-radius:5px;padding:5px 8px;font-size:10px;white-space:nowrap}.overview-metrics{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:10px;margin-top:18px}.overview-metrics>div{background:#faf8f5;border-radius:11px;padding:13px 15px}.overview-metrics span,.overview-metrics small{display:block;color:#948b82;font-size:10px}.overview-metrics strong{display:block;font-size:23px;line-height:1.15;margin:8px 0 5px;letter-spacing:-.04em}.overview-metrics .accent strong{color:var(--color-accent-ink)}.group-list{padding:20px}.group-list-heading{align-items:end;margin-bottom:12px}.group-list-heading>span{font-size:11px;color:#9b9289}.group-card{border:1px solid var(--color-line);border-radius:12px;overflow:hidden;margin-top:12px;background:#fff}.group-card.collapsed{background:var(--color-bg)}.group-header{display:grid;grid-template-columns:38px auto 20px minmax(0,1fr) auto;align-items:center;gap:9px;width:100%;padding:13px 15px;text-align:left;background:var(--color-bg)}.group-header:hover{background:var(--color-accent-tint)}.floor-badge{display:grid;place-items:center;width:30px;height:30px;border-radius:6px;background:var(--color-accent);color:#fff;font-size:11px;font-weight:800}.group-name{display:inline-flex;align-items:center;min-width:100px;padding:6px 14px;border-radius:8px;background:#d7d7d7;color:#3f3b36;font-size:13px;font-weight:800}.group-chevron{color:#8f877e;font-size:11px}.group-meta{font-size:11px;color:#6d6258}.group-meta i{font-style:normal;color:#b2a79c;margin:0 5px}.group-status,.space-row-status,.space-detail-status{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:800;white-space:nowrap}.group-status>span,.space-row-status>span,.space-detail-status>span{width:8px;height:8px;border-radius:50%;background:#dda94a}.is-confirmed{color:#438064}.is-confirmed>span{background:#65b38b}.is-pending{color:#a3783d}.group-body{padding:0 12px 12px}.space-rows{display:flex;flex-direction:column;gap:5px;padding:10px 0 8px;border-bottom:1px solid var(--color-line)}.space-row{display:grid;grid-template-columns:20px minmax(130px,1.4fr) .8fr .9fr .8fr auto;align-items:center;gap:10px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;text-align:left;font-size:11px;color:#6e655d}.space-row:hover,.space-row.active{background:var(--color-accent-tint);border-color:var(--color-accent-line)}.space-row strong{font-size:12px;color:#403932}.space-row-chevron{color:var(--color-accent-ink)}.space-row-status{justify-self:end}.space-detail-board{padding:15px 4px 2px}.space-detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:0 5px 12px}.space-detail-heading h3{font-size:16px;font-weight:800}.space-detail-heading p{font-size:10px;color:#968c82;margin-top:4px}.space-detail-status{padding:7px 10px;border-radius:8px;border:1px solid var(--color-line);background:#fff}.space-modules{display:grid;grid-template-columns:1.05fr 1.15fr 1.15fr 1fr .9fr;gap:0;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line)}.space-module{min-width:0;text-align:left;padding:12px 10px;border-right:1px solid var(--color-line);transition:background .16s,transform .16s}.space-module:last-child{border-right:0}.space-module:hover{background:var(--color-bg);transform:translateY(-1px)}.module-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#5b5148}.module-label>span:nth-child(2){flex:1}.module-label>svg{color:#ad9a89}.module-icon{width:24px;height:24px;border-radius:7px;display:grid;place-items:center}.module-icon.blue{background:#e4f0fb;color:#4d83b4}.module-icon.sand{background:#f4eadc;color:#a87542}.module-icon.green{background:#e4f1e9;color:#4e8a6c}.module-icon.purple{background:#eee7f7;color:#8167ad}.module-icon.yellow{background:#fbf0ce;color:#ad8330}.space-module p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:10px;line-height:1.65;color:#877d73;margin-top:10px;min-height:48px}.space-module small,.module-foot small{display:block;color:#ad9f93;font-size:9px;margin-top:8px}.layout-thumb{height:76px;margin-top:10px;border-radius:8px;overflow:hidden;background:#f7f2ea}.layout-thumb img{display:block;width:100%;height:100%;object-fit:contain}.layout-thumb svg{display:block;width:100%;height:100%}.layout-empty{height:100%;display:grid;place-items:center;color:#a3988d;font-size:10px}.module-foot{display:flex;justify-content:space-between;gap:5px;align-items:end;margin-top:8px;font-size:10px;color:#6d6258}.module-foot small{margin:0;white-space:nowrap}.product-strip{display:flex;gap:5px;margin-top:16px;min-height:34px;align-items:center}.product-thumb{display:grid;place-items:center;width:31px;height:31px;border-radius:7px;background:#f1e9df;color:#ae9172;overflow:hidden}.product-thumb :deep(svg){width:23px;height:23px}.product-thumb :deep(.relative){width:100%;height:100%}.product-no-image{font-size:9px;color:#a89b8e;white-space:nowrap}.product-more{font-size:10px;color:#9b8d80}.render-thumb{height:76px;margin-top:10px;border-radius:8px;background:linear-gradient(135deg,#e4d9cc,#a8866b 52%,#413d39);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;letter-spacing:.12em;text-shadow:0 1px 2px #0008;overflow:hidden}.render-thumb img{display:block;width:100%;height:100%;object-fit:cover}.render-thumb span{font-size:10px}.render-thumb b{font-size:18px;margin-top:4px}.comment-module{background:#fffbeb}.proposal-aside{min-width:0}.sticky-card{position:sticky;top:0;padding:18px;display:flex;flex-direction:column;gap:11px}.aside-title{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:800}.aside-title.small{font-size:12px}.aside-summary{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#8d8379;padding:4px 0}.aside-summary strong{font-size:12px;color:#4e4741}.aside-summary .price{font-size:18px;color:var(--color-accent-ink)}.aside-divider{height:1px;background:var(--color-line);margin:3px 0}.confirm-state{display:flex;gap:9px;padding:11px;border-radius:10px;background:#fbf5ec}.confirm-state.confirmed{background:#eef8f1}.state-dot{width:9px;height:9px;border-radius:50%;background:#dda94a;margin-top:4px;flex:none}.confirm-state.confirmed .state-dot{background:#58a87d}.confirm-state strong{font-size:11px}.confirm-state p{font-size:10px;color:#91867c;margin-top:4px;line-height:1.5}.proposal-primary,.proposal-secondary{display:flex;justify-content:center;align-items:center;gap:6px;border-radius:8px;padding:10px 12px;font-size:11px;font-weight:700;transition:background .16s,transform .16s}.proposal-primary{background:var(--color-accent);color:#fff}.proposal-primary:hover{background:var(--color-accent-ink);transform:translateY(-1px)}.proposal-secondary{border:1px solid var(--color-line);color:#72675c;background:#fff}.proposal-secondary:hover{background:var(--color-bg)}.proposal-primary.full,.proposal-secondary.full{width:100%}.aside-note{display:flex;gap:6px;color:#a39a91;font-size:10px;line-height:1.6;margin-top:7px}.proposal-empty{flex:1;min-height:430px;display:grid;place-items:center;text-align:center;background:#fff;border:1px solid var(--color-line);border-radius:16px;padding:40px}.proposal-empty-icon{width:60px;height:60px;display:grid;place-items:center;background:var(--color-accent-tint);color:var(--color-accent);border-radius:16px;margin:0 auto 14px}.proposal-empty h2{font-size:18px;font-weight:800}.proposal-empty p{font-size:12px;color:#958d84;margin:8px 0 18px}.proposal-toast{position:fixed;right:26px;bottom:26px;z-index:100;background:#382f28;color:#fff;border-radius:9px;padding:11px 15px;font-size:11px;box-shadow:0 12px 28px #0002}.detail-backdrop{position:fixed;inset:0;z-index:90;background:#2c241c55;display:flex;justify-content:flex-end}.detail-drawer{width:min(520px,94vw);height:100%;overflow:auto;background:#fff;padding:24px;box-shadow:-18px 0 45px #0002}.detail-header{display:flex;justify-content:space-between;gap:15px;margin-bottom:0px}.detail-header h2{font-size:21px;font-weight:800}.detail-close{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:#81776c}.detail-close:hover{background:#f6f1eb}.detail-hero{display:flex;gap:12px;align-items:center;padding:16px;border-radius:12px}.detail-hero.blue{background:#edf5fc;color:#467eae}.detail-hero strong,.detail-hero span{display:block}.detail-hero strong{font-size:14px;color:#4d433b}.detail-hero span{font-size:11px;color:#8c8177;margin-top:5px}.detail-list{display:flex;flex-direction:column;margin-top:18px}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;border-bottom:1px solid var(--color-line);padding:13px 0;font-size:12px}.detail-list dt{color:#968b81}.detail-list dd{color:#514943;line-height:1.7}.drawer-layout{background:#faf7f2;border-radius:12px;padding:10px}.drawer-layout img,.drawer-layout svg{display:block;width:100%;max-height:520px;height:auto;object-fit:contain}.detail-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.detail-stat-grid>div{background:#faf8f5;border-radius:10px;padding:13px}.detail-stat-grid span{display:block;color:#948b82;font-size:10px}.detail-stat-grid strong{display:block;font-size:18px;margin-top:7px}.drawer-product-list{display:flex;flex-direction:column;gap:8px}.drawer-product{width:100%;display:flex;align-items:center;gap:9px;padding:10px;border:1px solid var(--color-line);border-radius:10px;text-align:left}.drawer-product:hover{background:#faf7f2;border-color:#d8c4ad}.drawer-product-art{width:38px;height:38px;border-radius:8px;background:#f1e9df;display:grid;place-items:center;overflow:hidden}.drawer-product-art :deep(svg){width:27px;height:27px}.drawer-product-art :deep(.relative){width:100%;height:100%}.drawer-product-copy{flex:1;min-width:0}.drawer-product-copy strong,.drawer-product-copy small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.drawer-product-copy strong{font-size:11px}.drawer-product-copy small{font-size:10px;color:#958b82;margin-top:4px}.drawer-product-qty{font-size:11px;color:#887c70}.drawer-total{display:flex;justify-content:space-between;border-top:1px solid #ece5dc;margin-top:16px;padding-top:14px;font-size:12px}.drawer-total strong,.detail-price{color:var(--color-accent-ink);font-size:17px;font-weight:800}.detail-product-hero{display:flex;gap:13px;padding:14px;background:#faf7f2;border-radius:12px}.large-product-art{width:58px;height:58px;display:grid;place-items:center;background:#f0e5d7;border-radius:10px;overflow:hidden}.large-product-art :deep(svg){width:42px;height:42px}.large-product-art :deep(.relative){width:100%;height:100%}.detail-product-hero h3{font-size:16px;font-weight:800}.detail-product-hero p{font-size:11px;color:#8f857b;line-height:1.6;margin-top:5px}.qty-control{display:flex;align-items:center;gap:12px}.qty-control button{width:26px;height:26px;border:1px solid #e3dbd1;border-radius:6px;color:#9a704c}.drawer-render{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:14px;background:linear-gradient(135deg,#ece0d2,#a48268 55%,#363331);color:#fff;padding:30px}.drawer-render img{display:block;width:100%;max-height:430px;object-fit:contain;border-radius:10px}.drawer-render-image{gap:12px}.drawer-render span{font-size:10px;letter-spacing:.2em}.drawer-render strong{font-size:21px;margin-top:13px}.drawer-render p{max-width:280px;font-size:11px;line-height:1.7;color:#f0e6db;margin-top:10px}.comment-editor{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:700}.comment-editor textarea{width:100%;resize:vertical;border:1px solid #e1d9cf;border-radius:9px;padding:11px;font:inherit;font-size:12px;font-weight:400;line-height:1.7}.drawer-hint{font-size:11px;color:#968c82;line-height:1.7;margin:12px 0 18px}@media(max-width:1100px){.proposal-heading{align-items:flex-start;flex-direction:column}.proposal-layout{grid-template-columns:minmax(0,1fr)}.proposal-aside{order:-1}.sticky-card{position:static}.group-header{grid-template-columns:34px auto 18px 1fr auto}.group-meta{font-size:10px}.space-modules{grid-template-columns:repeat(2,minmax(0,1fr))}.space-module:nth-child(2n){border-right:0}.space-module:nth-child(n+3){border-top:1px solid var(--color-line)}}@media(max-width:700px){.proposal-page{gap:0}.proposal-heading h1{font-size:21px}.group-header{grid-template-columns:30px 1fr 16px auto}.group-meta{grid-column:2 / -1}.space-row{grid-template-columns:18px 1fr auto}.space-row>span:nth-child(3),.space-row>span:nth-child(4),.space-row>span:nth-child(5){display:none}.space-modules{grid-template-columns:1fr}.space-module{border-right:0;border-bottom:1px solid var(--color-line)}.space-module:last-child{border-bottom:0}.space-module:nth-child(n+3){border-top:0}.detail-drawer{padding:18px}}
 /* Preset confirmation board: five columns matching the reference layout. */
 .preset-space-board{display:grid;grid-template-columns:minmax(135px,1.05fr) minmax(150px,1.1fr) minmax(245px,1.9fr) minmax(130px,1fr) minmax(110px,.9fr);min-height:430px;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line);overflow:hidden}
 .preset-panel{position:relative;display:flex;flex-direction:column;min-width:0;min-height:430px;padding:14px 12px;border:0;border-right:1px solid var(--color-line);text-align:left;font:inherit;color:inherit;overflow:hidden}
@@ -725,6 +994,32 @@ function detailTitle(detail: Detail | null) {
 .proposal-3d-host{height:min(62dvh,640px);min-height:360px;border:1px solid var(--color-line);border-radius:12px;overflow:hidden;margin-bottom:14px}
 .heading-status.is-confirmed { color: var(--color-green); }
 .heading-status.is-confirmed span { background: var(--color-green); }
+/* 确认方案阻塞项弹窗：限高 + 列表内部滚动，避免空间过多撑高弹窗。 */
+.precheck-dialog{width:min(520px,calc(100vw - 48px));max-height:calc(100dvh - 48px);display:flex;flex-direction:column}
+.precheck-issue-list{margin-top:4px;max-height:min(52dvh,420px);overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px}
+.precheck-issue{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:1px solid var(--color-line);border-radius:10px;background:#fff;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.precheck-issue:hover{background:var(--color-accent-tint);border-color:var(--color-accent-line)}
+.precheck-issue-tag{flex:none;font-size:10px;font-weight:800;color:#a3783d;background:#fbf5ec;border:1px solid #e4d4bc;border-radius:6px;padding:3px 7px;white-space:nowrap}
+.precheck-issue-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.precheck-issue-copy strong{font-size:12px;color:#403932;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.precheck-issue-copy small{font-size:10px;color:#958d84}
+/* 空间级 Plan A/B 方案切换：样式对齐 canvas 产品方案视图的 scheme-versions。 */
+.proposal-scheme-versions{display:flex;gap:.25rem;align-items:center}
+.proposal-scheme-versions button{border:1px solid var(--color-accent-line);border-radius:8px;background:#fff;color:#72675c;font-size:.72rem;font-weight:600;padding:7px 10px;cursor:pointer}
+.proposal-scheme-versions button[aria-pressed=true]{background:var(--color-accent);border-color:var(--color-accent);color:#fff}
+.proposal-scheme-versions button:disabled{opacity:.45;cursor:default}
+/* 方案选择确认锁定后：当前选中的 Plan 保持选中样式，另一个禁用变淡 */
+.proposal-scheme-versions button[aria-pressed=true]:disabled{opacity:1}
+.proposal-scheme-versions .scheme-choice-confirm{background:var(--color-accent);border-color:var(--color-accent);color:#fff}
+.proposal-scheme-versions .scheme-choice-confirm:disabled{opacity:.45}
+.proposal-scheme-versions .scheme-choice-cancel{border-color:var(--color-line);color:#a3783d}
+/* 待确认方案横幅：Plan A/B 家具对比 */
+.scheme-choice-space{min-width:140px}
+.scheme-choice-plans{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:8px;flex:1;min-width:min(320px,100%)}
+.scheme-choice-plan{border:1px solid var(--color-line);border-radius:8px;padding:8px 10px;background:var(--color-bg)}
+.scheme-choice-plan>strong{font-size:11px;color:var(--color-accent-ink)}
+.scheme-choice-plan>span{display:block;font-size:10px;color:#958d84;margin-top:2px}
+.scheme-choice-plan ul{margin-top:4px;display:flex;flex-direction:column;gap:1px;font-size:10px;color:#6e655d}
 /* 参考金额加删除线，突出下方最终报价 */
 .aside-summary .price-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #b2a79c; color: #a89b8e; font-size: 15px; font-weight: 600; }
 /* 最终报价的数据口径说明 */
