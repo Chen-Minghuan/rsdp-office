@@ -180,15 +180,13 @@ try {
   const beforeLayout = (await stored()).objects.filter(object => object.kind === 'zone')
   await advance().click()
   await page.waitForURL(/mode=design/)
-  await page.getByTestId('functional-category-workstation').click()
-  await page.getByTestId('apply-layout').waitFor()
-  assert.match(page.url(), /mode=design/)
-  assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入排版只绑定模板，不改写人工确认和几何')
-  const designUrl = page.url()
+  assert.equal(new URL(page.url()).searchParams.get('view'), 'products', '进入家具排版应打开产品方案界面')
+  await page.getByTestId('product-scheme').waitFor()
+  assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入产品方案只绑定模板，不改写人工确认和几何')
+  const productSchemeUrl = page.url()
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByTestId('functional-category-workstation').click()
-  await page.getByTestId('apply-layout').waitFor()
-  assert.equal(page.url(), designUrl, '已确认复核的空间可刷新恢复排版')
+  await page.getByTestId('product-scheme').waitFor()
+  assert.equal(page.url(), productSchemeUrl, '已确认复核的空间可刷新恢复产品方案')
 
 
   // Import an unknown-scale image through the actual upload target route.
