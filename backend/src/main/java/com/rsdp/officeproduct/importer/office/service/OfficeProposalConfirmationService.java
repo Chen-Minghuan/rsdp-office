@@ -85,6 +85,7 @@ public class OfficeProposalConfirmationService {
         CanvasDto canvas = office.getCanvas(floorId);
         if (row.retired() || canvas == null || !Objects.equals(canvas.getRevision(), row.canvasRevision())) return status(row, false);
         try {
+            requireSchemeChoicesConfirmed(floorId, json.valueToTree(canvas.getObjects()));
             return status(row, current(row, snapshot(canvas, office.listCart(floorId))));
         } catch (BusinessException invalidLayout) {
             return status(row, false);
@@ -116,10 +117,11 @@ public class OfficeProposalConfirmationService {
         for (JsonNode item : objects) {
             if ("zone".equals(item.path("kind").asText())) names.put(item.path("id").asText(), item.path("name").asText());
         }
-        var labels = unconfirmed.stream().map(id -> {
+        var labels = unconfirmed.stream().filter(names::containsKey).map(id -> {
             String name = names.get(id);
             return name == null || name.isBlank() ? id : name;
         }).toList();
+        if (labels.isEmpty()) return;
         throw new BusinessException("还有 " + labels.size() + " 个空间未确认使用 Plan A 或 Plan B：" + String.join("、", labels));
     }
 

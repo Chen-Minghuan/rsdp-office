@@ -38,6 +38,7 @@ interface QuotationTableRow {
 }
 
 interface QuotationDraft {
+  proposalConfirmationIds: Record<string, string>
   projectId: string
   projectName: string
   pricingMode: QuotationPricingMode
@@ -69,6 +70,8 @@ const draft = ref<QuotationDraft | null>(null)
 // 各楼层方案确认状态：显式 null = 从未确认；!current = 已失效；键缺失 = 读取失败按未知处理（后端权威拦截兜底）
 const floorConfirmations = ref<Record<string, ProposalConfirmation | null>>({})
 const confirmationsLoading = ref(false)
+let previewRead = 0
+let confirmationRead = 0
 
 const projectId = ref('')
 const mode = ref<QuotationPricingMode>('COEFFICIENT')
@@ -85,11 +88,19 @@ const canExport = computed(() => projectPermissionsFor(currentProject.value, use
 
 /** 报价行涉及但方案确认缺失/已失效的楼层；stale 区分“从未确认”与“已失效需重新确认”。 */
 const blockedFloors = computed(() => (preview.value?.floors || [])
+  .filter(floor => floor.spaces.some(space => space.lines.length > 0))
   .filter((floor) => {
     const status = floorConfirmations.value[floor.floorId]
+    const sourceId = preview.value?.proposalConfirmationIds?.[floor.floorId]
     return status === null || (status !== undefined && !status.current)
+      || !sourceId || (status?.current && status.confirmationId !== sourceId)
   })
-  .map(floor => ({ floorId: floor.floorId, floorName: floor.floorName, stale: !!floorConfirmations.value[floor.floorId] })))
+  .map(floor => ({
+    floorId: floor.floorId,
+    floorName: floor.floorName,
+    stale: !!floorConfirmations.value[floor.floorId],
+    needsPreview: !!floorConfirmations.value[floor.floorId]?.current || floorConfirmations.value[floor.floorId] === undefined,
+  })))
 
 onMounted(async () => {
   checking.value = true
@@ -114,6 +125,8 @@ watch(projectId, (value, previous) => {
   if (value !== previous) {
     resetFees()
     record.value = null
+    ++previewRead
+    ++confirmationRead
     draft.value = null
     notice.value = ''
     dialogError.value = ''
@@ -126,7 +139,9 @@ watch(projectId, (value, previous) => {
 })
 
 async function loadFloorConfirmations(floorIds: string[]) {
+  const read = ++confirmationRead
   floorConfirmations.value = {}
+  confirmationsLoading.value = false
   if (!floorIds.length) return
   confirmationsLoading.value = true
   const requestProject = projectId.value
@@ -134,32 +149,38 @@ async function loadFloorConfirmations(floorIds: string[]) {
     await Promise.all(floorIds.map(async (floorId) => {
       try {
         const status = await api.loadProposalConfirmation(floorId)
-        if (requestProject === projectId.value) floorConfirmations.value = { ...floorConfirmations.value, [floorId]: status }
+        if (read === confirmationRead && requestProject === projectId.value) floorConfirmations.value = { ...floorConfirmations.value, [floorId]: status }
       } catch { /* 单楼层状态读取失败按未知处理，不阻塞确认入口；后端确认时会权威拦截 */ }
     }))
   } finally {
-    if (requestProject === projectId.value) confirmationsLoading.value = false
+    if (read === confirmationRead && requestProject === projectId.value) confirmationsLoading.value = false
   }
 }
 
 async function loadPreview() {
-  if (!projectId.value) {
+  const read = ++previewRead
+  const requestProject = projectId.value
+  if (!requestProject) {
     preview.value = null
+    loading.value = false
     return
   }
   loading.value = true
   error.value = ''
   draft.value = null
   try {
-    preview.value = await api.previewProjectQuotation(projectId.value, mode.value, currentPricingValue())
+    const result = await api.previewProjectQuotation(requestProject, mode.value, currentPricingValue())
+    if (read !== previewRead || requestProject !== projectId.value) return
+    preview.value = result
     resetOverrides()
-    void loadFloorConfirmations(preview.value.floors.map(floor => floor.floorId))
+    await loadFloorConfirmations(result.floors.map(floor => floor.floorId))
   } catch (cause) {
+    if (read !== previewRead || requestProject !== projectId.value) return
     preview.value = null
     floorConfirmations.value = {}
     error.value = cause instanceof Error ? cause.message : '报价试算失败'
   } finally {
-    loading.value = false
+    if (read === previewRead) loading.value = false
   }
 }
 
@@ -252,7 +273,7 @@ function openConfirmation() {
   notice.value = ''
   dialogError.value = ''
   try {
-    if (!preview.value || !projectId.value || !rows.value.length) return
+    if (!preview.value || !projectId.value || !rows.value.length || loading.value || confirmationsLoading.value) return
     if (blockedFloors.value.length) {
       throw new Error(`楼层「${blockedFloors.value.map(floor => floor.floorName).join('、')}」的方案尚未确认或已失效，请先在项目清单页确认当前方案`)
     }
@@ -285,6 +306,7 @@ function openConfirmation() {
     const goodsTotal = roundMoney(frozenRows.reduce((sum, row) => sum + (row.subtotal || 0), 0))
     const feeTotal = roundMoney(normalized.reduce((sum, fee) => sum + (fee.amount || 0), 0))
     draft.value = {
+      proposalConfirmationIds: { ...preview.value.proposalConfirmationIds },
       projectId: projectId.value,
       projectName: preview.value.projectName,
       pricingMode: mode.value,
@@ -310,6 +332,7 @@ function closeConfirmation() {
 
 function draftPayload(active: QuotationDraft): ConfirmQuotationRequest {
   return {
+    proposalConfirmationIds: { ...active.proposalConfirmationIds },
     pricingMode: active.pricingMode,
     pricingValue: active.pricingValue,
     fees: active.fees.map(fee => ({ ...fee })),
@@ -510,7 +533,7 @@ function modeLabel() {
         <p class="font-semibold text-red-700">以下楼层的方案尚未确认或已失效，确认报价前需要先在项目清单页确认当前方案：</p>
         <ul class="mt-1 space-y-1">
           <li v-for="floor in blockedFloors" :key="floor.floorId" class="flex items-center gap-2">
-            <span class="text-ink">{{ floor.floorName }}（{{ floor.stale ? '方案已失效，需重新确认' : '尚未确认方案' }}）</span>
+            <span class="text-ink">{{ floor.floorName }}（{{ floor.needsPreview ? '方案版本已变化或未绑定，请重新试算' : floor.stale ? '方案已失效，需重新确认' : '尚未确认方案' }}）</span>
             <NuxtLink :to="{ path: '/proposal', query: { floorId: floor.floorId } }" class="font-semibold text-bronze-dark hover:underline">去项目清单确认</NuxtLink>
           </li>
         </ul>

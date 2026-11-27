@@ -262,6 +262,7 @@ create table if not exists office_quotation (
     pricing_mode varchar(20) not null,
     pricing_value numeric(12,4) not null,
     total_amount numeric(14,2) not null default 0,
+    proposal_confirmations_json jsonb not null default '{}'::jsonb,
     fees_json jsonb not null default '[]'::jsonb,
     created_by varchar(64),
     created_at timestamp not null default now(),

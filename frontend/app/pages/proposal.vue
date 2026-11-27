@@ -65,9 +65,9 @@ const selectedDetail = ref<Detail | null>(null)
 const renderTab = ref<'model' | 'ai' | 'layout'>('ai')
 const demoConfirmed = ref(false)
 const savedConfirmation = ref<ProposalConfirmation | null>(null)
-// 最新已确认报价：最终报价取该快照中当前楼层行的小计之和，与报价页同一数据源
+// 最近确认报价的楼层商品小计是历史快照，不代表当前方案的最终报价。
 const latestQuotation = ref<ProjectQuotationRecord | null>(null)
-// 最近一条报价记录（任意状态）：最终报价隐藏时在参考金额下方展示上一次报价时间
+// 最近一条报价记录（任意状态）：楼层小计隐藏时仍可展示报价版本与时间。
 const latestQuotationAny = ref<ProjectQuotationLatest | null>(null)
 const checkingCatalog = ref(false)
 const catalogApi = useOfficeApi()
@@ -113,7 +113,7 @@ watch([previewMode, () => store.initialized, () => store.workspaceId, () => stor
     if (read === confirmationRead) savedConfirmation.value = result
   } catch { /* Confirmation remains unknown and can be requested again. */ }
 }, { immediate: true })
-// 加载项目最新已确认报价与最近一条报价记录；无记录或读取失败时保持空值，页面不显示最终报价行
+// 加载项目最新已确认报价与最近一条报价记录；无记录或读取失败时不展示历史金额。
 let quotationRead = 0
 watch([previewMode, () => store.initialized, () => store.workspaceId, () => workspace.currentProjectId], async ([preview, ready, floorId, projectId]) => {
   const read = ++quotationRead
@@ -348,8 +348,9 @@ async function confirmSchemeChoice(space: ProposalSpace) {
   if (!floorId || !state?.alternativeSaved || state.confirmedSlot) return
   schemeBusyId.value = space.zoneId
   try {
-    const result = await catalogApi.changeRoomSchemeChoice(floorId, 'confirm-choice', space.zoneId)
+    const result = await catalogApi.changeRoomSchemeChoice(floorId, 'confirm-choice', { zoneId: space.zoneId, targetSlot: state.activeSlot, revision: store.canvasRevision, schemeToken: store.schemeToken })
     if (store.workspaceId !== floorId) return
+    savedConfirmation.value = null
     schemeStates.value = { ...schemeStates.value, [space.zoneId]: result }
     setNotice(`${space.name} 已确认使用 Plan ${result.confirmedSlot}`)
   } catch (e) {
@@ -365,8 +366,9 @@ async function cancelSchemeChoice(space: ProposalSpace) {
   if (!floorId || !schemeStates.value[space.zoneId]?.confirmedSlot) return
   schemeBusyId.value = space.zoneId
   try {
-    const result = await catalogApi.changeRoomSchemeChoice(floorId, 'cancel-choice', space.zoneId)
+    const result = await catalogApi.changeRoomSchemeChoice(floorId, 'cancel-choice', { zoneId: space.zoneId, targetSlot: schemeStates.value[space.zoneId]!.activeSlot, revision: store.canvasRevision, schemeToken: store.schemeToken })
     if (store.workspaceId !== floorId) return
+    savedConfirmation.value = null
     schemeStates.value = { ...schemeStates.value, [space.zoneId]: result }
     setNotice(`${space.name} 已取消方案确认，可重新切换`)
   } catch (e) {
@@ -438,7 +440,7 @@ const floorQuoteLines = computed(() => {
   const lines = record.lines.filter(line => line.floorId === floorId)
   return lines.length ? lines : null
 })
-// 最终报价：已确认报价快照中当前楼层行的商品小计合计（项目级费用不摊入楼层）
+// 历史楼层商品小计（项目级费用不摊入楼层）。
 // subtotal 为 null 的缺价行不计入金额，计入 missingCount 用于提示报价不完整
 const floorQuoteTotal = computed(() => {
   const lines = floorQuoteLines.value
@@ -447,7 +449,7 @@ const floorQuoteTotal = computed(() => {
   const total = roundMoney(lines.reduce((sum, line) => sum + (line.subtotal ?? 0), 0))
   return { total, missingCount }
 })
-// 缺价行 > 0 时金额仅为已定价商品小计，不作为最终报价展示
+// 缺价行 > 0 时金额仅为已定价商品小计。
 const floorQuoteIncomplete = computed(() => (floorQuoteTotal.value?.missingCount ?? 0) > 0)
 // 页面当前商品（楼层级按 productId 汇总数量）：与报价行同一口径——空间有清单取清单，无清单取画布家具
 const pageProductQuantities = computed(() => {
@@ -461,7 +463,7 @@ const pageProductQuantities = computed(() => {
   }
   return map
 })
-// 报价快照与页面商品（含数量）严格一致：报价后修改页面商品或数量时不再展示旧报价
+// 按商品和数量比较；不校验空间或布局版本，因此匹配时也只能展示历史小计。
 const quotationMatchesPage = computed(() => {
   const lines = floorQuoteLines.value
   if (!lines) return false
@@ -472,14 +474,14 @@ const quotationMatchesPage = computed(() => {
   for (const [productId, qty] of quote) if (page.get(productId) !== qty) return false
   return true
 })
-// 有与页面一致的确认报价（或演示模式）才显示最终报价行；此时参考金额加删除线作对比
-const showFinalQuote = computed(() => previewMode.value || (floorQuoteTotal.value !== null && quotationMatchesPage.value))
+// 演示数据没有真实确认报价，不生成历史报价记录。
+const showFloorQuote = computed(() => !previewMode.value && floorQuoteTotal.value !== null && quotationMatchesPage.value)
 // 上一次报价记录：优先当前项目 status 为 CONFIRMED 的报价，没有则取最近一条（任意状态）记录
 const lastQuotation = computed<ProjectQuotationRecord | ProjectQuotationLatest | null>(() =>
   latestQuotation.value || latestQuotationAny.value)
-// 上一次报价日期：只保留日期部分，hover 版本号行时显示
+// 时间直接展示，便于识别历史快照。
 const lastQuotationTime = computed(() =>
-  (lastQuotation.value?.createdAt || '').split('T')[0].split(' ')[0])
+  (lastQuotation.value?.createdAt || '').replace('T', ' '))
 // 上一次报价版本号：报价记录在数据库中的 revision 字段
 const lastQuotationRevision = computed(() => lastQuotation.value?.revision ?? null)
 const confirmedSpaces = computed(() => spaces.value.filter(space => space.status === '已确认').length)
@@ -836,7 +838,18 @@ function detailTitle(detail: Detail | null) {
         </section>
       </section>
 
-      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div><div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || confirmed" @click="onConfirmClick"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
+      <aside class="proposal-aside"><div class="aside-card sticky-card"><div class="aside-title"><AppIcon name="documentText" size="4" /><span>方案摘要</span></div><div class="aside-summary"><span>楼层 / 类别</span><strong>{{ groups.length }}</strong></div><div class="aside-summary"><span>空间确认</span><strong>{{ confirmedSpaces }} / {{ spaces.length }}</strong></div><div class="aside-summary"><span>商品总数</span><strong>{{ totalModules }} 件</strong></div><div class="aside-summary"><span>参考金额</span><strong class="price">{{ money(totalPrice) }}</strong></div>
+          <div v-if="showFloorQuote" class="aside-summary" data-testid="floor-quote-total">
+            <span>{{ floorQuoteIncomplete ? '最近确认的已报价商品小计' : '最近确认的楼层商品小计' }}</span>
+            <strong class="price">{{ amount(floorQuoteTotal?.total) }}</strong>
+          </div>
+          <div v-if="showFloorQuote && floorQuoteIncomplete" class="aside-quote-hint incomplete">含缺价 {{ floorQuoteTotal?.missingCount }} 行（未计入），报价不完整</div>
+          <div v-if="showFloorQuote" class="aside-quote-hint">历史报价快照，不含项目级费用；当前方案变更后需重新核价</div>
+          <template v-if="!previewMode && lastQuotationRevision !== null">
+            <div class="aside-summary" data-testid="quotation-revision"><span>{{ showFloorQuote ? '报价版本号' : '上一次报价版本号' }}</span><strong>{{ lastQuotationRevision }}</strong></div>
+            <div v-if="lastQuotationTime" class="aside-quote-hint" data-testid="quotation-time">{{ showFloorQuote ? '确认时间' : '报价记录时间' }}：{{ lastQuotationTime }}</div>
+          </template>
+          <div class="aside-divider"></div><div class="aside-title small"><AppIcon name="check" size="4" /><span>确认状态</span></div><div class="confirm-state" :class="confirmed ? 'confirmed' : ''"><span class="state-dot"></span><div><strong>{{ confirmed ? '方案已确认' : '待最终确认' }}</strong><p>{{ confirmed ? '可以进入效果图与正式报价阶段。' : '确认前请逐项核对空间和商品。' }}</p></div></div><button v-if="canEdit" type="button" class="proposal-primary full" :disabled="checkingCatalog || confirmed" @click="onConfirmClick"><AppIcon name="check" size="3.5" />{{ confirmed ? '已确认方案' : '确认方案' }}</button><button v-if="canExport" type="button" class="proposal-secondary full" @click="store.exportCsv"><AppIcon name="documentText" size="3.5" />导出方案清单 CSV</button><NuxtLink v-if="canEdit" :to="{ path: '/canvas', query: { mode: 'design', floorId: workspace.currentFloorId } }" class="proposal-secondary full"><AppIcon name="arrowLeft" size="3.5" />返回继续设计</NuxtLink><NuxtLink :to="overviewRoute" class="proposal-secondary full"><AppIcon name="map" size="3.5" />查看空间总览</NuxtLink><p class="aside-note"><AppIcon name="info" size="3.5" />本页汇总当前楼层的空间和商品，正式报价仍需锁定真实规格、供应商和服务费用。</p></div></aside>
     </div>
 
     <div v-if="notice" class="proposal-toast" role="status">{{ notice }}</div>
@@ -1020,9 +1033,7 @@ function detailTitle(detail: Detail | null) {
 .scheme-choice-plan>strong{font-size:11px;color:var(--color-accent-ink)}
 .scheme-choice-plan>span{display:block;font-size:10px;color:#958d84;margin-top:2px}
 .scheme-choice-plan ul{margin-top:4px;display:flex;flex-direction:column;gap:1px;font-size:10px;color:#6e655d}
-/* 参考金额加删除线，突出下方最终报价 */
-.aside-summary .price-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #b2a79c; color: #a89b8e; font-size: 15px; font-weight: 600; }
-/* 最终报价的数据口径说明 */
+/* 历史楼层小计的数据口径说明 */
 .aside-quote-hint { font-size: 10px; color: #a89b8e; margin: -7px 0 0; text-align: right; }
 /* 含缺价行时报价不完整，红色提示 */
 .aside-quote-hint.incomplete { color: #b91c1c; }

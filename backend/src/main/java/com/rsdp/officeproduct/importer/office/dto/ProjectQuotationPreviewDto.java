@@ -20,4 +20,5 @@ public class ProjectQuotationPreviewDto {
     private LocalDateTime generatedAt;
     private List<QuotationFloorDto> floors = new ArrayList<>();
     private QuotationTotalsDto totals;
+    private java.util.Map<String, String> proposalConfirmationIds = new java.util.LinkedHashMap<>();
 }

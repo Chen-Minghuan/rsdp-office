@@ -224,8 +224,8 @@ export function useOfficeApi() {
     return request<RoomSchemeSlots>('GET', `${schemePath(floorId)}/slots?zoneId=${encodeURIComponent(zoneId)}`)
   }
 
-  function changeRoomSchemeChoice(floorId: string, action: 'confirm-choice' | 'cancel-choice', zoneId: string) {
-    return request<RoomSchemeState>('POST', `${schemePath(floorId)}/${action}`, { zoneId })
+  function changeRoomSchemeChoice(floorId: string, action: 'confirm-choice' | 'cancel-choice', payload: SchemeVersion & { zoneId: string; targetSlot: SchemeSlot }) {
+    return request<RoomSchemeState>('POST', `${schemePath(floorId)}/${action}`, payload)
   }
 
   function loadProposalConfirmation(floorId: string) {

@@ -89,6 +89,12 @@ try {
       const action = path.split('/').at(-1)
       const body = request.postDataJSON()
       assert.equal(body.zoneId, zone.id)
+      if (action === 'confirm-choice' || action === 'cancel-choice') {
+        assert.equal(body.revision, canvas.revision)
+        assert.equal(body.schemeToken ?? undefined, canvas.schemeToken)
+        assert.equal(body.targetSlot, slot, '确认/取消必须携带用户所见目标方案')
+        confirmation = null
+      }
       if (action === 'confirm-choice') {
         assert.ok(otherSlot, '没有 Plan B 时不能确认方案选择')
         confirmedSlot = slot

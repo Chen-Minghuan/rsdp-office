@@ -48,6 +48,7 @@ try {
     collaborators: [], referenceImages: [],
     floors: [{ projectId: 'PROJ-1', floorId: 'FLOOR-1', name: '1F', sortOrder: 1 }],
   }
+  let previewSources
   const preview = {
     projectId: 'PROJ-1', projectName: '报价测试项目', pricingMode: 'COEFFICIENT', pricingValue: 1.2,
     generatedAt: '2026-11-18T15:00:00',
@@ -72,7 +73,7 @@ try {
     const path = new URL(request.url()).pathname
     const respond = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
     if (path === '/api/v1/office/projects' && request.method() === 'GET') return respond([project])
-    if (path === '/api/v1/office/projects/PROJ-1/quotation/preview') return respond(preview)
+    if (path === '/api/v1/office/projects/PROJ-1/quotation/preview') return respond({ ...preview, proposalConfirmationIds: previewSources ?? (proposalConfirmation?.current ? { 'FLOOR-1': proposalConfirmation.confirmationId } : {}) })
     if (path === '/api/v1/office/projects/PROJ-1/quotation/latest') return respond(null)
     if (path === '/api/v1/office/projects/PROJ-1/quotation/export' && request.method() === 'POST') {
       exportBodies.push(request.postDataJSON())
@@ -85,6 +86,7 @@ try {
     if (path === '/api/v1/office/projects/PROJ-1/quotation/confirm' && request.method() === 'POST') {
       const body = request.postDataJSON()
       confirmBodies.push(body)
+      if (body.proposalConfirmationIds?.['FLOOR-1'] !== proposalConfirmation?.confirmationId) return route.fulfill({ json: { code: 400, message: '方案已变化，请重新试算' } })
       if (confirmFails) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 400, message: '模拟确认失败' }) })
       return respond({
         quotationId: 'QT-MOCK-1', projectId: 'PROJ-1', projectName: '报价测试项目', revision: 1, status: 'CONFIRMED',
@@ -161,6 +163,7 @@ try {
   })
   assert.match(await dialog.innerText(), /¥613\.40/, '弹窗金额不随背景编辑变化')
   const expectedPayload = {
+    proposalConfirmationIds: { 'FLOOR-1': 'PROP-1' },
     pricingMode: 'COEFFICIENT', pricingValue: 1.2,
     fees: [
       { name: '服务费', amount: 100 },
@@ -201,6 +204,28 @@ try {
   assert.equal(await dialog.count(), 1, '确认失败保留弹窗')
   confirmFails = false
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
+
+  // 冻结草稿后别处重新确认方案：提交保持旧 ID，服务端拒绝；重新试算才绑定新 ID。
+  await confirmButton.click()
+  await dialog.waitFor()
+  proposalConfirmation = { ...proposalConfirmation, confirmationId: 'PROP-2', canvasRevision: 9 }
+  await dialog.getByRole('button', { name: '确认', exact: true }).click()
+  await dialog.getByRole('alert').filter({ hasText: '方案已变化，请重新试算' }).waitFor()
+  assert.equal(confirmBodies.at(-1).proposalConfirmationIds['FLOOR-1'], 'PROP-1')
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  previewSources = {}
+  await page.getByRole('button', { name: '重新试算', exact: true }).click()
+  await blockers.waitFor()
+  assert.match(await blockers.innerText(), /请重新试算/)
+  assert.equal(await confirmButton.isDisabled(), true, '缺少试算快照 ID 时不能确认')
+  previewSources = undefined
+  await page.getByRole('button', { name: '重新试算', exact: true }).click()
+  await blockers.waitFor({ state: 'detached' })
+  await confirmButton.click()
+  await dialog.waitFor()
+  await dialog.getByRole('button', { name: '确认', exact: true }).click()
+  await dialog.waitFor({ state: 'detached' })
+  assert.equal(confirmBodies.at(-1).proposalConfirmationIds['FLOOR-1'], 'PROP-2')
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: '确认报价', exact: true }).click()

@@ -55,7 +55,7 @@ Viewport（平移、缩放）独立于上述物理几何
 
 2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换在事务内完成。主号可换负责人并配置权限，获授成员管理权限的项目成员可调整协作者。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
 
-2026-11-25 楼层级参考图（PROJECT-005）：`office_design_floor.reference_images` 为 **text 列**（项目级为 JSONB，列类型不同），存同一 `[{url, name}]` JSON 契约，由服务层 Jackson 序列化/解析（解析失败按空列表降级）。`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references` 整体替换（null/空列表即清空），复用项目级校验（≤10 张、仅本站 `/uploads/images/` 前缀、拒绝 `..`、名称 ≤200 字符），要求项目 EDIT 权限并核验楼层归属。前端项目总览页按楼层编辑（无 EDIT 权限不显示入口，后端仍独立鉴权），保存按 `projectId/floorId` 单调序号防乱序覆盖、请求前固定 ID 防止切楼层串写，成功后回写工作区缓存；画布工具栏「参考图」弹层只读展示当前楼层参考图。方案页最终报价取最新 CONFIRMED 报价快照中当前楼层行小计合计（缺价行不计入、红色提示行数），且仅当报价行与页面商品按 productId+数量严格一致时展示。见 [PROJECT-005](tasks/PROJECT-005-floor-reference-images.md)。
+2026-11-25 楼层级参考图（PROJECT-005）：`office_design_floor.reference_images` 为 **text 列**（项目级为 JSONB，列类型不同），存同一 `[{url, name}]` JSON 契约，由服务层 Jackson 序列化/解析（解析失败按空列表降级）。`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references` 整体替换（null/空列表即清空），复用项目级校验（≤10 张、仅本站 `/uploads/images/` 前缀、拒绝 `..`、名称 ≤200 字符），要求项目 EDIT 权限并核验楼层归属。前端项目总览页按楼层编辑（无 EDIT 权限不显示入口，后端仍独立鉴权），上传期间禁用重复上传和删除，保存期间禁用编辑；请求前固定项目/楼层 ID、按楼层记录保存状态，成功后回写原楼层缓存；画布工具栏「参考图」弹层只读展示当前楼层参考图。方案页展示“最近确认的楼层商品小计”，取最新 CONFIRMED 报价快照中当前楼层行小计合计（缺价行不计入、红色提示行数），且仅当报价行与页面商品按 productId+数量严格一致时展示。该比较不核验空间或布局版本，小计始终标为历史快照并显示报价版本和确认时间，不含项目级费用、不替代当前方案核价；演示数据不生成历史报价。见 [PROJECT-005](tasks/PROJECT-005-floor-reference-images.md)。
 
 Office 系统管理员标记存于 `office_user.is_system_admin`，PostgreSQL 部分唯一索引限制最多一人。`/api/v1/office/admin/users` 提供现有账号的列表、状态管理、重置密码和删除，服务端逐请求校验管理员。工作区主号随工作区一并创建，工作区成员账号由主号开通。账号停用或重置密码时会话立即失效，仍任项目负责人或工作区主号的账号不能直接删除。见 [AUTH-003](tasks/AUTH-003-user-admin.md) 和 [TENANT-004](tasks/TENANT-004-office-role-model.md)。
 
@@ -217,7 +217,7 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 
 报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。确认报价时按报价行涉及的楼层逐一要求 `office_proposal_confirmation` 存在当前有效的方案确认快照（缺失或失效即拒绝，2026-11-25，QUOTE-002）；试算与导出不拦截。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)、[报价方案确认门禁](tasks/QUOTE-002-quotation-proposal-gate.md)。
 
-2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在最终报价隐藏时用它展示上一次报价时间。
+2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在历史楼层小计隐藏且无已确认报价记录时，用它展示最近报价记录的版本和时间。
 
 ### 5.3 房间方案和楼层确认（FLOW-007）
 
@@ -303,3 +303,6 @@ v9 曾将带F的图1/图2送入生图；真实样本出现编号和椅子复制�
 ## 提示词与参考图对照实验（RENDER-012，实验）
 
 RenderGenerationOptions 显式定义 A/B/C/D/E；缺省使用正式 E（完整技术提示词＋Direct）。RenderVisualTaskPrompt 从同一 RenderLayoutSemantics 结构化事实生成无坐标 JSON 的精简任务，Java 仍保存完整空间事实。C 只从生图输入移除平面图，审核继续使用；D/E 使用 prompt_extend=direct，其中 E 保留 A 的完整技术提示词。实验参数、seed、实际图片角色与哈希进入原任务快照并参与幂等，不新增表、不自动批量收费生图。任务快照另存 generationTiming 时间戳，接口计算准备、提交、服务生成和图片下载耗时，页面实时显示等待及最终耗时；Direct 改写包含在服务生成阶段，当前不能单独拆分。详见 [RENDER-012](tasks/RENDER-012-prompt-ab-experiment.md)。
+
+
+2026-11-27 报价与方案快照绑定：试算返回楼层 `proposalConfirmationIds`，冻结的确认请求必须携带同一映射；正式确认在项目各楼层按 ID 排序的共同事务锁内核验有效性和确认 ID，来源写入 `office_quotation.proposal_confirmations_json`。房间选择确认/取消校验画布修订、切换令牌和目标槽，并退役旧楼层确认；删除空间留下的方案行不参与当前楼层门禁。详见 [QUOTE-002](tasks/QUOTE-002-quotation-proposal-gate.md)。

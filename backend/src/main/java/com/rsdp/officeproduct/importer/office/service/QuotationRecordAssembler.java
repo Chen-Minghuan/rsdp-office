@@ -24,6 +24,11 @@ class QuotationRecordAssembler {
 
     private final ObjectMapper objectMapper;
 
+    String writeProposalSources(java.util.Map<String, String> sources) {
+        try { return objectMapper.writeValueAsString(sources); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException error) { throw new BusinessException("报价方案版本无法保存"); }
+    }
+
     ProjectQuotationRecordDto assemble(OfficeQuotation quotation, List<OfficeQuotationLine> rows,
                                        List<QuotationFeeDto> fees) {
         ProjectQuotationRecordDto dto = new ProjectQuotationRecordDto();

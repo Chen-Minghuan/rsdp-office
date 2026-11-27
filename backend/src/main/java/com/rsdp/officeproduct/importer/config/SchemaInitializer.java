@@ -84,6 +84,7 @@ public class SchemaInitializer {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_floor_reference_images.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261126_project_status_backfill.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261126_office_room_scheme_confirmed_slot.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261127_quotation_proposal_sources.sql"));
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

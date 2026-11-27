@@ -1,38 +1,35 @@
-# QUOTE-002 报价确认的方案确认门禁
+# QUOTE-002 报价与方案确认快照绑定
 
-状态：已实现待验收（Java 断言受本机 JDK 17 工具链阻塞未执行，见"验证记录"；前端构建与三项模拟 UI 回归通过）
+状态：已实现，单元与模拟 UI 回归及隔离 PostgreSQL 验证通过；真实报价业务链路待验收。
+更新日期：2026-11-27
+基线：PR #26（`53c2413`），合并提交 `f715bde`；以下为合并后修复。
 
-## 背景与范围
+## 目标与范围
 
-业务顺序要求：空间复核确认 → 排版确认 → 商品推荐 → 方案确认 → 正式报价。此前 `ProjectQuotationService.confirm()` 与方案确认完全独立，只校验报价行本身（商品存在、楼层归属项目、数量价格非负），只要请求里存在商品明细行就能生成 `CONFIRMED` 正式报价，绕过空间复核确认、排版确认与方案确认。
+报价必须依据用户试算时的已确认方案。方案修改或重新确认后，旧草稿不能继续确认为正式报价。房间 Plan A/B 选择必须与用户看到的版本一致，删除空间不应阻塞其他空间的整层确认。
 
-本任务在报价确认入口补后端权威校验，并在项目清单页和报价页补前置状态提示（不依赖按钮禁用）：
+## 接口与存储
 
-- **后端**：确认报价时，报价行涉及的每个楼层必须持有当前有效的方案确认（`office_proposal_confirmation` 快照未失效），否则拒绝。
-- **前端**：`/proposal` 确认方案前提示待复核空间与排版未确认空间；`/workspace/quotes` 确认报价前按楼层提示方案确认缺失/失效。
+- `GET /api/v1/office/projects/{projectId}/quotation/preview` 返回 `proposalConfirmationIds`，以楼层 ID 为键、有效方案确认 ID 为值。没有有效确认的楼层不写入该映射，仍可查看试算。
+- `POST /.../quotation/confirm` 携带试算返回的映射。后端仅核验报价行涉及的楼层：缺失或失效确认拒绝；ID 缺失或与当前确认不一致时要求重新试算。页面冻结草稿时复制映射，下载与确认使用同一载荷，不用随后读取的确认状态替换草稿来源。
+- 试算与正式确认都在事务内按楼层 ID 排序，取得项目各楼层的 `OfficeWorkspaceLockMapper` 锁，与画布、清单和方案切换共用。确认保持楼层锁至报价事务提交；之后才按已有项目行锁分配报价版本，避免检查后方案被改、并保持多楼层锁顺序一致。
+- 新迁移 [20261127_quotation_proposal_sources.sql](../../backend/src/main/resources/db/migrations/20261127_quotation_proposal_sources.sql) 为 `office_quotation` 增加 `proposal_confirmations_json`（JSONB，旧记录默认 `{}`），保存实际核验的楼层确认 ID，历史报价内容不变。
+- 试算与导出编辑稿仍允许未确认方案；只有最终确认要求有效且匹配的来源快照。
 
-试算（preview）与导出前试算（previewConfirmation）不拦截，保留先查看金额的能力；门禁只拦最终确认。
+## 房间 Plan A/B
 
-## 规则
+- 确认/取消选择使用既有 `Change` 载荷，必须携带 `zoneId`、`revision`、`schemeToken` 和所见 `targetSlot`。在楼层锁内核验版本、空间和活动槽，后台切换后旧页面请求明确失败，不会把 A 确认成 B。
+- 确认或取消选择会退役旧楼层方案确认，取消后不能继续把旧记录用于正式报价或效果图；页面同步清除旧确认状态。
+- 楼层确认仅检查当前画布仍存在的空间。已删除空间残留的方案行不再阻塞整层确认；当前空间存在未确认选择时仍拒绝。
 
-- **门禁范围**：报价明细行中出现的楼层（按 `floorId` 去重），而非项目全部楼层；没有商品行的楼层不拦截。
-- **有效性判定**：复用 `OfficeProposalConfirmationService.latest(floorId)`——返回 null（从未确认）或 `current=false`（修订变化、快照指纹不匹配、排版合法性复核失败、记录被退役）均视为不满足。只有指纹比对能识破同 revision 覆盖保存，因此不新写轻量查询。
-- **调用时机**：`confirm()` 中 `draftBuilder.build()` 之后、项目行 `FOR UPDATE` 锁之前（fail-fast 不占锁；floorId 已被 draftBuilder 校验属于本项目）。
-- **软检查说明**：方案确认走楼层工作区锁、报价确认走项目锁，两把锁不互斥，门禁通过后事务提交前方案理论上仍可被改——与"空间复核→方案确认"的既有竞态同级，属可接受的软检查，不为它拉长锁持有时间。
-- **错误文案**：`BusinessException("楼层「A、B」的方案尚未确认或已失效，请先在项目清单页确认当前方案后再确认报价")`，经 `GlobalExceptionHandler` 以 `Result.fail`（body code=400）透出到前端弹窗。
-- **权限兼容**：报价确认要求工作区主号（`requireWorkspaceOwner`）；`latest()` 内部走 `requireFloorAccess`，主号自动满足，无 403 风险。
+## 前端
 
-## 前端提示
+- 报价页分别用请求序号保护试算和楼层状态，迟到响应不覆盖新试算。没有来源 ID、方案已失效或后来查询到不同确认 ID 时禁用确认并提示处理。
+- 保留 PR #22 合并后修复的历史楼层小计、版本/时间提示及参考图上传保护；预检查弹窗继续合并空间复核、排版和选品问题。
 
-- `/proposal`（项目清单页）：新增"N 个空间待复核确认 · M 个空间排版未确认"可展开横幅（`data-testid="proposal-precheck-issues"`，复用选品差异横幅样式），逐空间列出并提供「去复核空间」「去排版确认」跳转。数据完全本地推导：`store.pendingReviewZones`（复核凭据）与逐空间家具 `layoutConfirmed`（只统计有家具的空间，无家具空间不算阻塞）。确认按钮禁用条件增加前置条件与 `confirmed`（已确认后不再重复提交）；`confirmProposal()` 守卫同步。
-- `/workspace/quotes`（报价页）：试算成功后按楼层并发读取 `loadProposalConfirmation`，单楼层读取失败按"未知"处理不阻塞（后端兜底）。横幅 `data-testid="quote-confirmation-blockers"` 区分"尚未确认方案"与"方案已失效，需重新确认"，逐楼层链接到 `/proposal?floorId=…`。确认按钮在状态加载中或存在阻塞楼层时禁用；`openConfirmation()` 内置防御性检查；后端 400 文案经既有弹窗错误路径原样透出。
+## 验证
 
-## 验证记录
-
-- 前端构建：`pnpm build` 通过。
-- 模拟 UI 回归（全部 API 模拟）：
-  - `node scripts/e2e-quotes.mjs` 通过：新增门禁三段断言（从未确认 → 横幅+禁用；已失效 → 横幅+禁用；有效 → 横幅消失+启用），既有费用增删、弹窗、下载/确认同载荷、失败保留、窄屏用例不受影响。
-  - `node scripts/e2e-product-scheme.mjs` 通过（其 mock 已带 CONFIRMED 复核凭据与 `layoutConfirmed: true`，方案确认按钮仍可用）。
-  - `node scripts/e2e-project-floors.mjs` 通过。
-- Java：`mvn -f backend/pom.xml test` **未执行**——本机仅有 JDK 17（`D:\Java\jdk-17`），项目要求 release 21，编译阶段被工具链阻塞（与 [FLOW-006](FLOW-006-server-proposal-cart-validation.md) 记录的情况相同）。`ProjectQuotationServiceTest` 新增 `confirmRejectsFloorWithoutProposalConfirmation`、`confirmRejectsStaleProposalConfirmation`、`previewConfirmationSkipsProposalGate` 三个用例及 `stubScenario` 默认有效确认桩，断言待具备 JDK 21 的环境执行。
-- 真实后端联调与业务验收未执行，未部署。
+- Java 专项覆盖旧草稿/缺少来源拒绝、锁先于校验及写入、多楼层锁顺序、来源存储、已删除/当前空间区分、旧 A 选择拒绝和取消后的确认退役。
+- `QuotationProposalPostgresTest` 在临时 PostgreSQL 16、独立 schema 中实际执行：迁移连续两次幂等、真实 MyBatis 插入/读取 JSONB 来源、第二连接等待相同楼层事务锁并在提交后读取来源。测试手工会话显式使用 JDBC 事务工厂，避免脱离 Spring 时连接自动提交。该验证不等同真实商品源与业务接口端到端验收。
+- `pnpm build`、报价/产品方案/项目楼层/历史楼层小计/参考图模拟 UI 回归通过。报价 UI 覆盖冻结后方案变更拒绝、缺来源禁用、重新试算绑定新确认；产品方案 UI 核验确认/取消请求携带版本与目标槽。
+- 自建预览服务上的 `e2e:workflows` 与 `MOCK_API=1 e2e:smoke` 通过，均拦截 API。Java 全量运行 495 项，0 失败、0 错误、13 跳过（含环境门控的数据库测试）；另在临时 PostgreSQL 中显式执行新增数据库专项 1 项通过。房间选择专项 4 项通过，包含画布未变化但选择已取消时的最新确认失效用例。真实主号、商品目录和多用户业务链路未验收，运行服务与测试站未部署本轮修复。
