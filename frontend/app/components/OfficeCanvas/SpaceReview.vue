@@ -761,7 +761,7 @@ function advance() {
   if (tracing.value || sketching.value || obstacleDraft.value || obstacleManipulation.value) return
   if (!store.canEnterLayout || store.floorPlanLoading || store.floorPlanError) return
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
-  if (zone && store.enterDesign(zone.id)) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', zoneId: zone.id, floorId: workspace.currentFloorId } })
+  if (zone) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', view: 'products', zoneId: zone.id, floorId: workspace.currentFloorId } })
 }
 onMounted(() => { window.addEventListener('keydown', traceKey); window.addEventListener('keyup', keyUp); window.addEventListener('blur', cancelInteraction) })
 onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHintTimer) clearTimeout(zoomHintTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
