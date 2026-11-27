@@ -197,6 +197,29 @@ class OfficeProjectAccessServiceTest {
             () -> access.requireMember("P1")).getMessage());
     }
 
+    @Test void requirePermissionFollowsGrantedBitsForQuoteAndExport() {
+        addProject("P1", null);
+        enforcementOn("USR-1");
+        addMember("P1", "USR-1", "COLLABORATOR");
+        // 只授 项目查看+报价查看：其余权限位逐一拒绝
+        members.getFirst().setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.QUOTE_READ)));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.READ));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.QUOTE_READ));
+        for (OfficeProjectPermission denied : List.of(OfficeProjectPermission.EDIT,
+            OfficeProjectPermission.MARGIN_READ, OfficeProjectPermission.EXPORT_PROJECT,
+            OfficeProjectPermission.EXPORT_QUOTE, OfficeProjectPermission.MANAGE_MEMBERS)) {
+            assertThrows(AccessDeniedException.class, () -> access.requirePermission("P1", denied));
+        }
+        // 补授毛利查看与报价导出后放行
+        members.getFirst().setPermissionFlags(OfficeProjectPermission.encode(
+            List.of(OfficeProjectPermission.READ, OfficeProjectPermission.QUOTE_READ,
+                OfficeProjectPermission.MARGIN_READ, OfficeProjectPermission.EXPORT_QUOTE)));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.MARGIN_READ));
+        assertDoesNotThrow(() -> access.requirePermission("P1", OfficeProjectPermission.EXPORT_QUOTE));
+        assertThrows(AccessDeniedException.class, () -> access.requirePermission("P1", OfficeProjectPermission.EDIT));
+    }
+
     @Test void floorAccessResolvesOwningProjectBeforeMembershipCheck() {
         addProject("P1", null);
         addProject("P2", null);
