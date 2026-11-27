@@ -117,8 +117,8 @@ try {
     state.submitted = { projectContext: state.project, zones: [] }
     localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
-  // 复核门禁：未完成复核确认时直达排版地址会被拦回总览
-  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
+  // 复核门禁：未完成复核确认时直达产品方案会被拦回总览
+  await page.goto(baseUrl + '/canvas?mode=design&view=products&zoneId=ROOM-001', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.doesNotMatch(page.url(), /mode=design/, '未完成复核确认不能绕过门禁直达排版')
   // 页脚按钮灰化但可点击，弹出引导提示；徽标统一为「待复核」
@@ -178,17 +178,19 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.ok(await advance().isEnabled())
   const beforeLayout = (await stored()).objects.filter(object => object.kind === 'zone')
+  const targetRoom = beforeLayout[1]
+  await choose(targetRoom.name)
   await advance().click()
-  await page.waitForURL(/mode=design/)
-  await page.getByTestId('functional-category-workstation').click()
-  await page.getByTestId('apply-layout').waitFor()
-  assert.match(page.url(), /mode=design/)
-  assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入排版只绑定模板，不改写人工确认和几何')
-  const designUrl = page.url()
+  await page.waitForURL(url => url.searchParams.get('mode') === 'design' && url.searchParams.get('view') === 'products')
+  const destination = new URL(page.url())
+  assert.equal(destination.searchParams.get('floorId'), 'OFFICE-PROJECT-001')
+  assert.equal(destination.searchParams.get('zoneId'), targetRoom.id)
+  const schemeRoomHeading = page.getByTestId('product-scheme').getByRole('heading', { name: targetRoom.name, exact: true })
+  await schemeRoomHeading.waitFor()
+  assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入产品方案只绑定模板，不改写人工确认和几何')
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByTestId('functional-category-workstation').click()
-  await page.getByTestId('apply-layout').waitFor()
-  assert.equal(page.url(), designUrl, '已确认复核的空间可刷新恢复排版')
+  await schemeRoomHeading.waitFor()
+  assert.equal(page.url(), destination.href, '已确认复核的空间可刷新恢复产品方案')
 
 
   // Import an unknown-scale image through the actual upload target route.
@@ -711,13 +713,24 @@ try {
     const boundsB = ringBounds(mergeB.polygon)
     assert.equal(await zoneCount(), before + 2, '合并前画好两个相邻空间')
     assert.equal(boundsB.minX, boundsA.maxX, 'B 与 A 共享边')
-    const disjointBounds = ringBounds(zonesNow[2].polygon)
     const midAY = (boundsA.minY + boundsA.maxY) / 2
-    // 拒绝：合并两个不相交空间
+    // 拒绝：点击不相交且未被其它轮廓遮住的空间。
     await page.locator('[data-testid="tool-merge"]').click()
     await page.locator('[data-testid="boolean-bar"]').waitFor()
     await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
-    await worldClick((disjointBounds.minX + disjointBounds.maxX) / 2, (disjointBounds.minY + disjointBounds.maxY) / 2)
+    let disjointPoint
+    for (const zone of zonesNow.slice(0, -2)) {
+      const bounds = ringBounds(zone.polygon)
+      const disjoint = bounds.maxX < boundsA.minX || bounds.minX > boundsA.maxX
+        || bounds.maxY < boundsA.minY || bounds.minY > boundsA.maxY
+      if (!disjoint) continue
+      const center = [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2]
+      const client = await worldToClient(...center)
+      const target = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-space-id]')?.getAttribute('data-space-id'), client)
+      if (target === zone.id) { disjointPoint = center; break }
+    }
+    assert.ok(disjointPoint, '存在可点击的不相交空间')
+    await worldClick(...disjointPoint)
     await page.locator('.review-toast').getByText('不相连', { exact: false }).waitFor()
     assert.equal(await zoneCount(), before + 2, '不相连合并不改动空间')
     assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '不相连合并不改动轮廓')
@@ -748,7 +761,7 @@ try {
     // 拒绝：剔除不相交空间
     await page.locator('[data-testid="tool-subtract"]').click()
     await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
-    await worldClick((disjointBounds.minX + disjointBounds.maxX) / 2, (disjointBounds.minY + disjointBounds.maxY) / 2)
+    await worldClick(...disjointPoint)
     await page.locator('.review-toast').getByText('没有重叠区域', { exact: false }).waitFor()
     assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '不相交剔除不改动轮廓')
     await page.locator('[data-testid="boolean-cancel"]').click()
@@ -840,7 +853,8 @@ try {
   await choose('手动空间 4')
   // 复核确认后可从总览进入排版；排版侧栏改名入口已随三段式工作台改版移除，改名走总览列表与画布标签两处
   await advance().click()
-  await page.waitForURL(/mode=design/)
+  await page.getByTestId('product-scheme').waitFor()
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()
