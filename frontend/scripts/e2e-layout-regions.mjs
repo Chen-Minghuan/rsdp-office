@@ -130,6 +130,7 @@ try {
   await page.getByRole('button', { name: '加载工装示例（可撤销）', exact: true }).click()
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   const originalPolygon = (await zoneState()).polygon

@@ -75,6 +75,7 @@ try {
   await page.goto(`${baseUrl}/canvas?analysisId=PREVIEW-DRAG`, { waitUntil: 'networkidle' })
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-auto-layout').click()
 
   const previewItems = page.locator('[data-preview-id]')
   await page.evaluate(() => {

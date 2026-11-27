@@ -69,6 +69,7 @@ try {
   }
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   const originalRoomPolygon = (await zoneState()).polygon

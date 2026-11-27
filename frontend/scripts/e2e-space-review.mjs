@@ -117,8 +117,8 @@ try {
     state.submitted = { projectContext: state.project, zones: [] }
     localStorage.setItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001', JSON.stringify(state))
   })
-  // 复核门禁：未完成复核确认时直达排版地址会被拦回总览
-  await page.goto(baseUrl + '/canvas?mode=design&zoneId=ROOM-001', { waitUntil: 'networkidle' })
+  // 复核门禁：未完成复核确认时直达产品方案会被拦回总览
+  await page.goto(baseUrl + '/canvas?mode=design&view=products&zoneId=ROOM-001', { waitUntil: 'networkidle' })
   await page.getByRole('img', { name: '空间核对画布', exact: true }).waitFor()
   assert.doesNotMatch(page.url(), /mode=design/, '未完成复核确认不能绕过门禁直达排版')
   // 页脚按钮灰化但可点击，弹出引导提示；徽标统一为「待复核」
@@ -178,15 +178,19 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.ok(await advance().isEnabled())
   const beforeLayout = (await stored()).objects.filter(object => object.kind === 'zone')
+  const targetRoom = beforeLayout[1]
+  await choose(targetRoom.name)
   await advance().click()
-  await page.waitForURL(/mode=design/)
-  assert.equal(new URL(page.url()).searchParams.get('view'), 'products', '进入家具排版应打开产品方案界面')
-  await page.getByTestId('product-scheme').waitFor()
+  await page.waitForURL(url => url.searchParams.get('mode') === 'design' && url.searchParams.get('view') === 'products')
+  const destination = new URL(page.url())
+  assert.equal(destination.searchParams.get('floorId'), 'OFFICE-PROJECT-001')
+  assert.equal(destination.searchParams.get('zoneId'), targetRoom.id)
+  const schemeRoomHeading = page.getByTestId('product-scheme').getByRole('heading', { name: targetRoom.name, exact: true })
+  await schemeRoomHeading.waitFor()
   assert.deepEqual((await stored()).objects.filter(object => object.kind === 'zone').map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), beforeLayout.map(({ spaceTemplateId, templateSpaceId, ...zone }) => zone), '进入产品方案只绑定模板，不改写人工确认和几何')
-  const productSchemeUrl = page.url()
   await page.reload({ waitUntil: 'networkidle' })
-  await page.getByTestId('product-scheme').waitFor()
-  assert.equal(page.url(), productSchemeUrl, '已确认复核的空间可刷新恢复产品方案')
+  await schemeRoomHeading.waitFor()
+  assert.equal(page.url(), destination.href, '已确认复核的空间可刷新恢复产品方案')
 
 
   // Import an unknown-scale image through the actual upload target route.
@@ -838,7 +842,8 @@ try {
   await choose('手动空间 4')
   // 复核确认后可从总览进入排版；排版侧栏改名入口已随三段式工作台改版移除，改名走总览列表与画布标签两处
   await advance().click()
-  await page.waitForURL(/mode=design/)
+  await page.getByTestId('product-scheme').waitFor()
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('functional-category-workstation').click()
   await page.getByTestId('apply-layout').waitFor()
   await page.getByRole('button', { name: '返回空间总览', exact: true }).first().click()

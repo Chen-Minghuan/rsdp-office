@@ -759,7 +759,7 @@ function pointerUp() {
 }
 function advance() {
   if (tracing.value || sketching.value || obstacleDraft.value || obstacleManipulation.value) return
-  if (!store.canEnterLayout || store.floorPlanLoading || store.floorPlanError) return
+  if (store.layoutEntryBlocker) return
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
   if (zone) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', view: 'products', zoneId: zone.id, floorId: workspace.currentFloorId } })
 }

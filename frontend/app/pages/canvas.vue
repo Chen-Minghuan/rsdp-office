@@ -293,7 +293,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
         />
         <p v-if="sizeMessage" role="status" class="mx-3 mt-2 flex-none border border-[#d8e6c8] bg-[#f3f9ee] px-2 py-1.5 text-[10px] text-[#4d713d]">{{ sizeMessage }}</p>
         <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" @edit-size="(id, anchor) => openSizeDialog(store.objects.find(o => o.id === id) as FurnitureObject, [id], anchor)" />
-        <OfficeCanvasFurnitureStrip v-if="mode === 'design' && !isProductScheme" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" @edit-size="(item, ids, anchor) => openSizeDialog(item, ids, anchor)" @bulk-replace="(item, ids) => openBulkReplace(item, ids)" />
+        <OfficeCanvasFurnitureStrip v-if="mode === 'design' && (!isProductScheme || canEditScheme)" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" @edit-size="(item, ids, anchor) => openSizeDialog(item, ids, anchor)" @bulk-replace="(item, ids) => openBulkReplace(item, ids)" />
         <div v-if="isProductScheme" class="scheme-board-footer">
           <span v-if="inspectedProduct"><strong>{{ inspectedProduct.name }}</strong> · {{ inspectedProduct.variant }} · {{ money(inspectedProduct.price) }}</span>
           <span v-else-if="selectedCount">点击画布家具查看已选商品</span>
