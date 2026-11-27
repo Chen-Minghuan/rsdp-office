@@ -57,6 +57,7 @@ const favoriteLoading = ref(true)
 const projectFavoriteLoading = ref(false)
 const collectionOpen = ref(false)
 const bundlesAvailable = ref(false)
+const collectionWidth = ref(280)
 const collectionId = useId()
 const collectionPanel = ref<HTMLElement | null>(null)
 const selectedCollection = ref<'project' | 'personal'>()
@@ -561,7 +562,7 @@ onMounted(loadCatalogContext)
     <p v-if="sharedUnavailable && !listError && !isLoading" role="status" class="text-sm text-amber-800">
       公共库暂时无法加载，当前显示本地商品。
     </p>
-    <div class="catalog-split" :class="{ 'advanced-open': advancedOpen }">
+    <div class="catalog-split" :class="{ 'advanced-open': advancedOpen }" :style="{ '--collection-width': `${collectionWidth}px` }">
       <section class="catalog-main min-w-0" aria-label="商品列表">
         <form ref="filtersForm" class="catalog-filters grid items-end gap-2.5 border-b-[3px] border-accent pb-3" aria-label="商品筛选" @submit.prevent>
           <label class="filter-search grid min-w-0 gap-1 text-xs font-medium text-neutral-700">
@@ -691,7 +692,7 @@ onMounted(loadCatalogContext)
         @confirm="applyAdvancedFilters" @cancel="advancedOpen = false" />
       <aside :id="collectionId" ref="collectionPanel" class="catalog-collections border border-neutral-200 bg-neutral-100 p-3.5"
         :class="{ 'is-open': collectionOpen }" aria-label="产品库收藏" tabindex="-1">
-        <ProductBundlePanel ref="bundlePanel" v-model:available="bundlesAvailable" :products="pageProducts" class="mb-4" />
+        <ProductComboPanel ref="bundlePanel" v-model:available="bundlesAvailable" v-model:width="collectionWidth" :products="pageProducts" class="mb-4" />
         <ProductCatalogFavorites
           :section="collection"
           :project-name="workspace.currentProject?.projectName || ''"
@@ -742,7 +743,7 @@ onMounted(loadCatalogContext)
   gap: 1rem;
 }
 @media (min-width: 1100px) {
-  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px clamp(13rem, 17vw, 18rem); }
+  .catalog-split.advanced-open { grid-template-columns: minmax(0, 1fr) 400px var(--collection-width, clamp(13rem, 17vw, 18rem)); }
 }
 @media (min-width: 641px) and (max-width: 1099px) {
   .catalog-split.advanced-open { margin-right: 400px; }
@@ -755,7 +756,7 @@ onMounted(loadCatalogContext)
 .filter-search { grid-column: 1 / -1; }
 
 @media (min-width: 1100px) {
-  .catalog-split { grid-template-columns: minmax(0, 1fr) clamp(13rem, 17vw, 18rem); }
+  .catalog-split { grid-template-columns: minmax(0, 1fr) var(--collection-width, clamp(13rem, 17vw, 18rem)); }
   .catalog-collections,
   .catalog-collections.is-open { display: block; grid-row: auto; }
   .collection-toggle { display: none; }

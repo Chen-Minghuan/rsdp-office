@@ -485,11 +485,6 @@ export function useOfficeApi() {
     return await request<ProjectFavoriteState>('PUT', `/api/v1/office/projects/${encodeURIComponent(projectId)}/favorites/${encodeURIComponent(rspuId)}`, { selected })
   }
 
-
-
-
-
-
   async function parseCad(file: File): Promise<unknown> {
     const formData = new FormData()
     formData.append('file', file)

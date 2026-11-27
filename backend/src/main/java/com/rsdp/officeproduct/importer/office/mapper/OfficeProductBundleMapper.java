@@ -14,6 +14,12 @@ public interface OfficeProductBundleMapper {
         """)
     List<Row> list(@Param("userId") String userId);
 
+    @Select("""
+        SELECT bundle_id, user_id, name, revision, items_json::text AS items_json
+        FROM office_product_bundle WHERE bundle_id=#{bundleId} AND user_id=#{userId}
+        """)
+    Row findById(@Param("bundleId") String bundleId, @Param("userId") String userId);
+
     @Insert("""
         INSERT INTO office_product_bundle(bundle_id, user_id, name, items_json, revision, updated_at)
         VALUES(#{bundleId}, #{userId}, #{name}, CAST(#{itemsJson} AS jsonb), 1, now()) ON CONFLICT DO NOTHING

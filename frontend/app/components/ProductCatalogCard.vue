@@ -33,6 +33,7 @@ function dragProduct(event: DragEvent) {
 <template>
   <ProductCatalogTile :name="name" :code="product.rspuCode || product.externalCode || product.rspuId"
     :image-url="product.primaryImageUrl" :to="catalogProductPath(product.rspuId)"
+    :data-testid="`product-card-${product.rspuId}`"
     :draggable="bundleAvailable && product.status === 'active'" @dragstart="dragProduct">
     <template #metadata>
       <template v-if="isLocal">
