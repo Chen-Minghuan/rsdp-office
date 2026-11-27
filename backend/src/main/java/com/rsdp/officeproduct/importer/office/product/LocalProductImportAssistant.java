@@ -50,6 +50,7 @@ public class LocalProductImportAssistant {
             可用字段：MODEL 厂内型号或货号，NAME 商品名，PICTURE 图片，SIZE 组合尺寸，
             WIDTH_MM 毫米宽（原表长向），DEPTH_MM 毫米进深（原表短向），HEIGHT_MM 毫米高，
             COLOR 颜色，MATERIAL 专门的材质列，DESCRIPTION 说明、备注或配置描述，CATEGORY 商品品类。
+            REFERENCE_PRICE 仅用于表头明确表示零售价、销售价或参考价的列。出厂价、成本、单价或只写价格的列不要建议该字段。
             尺寸单位明确为非毫米时不要把它映射到毫米数值列。
             输出 JSON 对象 {"fields":{"MODEL":0,"NAME":1}}，值只可使用输入中的列索引（整数）。
             每列最多一个字段。证据不足就省略，价格、包装或说明列不能作为尺寸。
@@ -61,6 +62,8 @@ public class LocalProductImportAssistant {
         for (Field field : Field.values()) {
             var index = fields.path(field.name());
             if (index.isIntegralNumber() && index.canConvertToInt() && headers.containsKey(index.intValue())) {
+                if (field == Field.REFERENCE_PRICE && !WorkbookReferencePrice.HEADERS.contains(
+                        SupplierProductWorkbook.label(headers.get(index.intValue())))) continue;
                 proposed.put(field, index.intValue());
                 counts.merge(index.intValue(), 1, Integer::sum);
             }

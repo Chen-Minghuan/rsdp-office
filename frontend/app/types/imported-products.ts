@@ -17,6 +17,8 @@ export interface ImportedProduct {
   colorPrimaryName?: string | null
   primaryImageUrl: string | null
   retailPrice: number | null
+  minReferencePrice?: number | null
+  multipleVariants?: boolean
   status: string | null
   createdAt: string
   updatedAt: string

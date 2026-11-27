@@ -11,6 +11,7 @@ const props = defineProps<{
   fileBytes: number
   progress?: WorkbookImportProgress | null
   capacityBlocked: boolean
+  priceConfirmationRequired?: boolean
   saveBatch: (products: LocalProductInput[], onSaved: (products: LocalProductInput[]) => void) => Promise<boolean>
 }>()
 const emit = defineEmits<{ busyChange: [busy: boolean], selectionChange: [count: number] }>()
@@ -98,7 +99,7 @@ const filterCounts = computed(() => ({ all: drafts.value.length, 'needs-review':
 const hasPickable = computed(() => visibleDrafts.value.some(draft => !draft.selected && !draftIssue(draft)))
 const selectedIssues = computed(() => selected.value.filter(draft => draftIssue(draft)).length)
 const canSubmit = computed(() => categoryMode.value !== null && selected.value.length > 0
-  && !selectedIssues.value && !props.capacityBlocked)
+  && !selectedIssues.value && !props.capacityBlocked && !props.priceConfirmationRequired)
 watch(() => selected.value.length, count => emit('selectionChange', count), { immediate: true })
 
 function categoryLabel(code: string) {
@@ -147,7 +148,14 @@ function issue({ product }: Draft) {
     || (variant.color?.length ?? 0) > 64 || (variant.material?.length ?? 0) > 128)) {
     return '待核对规格资料'
   }
+  if (product.variants.some(({ referencePrice }) => referencePrice != null
+    && (referencePrice <= 0 || !/^\d{1,10}(?:\.\d{1,2})?$/.test(String(referencePrice))))) return '待核对参考价'
   return ''
+}
+
+function updateReferencePrice(variant: DraftVariant, event: Event) {
+  const input = event.target as HTMLInputElement
+  variant.referencePrice = input.value ? input.valueAsNumber : null
 }
 
 function millimetres(value: unknown) {
@@ -320,6 +328,7 @@ async function confirm() {
     variants: draft.product.variants.map(({ evidence, materialOrigin, suggestedMaterial, ...variant }) => ({
       ...variant,
       heightMm: variant.heightMm || null,
+      referencePrice: variant.referencePrice ?? null,
     })),
     images: draft.images.filter(image => image.selected).map(image => props.preview.images[image.key]!),
   }))
@@ -516,6 +525,13 @@ async function confirm() {
                 <label class="space-y-1 text-xs"><span class="font-medium">高（mm）</span><input v-model.number="variant.heightMm" :class="control" type="number" min="0.01" max="100000" step="0.01"></label>
                 <label class="space-y-1 text-xs"><span class="font-medium">尺寸原文</span><input v-model.trim="variant.sizeText" :class="control" maxlength="64"></label>
                 <label class="space-y-1 text-xs"><span class="font-medium">颜色</span><input v-model.trim="variant.color" :class="control" maxlength="64"></label>
+                <label class="space-y-1 text-xs"><span class="font-medium">参考价（元）</span>
+                  <input :value="variant.referencePrice ?? ''" :class="control" type="number" min="0.01" max="9999999999.99" step="0.01"
+                    placeholder="待补" @input="updateReferencePrice(variant, $event)">
+                  <span v-if="variant.evidence?.referencePriceCell" class="block text-muted">
+                    原表 {{ variant.evidence.referencePriceCell.column }}{{ variant.evidence.referencePriceCell.row }}
+                  </span>
+                </label>
                 <label class="min-w-0 space-y-1 text-xs"><span class="font-medium">材质</span>
                   <input v-model.trim="variant.material" :class="control" maxlength="128"
                     @input="variant.materialOrigin = null; variant.suggestedMaterial = undefined">
@@ -574,6 +590,7 @@ async function confirm() {
             <template v-if="!categoryMode">请先选择导入方式。</template>
             <template v-else-if="selectedIssues">有 {{ selectedIssues }} 件还需核对。</template>
             <template v-else-if="capacityBlocked">已超出本工作区剩余名额，请减少选择。</template>
+            <template v-else-if="priceConfirmationRequired">请选择参考价列或确认跳过未匹配的价格。</template>
           </p>
         </div>
         <div class="flex flex-wrap gap-2">

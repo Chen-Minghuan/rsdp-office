@@ -16,6 +16,8 @@ let includeLocalFixture = false
 let rejectCatalogChange = false
 const catalogUpdates = []
 const localProduct = { id: 'LOCAL-TEA-TABLE', revision: 1, name: '本地样品茶几', categoryCode: 'CODE-1', factoryModel: 'LOCAL-001' }
+let localReferencePrice = 1380.5
+const localCatalogRow = () => ({ ...localProduct, primaryImageId: localImageId, minReferencePrice: localReferencePrice, multipleVariants: true })
 const localImageId = 'LOCAL-IMAGE'
 const localSideImageId = 'LOCAL-SIDE-IMAGE'
 const localCollectionId = 'OFFICE-LOCAL-' + localProduct.id
@@ -30,7 +32,7 @@ let supplierCapacityPreview = false
 const capacitySaves = []
 const quotaPreviewProducts = ['LIMIT-1', 'LIMIT-2'].map(factoryModel => ({
   name: '额度验证 ' + factoryModel, categoryCode: 'CODE-1', factoryModel, images: [],
-  variants: [{ name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450 }],
+  variants: [{ name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, referencePrice: 1380.5 }],
 }))
 let catalogPageRequests = 0
 let importRequests = 0
@@ -141,6 +143,10 @@ await context.route('**/api/v1/**', async route => {
   if (url.pathname === '/api/v1/office/local-products') {
     if (request.method() === 'POST') {
       const { products } = request.postDataJSON()
+      if (products[0]?.id === localProduct.id) {
+        localReferencePrice = products[0].variants[0].referencePrice
+        return respond([{ id: localProduct.id, name: localProduct.name, revision: 2 }])
+      }
       capacitySaves.push(products)
       localCapacityUsed += products.length
       return respond(products.map(product => ({ id: product.factoryModel, name: product.name, revision: 1 })))
@@ -148,11 +154,11 @@ await context.route('**/api/v1/**', async route => {
     const query = (url.searchParams.get('search') || '').toLowerCase()
     const matches = [localProduct.name, localProduct.factoryModel].some(value => value.toLowerCase().includes(query))
     return respond({ canWrite: catalogDealer || staffCanEditLocalProducts,
-      products: matches ? [{ ...localProduct, primaryImageId: localImageId }] : [], hasMore: false })
+      products: matches ? [localCatalogRow()] : [], hasMore: false })
   }
   if (url.pathname === `/api/v1/office/local-products/${localProduct.id}`) {
     return respond({ product: localProduct, variants: [
-      { id: 'STANDARD', name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, color: '胡桃色', material: 'PB' },
+      { id: 'STANDARD', name: '默认规格', widthMm: 1200, depthMm: 600, heightMm: 450, color: '胡桃色', material: 'PB', referencePrice: localReferencePrice },
       { id: 'LARGE', name: '加长规格', widthMm: 1400, depthMm: 600, heightMm: 450, color: '深木色', material: '碳晶板' },
     ], images: [localImageId, localSideImageId].map(id => ({ id, mediaType: 'image/png' })),
     canWrite: catalogDealer || staffCanEditLocalProducts })
@@ -189,7 +195,7 @@ await context.route('**/api/v1/**', async route => {
   }
   if (url.pathname === '/api/v1/products/browse' && request.method() === 'GET') {
     if (catalogEnabled) catalogPageRequests++
-    const localCatalog = includeLocalFixture ? [{ ...localProduct, primaryImageId: localImageId }] : []
+    const localCatalog = includeLocalFixture ? [localCatalogRow()] : []
     const sharedCatalog = listMode === 'success' && catalogEnabled ? products : []
     const page = Number(url.searchParams.get('page'))
     const size = Number(url.searchParams.get('size'))
@@ -709,12 +715,15 @@ try {
   await heading('没有找到匹配的商品')
   await page.getByLabel('搜索商品名称或编码').fill('local-001')
   await localCard.waitFor()
+  await localCard.getByText('参考价 ¥ 1,380.50 起', { exact: true }).waitFor()
   await localCard.click()
   await heading(localProduct.name)
   const localDimensions = page.getByTestId('catalog-product-dimensions')
   assert.equal(await localDimensions.innerText(), '1200 × 600 × 450 mm')
+  await page.getByText('¥ 1,380.50', { exact: true }).waitFor()
   await page.getByRole('combobox', { name: '选择规格' }).selectOption('LARGE')
   assert.equal(await localDimensions.innerText(), '1400 × 600 × 450 mm')
+  await page.getByText('价格待补', { exact: true }).waitFor()
   await page.getByText('碳晶板', { exact: true }).waitFor()
   const secondaryImage = page.getByRole('button', { name: '查看商品图片 2' })
   await secondaryImage.click()
@@ -745,7 +754,10 @@ try {
   await heading('编辑商品')
   assert.equal(await page.getByLabel('宽（mm）').first().inputValue(), '1200')
   assert.equal(await page.getByLabel('宽（mm）').first().isEnabled(), true)
-  await page.getByRole('button', { name: '保存', exact: true }).waitFor()
+  await page.getByLabel('参考价（元）').first().fill('1420.5')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByText('参考价 ¥ 1,420.50 起', { exact: true }).waitFor()
+  assert.equal(localReferencePrice, 1420.5)
   staffCanEditLocalProducts = false
   await page.goto(`${baseUrl}/products`)
   await localCard.waitFor()
@@ -953,6 +965,7 @@ try {
   await page.getByText('已导入 1 件商品', { exact: true }).waitFor()
   await page.waitForFunction(() => document.querySelector('[aria-label="本地商品录入占用率"][role="progressbar"]')?.getAttribute('aria-valuenow') === '5000')
   assert.deepEqual(capacitySaves.map(products => products.map(product => product.factoryModel)), [['LIMIT-1']])
+  assert.equal(capacitySaves[0][0].variants[0].referencePrice, 1380.5)
   await page.getByRole('checkbox', { name: '选择 LIMIT-2' }).check()
   assert.equal(await confirmWorkbook.isDisabled(), true)
   supplierCapacityPreview = true

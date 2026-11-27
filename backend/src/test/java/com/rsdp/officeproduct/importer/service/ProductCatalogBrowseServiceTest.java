@@ -120,7 +120,7 @@ class ProductCatalogBrowseServiceTest {
             long offset = call.getArgument(4);
             int size = call.getArgument(5);
             return IntStream.range((int) offset, (int) offset + size).mapToObj(index ->
-                new CatalogItem("local-" + index, 1, "本地商品", "TB", "", "MODEL-" + index, null)).toList();
+                new CatalogItem("local-" + index, 1, "本地商品", "TB", "", "MODEL-" + index, null, null, false)).toList();
         });
     }
 

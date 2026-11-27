@@ -11,6 +11,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -42,17 +43,19 @@ final class SupplierProductWorkbook {
     private static final Pattern SINGLE_DIMENSION = Pattern.compile("^" + DIMENSION + MILLIMETRES + "$", Pattern.CASE_INSENSITIVE);
 
     private record Columns(int model, int name, int picture, int size, int width, int depth, int height,
-                           int color, int material, int category, int description) {
+                           int color, int material, int category, int description, int referencePrice) {
         boolean hasSize() { return size >= 0 || width >= 0 || depth >= 0; }
     }
     private record Entry(Source source, String model, String name, Row row, Columns columns) {}
-    private record LocatedRow(Entry entry, Map<String, Boolean> pictures, String description, Source descriptionCell) {}
+    private record Price(BigDecimal amount, Source cell) {}
+    private record LocatedRow(Entry entry, Map<String, Boolean> pictures, String description, Source descriptionCell, Price price) {}
     private record CatalogSection(List<Entry> rows, int start, int end) {}
 
     private final XSSFWorkbook workbook;
     private final DataFormatter formatter;
     private final List<RowError> errors = new ArrayList<>();
     private int sourceRows;
+    private boolean unassignedPriceColumn;
 
     SupplierProductWorkbook(XSSFWorkbook workbook, DataFormatter formatter) {
         this.workbook = workbook;
@@ -103,21 +106,36 @@ final class SupplierProductWorkbook {
                     }
                     int descriptionColumn = entry.columns().description();
                     int descriptionRow = descriptionColumn < 0 ? entry.row().getRowNum()
-                        : mergedDescriptionRow(merges, entry.row().getRowNum(), descriptionColumn, section.start());
+                        : mergedValueRow(merges, entry.row().getRowNum(), descriptionColumn, section.start());
                     String description = WorkbookMaterial.description(text(sheet.getKey().getRow(descriptionRow), descriptionColumn));
                     Source descriptionCell = description.isEmpty() ? null
                         : new Source(entry.source().sheet(), descriptionRow, descriptionColumn);
                     products.computeIfAbsent(entry.model(), key -> new ArrayList<>())
-                        .add(new LocatedRow(entry, candidates, description, descriptionCell));
+                        .add(new LocatedRow(entry, candidates, description, descriptionCell, readPrice(sheet.getKey(), entry, section, merges)));
                 }
             }
         }
         if (products.isEmpty()) throw new BusinessException("已识别供应商表头，未找到可预览的商品行");
+        var mappingSheets = mapping == null && unassignedPriceColumn ? SupplierWorkbookMapping.inspect(workbook, formatter) : List.<SupplierWorkbookMapping.Sheet>of();
         return new Preview(List.of(), errors,
-            new SupplierPreview(products.values().stream().map(this::product).toList(), pictures.includedImages()), List.of());
+            new SupplierPreview(products.values().stream().map(this::product).toList(), pictures.includedImages()), mappingSheets);
     }
 
-    private int mergedDescriptionRow(List<CellRangeAddress> merges, int row, int column, int firstDataRow) {
+    private Price readPrice(XSSFSheet sheet, Entry entry, CatalogSection section, List<CellRangeAddress> merges) {
+        int column = entry.columns().referencePrice();
+        if (column < 0) return null;
+        int row = mergedValueRow(merges, entry.row().getRowNum(), column, section.start());
+        var cell = new Source(sheet.getSheetName(), row, column);
+        try {
+            BigDecimal value = WorkbookReferencePrice.parse(text(sheet.getRow(row), column));
+            return value == null ? null : new Price(value, cell);
+        } catch (BusinessException error) {
+            errors.add(cell.issue(error.getMessage()));
+            return null;
+        }
+    }
+
+    private int mergedValueRow(List<CellRangeAddress> merges, int row, int column, int firstDataRow) {
         return merges.stream().filter(merge -> merge.getFirstColumn() == column && merge.getLastColumn() == column
                 && row >= merge.getFirstRow() && row <= merge.getLastRow() && merge.getFirstRow() >= firstDataRow)
             .map(CellRangeAddress::getFirstRow).findFirst().orElse(row);
@@ -150,7 +168,7 @@ final class SupplierProductWorkbook {
     private List<CatalogSection> mappedSections(XSSFSheet sheet, SupplierWorkbookMapping.Selection mapping) {
         var block = new Columns(mapping.column(MODEL), mapping.column(NAME), mapping.column(PICTURE), mapping.column(SIZE),
             mapping.column(WIDTH_MM), mapping.column(DEPTH_MM), mapping.column(HEIGHT_MM), mapping.column(COLOR),
-            mapping.column(MATERIAL), mapping.column(CATEGORY), mapping.column(DESCRIPTION));
+            mapping.column(MATERIAL), mapping.column(CATEGORY), mapping.column(DESCRIPTION), mapping.column(REFERENCE_PRICE));
         var header = sheet.getRow(mapping.headerRow() - 1);
         var sections = new ArrayList<CatalogSection>();
         var entries = new ArrayList<Entry>();
@@ -198,7 +216,8 @@ final class SupplierProductWorkbook {
             int photo = PICTURE_HEADERS.contains(label(text(row, code - 1))) ? code - 1 : -1;
             result.add(new Columns(code, code + 1, photo, field(row, code + 2, end, SIZE_HEADERS), -1, -1, -1,
                 field(row, code + 2, end, COLOR_HEADERS), field(row, code + 2, end, MATERIAL_HEADERS),
-                field(row, code + 2, end, CATEGORY_HEADERS), field(row, code + 2, end, WorkbookMaterial.DESCRIPTION_HEADERS)));
+                field(row, code + 2, end, CATEGORY_HEADERS), field(row, code + 2, end, WorkbookMaterial.DESCRIPTION_HEADERS),
+                referencePriceColumn(row, code + 2, end)));
         }
         return result;
     }
@@ -206,6 +225,15 @@ final class SupplierProductWorkbook {
     private int field(Row row, int from, int end, Set<String> names) {
         for (int column = from; column < end; column++) {
             if (names.contains(label(text(row, column)))) return column;
+        }
+        return -1;
+    }
+
+    private int referencePriceColumn(Row row, int from, int end) {
+        int first = field(row, from, end, WorkbookReferencePrice.HEADERS);
+        if (first >= 0 && field(row, first + 1, end, WorkbookReferencePrice.HEADERS) < 0) return first;
+        if (first >= 0 || field(row, from, end, WorkbookReferencePrice.AMBIGUOUS_HEADERS) >= 0) {
+            unassignedPriceColumn = true;
         }
         return -1;
     }
@@ -251,14 +279,22 @@ final class SupplierProductWorkbook {
         List<LocatedRow> specifications = detailed.isEmpty() ? rows : detailed;
         var first = specifications.getFirst().entry();
         var variants = new LinkedHashMap<Variant, VariantEvidence>();
+        var prices = new LinkedHashMap<Variant, Price>();
+        var conflicts = new HashSet<Variant>();
         for (var row : specifications) {
             var entry = row.entry();
             String explicit = WorkbookMaterial.explicit(text(entry.row(), entry.columns().material()));
             String material = explicit.isEmpty() ? WorkbookMaterial.fromDescription(row.description()) : explicit;
             MaterialSource source = !explicit.isEmpty() ? MaterialSource.COLUMN : material.isEmpty() ? null : MaterialSource.DESCRIPTION;
-            var evidence = new VariantEvidence(row.description(), row.descriptionCell(), source);
+            var evidence = new VariantEvidence(row.description(), row.descriptionCell(), source, null);
             for (Variant variant : variants(entry, material)) {
                 variants.merge(variant, evidence, (firstEvidence, next) -> firstEvidence.description().isEmpty() ? next : firstEvidence);
+                if (row.price() != null) {
+                    Price earlier = prices.putIfAbsent(variant, row.price());
+                    if (earlier != null && earlier.amount().compareTo(row.price().amount()) != 0 && conflicts.add(variant)) {
+                        errors.add(row.price().cell().issue("同一规格有多个参考价，请在商品预览中核对"));
+                    }
+                }
             }
         }
         var candidates = new LinkedHashMap<String, Boolean>();
@@ -271,12 +307,20 @@ final class SupplierProductWorkbook {
             images.add(new ImageCandidate(candidate.getKey(), include));
             if (include) selected++;
         }
-        var input = new Input(null, null, first.name(), "", "", first.model(), List.copyOf(variants.keySet()), List.of());
+        var resolvedVariants = new ArrayList<Variant>();
+        var resolvedEvidence = new ArrayList<VariantEvidence>();
+        variants.forEach((variant, evidence) -> {
+            Price price = conflicts.contains(variant) ? null : prices.get(variant);
+            resolvedVariants.add(price == null ? variant : variant.withReferencePrice(price.amount()));
+            resolvedEvidence.add(new VariantEvidence(evidence.description(), evidence.descriptionCell(), evidence.materialSource(),
+                price == null ? null : price.cell()));
+        });
+        var input = new Input(null, null, first.name(), "", "", first.model(), resolvedVariants, List.of());
         var categories = rows.stream().map(LocatedRow::entry).map(entry -> text(entry.row(), entry.columns().category()))
             .filter(value -> !value.isBlank()).distinct().toList();
         if (categories.size() > 1) errors.add(first.source().issue("同型号在原表有多个品类，请核对"));
         return new SupplierProduct(input, rows.stream().map(r -> r.entry().source()).toList(), images,
-            categories.size() == 1 ? categories.getFirst() : null, List.copyOf(variants.values()));
+            categories.size() == 1 ? categories.getFirst() : null, resolvedEvidence);
     }
 
     private List<Variant> variants(Entry entry, String material) {
@@ -307,7 +351,7 @@ final class SupplierProductWorkbook {
         String name = width == null || depth == null ? "默认规格"
             : String.join("×", height == null ? List.of(width, depth) : List.of(width, depth, height));
         return new Variant(null, name, mm(width), mm(depth), mm(height), raw,
-            text(entry.row(), entry.columns().color()), material);
+            text(entry.row(), entry.columns().color()), material, null);
     }
 
     private BigDecimal mm(String value) {

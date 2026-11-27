@@ -2,6 +2,7 @@
 import type { ImportedProduct } from '~/types/imported-products'
 import { catalogProductPath, localProductId } from '~/utils/catalogProductReference'
 import { catalogSourceLabel } from '~/utils/catalogSource'
+import { localReferencePrice } from '~/utils/localReferencePrice'
 
 const props = defineProps<{
   product: ImportedProduct
@@ -38,7 +39,12 @@ function dragProduct(event: DragEvent) {
     <template #metadata>
       <template v-if="isLocal">
         <span v-if="localCategory" class="truncate text-xs text-neutral-600">{{ localCategory }}</span>
-        <span class="mt-auto pt-1 text-xs font-medium text-accent-ink">本地商品</span>
+        <div class="mt-auto flex flex-wrap items-baseline justify-between gap-x-1.5 gap-y-0.5 pt-1">
+          <span class="text-xs font-medium text-accent-ink">本地商品</span>
+          <span class="text-xs tabular-nums" :class="product.minReferencePrice == null ? 'text-muted' : 'font-semibold text-accent-ink'">
+            {{ product.minReferencePrice == null ? '' : '参考价 ' }}{{ localReferencePrice(product.minReferencePrice, product.multipleVariants) }}
+          </span>
+        </div>
       </template>
       <template v-else>
         <span v-if="product.sourceChannel" class="truncate text-xs text-neutral-600">

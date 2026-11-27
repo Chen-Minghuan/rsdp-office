@@ -7,6 +7,7 @@ export interface LocalProductVariant {
   sizeText?: string
   color?: string
   material?: string
+  referencePrice?: number | null
 }
 
 export interface LocalProductImage {
@@ -32,7 +33,11 @@ export type LocalProductSummary = Pick<LocalProductInput, 'name' | 'categoryCode
   factoryCode: string
 }
 
-export type LocalProductCatalogItem = LocalProductSummary & { primaryImageId?: string | null }
+export type LocalProductCatalogItem = LocalProductSummary & {
+  primaryImageId?: string | null
+  minReferencePrice?: number | null
+  multipleVariants?: boolean
+}
 
 export interface LocalProductDetail {
   product: LocalProductSummary
@@ -71,6 +76,7 @@ export interface LocalProductWorkbookIssue {
 export interface WorkbookVariantEvidence {
   description: string
   descriptionCell?: { sheet: string, row: number, column: string } | null
+  referencePriceCell?: { sheet: string, row: number, column: string } | null
   materialSource?: 'COLUMN' | 'DESCRIPTION' | null
 }
 
@@ -99,7 +105,7 @@ export interface WorkbookImportProgress {
   total: number
 }
 
-export type WorkbookField = 'MODEL' | 'NAME' | 'PICTURE' | 'SIZE' | 'WIDTH_MM' | 'DEPTH_MM' | 'HEIGHT_MM' | 'COLOR' | 'MATERIAL' | 'CATEGORY' | 'DESCRIPTION'
+export type WorkbookField = 'MODEL' | 'NAME' | 'PICTURE' | 'SIZE' | 'WIDTH_MM' | 'DEPTH_MM' | 'HEIGHT_MM' | 'COLOR' | 'MATERIAL' | 'CATEGORY' | 'DESCRIPTION' | 'REFERENCE_PRICE'
 export type WorkbookFieldColumns = Partial<Record<WorkbookField, number>>
 
 export interface WorkbookMappingSheet {

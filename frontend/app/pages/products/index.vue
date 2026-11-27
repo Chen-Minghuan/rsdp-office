@@ -129,6 +129,8 @@ const pageProducts = computed<ImportedProduct[]>(() => serverProducts.value.flat
     categoryPath: [localCategoryLabel(item.categoryCode)],
     primaryImageUrl: item.primaryImageId ? api.localProductImagePath(item.primaryImageId) : null,
     retailPrice: null,
+    minReferencePrice: item.minReferencePrice,
+    multipleVariants: item.multipleVariants,
     status: 'active',
     createdAt: '',
     updatedAt: '',

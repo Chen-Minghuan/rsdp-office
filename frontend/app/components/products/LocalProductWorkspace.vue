@@ -3,6 +3,7 @@ import type { LocalProductCapacity, LocalProductCatalogItem, LocalProductImage, 
 import { withApiBase } from '~/utils/apiBase'
 import { createUuid } from '~/utils/uuid'
 import { splitWorkbookProducts, workbookPreviewPageSize, workbookSize } from '~/utils/localProductImport'
+import { localReferencePrice } from '~/utils/localReferencePrice'
 
 const api = useOfficeApi()
 const route = useRoute()
@@ -26,6 +27,8 @@ const workbookFile = shallowRef<File | null>(null)
 const templatePage = ref(1)
 const templateSelection = ref(new Set<string>())
 const supplierSelectedCount = ref(0)
+const showWorkbookMapping = ref(false)
+const skipUnmappedPrices = ref(false)
 const importProgress = ref<WorkbookImportProgress | null>(null)
 const readingWorkbook = ref(false)
 const dragActive = ref(false)
@@ -107,6 +110,11 @@ async function load(next = page.value) {
 
 function emptyVariant(): LocalProductVariant {
   return { name: '', widthMm: null, depthMm: null, heightMm: null }
+}
+
+function updateReferencePrice(variant: LocalProductVariant, event: Event) {
+  const input = event.target as HTMLInputElement
+  variant.referencePrice = input.value ? input.valueAsNumber : null
 }
 
 function categoryLabel(code: string) {
@@ -252,6 +260,8 @@ async function previewWorkbook(file: File, mapping?: WorkbookMappingSelection) {
   error.value = ''
   try {
     const result = await api.previewLocalProductWorkbook(file, mapping)
+    showWorkbookMapping.value = !result.supplier && Boolean(result.mappingSheets?.length)
+    skipUnmappedPrices.value = false
     supplierSelectedCount.value = 0
     templateSelection.value = new Set(result.products.map(product => product.factoryModel))
     preview.value = result
@@ -381,6 +391,9 @@ async function importTemplate() {
             :to="{ path: `/products/local/${encodeURIComponent(row.id)}` }">
             <template #metadata>
               <span class="truncate text-xs text-neutral-600">{{ categoryLabel(row.categoryCode) }}</span>
+              <span class="mt-auto pt-1 text-xs tabular-nums" :class="row.minReferencePrice == null ? 'text-muted' : 'font-semibold text-accent-ink'">
+                {{ row.minReferencePrice == null ? '' : '参考价 ' }}{{ localReferencePrice(row.minReferencePrice, row.multipleVariants) }}
+              </span>
             </template>
           </ProductCatalogTile>
         </ProductCatalogGrid>
@@ -414,6 +427,10 @@ async function importTemplate() {
                 <label class="space-y-1 text-sm"><span>尺寸原文</span><input v-model.trim="variant.sizeText" :class="control" maxlength="64"></label>
                 <label class="space-y-1 text-sm"><span>颜色</span><input v-model.trim="variant.color" :class="control" maxlength="64"></label>
                 <label class="space-y-1 text-sm"><span>材质</span><input v-model.trim="variant.material" :class="control" maxlength="128"></label>
+                <label class="space-y-1 text-sm"><span>参考价（元）</span>
+                  <input :value="variant.referencePrice ?? ''" :class="control" type="number" min="0.01" max="9999999999.99" step="0.01"
+                    placeholder="待补" @input="updateReferencePrice(variant, $event)">
+                </label>
                 <button v-if="canWrite && form.variants.length > 1" type="button" class="justify-self-end self-end px-2 py-2 text-sm text-red-700 hover:underline" @click="form.variants.splice(index, 1)">移除此规格</button>
               </div>
             </div>
@@ -507,12 +524,22 @@ async function importTemplate() {
               </li>
             </ul>
           </details>
-          <ProductsWorkbookFieldMapping v-if="preview.mappingSheets?.length" :sheets="preview.mappingSheets" :busy="busy"
+          <div v-if="preview.supplier && preview.mappingSheets?.length" class="flex flex-wrap items-center gap-x-4 gap-y-2 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <span>原表有未确认用途的价格列，请选择展示价列或跳过这些价格。</span>
+            <button type="button" class="font-semibold underline" :disabled="busy" @click="showWorkbookMapping = !showWorkbookMapping">
+              {{ showWorkbookMapping ? '返回商品预览' : '选择参考价列' }}
+            </button>
+            <label v-if="!showWorkbookMapping" class="inline-flex items-center gap-2">
+              <input v-model="skipUnmappedPrices" type="checkbox" :disabled="busy">跳过未确认的价格
+            </label>
+          </div>
+          <ProductsWorkbookFieldMapping v-if="showWorkbookMapping && preview.mappingSheets?.length" :sheets="preview.mappingSheets" :busy="busy"
             @apply="applyWorkbookMapping" @busy-change="busy = $event" />
           <ProductsSupplierWorkbookReview v-else-if="preview.supplier" :key="preview.previewId ?? workbookName"
             :preview="preview.supplier" :categories="categories" :busy="busy"
             :preview-id="preview.previewId" :image-sizes="preview.imageSizes ?? {}" :file-bytes="workbookFile?.size ?? 0"
             :progress="importProgress" :capacity-blocked="capacityBlocksImport" :save-batch="saveWorkbook"
+            :price-confirmation-required="Boolean(preview.mappingSheets?.length) && !skipUnmappedPrices"
             @selection-change="supplierSelectedCount = $event" @busy-change="busy = $event" />
           <section v-else class="border border-line bg-white" aria-label="模板导入预览">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-5">
@@ -535,7 +562,15 @@ async function importTemplate() {
                   <span class="min-w-0">{{ product.name }} <span class="font-normal text-muted">· {{ product.factoryModel }}</span></span>
                 </label>
                 <span class="break-words text-muted">{{ categoryLabel(product.categoryCode) }}</span>
-                <span class="text-muted">{{ product.variants.length }} 个规格 · {{ product.images.length }} 张图</span>
+                <div class="space-y-1 text-muted">
+                  <span>{{ product.variants.length }} 个规格 · {{ product.images.length }} 张图</span>
+                  <details v-if="product.variants.some(variant => variant.referencePrice != null)">
+                    <summary class="cursor-pointer">规格参考价</summary>
+                    <div v-for="(variant, index) in product.variants" :key="index" class="text-xs">
+                      {{ variant.name }} · {{ localReferencePrice(variant.referencePrice) }}
+                    </div>
+                  </details>
+                </div>
               </li>
             </ul>
             <p v-else class="px-5 py-6 text-sm text-muted">没有可导入的商品。可查看原表提示后更换文件。</p>

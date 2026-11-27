@@ -86,7 +86,8 @@ public class LocalProductService {
             order by position
             """, (r, i) -> new Variant(r.getString("variant_id"), r.getString("display_name"),
             r.getBigDecimal("width_mm"), r.getBigDecimal("depth_mm"), r.getBigDecimal("height_mm"),
-            r.getString("size_text"), r.getString("color_text"), r.getString("material_text")), workspace, productId);
+            r.getString("size_text"), r.getString("color_text"), r.getString("material_text"),
+            r.getBigDecimal("reference_price")), workspace, productId);
         List<ImageRef> images = jdbc.query("""
             select image_id, media_type from office_product_image
             where workspace_id = ? and product_id = ? and position is not null order by position, image_id
@@ -228,16 +229,16 @@ public class LocalProductService {
             if (variant.id() == null) {
                 jdbc.update("""
                     insert into office_product_variant(variant_id, workspace_id, product_id, display_name,
-                        width_mm, depth_mm, height_mm, size_text, color_text, material_text, position)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        width_mm, depth_mm, height_mm, size_text, color_text, material_text, position, reference_price)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, id, workspace, product, variant.name(), variant.widthMm(), variant.depthMm(), variant.heightMm(),
-                    variant.sizeText(), variant.color(), variant.material(), result.size());
+                    variant.sizeText(), variant.color(), variant.material(), result.size(), variant.referencePrice());
             } else if (jdbc.update("""
                 update office_product_variant set display_name = ?, width_mm = ?, depth_mm = ?, height_mm = ?,
-                    size_text = ?, color_text = ?, material_text = ?, position = ?, active = true
+                    size_text = ?, color_text = ?, material_text = ?, position = ?, reference_price = ?, active = true
                 where workspace_id = ? and product_id = ? and variant_id = ?
                 """, variant.name(), variant.widthMm(), variant.depthMm(), variant.heightMm(), variant.sizeText(),
-                variant.color(), variant.material(), result.size(), workspace, product, id) != 1) {
+                variant.color(), variant.material(), result.size(), variant.referencePrice(), workspace, product, id) != 1) {
                 throw new BusinessException("规格不属于当前商品");
             }
             var dimensions = new Dimensions(variant.widthMm(), variant.depthMm(), variant.heightMm(), "mm");
@@ -314,7 +315,8 @@ public class LocalProductService {
             if (v == null) throw new BusinessException("规格资料不能为空");
             return new Variant(v.id(), required(v.name(), "规格名称", 128), mm(v.widthMm(), "宽度"),
                 mm(v.depthMm(), "进深"), v.heightMm() == null ? null : mm(v.heightMm(), "高度"),
-                optional(v.sizeText(), "尺寸原文", 64), optional(v.color(), "颜色", 64), optional(v.material(), "材质", 128));
+                optional(v.sizeText(), "尺寸原文", 64), optional(v.color(), "颜色", 64), optional(v.material(), "材质", 128),
+                referencePrice(v.referencePrice()));
         }).toList();
         var images = input.images() == null ? List.<ImageInput>of() : input.images();
         if (images.size() > MAX_IMAGES) throw new BusinessException("每个商品最多 6 张图片");
@@ -347,6 +349,15 @@ public class LocalProductService {
             throw new BusinessException(label + "须为 0–100000 毫米之间的正数，最多两位小数");
         }
         return value.setScale(2);
+    }
+
+    static BigDecimal referencePrice(BigDecimal amount) {
+        if (amount == null) return null;
+        if (amount.signum() <= 0 || amount.compareTo(new BigDecimal("9999999999.99")) > 0
+                || amount.stripTrailingZeros().scale() > 2) {
+            throw new BusinessException("参考价须为正数，最多十位整数和两位小数");
+        }
+        return amount.setScale(2);
     }
 
     private String required(String value, String label, int max) {
