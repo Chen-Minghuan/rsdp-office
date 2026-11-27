@@ -92,9 +92,10 @@ try {
   })
   // 关闭吸附，保证拖动位移可精确断言。
   await page.getByRole('button', { name: '家具吸附', exact: true }).click()
-  const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
   async function dragFirstPreview(dx, dy) {
     const item = previewItems.first()
+    // The canvas refits when the furniture strip appears or disappears.
+    const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
     const before = await item.evaluate(el => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) }))
     const box = await item.boundingBox()
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -142,6 +143,7 @@ try {
   await page.getByTestId('design-workflow-sidebar').waitFor()
   const afterReload = (await state()).objects.filter(object => object.kind === 'furniture').map(item => [item.x, item.y, item.w, item.h, item.rotation]).sort()
   assert.deepEqual(afterReload, beforeReload, '刷新后保留手动调整后的排版几何')
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('auto-clear-layout').click()
   await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
 

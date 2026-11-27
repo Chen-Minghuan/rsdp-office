@@ -713,13 +713,24 @@ try {
     const boundsB = ringBounds(mergeB.polygon)
     assert.equal(await zoneCount(), before + 2, '合并前画好两个相邻空间')
     assert.equal(boundsB.minX, boundsA.maxX, 'B 与 A 共享边')
-    const disjointBounds = ringBounds(zonesNow[2].polygon)
     const midAY = (boundsA.minY + boundsA.maxY) / 2
-    // 拒绝：合并两个不相交空间
+    // 拒绝：点击不相交且未被其它轮廓遮住的空间。
     await page.locator('[data-testid="tool-merge"]').click()
     await page.locator('[data-testid="boolean-bar"]').waitFor()
     await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
-    await worldClick((disjointBounds.minX + disjointBounds.maxX) / 2, (disjointBounds.minY + disjointBounds.maxY) / 2)
+    let disjointPoint
+    for (const zone of zonesNow.slice(0, -2)) {
+      const bounds = ringBounds(zone.polygon)
+      const disjoint = bounds.maxX < boundsA.minX || bounds.minX > boundsA.maxX
+        || bounds.maxY < boundsA.minY || bounds.minY > boundsA.maxY
+      if (!disjoint) continue
+      const center = [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2]
+      const client = await worldToClient(...center)
+      const target = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-space-id]')?.getAttribute('data-space-id'), client)
+      if (target === zone.id) { disjointPoint = center; break }
+    }
+    assert.ok(disjointPoint, '存在可点击的不相交空间')
+    await worldClick(...disjointPoint)
     await page.locator('.review-toast').getByText('不相连', { exact: false }).waitFor()
     assert.equal(await zoneCount(), before + 2, '不相连合并不改动空间')
     assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '不相连合并不改动轮廓')
@@ -750,7 +761,7 @@ try {
     // 拒绝：剔除不相交空间
     await page.locator('[data-testid="tool-subtract"]').click()
     await worldClick((boundsA.minX + boundsA.maxX) / 2, midAY)
-    await worldClick((disjointBounds.minX + disjointBounds.maxX) / 2, (disjointBounds.minY + disjointBounds.maxY) / 2)
+    await worldClick(...disjointPoint)
     await page.locator('.review-toast').getByText('没有重叠区域', { exact: false }).waitFor()
     assert.deepEqual((await zoneById(mergeA.id)).polygon, mergeA.polygon, '不相交剔除不改动轮廓')
     await page.locator('[data-testid="boolean-cancel"]').click()
