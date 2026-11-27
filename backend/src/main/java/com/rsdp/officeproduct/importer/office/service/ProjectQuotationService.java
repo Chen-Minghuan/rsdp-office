@@ -19,7 +19,10 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** 项目报价的权限、流程和确认事务入口。 */
@@ -35,6 +38,7 @@ public class ProjectQuotationService {
     private final ProjectQuotationPreviewBuilder previewBuilder;
     private final ProjectQuotationDraftBuilder draftBuilder;
     private final QuotationRecordAssembler recordAssembler;
+    private final OfficeProposalConfirmationService proposalConfirmations;
 
     public ProjectQuotationPreviewDto preview(String projectId, String mode, BigDecimal value) {
         OfficeDesignProject project = requireProjectAccess(projectId);
@@ -45,6 +49,9 @@ public class ProjectQuotationService {
     @Transactional
     public ProjectQuotationRecordDto confirm(String projectId, ConfirmProjectQuotationRequest request) {
         ProjectQuotationDraftBuilder.Draft draft = draftBuilder.build(requireProjectAccess(projectId), request);
+        // 软检查：方案确认走楼层工作区锁、报价走项目锁，两把锁不互斥，门禁通过后事务提交前方案理论上仍可被改，
+        // 与“空间复核→方案确认”的既有竞态同级，故放在项目锁之前 fail-fast，不为它拉长锁持有时间。
+        requireConfirmedSchemes(draft);
         OfficeQuotation quotation = draft.quotation();
         quotation.setFeesJson(recordAssembler.writeFees(draft.fees()));
 
@@ -126,6 +133,25 @@ public class ProjectQuotationService {
         ProjectQuotationRecordDto record = latest(projectId);
         if (record == null) throw new BusinessException("项目暂无已确认报价");
         return record;
+    }
+
+    /** 报价行涉及的每个楼层都必须持有当前有效的方案确认快照；缺失或已失效即拒绝确认报价。预览/试算不调用此门禁。 */
+    private void requireConfirmedSchemes(ProjectQuotationDraftBuilder.Draft draft) {
+        Map<String, String> floors = new LinkedHashMap<>();
+        for (OfficeQuotationLine row : draft.rows()) {
+            floors.putIfAbsent(row.getFloorId(), row.getFloorName());
+        }
+        List<String> unconfirmed = new ArrayList<>();
+        for (Map.Entry<String, String> floor : floors.entrySet()) {
+            OfficeProposalConfirmationService.Status status = proposalConfirmations.latest(floor.getKey());
+            if (status == null || !status.current()) {
+                unconfirmed.add(floor.getValue());
+            }
+        }
+        if (!unconfirmed.isEmpty()) {
+            throw new BusinessException("楼层「" + String.join("、", unconfirmed)
+                + "」的方案尚未确认或已失效，请先在项目清单页确认当前方案后再确认报价");
+        }
     }
 
     private OfficeQuotation findLatest(String projectId, boolean confirmedOnly) {

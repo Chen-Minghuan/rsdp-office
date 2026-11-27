@@ -215,7 +215,7 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 
 ### 5.2 项目报价存储（QUOTE-001）
 
-报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
+报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。确认报价时按报价行涉及的楼层逐一要求 `office_proposal_confirmation` 存在当前有效的方案确认快照（缺失或失效即拒绝，2026-11-25，QUOTE-002）；试算与导出不拦截。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)、[报价方案确认门禁](tasks/QUOTE-002-quotation-proposal-gate.md)。
 
 2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在最终报价隐藏时用它展示上一次报价时间。
 

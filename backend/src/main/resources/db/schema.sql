@@ -136,6 +136,7 @@ create table if not exists office_room_scheme (
     zone_id varchar(64) not null,
     active_slot varchar(1) not null check (active_slot in ('A', 'B')),
     inactive_json jsonb not null,
+    confirmed_slot varchar(1) check (confirmed_slot in ('A', 'B')),
     primary key (floor_id, zone_id)
 );
 

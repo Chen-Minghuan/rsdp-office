@@ -8,6 +8,7 @@ import com.rsdp.officeproduct.importer.common.BusinessException;
 import com.rsdp.officeproduct.importer.office.dto.CanvasDto;
 import com.rsdp.officeproduct.importer.office.dto.CartItemDto;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeRoomSchemeMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
 import com.rsdp.officeproduct.importer.service.VisionImagePreparer;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class OfficeProposalConfirmationService {
     private final OfficeProjectAccessService access;
     private final OfficeWorkspaceLockMapper locks;
     private final OfficeProposalConfirmationMapper confirmations;
+    private final OfficeRoomSchemeMapper roomSchemes;
     private final ObjectMapper json;
 
     @Transactional
@@ -66,6 +68,7 @@ public class OfficeProposalConfirmationService {
             throw new BusinessException("请先处理清单中未分区的商品");
         }
         office.checkProposalCatalog(floorId);
+        requireSchemeChoicesConfirmed(floorId, objects);
         Snapshot snapshot = snapshot(canvas, cart);
         var previous = confirmations.latest(floorId);
         if (current(previous, snapshot)) return status(previous, true);
@@ -103,6 +106,21 @@ public class OfficeProposalConfirmationService {
         } catch (JsonProcessingException error) {
             throw new BusinessException("已确认的方案快照无法读取");
         }
+    }
+
+    /** 已创建 Plan B 的空间必须先确认使用 Plan A 还是 Plan B，才能确认楼层方案。 */
+    private void requireSchemeChoicesConfirmed(String floorId, JsonNode objects) {
+        var unconfirmed = roomSchemes.findUnconfirmedZoneIds(floorId);
+        if (unconfirmed.isEmpty()) return;
+        var names = new java.util.HashMap<String, String>();
+        for (JsonNode item : objects) {
+            if ("zone".equals(item.path("kind").asText())) names.put(item.path("id").asText(), item.path("name").asText());
+        }
+        var labels = unconfirmed.stream().map(id -> {
+            String name = names.get(id);
+            return name == null || name.isBlank() ? id : name;
+        }).toList();
+        throw new BusinessException("还有 " + labels.size() + " 个空间未确认使用 Plan A 或 Plan B：" + String.join("、", labels));
     }
 
     private boolean current(OfficeProposalConfirmationMapper.Row row, Snapshot snapshot) {

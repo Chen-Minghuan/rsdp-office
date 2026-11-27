@@ -5,7 +5,7 @@ import type { CatalogBrowseFacets, CatalogBrowsePage, CatalogCapabilities, Catal
 import { FILTER_KEYS } from '~/utils/productFilter'
 import type { FavoriteFolder, ProjectFavoriteState } from '~/types/favorites'
 import type { WorkspaceType } from '~/utils/workspaceType'
-import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
+import type { BundleItem, ProductBundle, ProposalConfirmation, RoomSchemeResult, RoomSchemeSlots, RoomSchemeState, SchemeSlot, SchemeVersion } from '~/types/productScheme'
 import type {
   LocalProductInput, LocalProductCatalogItem, LocalProductDetail, LocalProductWorkbookPreview,
   LocalProductImportDetail, LocalProductImportRecord,
@@ -218,6 +218,14 @@ export function useOfficeApi() {
     payload: SchemeVersion & { zoneId: string; targetSlot?: SchemeSlot; automatic?: boolean; items?: BundleItem[] }): Promise<RoomSchemeResult> {
     const result = await request<{ canvas: CanvasDto; cart: CartDto[]; scheme: RoomSchemeState | null }>('POST', `${schemePath(floorId)}/${action}`, payload)
     return { ...result, canvas: { ...result.canvas, schemeToken: result.canvas.schemeToken ?? null }, cart: result.cart.map(cartItem) }
+  }
+
+  function loadRoomSchemeSlots(floorId: string, zoneId: string) {
+    return request<RoomSchemeSlots>('GET', `${schemePath(floorId)}/slots?zoneId=${encodeURIComponent(zoneId)}`)
+  }
+
+  function changeRoomSchemeChoice(floorId: string, action: 'confirm-choice' | 'cancel-choice', zoneId: string) {
+    return request<RoomSchemeState>('POST', `${schemePath(floorId)}/${action}`, { zoneId })
   }
 
   function loadProposalConfirmation(floorId: string) {
@@ -621,6 +629,8 @@ export function useOfficeApi() {
     saveCanvas,
     loadRoomScheme,
     changeRoomScheme,
+    loadRoomSchemeSlots,
+    changeRoomSchemeChoice,
     loadProposalConfirmation,
     confirmProposal,
     loadProductBundles,
