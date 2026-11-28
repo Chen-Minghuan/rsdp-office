@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import SpatialCanvas from './SpatialCanvas.vue'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
-import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
+import { productSchemeRoute, projectDrawingRoute } from '~/utils/projectBenchRoutes'
 import SpaceTemplateDialog from './SpaceTemplateDialog.vue'
 import { reviewScene, reviewSceneBounds, geometryForZone, zoneMeasurements, ringProblem, zoneLayoutProblem, zoneReviewMessage } from '~/utils/spatial/review'
 import { fitCameraToBoundsBySystem, toScreen } from '~/utils/spatial/camera'
@@ -761,7 +761,7 @@ function advance() {
   if (tracing.value || sketching.value || obstacleDraft.value || obstacleManipulation.value) return
   if (store.layoutEntryBlocker) return
   const zone = store.zones.find(item => item.id === selectedId.value) || store.zones[0]
-  if (zone) router.push({ path: '/canvas', query: { ...route.query, mode: 'design', view: 'products', zoneId: zone.id, floorId: workspace.currentFloorId } })
+  if (zone) router.push(productSchemeRoute(workspace.currentFloorId, zone.id))
 }
 onMounted(() => { window.addEventListener('keydown', traceKey); window.addEventListener('keyup', keyUp); window.addEventListener('blur', cancelInteraction) })
 onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHintTimer) clearTimeout(zoomHintTimer); window.removeEventListener('keydown', traceKey); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', cancelInteraction) })
@@ -959,7 +959,7 @@ onBeforeUnmount(() => { if (messageTimer) clearTimeout(messageTimer); if (zoomHi
         </div>
       </aside>
     </div>
-    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push({ path: '/canvas', query: { mode: 'design', zoneId, floorId: workspace.currentFloorId } })" />
+    <SpaceTemplateDialog v-if="showTemplate" @close="showTemplate = false" @locate="locateSpace" @layout="zoneId => router.push(productSchemeRoute(workspace.currentFloorId, zoneId))" />
   </div>
 </template>
 

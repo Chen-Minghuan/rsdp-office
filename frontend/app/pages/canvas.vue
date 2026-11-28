@@ -332,7 +332,8 @@ watch(() => store.canEnterLayout, (confirmed) => {
       <div class="scheme-styles" aria-label="效果图风格">
         <button v-for="style in renderStyles" :key="style" type="button" :aria-pressed="style === renderStyle" @click="renderStyle = style">{{ style }}</button>
       </div>
-      <button type="button" :disabled="!schemeFurniture.length" @click="showWhiteModel = true">3D 预览</button>
+      <button type="button" :disabled="!schemeFurniture.length" @click="showWhiteModel = true">3D 白模</button>
+      <button type="button" @click="openRenderPreview()">AI 效果图</button>
       <button v-if="canEditScheme && currentConfirmation" class="scheme-generate" type="button" @click="openRenderPreview()">生成方案效果图</button>
       <NuxtLink v-else-if="canEditScheme" class="scheme-generate" :to="proposalRoute">去项目清单确认</NuxtLink>
       <button type="button" @click="openRenderPreview()">生成记录</button>

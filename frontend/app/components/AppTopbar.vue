@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { productSchemeRoute } from '~/utils/projectBenchRoutes'
 const { links, activeLink, isDesignWorkflow, floorReady } = useWorkspaceNavigation()
 const workspace = useWorkspaceStore()
 const store = useOfficeStore()
@@ -8,7 +9,7 @@ watch(showDesignContext, visible => { if (!visible) showTemplate.value = false }
 
 function openTemplateLayout(zoneId: string) {
   showTemplate.value = false
-  return navigateTo({ path: '/canvas', query: { floorId: workspace.currentFloorId, mode: 'design', zoneId } })
+  return navigateTo(productSchemeRoute(workspace.currentFloorId, zoneId))
 }
 </script>
 

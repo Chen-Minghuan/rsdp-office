@@ -164,7 +164,7 @@ try {
   assert.equal(await cards.getByRole('button', { name: /交付中/ }).innerText(), '交付中\n0')
 
   // 场景 2：清单变化导致确认失效 → 返回工作台，进度回退；阶段仍保持人工值
-  await nav.getByRole('link', { name: '产品方案', exact: true }).click()
+  await nav.getByRole('link', { name: '产品选型', exact: true }).click()
   await page.getByTestId('product-scheme').waitFor()
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '清空选品' }).click()
