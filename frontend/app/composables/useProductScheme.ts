@@ -13,7 +13,9 @@ export function useProductScheme(active: Ref<boolean>) {
   const busy = ref(false)
   const message = ref('')
   const error = ref('')
-  const source = ref<'auto' | 'project' | 'personal'>('auto')
+  const source = ref<'project' | 'favorites' | 'style'>('project')
+  const step = ref<'layout' | 'select'>('layout')
+  const favoriteSection = ref<'project' | 'personal'>('project')
   const favoriteIds = ref<string[]>()
   const sourceError = ref('')
   const bundles = ref<ProductBundle[]>([])
@@ -74,14 +76,14 @@ export function useProductScheme(active: Ref<boolean>) {
     message.value = ''
   })
 
-  watch([active, source, () => workspace.currentProjectId], async ([open, currentSource, projectId], _, onCleanup) => {
+  watch([active, source, favoriteSection, () => workspace.currentProjectId], async ([open, currentSource, section, projectId], _, onCleanup) => {
     let current = true
     onCleanup(() => { current = false })
-    favoriteIds.value = currentSource === 'auto' ? undefined : []
+    favoriteIds.value = currentSource === 'favorites' ? [] : undefined
     sourceError.value = ''
-    if (!open || currentSource === 'auto') return
+    if (!open || currentSource !== 'favorites') return
     try {
-      const data = currentSource === 'personal' ? await api.loadFavoriteProductIds()
+      const data = section === 'personal' ? await api.loadFavoriteProductIds()
         : projectId ? await api.loadProjectFavoriteProductIds(projectId) : []
       if (current) favoriteIds.value = data || []
     } catch (failure) {
@@ -89,17 +91,18 @@ export function useProductScheme(active: Ref<boolean>) {
     }
   }, { immediate: true })
 
-  watch(active, async (open, _, onCleanup) => {
-    let current = true
-    onCleanup(() => { current = false })
-    if (!open) return
+  let bundleRead = 0
+  async function refreshBundles() {
+    const read = ++bundleRead
     try {
       const data = await api.loadProductBundles()
-      if (current) bundles.value = data || []
+      if (read === bundleRead) bundles.value = data || []
     } catch (failure) {
-      if (current) error.value = productBundleError(failure, '暂时无法读取商品组合。', '当前服务暂未提供商品组合。')
+      if (read === bundleRead) error.value = productBundleError(failure, '暂时无法读取商品组合。', '当前服务暂未提供商品组合。')
     }
-  }, { immediate: true })
+  }
+
+  watch(active, open => { if (open) void refreshBundles() }, { immediate: true })
 
   async function change(action: 'activate' | 'clear-selection' | 'apply-products',
     options: { targetSlot?: SchemeSlot; automatic?: boolean; items?: BundleItem[] } = {}) {
@@ -150,6 +153,6 @@ export function useProductScheme(active: Ref<boolean>) {
     if (bundle?.items.length) void change('apply-products', { items: bundle.items })
   }
 
-  return { state, busy, error, message, source, favoriteIds, sourceError, bundles, bundleId, clipboard,
-    room, furniture, selectedCount, canEdit, canApply, canClear, currentConfirmation, renders, refreshRenders, change, copy, applyBundle }
+  return { state, busy, error, message, source, step, favoriteSection, favoriteIds, sourceError, bundles, bundleId, clipboard,
+    room, furniture, selectedCount, canEdit, canApply, canClear, currentConfirmation, renders, refreshRenders, refreshBundles, change, copy, applyBundle }
 }

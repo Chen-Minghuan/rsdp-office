@@ -646,9 +646,8 @@ try {
   assert.equal(projectFavoriteSaveRequests.at(-1).rspuId, localCollectionId)
   await page.getByRole('button', { name: `加入组合 ${localProduct.name}` }).click()
   await page.getByRole('combobox', { name: '选择商品规格' }).selectOption('LARGE')
+  await page.getByRole('button', { name: '重命名组合', exact: true }).click()
   await page.getByLabel('组合名称').fill('本地茶几组合')
-  await page.getByRole('button', { name: '加入规格' }).click()
-  await page.getByRole('button', { name: '保存组合' }).click()
   await page.getByText('组合已保存', { exact: true }).waitFor()
   assert.equal(savedBundles[0].items[0].rspuId, localCollectionId)
   assert.equal(savedBundles[0].items[0].variantId, 'LARGE')
@@ -656,8 +655,9 @@ try {
   assert.equal(await localPersonal.getAttribute('aria-pressed'), 'true')
   assert.equal(await localProjectFavorite.getAttribute('aria-pressed'), 'true')
   const bundlesPanel = page.getByRole('region', { name: '自选商品组合' })
-  await bundlesPanel.getByRole('button', { name: /本地茶几组合/ }).click()
-  assert.equal(await bundlesPanel.getByRole('link', { name: localProduct.name }).getAttribute('href'),
+  const localBundleCard = bundlesPanel.locator('[data-testid="bundle-card"]').filter({ hasText: '本地茶几组合' })
+  await localBundleCard.getByRole('button', { name: '展开组合', exact: true }).click()
+  assert.equal(await localBundleCard.getByRole('link', { name: localProduct.name }).getAttribute('href'),
     `/products/local/${localProduct.id}?from=catalog`)
   await page.goto(`${baseUrl}/favorites`)
   const savedLocalCard = page.getByRole('list', { name: '收藏商品列表' }).getByRole('link', { name: `查看${localProduct.name}详情` }).first()

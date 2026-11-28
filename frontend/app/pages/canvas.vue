@@ -3,6 +3,7 @@ import type { FloorPlanAnalysisResponse } from '~/types/floorPlan'
 import type { LayoutPreview, LayoutReferenceEditing } from '~/types/layoutPlanning'
 import type { FurnitureObject } from '~/types/office'
 import type { OfficeModuleTemplate } from '~/types/officeModule'
+import type { ProductBundle } from '~/types/productScheme'
 import { drawingMatchesPlan, recognitionRunning } from '~/utils/drawingContext'
 import { sameOriginAssetUrl } from '~/utils/apiBase'
 import { projectDrawingRoute } from '~/utils/projectBenchRoutes'
@@ -64,9 +65,9 @@ function openBulkReplace(item: FurnitureObject, ids: string[]) {
 }
 const isProductScheme = computed(() => route.query.view === 'products' && store.canvasMode === 'design')
 const {
-  state: schemeState, busy: schemeBusy, error: schemeError, message: schemeMessage, source: schemeSource, favoriteIds,
+  state: schemeState, busy: schemeBusy, error: schemeError, message: schemeMessage, source: schemeSource, step: schemeStep, favoriteSection, favoriteIds,
   sourceError, bundles, bundleId, clipboard, room: schemeRoom, furniture: schemeFurniture, selectedCount,
-  canEdit: canEditScheme, canApply, canClear, currentConfirmation, renders, refreshRenders, change: changeScheme, copy: copyScheme, applyBundle,
+  canEdit: canEditScheme, canApply, canClear, currentConfirmation, renders, refreshRenders, refreshBundles, change: changeScheme, copy: copyScheme, applyBundle,
 } = useProductScheme(isProductScheme)
 watch(showRenderPreview, open => { if (!open && isProductScheme.value) void refreshRenders() })
 const schemeArea = computed(() => {
@@ -97,9 +98,15 @@ const snapEnabled = ref(true)
 const showUnderlay = ref(true)
 const boardRef = ref<{ fitBoard: () => void; rotateView: (degrees: number) => void } | null>(null)
 const workflowRef = ref<{ openFurniture: (id: string, fromGroup: boolean) => void; openRecommendations: () => void; selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void } | null>(null)
-function pickSchemeSource(source: 'auto' | 'project' | 'personal') {
+function pickSchemeSource(source: 'project' | 'favorites' | 'style') {
   schemeSource.value = source
-  if (store.designZoneId && store.layoutConfirmedForZone(store.designZoneId)) workflowRef.value?.openRecommendations()
+}
+function selectSchemeBundle(bundle: ProductBundle | null) {
+  if (bundle?.revision) bundleId.value = bundle.bundleId
+}
+function saveSchemeBundle(bundle: ProductBundle) {
+  bundleId.value = bundle.bundleId
+  void refreshBundles()
 }
 watch(tool, value => { if (value.startsWith('constraints')) showUnderlay.value = true })
 watch(() => !!referenceEditing.value, active => {
@@ -296,24 +303,30 @@ watch(() => store.canEnterLayout, (confirmed) => {
         </div>
       </div>
       <OfficeCanvasDesignWorkflowSidebar ref="workflowRef" v-model:selected-id="selectedId" v-model:reference-editing="referenceEditing"
-        :current-preview="layoutPreview" :open-selection="isProductScheme" :allowed-rspu-ids="isProductScheme ? favoriteIds : undefined" @preview="layoutPreview = $event">
+        :current-preview="layoutPreview" :open-selection="isProductScheme" :allowed-rspu-ids="isProductScheme ? favoriteIds : undefined" v-model:scheme-source="schemeSource" v-model:scheme-step="schemeStep" @preview="layoutPreview = $event">
         <template v-if="isProductScheme" #scheme-tools>
           <div class="scheme-tools">
-            <div class="scheme-sources" aria-label="选品来源">
-              <button type="button" :aria-pressed="schemeSource === 'auto'" @click="pickSchemeSource('auto')">自动选品</button>
-              <button type="button" :aria-pressed="schemeSource === 'project'" @click="pickSchemeSource('project')">项目选品库</button>
-              <button type="button" :aria-pressed="schemeSource === 'personal'" @click="pickSchemeSource('personal')">个人收藏夹</button>
-            </div>
-            <p v-if="sourceError" role="alert" class="text-xs text-red-700">{{ sourceError }}</p>
-            <button v-if="schemeSource === 'auto'" type="button" class="scheme-auto" :disabled="!canApply" @click="changeScheme('apply-products', { automatic: true })">一键匹配待选家具</button>
-            <div v-if="bundles.length" class="scheme-bundle">
-              <select v-model="bundleId" aria-label="选择商品组合">
-                <option value="">选择商品组合</option>
-                <option v-for="bundle in bundles" :key="bundle.bundleId" :value="bundle.bundleId" :disabled="!bundle.items.length">{{ bundle.name }}</option>
-              </select>
-              <button type="button" :disabled="!canApply || !bundleId" @click="applyBundle">应用组合</button>
-            </div>
+            <template v-if="schemeStep === 'select'">
+              <div class="scheme-sources" aria-label="选品来源">
+                <button type="button" :aria-pressed="schemeSource === 'project'" @click="pickSchemeSource('project')">项目选品库</button>
+                <button type="button" :aria-pressed="schemeSource === 'favorites'" @click="pickSchemeSource('favorites')">收藏</button>
+                <button type="button" :aria-pressed="schemeSource === 'style'" @click="pickSchemeSource('style')">款式推荐</button>
+              </div>
+              <p v-if="sourceError" role="alert" class="text-xs text-red-700">{{ sourceError }}</p>
+              <div v-if="schemeSource === 'project' && bundles.length" class="scheme-bundle">
+                <select v-model="bundleId" aria-label="选择商品组合">
+                  <option value="">选择商品组合</option>
+                  <option v-for="bundle in bundles" :key="bundle.bundleId" :value="bundle.bundleId" :disabled="!bundle.items.length">{{ bundle.name }}</option>
+                </select>
+                <button type="button" :disabled="!canApply || !bundleId" @click="applyBundle">应用组合</button>
+              </div>
+            </template>
+            <button v-else type="button" class="scheme-auto" :disabled="!canApply" @click="changeScheme('apply-products', { automatic: true })">一键匹配待选家具</button>
           </div>
+        </template>
+        <template v-if="isProductScheme && schemeStep === 'select' && schemeSource !== 'style'" #scheme-content>
+          <ProductBundlePanel v-if="schemeSource === 'project'" :products="[]" @selected="selectSchemeBundle" @saved="saveSchemeBundle" />
+          <OfficeCanvasSchemeFavoritesPanel v-else v-model:section="favoriteSection" />
         </template>
       </OfficeCanvasDesignWorkflowSidebar>
     </div>

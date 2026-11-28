@@ -8,6 +8,8 @@ import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
 const selectedId = defineModel<string | null>('selectedId')
+const schemeSource = defineModel<'project' | 'favorites' | 'style'>('schemeSource', { default: 'project' })
+const schemeStep = defineModel<'layout' | 'select'>('schemeStep', { default: 'layout' })
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { required: true })
 /** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
 const props = defineProps<{ currentPreview?: LayoutPreview | null; openSelection?: boolean; allowedRspuIds?: string[] }>()
@@ -16,20 +18,40 @@ type WorkflowPage = 'auto' | 'products' | 'recommendations'
 type AutoLayoutPanel = { selectModule: (module: OfficeModuleTemplate, size?: [number, number]) => void }
 const activePage = ref<WorkflowPage>('auto')
 watch(activePage, () => store.cancelFurniturePlacement())
+const inStyleView = computed(() => activePage.value === 'recommendations'
+  || (activePage.value === 'products' && !!props.openSelection && schemeStep.value === 'select' && schemeSource.value === 'style'))
 function openFurniture(id: string, fromGroup: boolean) {
   if (!store.designZoneId || !store.furnitureForZone(store.designZoneId).some(item => item.id === id)) return
-  if (fromGroup && activePage.value !== 'recommendations') return
+  if (fromGroup && !inStyleView.value) return
   selectedId.value = id
-  if (activePage.value !== 'recommendations') activePage.value = 'products'
+  if (!inStyleView.value) {
+    activePage.value = 'products'
+    if (props.openSelection) schemeStep.value = 'layout'
+  }
   collapsed.value = false
 }
-defineExpose({ openFurniture, openRecommendations: () => openPage('recommendations'), selectModule })
+function openRecommendations() {
+  if (props.openSelection) {
+    activePage.value = 'products'
+    schemeStep.value = 'select'
+    schemeSource.value = 'style'
+  } else {
+    activePage.value = 'recommendations'
+  }
+}
+defineExpose({ openFurniture, openRecommendations, selectModule })
 const collapsed = ref(false), autoLayout = ref<AutoLayoutPanel | null>(null), actionMessage = ref('')
-const pages: Array<{ id: WorkflowPage; label: string; testId: string }> = [
-  { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },
-  { id: 'products', label: '产品选型', testId: 'tab-product-selection' },
-  { id: 'recommendations', label: '款式推荐', testId: 'tab-style-recommendation' },
-]
+const stepMessage = ref('')
+const pages = computed<Array<{ id: WorkflowPage; label: string; testId: string }>>(() => props.openSelection
+  ? [
+      { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },
+      { id: 'products', label: '手动布局', testId: 'tab-product-selection' },
+    ]
+  : [
+      { id: 'auto', label: '自动布局', testId: 'tab-auto-layout' },
+      { id: 'products', label: '产品选型', testId: 'tab-product-selection' },
+      { id: 'recommendations', label: '款式推荐', testId: 'tab-style-recommendation' },
+    ])
 const categories = [
   { id: 'workstation', label: '办公桌椅', moduleId: 'desk-straight' },
   { id: 'sofa', label: '沙发茶几', moduleId: 'sofa-double' },
@@ -51,6 +73,26 @@ function forwardPreview(single: boolean, preview: LayoutPreview | null) {
 }
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const hasLayout = computed(() => zone.value ? store.furnitureForZone(zone.value.id).length > 0 : false)
+const layoutConfirmed = computed(() => zone.value ? store.layoutConfirmedForZone(zone.value.id) : false)
+const showStyleRecommendations = computed(() => inStyleView.value)
+const showSchemeSources = computed(() => activePage.value === 'products' && !!props.openSelection
+  && schemeStep.value === 'select' && schemeSource.value !== 'style')
+function openSelectStep() {
+  if (!layoutConfirmed.value) {
+    stepMessage.value = '请先完成第 1 步排版：摆放并确认当前家具'
+    return
+  }
+  stepMessage.value = ''
+  schemeStep.value = 'select'
+}
+function onEditorConfirmed() {
+  if (props.openSelection) {
+    stepMessage.value = ''
+    schemeStep.value = 'select'
+  } else {
+    activePage.value = 'recommendations'
+  }
+}
 const zoneType = computed({
   get: () => zone.value?.zoneType || 'OTHER',
   set: (value: ZoneObject['zoneType']) => {
@@ -58,9 +100,9 @@ const zoneType = computed({
   },
 })
 watch([() => store.designZoneId, () => props.openSelection], ([zoneId, openSelection]) => {
-  activePage.value = openSelection && zoneId
-    ? (store.layoutConfirmedForZone(zoneId) ? 'recommendations' : 'products')
-    : 'auto'
+  activePage.value = openSelection && zoneId ? 'products' : 'auto'
+  schemeStep.value = openSelection && zoneId && store.layoutConfirmedForZone(zoneId) ? 'select' : 'layout'
+  stepMessage.value = ''
   selectedCategories.value = []
   selectedCatalogId.value = ''
   automaticModuleId.value = ''
@@ -95,7 +137,7 @@ function confirmAndRecommend() {
   if (problem) { actionMessage.value = problem; return }
   if (store.confirmLayout(zone.value.id) === false) { actionMessage.value = '当前家具存在越界、重叠或约束冲突，请调整后确认'; return }
   actionMessage.value = ''
-  activePage.value = 'recommendations'
+  openRecommendations()
 }
 function clearAutomaticLayout() {
   if (!zone.value) return
@@ -121,7 +163,7 @@ function clearAutomaticLayout() {
         <span class="min-w-0 flex-1 truncate text-right text-xs font-semibold text-[#4f493f]" :title="zone?.name">{{ zone?.name || '未选择空间' }}</span>
         <button class="flex-none p-0.5 text-muted hover:bg-accent-tint" title="收起侧边栏" @click="collapsed = true"><AppIcon name="arrowRight" size="3.5" /></button>
       </div>
-      <div class="grid grid-cols-3 gap-1" role="tablist" aria-label="布局选品页面">
+      <div :class="['grid gap-1', pages.length === 2 ? 'grid-cols-2' : 'grid-cols-3']" role="tablist" aria-label="布局选品页面">
         <button
           v-for="page in pages"
           :key="page.id"
@@ -169,17 +211,46 @@ function clearAutomaticLayout() {
 
     </template>
 
-    <slot v-if="!collapsed" name="scheme-tools" />
+    <div v-if="activePage === 'products' && openSelection" v-show="!collapsed" class="flex-none border-b border-line px-3 py-2">
+      <div class="grid grid-cols-2 gap-1" aria-label="手动布局步骤">
+        <button
+          type="button"
+          data-testid="scheme-step-layout"
+          :aria-pressed="schemeStep === 'layout'"
+          :class="['rounded-none px-2 py-1.5 text-left text-[11px] font-medium transition', schemeStep === 'layout' ? 'bg-accent text-white' : 'bg-bg text-[#6f776a] hover:bg-[#e8eee1]']"
+          @click="schemeStep = 'layout'; stepMessage = ''"
+        >
+          ① 排版
+          <span class="block text-[9px] font-normal opacity-80">{{ layoutConfirmed ? '已确认 · 可修改' : '摆放并确认家具' }}</span>
+        </button>
+        <button
+          type="button"
+          data-testid="scheme-step-select"
+          :aria-pressed="schemeStep === 'select'"
+          :aria-disabled="!layoutConfirmed"
+          :class="['rounded-none px-2 py-1.5 text-left text-[11px] font-medium transition', schemeStep === 'select' ? 'bg-accent text-white' : 'bg-bg text-[#6f776a] hover:bg-[#e8eee1]', !layoutConfirmed ? 'opacity-50' : '']"
+          @click="openSelectStep"
+        >
+          ② 选品
+          <span class="block text-[9px] font-normal opacity-80">{{ layoutConfirmed ? '选品库 / 收藏 / 款式推荐' : '先完成排版' }}</span>
+        </button>
+      </div>
+      <p v-if="stepMessage" role="status" class="mt-1.5 text-[10px] leading-relaxed text-[#a65e4c]">{{ stepMessage }}</p>
+    </div>
+
+    <slot v-if="!collapsed && activePage === 'products' && openSelection" name="scheme-tools" />
     <div v-show="!collapsed" class="flex min-h-0 flex-1 flex-col">
       <OfficeCanvasMixedAutoLayoutPanel v-if="activePage === 'auto' && !isSingleModule" v-model:reference-editing="referenceEditing" :category-ids="selectedCategories" :current-preview="currentPreview" @preview="forwardPreview(false, $event)" />
       <OfficeCanvasDesignLayoutSidebar v-else-if="activePage === 'auto'" ref="autoLayout" embedded :module-id="automaticModuleId" :current-preview="currentPreview" @module-change="automaticModuleId = $event" @preview="forwardPreview(true, $event)" />
-      <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @confirmed="activePage = 'recommendations'" @select-module="selectModule" />
+      <OfficeCanvasDesignSidebar v-else-if="showStyleRecommendations" v-model:selected-id="selectedId" :allowed-rspu-ids="allowedRspuIds" :show-floor-summary="!openSelection" />
+      <slot v-else-if="showSchemeSources" name="scheme-content" />
+      <OfficeCanvasProductLayoutEditor v-else-if="activePage === 'products'" v-model:selected-id="selectedId" v-model:selected-catalog-id="selectedCatalogId" @confirmed="onEditorConfirmed" @select-module="selectModule" />
       <OfficeCanvasDesignSidebar v-else v-model:selected-id="selectedId" :allowed-rspu-ids="allowedRspuIds" :show-floor-summary="!openSelection" />
     </div>
     <div v-if="activePage === 'auto' && hasLayout && !referenceEditing" v-show="!collapsed" class="flex-none border-t border-line bg-bg px-3 py-2.5" data-testid="auto-layout-next-actions">
       <p class="mb-2 text-[9px] leading-relaxed text-muted">可直接确认并推荐款式，也可进入产品选型手动调整，无需按固定顺序操作。</p>
       <div class="grid grid-cols-2 gap-1.5">
-        <button data-testid="auto-manual-layout" class="rounded-none border border-line bg-white px-2 py-2 text-[10px] font-semibold text-[#596252]" @click="activePage = 'products'">产品选型 · 手动调整</button>
+        <button data-testid="auto-manual-layout" class="rounded-none border border-line bg-white px-2 py-2 text-[10px] font-semibold text-[#596252]" @click="activePage = 'products'; if (openSelection) schemeStep = 'layout'">产品选型 · 手动调整</button>
         <button data-testid="auto-confirm-recommend" class="rounded-none bg-accent px-2 py-2 text-[10px] font-semibold text-white" @click="confirmAndRecommend">确认排版并进入款式推荐</button>
       </div>
       <button data-testid="auto-clear-layout" title="清空当前空间家具，并取消全部已选功能模块" class="mt-1.5 w-full rounded-none border border-line bg-white px-3 py-1.5 text-[10px] text-muted hover:text-[#a65e4c]" @click="clearAutomaticLayout">清空排版</button>
