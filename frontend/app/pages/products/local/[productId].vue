@@ -19,6 +19,7 @@ const specifications = computed(() => (detail.value?.variants ?? []).map((varian
     dimensions: dimensions.length ? `${dimensions.join(' × ')} mm` : variant.sizeText?.trim(),
     color: variant.color,
     material: variant.material,
+    referencePrice: variant.referencePrice ?? null,
   }
 }))
 

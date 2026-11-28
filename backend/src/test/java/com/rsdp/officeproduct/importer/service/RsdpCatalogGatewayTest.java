@@ -182,6 +182,25 @@ class RsdpCatalogGatewayTest {
     }
 
     @Test
+    void productDetailKeepsProductMaterialSeparateFromVariantMaterial() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products/RSPU-MATERIAL")).thenReturn(json.readTree("""
+            {"rspu":{"rspuId":"RSPU-MATERIAL","materialTags":["WO","WO",""],"description":"架子：进口白蜡木实木"},
+             "recognitions":[{"parsedOcr":{"materialDescription":"橡木框架"}}]}
+            """));
+        when(client.get("/api/v1/products/RSPU-MATERIAL/variants")).thenReturn(json.readTree("""
+            [{"variantId":"V1"},{"variantId":"V2","materialText":"编织麻绳"}]
+            """));
+
+        var detail = gateway.getProductDetail("RSPU-MATERIAL");
+        assertEquals(List.of("WO"), detail.getMaterialTags());
+        assertEquals("架子：进口白蜡木实木", detail.getDescription());
+        assertNull(detail.getVariants().get(0).getMaterialText());
+        assertEquals("编织麻绳", detail.getVariants().get(1).getMaterialText());
+    }
+
+    @Test
     void detailAndCurrentVariantFindExactIdAcrossVisibleCatalogPages() throws Exception {
         RsdpClient client = mock(RsdpClient.class);
         RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
@@ -441,6 +460,82 @@ class RsdpCatalogGatewayTest {
         assertEquals("蜜芽胡桃+雅士白", result.get(0).getColorPrimaryName());
         assertEquals("蜜芽胡桃+雅士白", result.get(1).getColorPrimaryName());
         assertNull(result.get(2).getColorPrimaryName());
+    }
+
+    @Test
+    void loadsFilterSnapshotAndCachesPerView() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=full")).thenReturn(json.readTree("""
+            {"total":1,"rows":[{"rspuId":"P1","productName":"1.4米职员台","productLevel":"B","status":"active"}]}
+            """));
+        when(client.get("/api/v1/products/P1")).thenReturn(json.readTree("""
+            {"rspu":{"rspuId":"P1","productName":"1.4米职员台","productLevel":"B","description":"钢脚","status":"active"}}
+            """));
+        when(client.get("/api/v1/products/P1/variants")).thenReturn(json.readTree("""
+            [{"variantId":"V1","productLevel":"B","materialText":"PB","dimensions":"{\\\"w\\\":1400,\\\"unit\\\":\\\"mm\\\"}","status":"active"}]
+            """));
+
+        var first = gateway.listFilterProducts("full", false);
+        var second = gateway.listFilterProducts("full", false);
+
+        assertEquals("B", first.getFirst().summary().getProductLevel());
+        assertEquals("钢脚", first.getFirst().description());
+        assertEquals("PB", first.getFirst().variants().getFirst().getMaterialText());
+        assertEquals(new BigDecimal("1400"), first.getFirst().variants().getFirst().getWidthMm());
+        assertSame(first, second);
+        verify(client, times(1)).get("/api/v1/products/P1");
+    }
+
+    @Test
+    void browsesOffShelfFiltersWithoutAddingThemToDesignRecommendations() throws Exception {
+        var client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=full")).thenReturn(json.readTree("""
+            {"total":2,"rows":[{"rspuId":"P1","productName":"办公桌","status":"active"},
+              {"rspuId":"P2","productName":"办公桌","status":"inactive"}]}
+            """));
+        when(client.get("/api/v1/products?page=1&size=500&viewMode=full&status=active")).thenReturn(json.readTree("""
+            {"total":1,"rows":[{"rspuId":"P1","productName":"办公桌","status":"active"}]}
+            """));
+        for (String id : List.of("P1", "P2")) {
+            when(client.get("/api/v1/products/" + id)).thenReturn(json.readTree("{\"rspu\":{\"rspuId\":\"" + id + "\"}}"));
+            when(client.get("/api/v1/products/" + id + "/variants")).thenReturn(json.readTree("""
+                [{"variantId":"%s-V1","materialText":"PB","status":"active",
+                  "dimensions":{"w":1400,"d":600,"unit":"mm"}}]
+                """.formatted(id)));
+        }
+        var service = new CatalogProductFilterService(gateway);
+        var request = new com.rsdp.officeproduct.importer.dto.request.CatalogProductPageRequest();
+        request.setStatus("other");
+        request.setProductTypes(List.of("DESK"));
+        request.setMaterials(List.of("PB"));
+        request.setWidthRanges(List.of("R1200_1600"));
+
+        var page = service.pageProducts("full", request, false);
+        assertEquals(1, page.total());
+        assertEquals("P2", page.rows().getFirst().getRspuId());
+        assertEquals(2, page.catalogTotal());
+        assertEquals(1, page.activeTotal());
+        assertEquals(1, page.facets().groups().get("productTypes").stream()
+            .filter(option -> option.code().equals("DESK")).findFirst().orElseThrow().count());
+        assertEquals(List.of("P1-V1"), gateway.listOfficeProducts("full").stream().map(OfficeProductDto::getId).toList());
+    }
+
+    @Test
+    void explicitFilterRefreshReadsNewProductsInsideCacheTtl() throws Exception {
+        var client = mock(RsdpClient.class);
+        var gateway = new RsdpCatalogGateway(client, json);
+        String list = "/api/v1/products?page=1&size=500&viewMode=full";
+        when(client.get(list)).thenReturn(json.readTree("{\"total\":0,\"rows\":[]}"), json.readTree("""
+            {"total":1,"rows":[{"rspuId":"NEW","productName":"办公桌","status":"active"}]}
+            """));
+        when(client.get("/api/v1/products/NEW")).thenReturn(json.readTree("{\"rspu\":{\"rspuId\":\"NEW\"}}"));
+        when(client.get("/api/v1/products/NEW/variants")).thenReturn(json.createArrayNode());
+
+        assertTrue(gateway.listFilterProducts("full", false).isEmpty());
+        assertEquals("NEW", gateway.listFilterProducts("full", true).getFirst().summary().getRspuId());
+        verify(client, times(2)).get(list);
     }
 
 }

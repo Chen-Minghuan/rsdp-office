@@ -23,6 +23,7 @@ public class LocalProductController {
     private final LocalProductWorkbook workbook;
     private final LocalProductImportAssistant assistant;
     private final WorkbookPreviewCache previewCache;
+    private final LocalProductImportHistory importHistory;
 
     @GetMapping
     public Result<Page> list(@RequestParam(defaultValue = "1") int page,
@@ -35,9 +36,25 @@ public class LocalProductController {
         return Result.ok(products.detail(productId));
     }
 
+    @GetMapping("/capacity")
+    public Result<Capacity> capacity() {
+        return Result.ok(products.capacity());
+    }
+
     @PostMapping
     public Result<List<Saved>> save(@RequestBody SaveRequest request) {
         return Result.ok(products.save(request));
+    }
+
+    @GetMapping("/imports")
+    public Result<LocalProductImportHistory.Page> imports(@RequestParam(defaultValue = "1") int page,
+                                                         @RequestParam(defaultValue = "") String search) {
+        return Result.ok(importHistory.list(page, search));
+    }
+
+    @GetMapping("/imports/{importId}")
+    public Result<LocalProductImportHistory.Detail> importDetail(@PathVariable UUID importId) {
+        return Result.ok(importHistory.detail(importId));
     }
 
     @PostMapping("/excel-preview")

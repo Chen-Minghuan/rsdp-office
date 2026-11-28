@@ -32,6 +32,18 @@ class OfficeLayoutValidationPolicyTest {
         assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
     }
 
+    @Test void overlapNamesTheConfirmedAndDraftFurnitureWhileZeroGapIsAllowed() throws Exception {
+        ArrayNode objects = scene();
+        ((ObjectNode) objects.get(0)).put("name", "测试会议室");
+        ((ObjectNode) objects.get(1)).put("label", "主会议桌");
+        ObjectNode cabinet = objects.addObject().put("id", "K").put("kind", "furniture").put("zoneId", "R")
+            .put("label", "收纳柜").put("x", 4800).put("y", 2000).put("w", 600).put("h", 600).put("rotation", 0);
+        assertDoesNotThrow(() -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        cabinet.put("x", 4650);
+        var error = assertThrows(BusinessException.class, () -> OfficeLayoutValidationPolicy.requireConfirmedValid(objects));
+        assertEquals("空间「测试会议室」内「主会议桌」（2000, 2000 mm）与「收纳柜」（4650, 2000 mm）的占地重叠", error.getMessage());
+    }
+
     @Test void lCounterInnerCornerAllowsChairWhileWingStillBlocks() throws Exception {
         ArrayNode objects = scene();
         objects.remove(1);

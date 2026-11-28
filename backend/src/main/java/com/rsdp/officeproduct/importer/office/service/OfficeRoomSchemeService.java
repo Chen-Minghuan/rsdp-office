@@ -33,6 +33,7 @@ public class OfficeRoomSchemeService {
     private final OfficeRoomSchemeMapper schemes;
     private final OfficeCartMapper carts;
     private final ObjectMapper json;
+    private final com.rsdp.officeproduct.importer.office.mapper.OfficeCanvasMapper canvasRecords;
 
     private record Room(List<JsonNode> objects, JsonNode zone, List<JsonNode> furniture) {}
     private record Slot(JsonNode geometry, List<JsonNode> furniture, List<CartItemDto> cart) {}
@@ -53,6 +54,9 @@ public class OfficeRoomSchemeService {
         var currentState = state(saved);
         var allCart = office.listCart(floorId);
         if (currentState.activeSlot().equals(change.targetSlot())) return new OfficeSchemeDtos.Result(canvas, allCart, currentState);
+        if (saved != null && saved.confirmedSlot() != null) {
+            throw new BusinessException("当前空间已确认使用 Plan " + saved.activeSlot() + "，请先取消确认");
+        }
 
         JsonNode geometry = OfficeSpaceReviewSupport.snapshot(json, room.zone());
         Slot outgoing = new Slot(geometry, room.furniture(),
@@ -78,7 +82,7 @@ public class OfficeRoomSchemeService {
         for (CartItemDto line : incoming.cart()) restoreCart(floorId, change.zoneId(), room.zone().path("name").asText(), line);
         CanvasDto updated = persist(canvas, next);
         schemes.save(floorId, change.zoneId(), change.targetSlot(), encode(outgoing));
-        return new OfficeSchemeDtos.Result(updated, office.listCart(floorId), new OfficeSchemeDtos.State(change.targetSlot(), true));
+        return new OfficeSchemeDtos.Result(updated, office.listCart(floorId), new OfficeSchemeDtos.State(change.targetSlot(), true, null));
     }
 
     @Transactional
@@ -94,7 +98,71 @@ public class OfficeRoomSchemeService {
         return new OfficeSchemeDtos.Result(updated, office.listCart(floorId), state(schemes.find(floorId, change.zoneId())));
     }
 
+    /**
+     * 确认使用当前激活的方案（Plan A 或 Plan B）：确认后 activate 被拒绝，须先取消确认。
+     * 校验用户所见版本及目标槽，不能把旧页面的 A 确认成后台已切换的 B。
+     */
+    @Transactional
+    public OfficeSchemeDtos.State confirmChoice(String floorId, OfficeSchemeDtos.Change change) {
+        CanvasDto canvas = lockVersion(floorId, change);
+        room(canvas, change.zoneId());
+        var saved = schemes.find(floorId, change.zoneId());
+        if (saved == null) throw new BusinessException("当前空间还没有可确认的方案");
+        requireExpectedSlot(saved, change);
+        if (saved.confirmedSlot() != null) return state(saved);
+        schemes.setConfirmedSlot(floorId, change.zoneId(), saved.activeSlot());
+        canvasRecords.retireProposalConfirmations(floorId);
+        return new OfficeSchemeDtos.State(saved.activeSlot(), true, saved.activeSlot());
+    }
+
+    /** 取消方案选择确认，恢复 Plan A/B 切换。 */
+    @Transactional
+    public OfficeSchemeDtos.State cancelChoice(String floorId, OfficeSchemeDtos.Change change) {
+        CanvasDto canvas = lockVersion(floorId, change);
+        room(canvas, change.zoneId());
+        var saved = schemes.find(floorId, change.zoneId());
+        if (saved == null) throw new BusinessException("当前空间还没有方案记录");
+        requireExpectedSlot(saved, change);
+        if (saved.confirmedSlot() == null) return state(saved);
+        schemes.setConfirmedSlot(floorId, change.zoneId(), null);
+        canvasRecords.retireProposalConfirmations(floorId);
+        return new OfficeSchemeDtos.State(saved.activeSlot(), true, null);
+    }
+
+    private void requireExpectedSlot(OfficeRoomSchemeMapper.Row saved, OfficeSchemeDtos.Change change) {
+        if (!saved.activeSlot().equals(change.targetSlot())) {
+            throw new BusinessException("房间方案已切换，请刷新后重新确认选择");
+        }
+    }
+
+    /** 方案对比：激活槽家具取自画布，另一槽家具取自 inactive_json（无方案行时为空）。 */
+    public OfficeSchemeDtos.Slots slots(String floorId, String zoneId) {
+        CanvasDto canvas = office.getCanvas(floorId);
+        Room room = room(canvas, zoneId);
+        var saved = schemes.find(floorId, zoneId);
+        String activeSlot = saved == null ? "A" : saved.activeSlot();
+        List<OfficeSchemeDtos.SlotFurniture> inactive = saved == null ? List.of()
+            : decode(saved.inactiveJson()).furniture().stream().map(OfficeRoomSchemeService::summarize).toList();
+        return new OfficeSchemeDtos.Slots(activeSlot,
+            room.furniture().stream().map(OfficeRoomSchemeService::summarize).toList(), inactive);
+    }
+
+    private static OfficeSchemeDtos.SlotFurniture summarize(JsonNode item) {
+        String label = item.path("label").isTextual() ? item.path("label").asText() : null;
+        JsonNode productName = item.path("productSelection").path("product").path("name");
+        return new OfficeSchemeDtos.SlotFurniture(item.path("id").asText(), label,
+            productName.isTextual() ? productName.asText() : null, item.path("w").asInt(), item.path("h").asInt());
+    }
+
     private CanvasDto lockCurrent(String floorId, OfficeSchemeDtos.Change change) {
+        CanvasDto canvas = lockVersion(floorId, change);
+        JsonNode objects = json.valueToTree(canvas.getObjects());
+        OfficeCanvasReviewPolicy.requireLayoutReady(objects, change.zoneId());
+        OfficeCanvasReviewPolicy.requireSpacesReviewConfirmed(objects);
+        return canvas;
+    }
+
+    private CanvasDto lockVersion(String floorId, OfficeSchemeDtos.Change change) {
         if (change == null || change.zoneId() == null || change.revision() == null) throw new BusinessException("缺少当前房间或画布版本");
         locks.lockWorkspace(floorId);
         CanvasDto canvas = office.getCanvas(floorId);
@@ -102,9 +170,6 @@ public class OfficeRoomSchemeService {
             || !Objects.equals(canvas.getSchemeToken(), change.schemeToken())) {
             throw new BusinessException("房间方案已变化，请刷新画布后重试");
         }
-        JsonNode objects = json.valueToTree(canvas.getObjects());
-        OfficeCanvasReviewPolicy.requireLayoutReady(objects, change.zoneId());
-        OfficeCanvasReviewPolicy.requireSpacesReviewConfirmed(objects);
         return canvas;
     }
 
@@ -123,7 +188,8 @@ public class OfficeRoomSchemeService {
     }
 
     private OfficeSchemeDtos.State state(OfficeRoomSchemeMapper.Row saved) {
-        return saved == null ? new OfficeSchemeDtos.State("A", false) : new OfficeSchemeDtos.State(saved.activeSlot(), true);
+        return saved == null ? new OfficeSchemeDtos.State("A", false, null)
+            : new OfficeSchemeDtos.State(saved.activeSlot(), true, saved.confirmedSlot());
     }
 
     private void clearRoomCart(String floorId, String zoneId) {

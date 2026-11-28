@@ -22,6 +22,7 @@ const fields: { key: WorkbookField, label: string }[] = [
   { key: 'PICTURE', label: '商品图片' },
   { key: 'COLOR', label: '颜色' },
   { key: 'MATERIAL', label: '材质' },
+  { key: 'REFERENCE_PRICE', label: '参考价（元）' },
   { key: 'DESCRIPTION', label: '说明／备注' },
   { key: 'CATEGORY', label: '原表品类' },
 ]

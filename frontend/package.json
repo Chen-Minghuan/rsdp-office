@@ -14,9 +14,11 @@
     "e2e:space-review": "node scripts/e2e-space-review.mjs",
     "e2e:space-obstacles": "node scripts/e2e-space-obstacles.mjs",
     "e2e:workflows": "node scripts/e2e-workflows.mjs",
+    "e2e:product-filters": "node scripts/e2e-product-filters.mjs",
     "e2e:quotes": "node scripts/e2e-quotes.mjs",
     "e2e:account-center": "node scripts/e2e-account-center.mjs",
     "e2e:favorites-page": "node scripts/e2e-favorites-page.mjs",
+    "e2e:product-combos": "node scripts/e2e-product-combos.mjs",
     "test:auto-layout": "node scripts/test-auto-layout.mjs",
     "test:auto-layout-primary": "node scripts/test-auto-layout-primary.mjs",
     "test:arrangement-presets": "node scripts/test-arrangement-presets.mjs",
@@ -67,7 +69,8 @@
     "e2e:white-model": "node scripts/e2e-white-model.mjs",
     "e2e:proposal-3d": "node scripts/e2e-proposal-3d.mjs",
     "e2e:proposal-quote": "node scripts/e2e-proposal-quote.mjs",
-    "e2e:floor-references": "node scripts/e2e-floor-references.mjs"
+    "e2e:floor-references": "node scripts/e2e-floor-references.mjs",
+    "e2e:project-permissions": "node scripts/e2e-project-permissions.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",

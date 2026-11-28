@@ -51,6 +51,7 @@ class ProjectQuotationServiceTest {
     private static final String PROJECT_ID = "PROJ-1";
     private static final String FLOOR_ID = "FLOOR-1";
 
+    private final com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper floorLocks = mock(com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper.class);
     private final ObjectMapper json = new ObjectMapper();
     private final OfficeProjectAccessService accessService = mock(OfficeProjectAccessService.class);
     private final OfficeDesignProjectMapper projectMapper = mock(OfficeDesignProjectMapper.class);
@@ -61,6 +62,7 @@ class ProjectQuotationServiceTest {
     private final OfficeQuotationLineMapper quotationLineMapper = mock(OfficeQuotationLineMapper.class);
     private final RsdpCatalogGateway catalogGateway = mock(RsdpCatalogGateway.class);
     private final OfficeAuditService auditService = mock(OfficeAuditService.class);
+    private final OfficeProposalConfirmationService proposalConfirmations = mock(OfficeProposalConfirmationService.class);
 
     @Test
     void coefficientQuotesCartLinesAndUnassignedFurniture() {
@@ -200,6 +202,41 @@ class ProjectQuotationServiceTest {
     }
 
     @Test
+    void confirmRejectsFloorWithoutProposalConfirmation() {
+        stubScenario(true);
+        when(proposalConfirmations.latest(FLOOR_ID)).thenReturn(null);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID,
+            request("COEFFICIENT", "1.25", "100", "50", List.of(confirmLine("V-DESK", 2, "300")))));
+
+        assertEquals(true, error.getMessage().contains("1F"));
+        assertEquals(true, error.getMessage().contains("确认"));
+        verify(quotationMapper, never()).insert(any(OfficeQuotation.class));
+    }
+
+    @Test
+    void confirmRejectsStaleProposalConfirmation() {
+        stubScenario(true);
+        when(proposalConfirmations.latest(FLOOR_ID))
+            .thenReturn(new OfficeProposalConfirmationService.Status("PROP-T", 1, java.time.LocalDateTime.now(), false));
+
+        assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID,
+            request("COEFFICIENT", "1.25", "100", "50", List.of(confirmLine("V-DESK", 2, "300")))));
+        verify(quotationMapper, never()).insert(any(OfficeQuotation.class));
+    }
+
+    @Test
+    void previewConfirmationSkipsProposalGate() {
+        stubScenario(true);
+
+        ProjectQuotationRecordDto draft = service().previewConfirmation(PROJECT_ID,
+            request("COEFFICIENT", "1.25", "100", "50", List.of(confirmLine("V-DESK", 2, "300"))));
+
+        assertEquals("DRAFT", draft.getStatus());
+        verify(proposalConfirmations, never()).latest(anyString());
+    }
+
+    @Test
     void confirmKeepsMissingFactoryPriceLineWithIssueAndNoAmount() {
         stubScenario(false);
         when(quotationMapper.selectOne(any())).thenReturn(null);
@@ -301,6 +338,7 @@ class ProjectQuotationServiceTest {
         request.setPricingValue(new BigDecimal(value));
         request.setFees(new ArrayList<>(List.of(fee("服务费", serviceFee), fee("物流搬运安装费", logisticsFee))));
         request.setLines(lines);
+        request.setProposalConfirmationIds(Map.of(FLOOR_ID, "PROP-T"));
         return request;
     }
 
@@ -326,7 +364,8 @@ class ProjectQuotationServiceTest {
         QuotationCatalog catalog = new QuotationCatalog(catalogGateway);
         return new ProjectQuotationService(accessService, projectMapper, quotationMapper, quotationLineMapper,
             auditService, new ProjectQuotationPreviewBuilder(floorMapper, canvasMapper, cartMapper, catalog, json),
-            new ProjectQuotationDraftBuilder(floorMapper, catalog), new QuotationRecordAssembler(json));
+            new ProjectQuotationDraftBuilder(floorMapper, catalog), new QuotationRecordAssembler(json),
+            proposalConfirmations, floorMapper, floorLocks);
     }
 
     /** 一间楼层：清单里 2 张办公桌（空间 Z1），画布里 2 把会议椅（空间 Z2）。 */
@@ -370,6 +409,9 @@ class ProjectQuotationServiceTest {
             .thenReturn(withFactoryPrice ? Map.of("V-DESK", new BigDecimal("194")) : Map.of());
         when(catalogGateway.getFactoryPrices("RSPU-CHAIR"))
             .thenReturn(withFactoryPrice ? Map.of("", new BigDecimal("100")) : Map.of());
+
+        when(proposalConfirmations.latest(FLOOR_ID))
+            .thenReturn(new OfficeProposalConfirmationService.Status("PROP-T", 1, java.time.LocalDateTime.now(), true));
     }
 
     private OfficeProductDto product(String variantId, String rspuId, String name, String variant) {
@@ -387,4 +429,49 @@ class ProjectQuotationServiceTest {
         assertNotNull(actual);
         assertEquals(0, new BigDecimal(expected).compareTo(actual), "期望 " + expected + "，实际 " + actual);
     }
+    @Test void previewBindsRowsAndConfirmationWhileHoldingFloorLock() {
+        stubScenario(true);
+        var result = service().preview(PROJECT_ID, "COEFFICIENT", new BigDecimal("1.25"));
+        assertEquals(Map.of(FLOOR_ID, "PROP-T"), result.getProposalConfirmationIds());
+        var order = org.mockito.Mockito.inOrder(floorLocks, canvasMapper, proposalConfirmations);
+        order.verify(floorLocks).lockWorkspace(FLOOR_ID);
+        order.verify(canvasMapper).selectOne(any());
+        order.verify(proposalConfirmations).latest(FLOOR_ID);
+    }
+    @Test void confirmRejectsDraftAfterDifferentProposalConfirmed() {
+        stubScenario(true);
+        var frozen = request("COEFFICIENT", "1.25", "0", "0", List.of(confirmLine("V-DESK", 2, "300")));
+        service().previewConfirmation(PROJECT_ID, frozen);
+        when(proposalConfirmations.latest(FLOOR_ID)).thenReturn(
+            new OfficeProposalConfirmationService.Status("PROP-NEW", 9, LocalDateTime.now(), true));
+        assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID, frozen));
+        verify(quotationMapper, never()).insert(any(OfficeQuotation.class));
+    }
+    @Test void confirmRejectsMissingSourceAndLocksBeforeCheckingAndWriting() {
+        stubScenario(true);
+        var frozen = request("COEFFICIENT", "1.25", "0", "0", List.of(confirmLine("V-DESK", 2, "300")));
+        frozen.setProposalConfirmationIds(Map.of());
+        assertThrows(BusinessException.class, () -> service().confirm(PROJECT_ID, frozen));
+        frozen.setProposalConfirmationIds(Map.of(FLOOR_ID, "PROP-T"));
+        service().confirm(PROJECT_ID, frozen);
+        var order = org.mockito.Mockito.inOrder(floorLocks, proposalConfirmations, quotationMapper);
+        order.verify(floorLocks).lockWorkspace(FLOOR_ID);
+        order.verify(proposalConfirmations).latest(FLOOR_ID);
+        order.verify(floorLocks).lockWorkspace(FLOOR_ID);
+        order.verify(proposalConfirmations).latest(FLOOR_ID);
+        order.verify(quotationMapper).insert(org.mockito.ArgumentMatchers.argThat((OfficeQuotation q) -> q.getProposalConfirmationsJson().contains("PROP-T")));
+    }
+    @Test void floorLocksHaveStableOrderForMultiFloorQuotation() {
+        stubScenario(true);
+        var z = new OfficeDesignFloor(); z.setFloorId("Z");
+        var a = new OfficeDesignFloor(); a.setFloorId("A");
+        when(floorMapper.selectList(any())).thenReturn(List.of(z, a));
+        // Missing source rows can fail later; all floor locks must already be held in the same order.
+        try { service().confirm(PROJECT_ID, request("COEFFICIENT", "1.25", "0", "0", List.of(confirmLine("V-DESK", 2, "300")))); }
+        catch (BusinessException expected) { }
+        var order = org.mockito.Mockito.inOrder(floorLocks);
+        order.verify(floorLocks).lockWorkspace("A");
+        order.verify(floorLocks).lockWorkspace("Z");
+    }
+
 }

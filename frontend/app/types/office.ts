@@ -249,6 +249,7 @@ export interface QuotationTotals {
 }
 
 export interface ProjectQuotationPreview {
+  proposalConfirmationIds?: Record<string, string>
   projectId: string
   projectName: string
   pricingMode: QuotationPricingMode
@@ -320,6 +321,7 @@ export interface ConfirmQuotationLine {
 }
 
 export interface ConfirmQuotationRequest {
+  proposalConfirmationIds: Record<string, string>
   pricingMode: QuotationPricingMode
   pricingValue: number
   fees: QuotationFee[]

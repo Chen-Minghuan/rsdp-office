@@ -55,7 +55,7 @@ Viewport（平移、缩放）独立于上述物理几何
 
 2026-10-29 项目成员与参考图（PROJECT-004）：`office_project_member(project_id, user_id, role)` 记录项目成员——每项目恰好一位 `LEADER`（服务层保证至少一位、`role='LEADER'` 偏唯一索引保证至多一位）、零至多位 `COLLABORATOR`（不与负责人重合、不重复、须为有效在用用户）；创建项目单事务写入项目/楼层/成员/参考图，成员替换在事务内完成。主号可换负责人并配置权限，获授成员管理权限的项目成员可调整协作者。项目参考图存 `office_design_project.reference_images`（JSONB，`[{url, name}]`，≤10 张，仅接受本站 `/uploads/images/` 相对路径）。访问控制集中在 `OfficeProjectAccessService`（楼层→项目→成员解析），仅在 `rsdp.auth.enabled=true` 时强制：非成员访问项目数据返回 `Result.code=403`（`AccessDeniedException`）；关闭时保持开发行为。项目接口：`GET/PUT /api/v1/office/projects/{projectId}/members`、`PATCH /.../references`、`GET /api/v1/office/users/assignable`（按用户名/显示名模糊搜索在用用户，≤20 条）。画布/选品/消息等既有楼层接口已接入 `requireFloorAccess`；图纸识别、效果图、模板接口的鉴权收口与旧项目成员补录留待后续。见 [PROJECT-004](tasks/PROJECT-004-project-members.md)。
 
-2026-11-25 楼层级参考图（PROJECT-005）：`office_design_floor.reference_images` 为 **text 列**（项目级为 JSONB，列类型不同），存同一 `[{url, name}]` JSON 契约，由服务层 Jackson 序列化/解析（解析失败按空列表降级）。`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references` 整体替换（null/空列表即清空），复用项目级校验（≤10 张、仅本站 `/uploads/images/` 前缀、拒绝 `..`、名称 ≤200 字符），要求项目 EDIT 权限并核验楼层归属。前端项目总览页按楼层编辑（无 EDIT 权限不显示入口，后端仍独立鉴权），保存按 `projectId/floorId` 单调序号防乱序覆盖、请求前固定 ID 防止切楼层串写，成功后回写工作区缓存；画布工具栏「参考图」弹层只读展示当前楼层参考图。方案页最终报价取最新 CONFIRMED 报价快照中当前楼层行小计合计（缺价行不计入、红色提示行数），且仅当报价行与页面商品按 productId+数量严格一致时展示。见 [PROJECT-005](tasks/PROJECT-005-floor-reference-images.md)。
+2026-11-25 楼层级参考图（PROJECT-005）：`office_design_floor.reference_images` 为 **text 列**（项目级为 JSONB，列类型不同），存同一 `[{url, name}]` JSON 契约，由服务层 Jackson 序列化/解析（解析失败按空列表降级）。`PUT /api/v1/office/projects/{projectId}/floors/{floorId}/references` 整体替换（null/空列表即清空），复用项目级校验（≤10 张、仅本站 `/uploads/images/` 前缀、拒绝 `..`、名称 ≤200 字符），要求项目 EDIT 权限并核验楼层归属。前端项目总览页按楼层编辑（无 EDIT 权限不显示入口，后端仍独立鉴权），上传期间禁用重复上传和删除，保存期间禁用编辑；请求前固定项目/楼层 ID、按楼层记录保存状态，成功后回写原楼层缓存；画布工具栏「参考图」弹层只读展示当前楼层参考图。方案页展示“最近确认的楼层商品小计”，取最新 CONFIRMED 报价快照中当前楼层行小计合计（缺价行不计入、红色提示行数），且仅当报价行与页面商品按 productId+数量严格一致时展示。该比较不核验空间或布局版本，小计始终标为历史快照并显示报价版本和确认时间，不含项目级费用、不替代当前方案核价；演示数据不生成历史报价。见 [PROJECT-005](tasks/PROJECT-005-floor-reference-images.md)。
 
 Office 系统管理员标记存于 `office_user.is_system_admin`，PostgreSQL 部分唯一索引限制最多一人。`/api/v1/office/admin/users` 提供现有账号的列表、状态管理、重置密码和删除，服务端逐请求校验管理员。工作区主号随工作区一并创建，工作区成员账号由主号开通。账号停用或重置密码时会话立即失效，仍任项目负责人或工作区主号的账号不能直接删除。见 [AUTH-003](tasks/AUTH-003-user-admin.md) 和 [TENANT-004](tasks/TENANT-004-office-role-model.md)。
 
@@ -164,6 +164,14 @@ Office 本地商品、规格和图片表沿用 RSDP 的款式与变体模型及�
 
 本地商品列表的 `search` 按名称和厂内型号匹配，分页行返回主图 ID，图片内容由单独的图片接口读取。列表、详情和图片继续按工作区隔离。列表和详情响应中的 `canWrite` 供界面显示录入和编辑操作，保存按当前服务端权限独立核验。
 
+本地商品保存和详情使用规格的可选 `referencePrice`，单位为人民币元。列表按有效规格返回 `minReferencePrice` 和 `multipleVariants`。规格未录入参考价时保留空值，正式供应报价继续由 RSDP 管理。
+
+Office Excel 预览中的规格沿用 `referencePrice`。模板提供「参考价（元）」列，供应商表支持按含义明确的表头识别或用 `REFERENCE_PRICE` 自定义选列。供应商预览 `variantEvidence[].referencePriceCell` 返回可空的原表定位。金额沿用规格保存接口的校验和权限。
+
+Office Excel 导入记录聚合同一预览编号下已提交事务的商品接收回执。源文件名和字节数由上传时记录，同商品和发送回执一起提交。每次分批成功都会更新相应汇总，手工保存不进入导入记录。列表和详情默认仅向录入者开放，工作区主号可读取本工作区的全部记录。
+
+`GET /api/v1/office/local-products/capacity` 读取当前会话工作区的 `office_product` 主档数量和上限。新增商品在已有工作区事务锁内、处理批次幂等重放后校验剩余名额。并发保存共用这条校验；编辑已存在的主档无需新增名额。
+
 商品库浏览入口 `GET /api/v1/products/browse` 统一返回本地和公共商品的分页结果。它从会话确定本地工作区，并按当前公共库开关决定是否读取 RSDP。两类商品按各自目录顺序交错，在一类读尽后继续另一类。分页结果保留各自的稳定 ID 和详情入口。RSDP 读取失败时接口仍返回符合筛选的本地商品，并附公共库不可用状态。
 
 审核单以最后一件商品处理完成的时间起算，满 7 天由 RSDP 数据保留任务整单清理。接收回执和精简结论与删除同事务保存，支持清理后的批次幂等回包及来源版本校验。
@@ -171,8 +179,13 @@ Office 本地商品、规格和图片表沿用 RSDP 的款式与变体模型及�
 个人商品收藏按服务端会话用户隔离：`office_favorite_folder` 保存默认分组与用户自建分组，`office_favorite_item` 以 `(folder_id,rspu_id)` 保存多分组商品关系。`rspu_id` 保存商品弱关联，RSDP 编号沿用旧值，Office 本地编号带 `OFFICE-LOCAL-` 前缀。接口提供当前用户分组/数量/商品选择、自建分组、完整勾选事务保存及已收藏商品 ID，保存时独立核验商品可见性和分组归属。详见 [CAT-008](tasks/CAT-008-personal-favorites.md)。
 项目商品收藏使用独立的 `office_project_favorite_item`，以 `(project_id,user_id,rspu_id)` 联合主键实现每个成员在每个项目下各自收藏，不与个人分组混用。项目切换只刷新项目收藏状态；个人爱心跨项目保留。服务端从会话取得用户并逐次核验项目访问权和商品可见性。统一收藏弹窗只合并交互，不合并两套数据。详见 [CAT-009](tasks/CAT-009-project-favorites.md)。
 收藏中心 `/favorites` 对所有登录角色开放：侧栏账号浮层新增「收藏」直达入口，工作区账号仅主号可管理，报价入口按项目授权展示。个人与项目收藏各新增只读商品列表接口（`/favorites/items`、`/projects/{projectId}/favorites/items`），按收藏时间倒序，复用商品可见性过滤，他人收藏夹与无权限项目分别返回 403；自定义收藏夹可经 `DELETE /favorites/folders/{folderId}` 事务删除（默认夹保护、归属校验）。认证关闭的本地开发使用固定 `LOCAL-DEV` 用户读写收藏；数据库结构不变。详见 [CAT-010](tasks/CAT-010-favorites-center-page.md)。
+
+自选组合复用 `/api/v1/office/product-bundles`（真实/本地商品、变体、数量、revision 乐观锁、可应用房间方案），不存在独立组合表。商品库收藏侧栏的 `ProductComboPanel` 在旧面板基础上提供多组合卡片管理：命名创建/重命名、删除确认、缩略图网格拼贴（失效标注）、展开/收起明细、拖拽与空位＋选品弹窗（规格选择）。保存成功后仅用返回的 revision 结果更新本地，不整表回拉，创建/改名/增删不会被慢回拉覆盖；每账号 10 组合、每组 5 商品的限制在 UI 层执行。详见 [CAT-011](tasks/CAT-011-self-select-combo.md)。
 Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `widthCm/depthCm` 数据继续兼容。画布旧候选的厘米字段由毫米向上取整，当前模块宽深推荐使用下述精确毫米路径；完整匹配仍需补齐品类、结构和方案核验。
 商品详情的 `variants[].dimensionsText` 复用同一尺寸转换，提供可空的毫米显示文本。页面优先显示供应商尺寸原文，再读取结构化尺寸及旧尺寸编码。见 [CAT-009](tasks/CAT-009-structured-variant-dimensions.md)。
+
+RSDP 商品详情的 `GET /api/v1/products/{rspuId}` 返回主档 `materialTags` 和原始 `description`。Office 在商品资料中用材质字典解析标签名称并显示原始描述，规格继续读取 `variants[].materialText` 和 `materialCode`。规格无材质且主档有标签时，页面提示「见商品资料」。
+
 本轮模块尺寸推荐直接使用 `OfficeProductDto.widthMm/depthMm/heightMm` 的精确数值，旧厘米字段仅兼容显示。服务端读取已保存且全部家具已确认的指定空间/模块，分别比较旋转后的宽深，按两轴最小占比分档；查询及选择都核验当前修订以及商品和变体的在售状态。选择以现有 `office_canvas` JSON 记录 `productSelection`（真实 SKU/商品、尺寸、旋转、价格与清单行），同规格批量选择不改预留几何；工作区事务 advisory lock 与同事务清单/画布写入；锁替换和资料表清理见 [WORKSPACE-001](tasks/WORKSPACE-001-remove-project-info.md)。接口与验证边界见 [RECOMMEND-002](tasks/RECOMMEND-002-module-size-matching.md)。
 
 品类匹配从已保存家具图例或旧实例名称推导需求。网关保留主库 `categoryPath` 及规格名，目录同步时为分类和名称都模糊的商品补读详情中的 `sixDimTags`。尺寸适配后按品类证据和宽深贴合度计算 `relevanceScore`，`matchReason` 返回依据，旧 `fitRatio` 和 `tier` 继续表示尺寸。推荐和应用共用匹配逻辑，无品类相关性或有明显冲突的商品不会进入候选。
@@ -211,9 +224,9 @@ Office 从主库读取 `rspu_variant.dimensions` 中的毫米尺寸，旧 `width
 
 ### 5.2 项目报价存储（QUOTE-001）
 
-报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。报价与正式方案快照的关联和失效联动待实现。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)。
+报价主表保存确认总额、版本和有序的 `fees_json`，商品明细表保存确认时的商品信息、数量和价格。行小计和明细统计从保存的明细计算。项目内版本唯一且最多一条当前确认记录，确认事务锁定项目行后分配版本。确认报价时按报价行涉及的楼层逐一要求 `office_proposal_confirmation` 存在当前有效的方案确认快照（缺失或失效即拒绝，2026-11-25，QUOTE-002）；试算与导出不拦截。见 [报价任务与迁移说明](tasks/QUOTE-001-project-quotation.md)、[报价方案确认门禁](tasks/QUOTE-002-quotation-proposal-gate.md)。
 
-2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在最终报价隐藏时用它展示上一次报价时间。
+2026-11-25 新增只读接口 `GET /api/v1/office/projects/{projectId}/quotation/latest-record`（QUOTE_READ）：返回任意状态最近一条报价记录的 `quotationId`、`status`、`revision` 与 `createdAt`，不含金额与价格；方案确认页在历史楼层小计隐藏且无已确认报价记录时，用它展示最近报价记录的版本和时间。
 
 ### 5.3 房间方案和楼层确认（FLOW-007）
 
@@ -299,3 +312,9 @@ v9 曾将带F的图1/图2送入生图；真实样本出现编号和椅子复制�
 ## 提示词与参考图对照实验（RENDER-012，实验）
 
 RenderGenerationOptions 显式定义 A/B/C/D/E；缺省使用正式 E（完整技术提示词＋Direct）。RenderVisualTaskPrompt 从同一 RenderLayoutSemantics 结构化事实生成无坐标 JSON 的精简任务，Java 仍保存完整空间事实。C 只从生图输入移除平面图，审核继续使用；D/E 使用 prompt_extend=direct，其中 E 保留 A 的完整技术提示词。实验参数、seed、实际图片角色与哈希进入原任务快照并参与幂等，不新增表、不自动批量收费生图。任务快照另存 generationTiming 时间戳，接口计算准备、提交、服务生成和图片下载耗时，页面实时显示等待及最终耗时；Direct 改写包含在服务生成阶段，当前不能单独拆分。详见 [RENDER-012](tasks/RENDER-012-prompt-ab-experiment.md)。
+
+
+2026-11-27 报价与方案快照绑定：试算返回楼层 `proposalConfirmationIds`，冻结的确认请求必须携带同一映射；正式确认在项目各楼层按 ID 排序的共同事务锁内核验有效性和确认 ID，来源写入 `office_quotation.proposal_confirmations_json`。房间选择确认/取消校验画布修订、切换令牌和目标槽，并退役旧楼层确认；删除空间留下的方案行不参与当前楼层门禁。详见 [QUOTE-002](tasks/QUOTE-002-quotation-proposal-gate.md)。
+
+
+2026-11-27 个人组合条目返回明确的 `available`，读取和保存时按当前目录及会话工作区重新核验，不从名称或历史标记推断可用性。失效公共商品保留历史展示信息；不可访问的本地商品仅保留引用及数量，列表和保存响应均隐藏名称、规格和图片地址。旧组合 JSON 兼容读取，新增无效商品仍拒绝。详见 [商品库自选组合](tasks/CAT-011-self-select-combo.md#2026-11-27-合并后修复)。

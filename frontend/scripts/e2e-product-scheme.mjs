@@ -33,6 +33,7 @@ const cartLine = { lineId: 'LINE', zoneId: zone.id, zoneName: zone.name, project
 let canvas = { projectId: floorId, revision: 5, mode: 'design', designZoneId: zone.id, objects: [zone, { ...selected, layoutConfirmed: false }], files: [], blank: false }
 let cart = [cartLine]
 let slot = 'A', otherSlot = null, bundle = null, confirmation = null, submitted = null
+let confirmedSlot = null
 let bundleApiMissing = true
 let browser
 try {
@@ -84,15 +85,36 @@ try {
       return ok(canvas)
     }
     if (path.endsWith('/cart')) return ok(cart)
-    if (path.endsWith('/room-scheme')) return ok({ activeSlot: slot, alternativeSaved: !!otherSlot })
+    if (path.endsWith('/room-scheme')) return ok({ activeSlot: slot, alternativeSaved: !!otherSlot, confirmedSlot })
+    if (path.endsWith('/room-scheme/slots')) {
+      const summarize = item => ({ id: item.id, label: item.label ?? null, productName: item.productSelection?.product?.name ?? null, w: item.w, h: item.h })
+      const inRoom = item => item.kind === 'furniture' && item.zoneId === zone.id
+      return ok({ activeSlot: slot, active: canvas.objects.filter(inRoom).map(summarize), inactive: (otherSlot?.objects || []).filter(inRoom).map(summarize) })
+    }
     if (path.includes('/room-scheme/')) {
       const action = path.split('/').at(-1)
       const body = request.postDataJSON()
       assert.equal(body.zoneId, zone.id)
+      if (action === 'confirm-choice' || action === 'cancel-choice') {
+        assert.equal(body.revision, canvas.revision)
+        assert.equal(body.schemeToken ?? undefined, canvas.schemeToken)
+        assert.equal(body.targetSlot, slot, '确认/取消必须携带用户所见目标方案')
+        confirmation = null
+      }
+      if (action === 'confirm-choice') {
+        assert.ok(otherSlot, '没有 Plan B 时不能确认方案选择')
+        confirmedSlot = slot
+        return ok({ activeSlot: slot, alternativeSaved: true, confirmedSlot })
+      }
+      if (action === 'cancel-choice') {
+        confirmedSlot = null
+        return ok({ activeSlot: slot, alternativeSaved: true, confirmedSlot })
+      }
       assert.equal(body.revision, canvas.revision)
       assert.equal(body.schemeToken ?? undefined, canvas.schemeToken)
       let objects = canvas.objects
       if (action === 'activate') {
+        assert.equal(confirmedSlot, null, '已确认方案选择的空间不能切换')
         const old = { objects, cart }
         if (otherSlot) ({ objects, cart } = otherSlot)
         otherSlot = old
@@ -108,7 +130,7 @@ try {
       }
       canvas = { ...canvas, objects, revision: canvas.revision + 1, schemeToken: 'TOKEN-' + (canvas.revision + 1) }
       confirmation = null
-      return ok({ canvas, cart, scheme: { activeSlot: slot, alternativeSaved: !!otherSlot } })
+      return ok({ canvas, cart, scheme: { activeSlot: slot, alternativeSaved: !!otherSlot, confirmedSlot } })
     }
     if (path.endsWith('/proposal-confirmation')) {
       if (method === 'POST') {
@@ -131,61 +153,6 @@ try {
   const page = await context.newPage()
   const pageErrors = []
   page.on('pageerror', error => pageErrors.push(error.message))
-  await page.goto(baseUrl + '/products')
-  const bundlePanel = page.getByRole('region', { name: '自选商品组合' })
-  const bundleError = bundlePanel.getByRole('alert')
-  await bundleError.getByText('当前服务暂未提供商品组合，更新服务后可重试。', { exact: false }).waitFor()
-  assert.doesNotMatch(await bundleError.innerText(), /\/api\/|https?:|404/)
-  assert.equal(await bundlePanel.getByRole('button', { name: '＋ 新建组合' }).isDisabled(), true)
-  assert.equal(await bundlePanel.evaluate(panel => panel.scrollWidth > panel.clientWidth), false)
-  const newButton = await bundlePanel.getByRole('button', { name: '＋ 新建组合' }).boundingBox()
-  const bounds = await bundlePanel.boundingBox()
-  assert.ok(newButton.x + newButton.width <= bounds.x + bounds.width)
-  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/catalog-legacy-server.png' })
-  bundleApiMissing = false
-  await bundleError.getByRole('button', { name: '重试' }).click()
-  await page.getByRole('button', { name: '加入组合 胡桃木办公桌' }).click()
-  await bundlePanel.getByRole('link', { name: '胡桃木办公桌', exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: '加入规格', exact: true }).count(), 0, '单规格商品直接加入，不再显示加入规格')
-  assert.equal(await page.getByRole('button', { name: '取消选规格', exact: true }).count(), 0, '不再显示取消选规格')
-  assert.equal(await page.getByLabel('组合名称').count(), 0, '非重命名状态不重复显示组合名称输入框')
-  await page.getByRole('button', { name: '重命名组合', exact: true }).click()
-  await page.getByLabel('组合名称').fill('主管办公室组合')
-  await page.getByText('组合已保存', { exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: '保存组合', exact: true }).count(), 0, '自动保存后移除保存按钮')
-  assert.equal(await page.getByRole('button', { name: '删除组合', exact: true }).count(), 0, '底部删除按钮移除')
-  assert.equal(await page.getByRole('button', { name: '关闭编辑', exact: true }).count(), 0, '关闭编辑按钮移除')
-  const activeBundleCard = bundlePanel.locator('[data-testid="bundle-card"].is-active')
-  await activeBundleCard.waitFor()
-  assert.equal(await activeBundleCard.count(), 1, '展开组合只显示一张卡片')
-  await activeBundleCard.locator('form.bundle-editor').waitFor()
-  await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).waitFor()
-  await activeBundleCard.getByRole('button', { name: '删除', exact: true }).waitFor()
-  const nameBox = await activeBundleCard.locator('.bundle-select').boundingBox()
-  const renameBox = await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).boundingBox()
-  const toggleBox = await activeBundleCard.getByRole('button', { name: '收起组合', exact: true }).boundingBox()
-  assert.ok(Math.abs(renameBox.y - nameBox.y) < 10, '重命名/删除应与组合名称同一行')
-  assert.ok(renameBox.x >= nameBox.x + nameBox.width && renameBox.x + renameBox.width <= toggleBox.x, '重命名/删除应位于名称与展开箭头之间')
-  await activeBundleCard.getByRole('button', { name: '收起组合', exact: true }).click()
-  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'hidden' })
-  await bundlePanel.getByTestId('bundle-card').getByRole('button', { name: '展开组合', exact: true }).click()
-  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'visible' })
-  await bundlePanel.getByTestId('bundle-add-slot').waitFor()
-  await bundlePanel.getByRole('button', { name: '重命名组合', exact: true }).click()
-  assert.equal(await page.getByLabel('组合名称').evaluate(element => document.activeElement === element), true, '重命名按钮聚焦组合名称')
-  await bundlePanel.getByTestId('bundle-add-slot').click()
-  await bundlePanel.locator('.bundle-product-options').getByRole('button', { name: '胡桃木办公桌', exact: true }).waitFor()
-  await bundlePanel.getByTestId('bundle-add-slot').click()
-  await bundlePanel.locator('.bundle-product-options').waitFor({ state: 'hidden' })
-  await bundlePanel.getByRole('button', { name: '＋ 创建新的组合', exact: true }).waitFor()
-  await bundlePanel.locator('.bundle-item-image').waitFor()
-  assert.equal(await bundlePanel.locator('.bundle-item-image').count(), 1, '组合卡片展示商品图片')
-  await bundlePanel.getByRole('button', { name: '收起商品', exact: true }).click()
-  await bundlePanel.locator('.bundle-items').waitFor({ state: 'hidden' })
-  assert.equal(await bundlePanel.locator('.bundle-item-image').isVisible(), true, '收起商品明细时图片区域保持显示')
-  await bundlePanel.getByRole('button', { name: '展开商品', exact: true }).click()
-  await bundlePanel.locator('.bundle-items').waitFor({ state: 'visible' })
-  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/bundle-card.png' })
   const backgroundOf = locator => locator.evaluate(element => getComputedStyle(element).backgroundColor)
   await page.goto(baseUrl + '/canvas?floorId=' + floorId)
   const spaceActive = page.locator('.review-toolbar button.active').first()
@@ -230,6 +197,71 @@ try {
   assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true', '来源内容显示时必须选中产品选型')
   const schemeBundles = page.getByTestId('design-workflow-sidebar').getByRole('region', { name: '自选商品组合' })
   await schemeBundles.waitFor()
+  const bundleError = schemeBundles.getByRole('alert')
+  await bundleError.getByText('当前服务暂未提供商品组合，更新服务后可重试。', { exact: false }).waitFor()
+  assert.doesNotMatch(await bundleError.innerText(), /\/api\/|https?:|404/)
+  assert.equal(await schemeBundles.getByRole('button', { name: '＋ 新建组合' }).isDisabled(), true)
+  assert.equal(await schemeBundles.evaluate(panel => panel.scrollWidth > panel.clientWidth), false)
+  const newButton = await schemeBundles.getByRole('button', { name: '＋ 新建组合' }).boundingBox()
+  const bounds = await schemeBundles.boundingBox()
+  assert.ok(newButton.x + newButton.width <= bounds.x + bounds.width)
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-legacy-server.png' })
+  bundleApiMissing = false
+  await bundleError.getByRole('button', { name: '重试' }).click()
+  await schemeBundles.getByText('将常用商品保存为组合', { exact: false }).waitFor()
+  // 商品库页的组合面板已由上游 ProductComboPanel 接管；这里通过页面内请求预置组合（走 mock 路由），再切来源重载面板
+  const seeded = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/office/product-bundles/BUNDLE-1', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '主管办公室组合', revision: 0, items: [{ rspuId: 'RSPU', variantId: 'SKU', quantity: 1 }] }),
+    })
+    return response.status
+  })
+  assert.equal(seeded, 200, '预置组合应成功')
+  await page.getByRole('button', { name: '收藏', exact: true }).click()
+  await page.getByTestId('scheme-favorites-panel').waitFor()
+  await page.getByRole('button', { name: '项目选品库', exact: true }).click()
+  await schemeBundles.waitFor()
+  const bundlePanel = schemeBundles
+  await bundlePanel.getByTestId('bundle-card').getByRole('button', { name: '展开组合', exact: true }).click()
+  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'visible' })
+  const activeBundleCard = bundlePanel.locator('[data-testid="bundle-card"].is-active')
+  assert.equal(await activeBundleCard.count(), 1, '展开组合只显示一张卡片')
+  await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).waitFor()
+  await activeBundleCard.getByRole('button', { name: '删除', exact: true }).waitFor()
+  const nameBox = await activeBundleCard.locator('.bundle-select').boundingBox()
+  const renameBox = await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).boundingBox()
+  const toggleBox = await activeBundleCard.getByRole('button', { name: '收起组合', exact: true }).boundingBox()
+  assert.ok(Math.abs(renameBox.y - nameBox.y) < 10, '重命名/删除应与组合名称同一行')
+  assert.ok(renameBox.x >= nameBox.x + nameBox.width && renameBox.x + renameBox.width <= toggleBox.x, '重命名/删除应位于名称与展开箭头之间')
+  assert.equal(await page.getByLabel('组合名称').count(), 0, '非重命名状态不重复显示组合名称输入框')
+  await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).click()
+  assert.equal(await page.getByLabel('组合名称').evaluate(element => document.activeElement === element), true, '重命名按钮聚焦组合名称')
+  await page.getByLabel('组合名称').fill('主管办公室组合')
+  await page.getByText('组合已保存', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '保存组合', exact: true }).count(), 0, '自动保存后移除保存按钮')
+  assert.equal(await page.getByRole('button', { name: '删除组合', exact: true }).count(), 0, '底部删除按钮移除')
+  assert.equal(await page.getByRole('button', { name: '关闭编辑', exact: true }).count(), 0, '关闭编辑按钮移除')
+  assert.equal(await page.getByRole('button', { name: '加入规格', exact: true }).count(), 0, '不再显示加入规格')
+  assert.equal(await page.getByRole('button', { name: '取消选规格', exact: true }).count(), 0, '不再显示取消选规格')
+  await activeBundleCard.getByRole('button', { name: '收起组合', exact: true }).click()
+  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'hidden' })
+  await bundlePanel.getByTestId('bundle-card').getByRole('button', { name: '展开组合', exact: true }).click()
+  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'visible' })
+  await bundlePanel.getByTestId('bundle-add-slot').waitFor()
+  await bundlePanel.getByTestId('bundle-add-slot').click()
+  await bundlePanel.getByText('请先在商品库选择商品加入组合', { exact: false }).waitFor()
+  await bundlePanel.getByTestId('bundle-add-slot').click()
+  await bundlePanel.locator('.bundle-product-options').waitFor({ state: 'hidden' })
+  await bundlePanel.getByRole('button', { name: '＋ 创建新的组合', exact: true }).waitFor()
+  await bundlePanel.locator('.bundle-item-image').waitFor()
+  assert.equal(await bundlePanel.locator('.bundle-item-image').count(), 1, '组合卡片展示商品图片')
+  await bundlePanel.getByRole('button', { name: '收起商品', exact: true }).click()
+  await bundlePanel.locator('.bundle-items').waitFor({ state: 'hidden' })
+  assert.equal(await bundlePanel.locator('.bundle-item-image').isVisible(), true, '收起商品明细时图片区域保持显示')
+  await bundlePanel.getByRole('button', { name: '展开商品', exact: true }).click()
+  await bundlePanel.locator('.bundle-items').waitFor({ state: 'visible' })
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/bundle-card.png' })
   const schemeSourceAccent = await backgroundOf(currentNav)
   await page.waitForFunction(expected => getComputedStyle(document.querySelector('[data-testid="tab-product-selection"]')).backgroundColor === expected, schemeSourceAccent)
   if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-bundles.png' })
@@ -264,8 +296,11 @@ try {
   await page.getByRole('button', { name: '项目选品库', exact: true }).click()
   const plan = name => page.getByRole('button', { name: `Plan ${name}`, exact: true })
   await page.locator('button[aria-pressed=true]').filter({ hasText: 'Plan A' }).waitFor()
-  await plan('B').click()
-  await page.getByText('已切换至 Plan B', { exact: true }).waitFor()
+  // Plan B 按需创建：初始只有 Plan A 和「+」按钮
+  assert.equal(await plan('B').count(), 0)
+  await page.getByRole('button', { name: '新建 Plan B' }).click()
+  await page.getByText('已创建 Plan B', { exact: false }).waitFor()
+  await plan('B').waitFor()
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '清空选品' }).click()
   await page.getByText('已清空当前房间选品').waitFor()
@@ -279,6 +314,34 @@ try {
   await page.getByRole('button', { name: '应用组合' }).click()
   await page.getByText('已更新当前房间选品，剩余 0 件家具待选').waitFor()
   await page.getByRole('link', { name: '去项目清单确认' }).click()
+  // 有 Plan B 但未确认方案选择：横幅展示两个方案的家具对比，确认方案被预检查拦截
+  const choiceBanner = page.getByTestId('proposal-scheme-choice-issues')
+  await choiceBanner.getByText('1 个空间待确认方案', { exact: true }).waitFor()
+  await choiceBanner.locator('summary').click()
+  await choiceBanner.getByText('副总办公室', { exact: true }).waitFor()
+  await choiceBanner.getByText('1 件家具', { exact: true }).first().waitFor()
+  assert.equal(await choiceBanner.getByText('1 件家具', { exact: true }).count(), 2, 'Plan A/B 应各显示家具件数')
+  assert.ok((await choiceBanner.getByText('胡桃木办公桌 × 1', { exact: true }).count()) >= 1)
+  await page.getByRole('button', { name: '确认方案', exact: true }).click()
+  const precheckModal = page.getByTestId('proposal-precheck-modal')
+  await precheckModal.waitFor()
+  await precheckModal.getByText('方案选择未确认', { exact: true }).waitFor()
+  await precheckModal.getByText('副总办公室', { exact: true }).click()
+  await precheckModal.waitFor({ state: 'hidden' })
+  // 确认使用当前 Plan B：按钮锁定，选中的 Plan B 保持选中样式，Plan A 不可点击
+  await page.getByTestId('scheme-choice-confirm').click()
+  await page.getByText('副总办公室 已确认使用 Plan B', { exact: true }).waitFor()
+  await choiceBanner.waitFor({ state: 'hidden' })
+  assert.equal(await plan('A').isDisabled(), true, '确认后 Plan A 不可点击')
+  assert.equal(await plan('B').getAttribute('aria-pressed'), 'true', '确认后 Plan B 保持选中')
+  assert.equal(await plan('B').isDisabled(), true, '确认后 Plan B 也不可再切换')
+  // 取消确认恢复切换，横幅重新出现
+  await page.getByTestId('scheme-choice-cancel').click()
+  await page.getByText('副总办公室 已取消方案确认，可重新切换', { exact: true }).waitFor()
+  await choiceBanner.waitFor({ state: 'visible' })
+  assert.equal(await plan('A').isDisabled(), false, '取消后恢复切换')
+  await page.getByTestId('scheme-choice-confirm').click()
+  await page.getByText('副总办公室 已确认使用 Plan B', { exact: true }).waitFor()
   await page.getByRole('button', { name: '确认方案', exact: true }).click()
   await page.getByText('方案已确认', { exact: true }).waitFor()
   await page.reload()
@@ -297,7 +360,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-narrow.png' })
   assert.deepEqual(pageErrors, [])
-  console.log('Product scheme mock UI passed: bundle, Plan A/B, clear, confirmation after reload, formal render, narrow layout')
+  console.log('Product scheme mock UI passed: bundle, Plan A/B create, choice confirm/cancel lock, clear, confirmation after reload, formal render, narrow layout')
 } finally {
   await browser?.close()
   app.kill('SIGTERM')

@@ -29,6 +29,22 @@ class OfficeProjectControllerTest {
                 .content("{\"status\":\"DELIVERING\"}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("DELIVERING"));
     }
+    @Test void replaceMembersRoutePassesPermissionsToService() throws Exception {
+        var service = mock(OfficeProjectService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(service)).build();
+        mvc.perform(put("/api/v1/office/projects/OPRJ-1/members").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"leaderUserId\":\"U1\",\"collaboratorUserIds\":[\"U2\"],"
+                    + "\"permissions\":{\"U2\":[\"READ\",\"QUOTE_READ\"]}}"))
+            .andExpect(status().isOk());
+        // JSON body 中的权限数组必须反序列化为枚举 Map 并透传给 service（前端 PUT 契约的最后一环）
+        verify(service).replaceMembers(eq("OPRJ-1"), argThat(request ->
+            request.getPermissions() != null
+                && List.of(OfficeProjectPermission.READ, OfficeProjectPermission.QUOTE_READ)
+                    .equals(request.getPermissions().get("U2"))
+                && "U1".equals(request.getLeaderUserId())
+                && List.of("U2").equals(request.getCollaboratorUserIds())));
+    }
+
     private final OfficeProjectService projects = mock(OfficeProjectService.class);
     private final org.springframework.test.web.servlet.MockMvc mvc = MockMvcBuilders.standaloneSetup(new OfficeProjectController(projects)).build();
 

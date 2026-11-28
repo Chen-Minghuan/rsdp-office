@@ -35,6 +35,7 @@ import static com.rsdp.officeproduct.importer.office.product.LocalProductModels.
 @RequiredArgsConstructor
 public class LocalProductService {
     private static final int PAGE_SIZE = 30;
+    private static final int WORKSPACE_PRODUCT_LIMIT = 5_000;
     private static final RowMapper<Summary> SUMMARY = (r, i) -> new Summary(
         r.getString("product_id"), r.getInt("revision"), r.getString("name"), r.getString("category_code"),
         r.getString("factory_code"), r.getString("factory_model"));
@@ -66,6 +67,15 @@ public class LocalProductService {
         find(requireMember().getWorkspaceId(), productId);
     }
 
+    public Capacity capacity() {
+        return capacity(requireMember().getWorkspaceId());
+    }
+
+    private Capacity capacity(String workspace) {
+        long used = jdbc.queryForObject("select count(*) from office_product where workspace_id = ?", Long.class, workspace);
+        return new Capacity(used, WORKSPACE_PRODUCT_LIMIT);
+    }
+
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detail detail(String productId) {
         OfficeUser user = requireMember();
@@ -76,7 +86,8 @@ public class LocalProductService {
             order by position
             """, (r, i) -> new Variant(r.getString("variant_id"), r.getString("display_name"),
             r.getBigDecimal("width_mm"), r.getBigDecimal("depth_mm"), r.getBigDecimal("height_mm"),
-            r.getString("size_text"), r.getString("color_text"), r.getString("material_text")), workspace, productId);
+            r.getString("size_text"), r.getString("color_text"), r.getString("material_text"),
+            r.getBigDecimal("reference_price")), workspace, productId);
         List<ImageRef> images = jdbc.query("""
             select image_id, media_type from office_product_image
             where workspace_id = ? and product_id = ? and position is not null order by position, image_id
@@ -92,7 +103,7 @@ public class LocalProductService {
             requireMember().getWorkspaceId(), id).stream().findFirst().orElseThrow(() -> new BusinessException(404, "图片不存在"));
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<Saved> save(SaveRequest request) {
         OfficeUser user = requireWriter();
         String workspace = user.getWorkspaceId();
@@ -101,7 +112,7 @@ public class LocalProductService {
             throw new BusinessException("每批须包含 1–100 个商品并提供批次编号");
         }
         String boundFactory = boundFactory(workspace);
-        // 同一工作区的保存按事务串行，保护批次重放、型号唯一和导入归属。
+        // 同一工作区的保存按事务串行，保护名额、批次重放、型号唯一和导入归属。
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?, 0))", (r, i) -> 0, "office-local-products:" + workspace);
         boolean usesPreview = request.previewId() != null;
         String requestHash = usesPreview ? hash(writeJson(request)) : null;
@@ -109,7 +120,8 @@ public class LocalProductService {
             List<Saved> previous = previousSave(user, request.batchId(), requestHash);
             if (previous != null) return previous;
         }
-        var submitted = usesPreview ? previewCache.materialize(request, user).products() : request.products();
+        var materialized = usesPreview ? previewCache.materialize(request, user) : null;
+        var submitted = materialized == null ? request.products() : materialized.products();
         List<Input> inputs = submitted.stream().map(input -> {
             String factory = boundFactory == null && input != null && input.id() != null
                 ? find(workspace, input.id()).factoryCode() : boundFactory;
@@ -122,6 +134,15 @@ public class LocalProductService {
             requestHash = hash(writeJson(inputs));
             List<Saved> previous = previousSave(user, request.batchId(), requestHash);
             if (previous != null) return previous;
+        }
+
+        long additions = inputs.stream().filter(input -> input.id() == null).count();
+        if (additions > 0) {
+            var capacity = capacity(workspace);
+            long remaining = Math.max(0, capacity.limit() - capacity.used());
+            if (additions > remaining) {
+                throw new BusinessException(409, "本工作区最多录入 " + capacity.limit() + " 件商品，当前还可录入 " + remaining + " 件");
+            }
         }
 
         Set<List<String>> models = new HashSet<>();
@@ -141,10 +162,13 @@ public class LocalProductService {
         List<Saved> result = products.stream().map(p -> new Saved(p.id(), p.revision(), p.name())).toList();
         var delivery = boundFactory == null ? null
             : writeJson(new Delivery(1, request.batchId(), workspace, user.getUserId(), user.getDisplayName(), products));
+        var source = materialized == null ? null : materialized.source();
         jdbc.update("""
-            insert into office_product_outbox(workspace_id, batch_id, actor_id, request_hash, payload, result)
-            values (?, ?, ?, ?, ?::jsonb, ?::jsonb)
-            """, workspace, request.batchId(), user.getUserId(), requestHash, delivery, writeJson(result));
+            insert into office_product_outbox(workspace_id, batch_id, actor_id, request_hash, payload, result,
+                import_workbook_id, import_file_name, import_file_bytes)
+            values (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?)
+            """, workspace, request.batchId(), user.getUserId(), requestHash, delivery, writeJson(result),
+            request.previewId(), source == null ? null : source.fileName(), source == null ? null : source.fileBytes());
         return result;
     }
 
@@ -205,16 +229,16 @@ public class LocalProductService {
             if (variant.id() == null) {
                 jdbc.update("""
                     insert into office_product_variant(variant_id, workspace_id, product_id, display_name,
-                        width_mm, depth_mm, height_mm, size_text, color_text, material_text, position)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        width_mm, depth_mm, height_mm, size_text, color_text, material_text, position, reference_price)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, id, workspace, product, variant.name(), variant.widthMm(), variant.depthMm(), variant.heightMm(),
-                    variant.sizeText(), variant.color(), variant.material(), result.size());
+                    variant.sizeText(), variant.color(), variant.material(), result.size(), variant.referencePrice());
             } else if (jdbc.update("""
                 update office_product_variant set display_name = ?, width_mm = ?, depth_mm = ?, height_mm = ?,
-                    size_text = ?, color_text = ?, material_text = ?, position = ?, active = true
+                    size_text = ?, color_text = ?, material_text = ?, position = ?, reference_price = ?, active = true
                 where workspace_id = ? and product_id = ? and variant_id = ?
                 """, variant.name(), variant.widthMm(), variant.depthMm(), variant.heightMm(), variant.sizeText(),
-                variant.color(), variant.material(), result.size(), workspace, product, id) != 1) {
+                variant.color(), variant.material(), result.size(), variant.referencePrice(), workspace, product, id) != 1) {
                 throw new BusinessException("规格不属于当前商品");
             }
             var dimensions = new Dimensions(variant.widthMm(), variant.depthMm(), variant.heightMm(), "mm");
@@ -291,7 +315,8 @@ public class LocalProductService {
             if (v == null) throw new BusinessException("规格资料不能为空");
             return new Variant(v.id(), required(v.name(), "规格名称", 128), mm(v.widthMm(), "宽度"),
                 mm(v.depthMm(), "进深"), v.heightMm() == null ? null : mm(v.heightMm(), "高度"),
-                optional(v.sizeText(), "尺寸原文", 64), optional(v.color(), "颜色", 64), optional(v.material(), "材质", 128));
+                optional(v.sizeText(), "尺寸原文", 64), optional(v.color(), "颜色", 64), optional(v.material(), "材质", 128),
+                referencePrice(v.referencePrice()));
         }).toList();
         var images = input.images() == null ? List.<ImageInput>of() : input.images();
         if (images.size() > MAX_IMAGES) throw new BusinessException("每个商品最多 6 张图片");
@@ -324,6 +349,15 @@ public class LocalProductService {
             throw new BusinessException(label + "须为 0–100000 毫米之间的正数，最多两位小数");
         }
         return value.setScale(2);
+    }
+
+    static BigDecimal referencePrice(BigDecimal amount) {
+        if (amount == null) return null;
+        if (amount.signum() <= 0 || amount.compareTo(new BigDecimal("9999999999.99")) > 0
+                || amount.stripTrailingZeros().scale() > 2) {
+            throw new BusinessException("参考价须为正数，最多十位整数和两位小数");
+        }
+        return amount.setScale(2);
     }
 
     private String required(String value, String label, int max) {

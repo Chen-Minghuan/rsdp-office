@@ -57,7 +57,7 @@ try {
       ] } })
     }
     if (path === '/api/v1/office/projects' && route.request().method() === 'GET') {
-      const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['EDIT'] }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
+      const project = { projectId: 'OFFICE-PROJECT-001', name: '预览拖动测试项目', customerRequirements: '', requirementsRevision: 1, leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['READ', 'EDIT'] }, collaborators: [], referenceImages: [], floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }] }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: [project] }) })
     }
     const data = path.endsWith('/floor-plan/PREVIEW-DRAG') ? (floorPlanRequests++ === 0 ? source : null) : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
@@ -75,6 +75,7 @@ try {
   await page.goto(`${baseUrl}/canvas?analysisId=PREVIEW-DRAG`, { waitUntil: 'networkidle' })
   await confirmAllReviews(page)
   await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+  await page.getByTestId('tab-auto-layout').click()
 
   const previewItems = page.locator('[data-preview-id]')
   await page.evaluate(() => {
@@ -91,9 +92,10 @@ try {
   })
   // 关闭吸附，保证拖动位移可精确断言。
   await page.getByRole('button', { name: '家具吸附', exact: true }).click()
-  const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
   async function dragFirstPreview(dx, dy) {
     const item = previewItems.first()
+    // The canvas refits when the furniture strip appears or disappears.
+    const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
     const before = await item.evaluate(el => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) }))
     const box = await item.boundingBox()
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -141,6 +143,7 @@ try {
   await page.getByTestId('design-workflow-sidebar').waitFor()
   const afterReload = (await state()).objects.filter(object => object.kind === 'furniture').map(item => [item.x, item.y, item.w, item.h, item.rotation]).sort()
   assert.deepEqual(afterReload, beforeReload, '刷新后保留手动调整后的排版几何')
+  await page.getByTestId('tab-auto-layout').click()
   await page.getByTestId('auto-clear-layout').click()
   await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
 
@@ -270,7 +273,7 @@ try {
   await page.getByTestId('reference-add').click()
   await page.mouse.click(coffeeBox.x + coffeeBox.width / 2, coffeeBox.y + coffeeBox.height / 2)
   await page.getByTestId('reference-apply').click()
-  await page.getByText('此位置与已有家具重叠或间距不足', { exact: true }).waitFor()
+  await page.getByText(/「.*」与「.*」的占地重叠/).waitFor()
   assert.equal(await referenceLayer.locator('[data-reference-index]').count(), 4, '重叠校验不会挪动或删掉家具')
   assert.equal((await state()).objects.filter(item => item.layoutReference).length, 0)
   await page.keyboard.press('Delete')

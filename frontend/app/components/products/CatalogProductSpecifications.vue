@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { localReferencePrice } from '~/utils/localReferencePrice'
+
 const props = defineProps<{
   variants: {
     id: string
@@ -6,11 +8,13 @@ const props = defineProps<{
     dimensions?: string | null
     color?: string | null
     material?: string | null
+    referencePrice?: number | null
     packageCount?: number | null
     packageVolumeCbm?: number | null
     grossWeight?: number | null
     status?: string
   }[]
+  hasProductMaterial?: boolean
 }>()
 
 const selectedId = ref('')
@@ -65,7 +69,13 @@ const packaging = computed(() => {
         </div>
         <div class="min-w-0">
           <dt class="text-xs text-muted">材质</dt>
-          <dd class="mt-1 break-words text-sm font-medium">{{ selected.material || '—' }}</dd>
+          <dd class="mt-1 break-words text-sm font-medium">{{ selected.material || (hasProductMaterial ? '见商品资料' : '—') }}</dd>
+        </div>
+        <div v-if="selected.referencePrice !== undefined" class="min-w-0">
+          <dt class="text-xs text-muted">参考价</dt>
+          <dd class="mt-1 break-words text-sm font-semibold tabular-nums" :class="selected.referencePrice == null ? 'text-muted' : 'text-accent-ink'">
+            {{ localReferencePrice(selected.referencePrice) }}
+          </dd>
         </div>
         <div v-for="field in packaging" :key="field.label" class="min-w-0">
           <dt class="text-xs text-muted">{{ field.label }}</dt>

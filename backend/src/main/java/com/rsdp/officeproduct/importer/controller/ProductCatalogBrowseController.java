@@ -1,9 +1,11 @@
 package com.rsdp.officeproduct.importer.controller;
 
 import com.rsdp.officeproduct.importer.common.Result;
+import com.rsdp.officeproduct.importer.dto.request.CatalogProductPageRequest;
 import com.rsdp.officeproduct.importer.service.ProductCatalogBrowseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,12 +22,14 @@ public class ProductCatalogBrowseController {
                                                         @RequestParam(defaultValue = "") String search,
                                                         @RequestParam(defaultValue = "") String status,
                                                         @RequestParam(defaultValue = "") String category,
-                                                        @RequestParam(defaultValue = "") String color) {
-        return Result.ok(products.page(page, size, search, status, category, color));
+                                                        @RequestParam(defaultValue = "") String color,
+                                                        @ModelAttribute CatalogProductPageRequest advanced) {
+        return Result.ok(products.page(page, size, search, status, category, color, advanced));
     }
 
     @GetMapping("/facets")
-    public Result<ProductCatalogBrowseService.Facets> facets() {
-        return Result.ok(products.facets());
+    public Result<ProductCatalogBrowseService.Facets> facets(@RequestParam(defaultValue = "") String search,
+                                                             @RequestParam(defaultValue = "") String status) {
+        return Result.ok(products.facets(search, status));
     }
 }

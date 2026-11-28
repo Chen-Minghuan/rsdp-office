@@ -12,10 +12,13 @@ export interface ImportedProduct {
   rspuCode: string | null
   externalCode: string | null
   productName: string | null
+  productLevel?: string | null
   categoryPath?: string[] | null
   colorPrimaryName?: string | null
   primaryImageUrl: string | null
   retailPrice: number | null
+  minReferencePrice?: number | null
+  multipleVariants?: boolean
   status: string | null
   createdAt: string
   updatedAt: string
@@ -70,6 +73,8 @@ export interface ProductVariant {
   sizeText: string | null
   dimensions: string | null
   dimensionsText?: string | null
+  widthMm?: number | null
+  productLevel?: string | null
   packageCount: number | null
   packageVolumeCbm: number | null
   grossWeight: number | null
@@ -104,6 +109,7 @@ export interface ProductDetail {
   externalCode: string | null
   productName: string | null
   colorPrimaryName: string | null
+  materialTags?: string[]
   description: string | null
   retailPrice: number | null
   primaryImageUrl: string | null
@@ -115,6 +121,30 @@ export interface ProductDetail {
   variants: ProductVariant[]
   images: ProductImage[]
 }
+export interface CatalogProductFilters {
+  levels: string[]
+  spaceTypes: string[]
+  productTypes: string[]
+  materials: string[]
+  colors: string[]
+  widthRanges: string[]
+  legTypes: string[]
+  storageTypes: string[]
+}
+
+export interface CatalogFacetOption {
+  code: string
+  label: string
+  count: number
+  disabled: boolean
+}
+
+export type CatalogFacetGroups = Record<keyof CatalogProductFilters, CatalogFacetOption[]>
+
+export interface CatalogFacets {
+  groups: CatalogFacetGroups
+}
+
 export interface CatalogProductPage {
   rows: ImportedProduct[]
   total: number
@@ -122,6 +152,7 @@ export interface CatalogProductPage {
   activeTotal: number
   page: number
   size: number
+  facets: CatalogFacets
 }
 
 export type CatalogBrowseRow = { local: LocalProductCatalogItem, shared: null } | { local: null, shared: ImportedProduct }
@@ -141,4 +172,5 @@ export interface CatalogBrowseFacets {
   sharedCategories: string[]
   colors: string[]
   sharedUnavailable: boolean
+  advanced?: CatalogFacets
 }

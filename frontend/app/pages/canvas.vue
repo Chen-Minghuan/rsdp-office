@@ -82,6 +82,10 @@ const selectedSchemeProducts = computed(() => schemeFurniture.value
   .filter(item => item.productSelection && item.productId).map(item => ({ id: item.id, product: item.productSelection!.product })))
 const inspectedProduct = computed(() => selectedSchemeProducts.value.find(item => item.id === selectedId.value)?.product)
 const proposalRoute = computed(() => ({ path: '/proposal', query: { floorId: workspace.currentFloorId } }))
+// Plan B 按需创建：后端 alternativeSaved=true 表示另一方案槽已有保存内容（即 Plan B 已存在）
+const hasPlanB = computed(() => !!schemeState.value?.alternativeSaved)
+// 在方案确认页确认使用某个 Plan 后锁定切换，需先取消确认（后端同样拒绝 activate）
+const schemeLocked = computed(() => !!schemeState.value?.confirmedSlot)
 async function switchScheme(targetSlot: 'A' | 'B') {
   if (!await changeScheme('activate', { targetSlot })) return
   layoutPreview.value = null
@@ -262,10 +266,16 @@ watch(() => store.canEnterLayout, (confirmed) => {
       <h1>{{ schemeRoom?.name || '未选择空间' }}</h1>
       <span v-if="schemeArea">{{ schemeArea }} m²</span>
       <span>已选 <strong>{{ selectedCount }}</strong> / {{ schemeFurniture.length }} 件</span>
-      <div class="scheme-versions" aria-label="房间方案">
-        <button v-for="slot in (['A', 'B'] as const)" :key="slot" type="button"
-          :aria-pressed="schemeState ? schemeState.activeSlot === slot : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom"
-          @click="switchScheme(slot)">Plan {{ slot }}</button>
+      <div class="scheme-versions" aria-label="房间方案" :title="schemeLocked ? `已在方案确认页确认使用 Plan ${schemeState?.confirmedSlot}，取消后才可切换` : undefined">
+        <button type="button"
+          :aria-pressed="schemeState ? schemeState.activeSlot === 'A' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom || schemeLocked"
+          @click="switchScheme('A')">Plan A</button>
+        <button v-if="hasPlanB" type="button"
+          :aria-pressed="schemeState ? schemeState.activeSlot === 'B' : undefined" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !schemeRoom || schemeLocked"
+          @click="switchScheme('B')">Plan B</button>
+        <button v-else type="button" class="scheme-add" aria-label="新建 Plan B" title="以 Plan A 为起点创建 Plan B"
+          :disabled="!schemeState || !canEditScheme || schemeBusy || !store.apiReady || !schemeRoom || schemeLocked"
+          @click="switchScheme('B')">+</button>
       </div>
       <button type="button" :disabled="!canEditScheme || schemeBusy || !store.apiReady || !canClear" @click="clearScheme">清空选品</button>
       <p v-if="schemeError || schemeMessage" class="scheme-feedback" :role="schemeError ? 'alert' : 'status'">{{ schemeError || schemeMessage }}</p>
@@ -290,7 +300,7 @@ watch(() => store.canEnterLayout, (confirmed) => {
         />
         <p v-if="sizeMessage" role="status" class="mx-3 mt-2 flex-none border border-[#d8e6c8] bg-[#f3f9ee] px-2 py-1.5 text-[10px] text-[#4d713d]">{{ sizeMessage }}</p>
         <OfficeCanvasBoard ref="boardRef" v-model:view-rotation="viewRotation" v-model:show-underlay="showUnderlay" :show-dimensions="showDimensions" v-model:layout-preview="layoutPreview" v-model:reference-editing="referenceEditing" v-model:tool="tool" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" :mode="mode" v-model:snap-enabled="snapEnabled" :updating-scheme="schemeBusy" @edit-furniture="(id, fromGroup) => workflowRef?.openFurniture(id, fromGroup)" @edit-size="(id, anchor) => openSizeDialog(store.objects.find(o => o.id === id) as FurnitureObject, [id], anchor)" />
-        <OfficeCanvasFurnitureStrip v-if="mode === 'design' && !isProductScheme" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" @edit-size="(item, ids, anchor) => openSizeDialog(item, ids, anchor)" @bulk-replace="(item, ids) => openBulkReplace(item, ids)" />
+        <OfficeCanvasFurnitureStrip v-if="mode === 'design' && (!isProductScheme || canEditScheme)" v-model:selected-id="selectedId" v-model:selected-furniture-ids="selectedFurnitureIds" @edit-size="(item, ids, anchor) => openSizeDialog(item, ids, anchor)" @bulk-replace="(item, ids) => openBulkReplace(item, ids)" />
         <div v-if="isProductScheme" class="scheme-board-footer">
           <span v-if="inspectedProduct"><strong>{{ inspectedProduct.name }}</strong> · {{ inspectedProduct.variant }} · {{ money(inspectedProduct.price) }}</span>
           <span v-else-if="selectedCount">点击画布家具查看已选商品</span>
@@ -393,6 +403,15 @@ watch(() => store.canEnterLayout, (confirmed) => {
   display: flex;
   gap: .25rem;
   margin-left: auto;
+}
+
+.scheme-add {
+  min-width: 2rem;
+}
+
+/* 方案选择确认锁定后：当前选中的 Plan 保持选中样式 */
+.scheme-versions button[aria-pressed=true]:disabled {
+  opacity: 1;
 }
 
 .scheme-header button,

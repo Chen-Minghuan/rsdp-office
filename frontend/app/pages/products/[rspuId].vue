@@ -9,6 +9,9 @@ const rspuId = route.params.rspuId as string
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const product = ref<ProductDetail | null>(null)
+const materialNames = ref(new Map<string, string>())
+const productMaterial = computed(() => (product.value?.materialTags ?? [])
+  .map(code => materialNames.value.get(code) || code).join('、'))
 
 const galleryImages = computed(() => {
   const current = product.value
@@ -28,7 +31,7 @@ const specifications = computed(() => (product.value?.variants ?? []).map(varian
   name: variant.displayName,
   dimensions: variant.sizeText?.trim() || variant.dimensionsText || variant.sizeCode,
   color: variant.colorText || variant.colorCode,
-  material: variant.materialText || variant.materialCode,
+  material: variant.materialText?.trim() || (variant.materialCode && (materialNames.value.get(variant.materialCode) || variant.materialCode)),
   packageCount: variant.packageCount,
   packageVolumeCbm: variant.packageVolumeCbm,
   grossWeight: variant.grossWeight,
@@ -41,6 +44,11 @@ async function loadProduct() {
   try {
     product.value = await api.getProduct(rspuId)
     if (!product.value) error.value = '商品不存在或已删除'
+    else if (product.value.materialTags?.length || product.value.variants.some(variant => variant.materialCode && !variant.materialText?.trim())) {
+      void api.listProductMaterials().then(items => {
+        materialNames.value = new Map(items.map(item => [item.dictCode, item.dictName]))
+      }).catch(() => { /* Keep showing the source codes while the dictionary is unavailable. */ })
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载商品失败'
   } finally {
@@ -90,15 +98,21 @@ onMounted(loadProduct)
         <dt class="text-xs text-muted">商品来源</dt>
         <dd class="mt-1 break-words text-sm font-medium">{{ catalogSourceLabel(product.sourceChannel, product.sourceFactoryName || product.ownerFactoryCode) }}</dd>
       </div>
+      <div v-if="productMaterial" class="col-span-2 min-w-0">
+        <dt class="text-xs text-muted">材质</dt>
+        <dd class="mt-1 break-words text-sm font-medium">{{ productMaterial }}</dd>
+      </div>
+      <div v-if="product.description?.trim()" class="col-span-2 min-w-0">
+        <dt class="text-xs text-muted">商品描述</dt>
+        <dd class="mt-1 whitespace-pre-wrap break-words text-sm leading-6">{{ product.description }}</dd>
+      </div>
     </template>
-    <ProductsCatalogProductSpecifications :variants="specifications" />
+    <ProductsCatalogProductSpecifications :variants="specifications" :has-product-material="Boolean(productMaterial)" />
     <template v-if="product" #more>
       <details class="border border-line bg-white">
-        <summary class="cursor-pointer px-4 py-3 text-sm font-semibold sm:px-5">说明与记录</summary>
+        <summary class="cursor-pointer px-4 py-3 text-sm font-semibold sm:px-5">商品记录</summary>
         <div class="border-t border-line p-4 sm:p-5">
-          <h2 class="text-sm font-semibold">描述 / 配置说明</h2>
-          <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-6">{{ product.description || '暂无说明' }}</p>
-          <dl class="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4">
+          <dl class="grid grid-cols-2 gap-4">
             <div><dt class="text-xs text-muted">创建时间</dt><dd class="mt-1 text-sm tabular-nums">{{ formatDate(product.createdAt) }}</dd></div>
             <div><dt class="text-xs text-muted">更新时间</dt><dd class="mt-1 text-sm tabular-nums">{{ formatDate(product.updatedAt) }}</dd></div>
           </dl>

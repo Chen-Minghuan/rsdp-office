@@ -17,9 +17,13 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeFavoriteItemMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProductBundleMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectFavoriteItemMapper;
 import com.rsdp.officeproduct.importer.office.product.LocalCatalogReader;
+import com.rsdp.officeproduct.importer.office.product.LocalProductModels.Input;
+import com.rsdp.officeproduct.importer.office.product.LocalProductModels.SaveRequest;
+import com.rsdp.officeproduct.importer.office.product.LocalProductModels.Variant;
 import com.rsdp.officeproduct.importer.office.product.LocalProductService;
 import com.rsdp.officeproduct.importer.office.product.WorkbookPreviewCache;
 import com.rsdp.officeproduct.importer.service.ProductQueryService;
+import com.rsdp.officeproduct.importer.service.CatalogProductFilterService;
 import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import org.apache.ibatis.session.SqlSession;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -130,7 +135,7 @@ class LocalFavoritePostgresTest {
         var shared = mock(SharedCatalogService.class);
         when(shared.resolveViewMode()).thenReturn("none");
         var gateway = mock(RsdpCatalogGateway.class);
-        var products = new ProductQueryService(gateway, shared, access, local);
+        var products = new ProductQueryService(gateway, mock(CatalogProductFilterService.class), shared, access, local);
         var personal = new OfficeFavoriteService(currentUser, products,
             session.getMapper(OfficeFavoriteFolderMapper.class), session.getMapper(OfficeFavoriteItemMapper.class));
         var project = new OfficeProjectFavoriteService(currentUser, mock(OfficeProjectAccessService.class),
@@ -171,14 +176,47 @@ class LocalFavoritePostgresTest {
             List.of(localItem, new Item("RSPU-PUBLIC", "PUBLIC-VARIANT", 1))));
         assertEquals(mixed, bundles.list().get(0));
 
+        verifyReferencePrice(local, member);
+
         member.setWorkspaceId("WORKSPACE-B");
         when(shared.resolveViewMode()).thenReturn("none");
         assertTrue(personal.listFavoriteItems(folder).isEmpty());
         assertTrue(project.listProjectFavoriteItems("PROJECT").isEmpty());
         assertThrows(BusinessException.class, () -> personal.saveProductFolders(localReference, List.of(folder)));
         assertThrows(BusinessException.class, () -> project.saveProjectFavorite("PROJECT", localReference, true));
-        assertThrows(BusinessException.class, () -> bundles.save("BUNDLE", new Save("其他工作区", 2, List.of(localItem))));
+        var hidden = bundles.save("BUNDLE", new Save("其他工作区", 2, List.of(localItem))).items().getFirst();
+        assertFalse(hidden.available());
+        assertNull(hidden.name()); assertNull(hidden.variant()); assertNull(hidden.imageUrl());
+        assertThrows(BusinessException.class, () -> bundles.save("NEW-BUNDLE", new Save("新增不可见商品", 0, List.of(localItem))));
         assertNull(bundles.list().get(0).items().get(0).name());
         assertNull(bundles.list().get(0).items().get(0).variant());
+    }
+
+    private void verifyReferencePrice(LocalProductService local, OfficeUser member) {
+        member.setProductEntryEnabled(true);
+        try {
+            var price = new BigDecimal("1380.50");
+            var width = BigDecimal.valueOf(1200);
+            var depth = BigDecimal.valueOf(600);
+            var standard = new Variant("STANDARD", "1.2 米", width, depth, null, null, null, null, price);
+            var unpriced = new Variant(null, "加长款", width.add(BigDecimal.valueOf(200)), depth, null, null, null, null, null);
+            var product = new Input("TEA-TABLE", 1, "本地茶几", "TB", null, "MODEL-A", List.of(standard, unpriced), List.of());
+            local.save(new SaveRequest(UUID.randomUUID(), List.of(product), null));
+
+            var detail = local.detail("TEA-TABLE");
+            assertEquals(price, detail.variants().getFirst().referencePrice());
+            assertNull(detail.variants().getLast().referencePrice());
+            var card = local.list(1, "MODEL-A").products().getFirst();
+            assertEquals(price, card.minReferencePrice());
+            assertTrue(card.multipleVariants());
+
+            var cleared = new Variant("STANDARD", "1.2 米", width, depth, null, null, null, null, null);
+            var update = new Input("TEA-TABLE", detail.product().revision(), "本地茶几", "TB", null, "MODEL-A", List.of(cleared), List.of());
+            local.save(new SaveRequest(UUID.randomUUID(), List.of(update), null));
+            assertNull(local.detail("TEA-TABLE").variants().getFirst().referencePrice());
+            assertNull(local.list(1, "MODEL-A").products().getFirst().minReferencePrice());
+        } finally {
+            member.setProductEntryEnabled(false);
+        }
     }
 }

@@ -15,11 +15,13 @@ public class ProductDetailDto {
     private String rspuCode;
     private String externalCode;
     private String productName;
+    private String productLevel;
     private String sourceChannel;
     private String ownerFactoryCode;
     private String sourceFactoryName;
 
     private String colorPrimaryName;
+    private List<String> materialTags = List.of();
     private String description;
     private BigDecimal retailPrice;
     private String primaryImageUrl;
@@ -40,6 +42,8 @@ public class ProductDetailDto {
         private String sizeText;
         private String dimensions;
         private String dimensionsText;
+        private BigDecimal widthMm;
+        private String productLevel;
         private Integer packageCount;
         private BigDecimal packageVolumeCbm;
         private BigDecimal grossWeight;

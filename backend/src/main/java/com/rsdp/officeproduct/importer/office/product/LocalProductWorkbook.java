@@ -51,7 +51,7 @@ public class LocalProductWorkbook {
     }
     public record ImageCandidate(String key, boolean selected) {}
     public enum MaterialSource { COLUMN, DESCRIPTION }
-    public record VariantEvidence(String description, Source descriptionCell, MaterialSource materialSource) {}
+    public record VariantEvidence(String description, Source descriptionCell, MaterialSource materialSource, Source referencePriceCell) {}
     public record SupplierProduct(Input product, List<Source> sources, List<ImageCandidate> images, String sourceCategory,
                                   List<VariantEvidence> variantEvidence) {}
     public record SupplierPreview(List<SupplierProduct> products, Map<String, ImageInput> images) {}
@@ -69,7 +69,7 @@ public class LocalProductWorkbook {
             var sheet = workbook.createSheet("本地商品");
             var header = sheet.createRow(0);
             var fields = new ArrayList<>(REQUIRED);
-            fields.addAll(List.of("高(mm)", "尺寸原文", "颜色", "材质", "说明"));
+            fields.addAll(List.of("高(mm)", "尺寸原文", "颜色", "材质", "说明", WorkbookReferencePrice.TEMPLATE_HEADER));
             for (int i = 0; i < fields.size(); i++) {
                 header.createCell(i).setCellValue(fields.get(i));
                 sheet.setColumnWidth(i, 4608);
@@ -100,15 +100,18 @@ public class LocalProductWorkbook {
         try {
             upload = Files.createTempFile("office-product-workbook-", ".xlsx");
             file.transferTo(upload);
-            try (var cached = imageReferences ? previewCache.open(actor) : null;
+            try (var cached = imageReferences ? previewCache.open(actor, workbookSource(file)) : null;
                  var archive = OPCPackage.open(upload.toFile(), PackageAccess.READ);
                  var workbook = new XSSFWorkbook(archive)) {
                 var preview = previewWorkbook(workbook, workspace, boundFactory, mapping, cached);
                 if (cached == null) return preview;
                 var sizes = cached.sizes();
-                cached.keep();
+                boolean hasProducts = !preview.products().isEmpty()
+                    || preview.supplier() != null && !preview.supplier().products().isEmpty();
+                boolean keepPreview = hasProducts || !sizes.isEmpty();
+                if (keepPreview) cached.keep();
                 return new Preview(preview.products(), preview.errors(), preview.supplier(), preview.mappingSheets(),
-                    sizes.isEmpty() ? null : cached.id(), sizes);
+                    keepPreview ? cached.id() : null, sizes);
             }
         } catch (IOException | InvalidFormatException | POIXMLException | UnsupportedFileFormatException e) {
             throw new BusinessException("文件无法读取，请提供有效的 .xlsx 工作簿");
@@ -121,6 +124,15 @@ public class LocalProductWorkbook {
                 }
             }
         }
+    }
+
+    private WorkbookPreviewCache.WorkbookSource workbookSource(MultipartFile file) {
+        String original = file.getOriginalFilename();
+        String path = original == null ? "" : original.replace('\\', '/');
+        String name = path.substring(path.lastIndexOf('/') + 1).replaceAll("\\p{Cntrl}", "").strip();
+        if (name.isBlank()) name = "Excel 工作簿.xlsx";
+        int nameLength = Math.min(255, name.codePointCount(0, name.length()));
+        return new WorkbookPreviewCache.WorkbookSource(name.substring(0, name.offsetByCodePoints(0, nameLength)), file.getSize());
     }
 
     private Preview previewWorkbook(XSSFWorkbook workbook, String workspace, String boundFactory, SupplierWorkbookMapping.Selection mapping,
@@ -156,6 +168,15 @@ public class LocalProductWorkbook {
         }
         var groups = new LinkedHashMap<List<String>, Input>();
         var errors = new ArrayList<RowError>();
+        var priceHeaders = columns.keySet().stream().filter(name -> WorkbookReferencePrice.HEADERS
+            .contains(SupplierProductWorkbook.label(name))).toList();
+        if (priceHeaders.size() > 1) throw new BusinessException("Office 模板只接受一个参考价列，请核对表头");
+        String priceHeader = priceHeaders.isEmpty() ? null : priceHeaders.getFirst();
+        if (priceHeader == null && columns.keySet().stream().map(SupplierProductWorkbook::label)
+                .anyMatch(WorkbookReferencePrice.AMBIGUOUS_HEADERS::contains)) {
+            return new Preview(List.of(), List.of(new RowError(1, "请为价格列选择参考价用途，或在原表中使用「参考价（元）」表头")),
+                null, SupplierWorkbookMapping.inspect(workbook, formatter));
+        }
         var knownModels = new HashMap<List<String>, Boolean>();
         long totalImageBytes = 0;
         for (int i = 1; i <= sheet.getLastRowNum(); i++) {
@@ -175,7 +196,7 @@ public class LocalProductWorkbook {
                 }
                 var variant = new Variant(null, cells.get("规格名称"), decimal(cells.get("宽(mm)")),
                     decimal(cells.get("深(mm)")), decimal(cells.get("高(mm)")), cells.get("尺寸原文"),
-                    cells.get("颜色"), material);
+                    cells.get("颜色"), material, priceHeader == null ? null : WorkbookReferencePrice.parse(cells.get(priceHeader)));
                 Input item = products.normalize(new Input(null, null, cells.get("商品名称"), cells.get("分类编码"),
                     null, cells.get("厂内型号"), List.of(variant), images), boundFactory);
                 List<String> key = List.of(item.factoryCode(), item.factoryModel());
@@ -189,7 +210,9 @@ public class LocalProductWorkbook {
                 }
                 List<Variant> variants = new ArrayList<>(old == null ? List.of() : old.variants());
                 Variant normalized = item.variants().getFirst();
-                if (variants.contains(normalized)) throw new BusinessException("同型号的规格重复");
+                if (variants.stream().anyMatch(existing -> existing.withReferencePrice(null).equals(normalized.withReferencePrice(null)))) {
+                    throw new BusinessException("同型号的规格重复");
+                }
                 variants.add(normalized);
                 List<ImageInput> combinedImages = new ArrayList<>(old == null ? List.of() : old.images());
                 combinedImages.addAll(images);

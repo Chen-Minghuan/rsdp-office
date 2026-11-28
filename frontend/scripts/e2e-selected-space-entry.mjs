@@ -44,10 +44,15 @@ try {
   await context.route('**/api/v1/**', route => {
     if (fulfillReviewConfirm(reviewMock, route)) return
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/office/projects') return route.fulfill({ json: { code: 200, data: [{
+      projectId: 'OFFICE-PROJECT-001', name: '选中空间测试',
+      leader: { userId: 'MOCK-USER', role: 'LEADER', permissions: ['READ', 'EDIT'] },
+      floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '一层' }],
+    }] } })
     const data = path.endsWith('/floor-plan/SINGLE-SPACE') ? source : path.endsWith('/OFFICE-PROJECT-001') || path.endsWith('/canvas') ? null : []
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data }) })
   })
-  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01')))
+  const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')))
   const canvas = () => page.getByTestId('office-design-canvas')
   async function enter(id) {
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE&mode=design&zoneId=' + id, { waitUntil: 'networkidle' })
@@ -74,12 +79,17 @@ try {
   for (const [id, name] of [['ROOM-B', '其他会议室'], ['ROOM-L', '独立 L 形办公室'], ['ROOM-B', '其他会议室']]) {
     await page.locator('.review-rooms').getByRole('button', { name: '选择空间 ' + name, exact: true }).click()
     await page.getByRole('button', { name: '进入家具排版 →', exact: true }).click()
+    const selectedRoom = page.getByTestId('product-scheme').getByRole('heading', { name, exact: true })
+    await selectedRoom.waitFor()
+    assert.equal(new URL(page.url()).searchParams.get('floorId'), 'OFFICE-PROJECT-001')
+    await page.getByTestId('tab-auto-layout').click()
     await page.getByTestId('functional-category-workstation').click()
     await page.getByTestId('apply-layout').waitFor()
     assert.equal(new URL(page.url()).searchParams.get('zoneId'), id, '进入排版必须使用核对页当前选中的空间')
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     assert.equal((await state()).designZoneId, id)
     await page.reload({ waitUntil: 'networkidle' })
+    await selectedRoom.waitFor()
     await canvas().locator('polygon[data-id="' + id + '"]').waitFor()
     assert.equal(new URL(page.url()).searchParams.get('zoneId'), id, '刷新后保留选择的排版空间')
     await page.goto(baseUrl + '/canvas?analysisId=SINGLE-SPACE', { waitUntil: 'networkidle' })

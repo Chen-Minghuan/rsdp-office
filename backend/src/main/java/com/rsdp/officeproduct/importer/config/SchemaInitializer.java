@@ -72,6 +72,8 @@ public class SchemaInitializer {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_product_scheme.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_local_products.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261125_office_local_product_images.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261127_office_local_variant_reference_price.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261125_office_product_import_history.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_simple_office_permissions.sql"));
             Resource legacyFloorPlanStorage = new ClassPathResource("db/migrations/20261124_remove_unused_floor_plan_storage.sql");
             ScriptUtils.executeSqlScript(connection, new EncodedResource(legacyFloorPlanStorage), false, false, "--",
@@ -82,6 +84,8 @@ public class SchemaInitializer {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_project_status.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261124_office_floor_reference_images.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261126_project_status_backfill.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261126_office_room_scheme_confirmed_slot.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/migrations/20261127_quotation_proposal_sources.sql"));
             connection.commit();
             log.info("项目信息表清理完成；设计工作区数据保留");
             log.info("用户认证表迁移完成");

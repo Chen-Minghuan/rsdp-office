@@ -14,7 +14,7 @@ final class SupplierWorkbookMapping {
     static final int MAX_COLUMNS = 128;
     static final int MAX_LABEL_LENGTH = 120;
 
-    enum Field { MODEL, NAME, PICTURE, SIZE, WIDTH_MM, DEPTH_MM, HEIGHT_MM, COLOR, MATERIAL, CATEGORY, DESCRIPTION }
+    enum Field { MODEL, NAME, PICTURE, SIZE, WIDTH_MM, DEPTH_MM, HEIGHT_MM, COLOR, MATERIAL, CATEGORY, DESCRIPTION, REFERENCE_PRICE }
 
     record Column(int index, String label) {}
     record Header(int row, List<Column> columns) {}
@@ -34,6 +34,10 @@ final class SupplierWorkbookMapping {
             }
             if (new HashSet<>(columns.values()).size() != columns.size()) {
                 throw new BusinessException("同一列只能对应一个商品字段");
+            }
+            if (column(Field.REFERENCE_PRICE) >= 0 && WorkbookReferencePrice.factoryHeader(SupplierProductWorkbook.label(
+                new DataFormatter().formatCellValue(header.getCell(column(Field.REFERENCE_PRICE)))))) {
+                throw new BusinessException("所选列是工厂报价或成本，请选择用于展示的参考价列");
             }
         }
     }

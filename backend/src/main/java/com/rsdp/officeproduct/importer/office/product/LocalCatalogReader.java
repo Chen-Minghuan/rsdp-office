@@ -14,17 +14,25 @@ import static com.rsdp.officeproduct.importer.office.product.LocalProductModels.
 @Repository
 @RequiredArgsConstructor
 public class LocalCatalogReader {
-    private static final String CATALOG_ROWS = """
-        select p.product_id, p.revision, p.name, p.category_code, p.factory_code, p.factory_model,
+    private static final String CATALOG_COLUMNS = """
+        p.product_id, p.revision, p.name, p.category_code, p.factory_code, p.factory_model,
             (select i.image_id from office_product_image i
              where i.workspace_id = p.workspace_id and i.product_id = p.product_id and i.position is not null
-             order by i.position, i.image_id limit 1) as primary_image_id
-        from office_product p where p.workspace_id = :workspace
+             order by i.position, i.image_id limit 1) as primary_image_id,
+            prices.min_reference_price, prices.multiple_variants
         """;
+    private static final String CATALOG_FROM = """
+        from office_product p cross join lateral (
+            select min(v.reference_price) as min_reference_price, count(*) > 1 as multiple_variants
+            from office_product_variant v
+            where v.workspace_id = p.workspace_id and v.product_id = p.product_id and v.active
+        ) prices where p.workspace_id = :workspace
+        """;
+    private static final String CATALOG_ROWS = "select " + CATALOG_COLUMNS + CATALOG_FROM;
     private static final RowMapper<CatalogItem> CATALOG_ITEM = (r, i) ->
         new CatalogItem(r.getString("product_id"), r.getInt("revision"), r.getString("name"),
             r.getString("category_code"), r.getString("factory_code"), r.getString("factory_model"),
-            r.getString("primary_image_id"));
+            r.getString("primary_image_id"), r.getBigDecimal("min_reference_price"), r.getBoolean("multiple_variants"));
     private static final String MATCH = """
         (:search = '' or strpos(lower(p.name), lower(:search)) > 0
                       or strpos(lower(p.factory_model), lower(:search)) > 0)

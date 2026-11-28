@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 // 楼层参考图上传交互 UI 回归：独立端口 + 模拟 API。
-// 覆盖：上传→保存→刷新恢复；连续两次保存乱序响应只生效最后一次（竞态回归）；
+// 覆盖：上传→保存→刷新恢复；上传及保存期间禁止交错编辑；连续编辑后重读保留最后一次结果；
 // 保存失败显示 role=alert 且恢复后消失；只读成员不显示上传入口；画布工具栏参考图弹层。
 const cwd = fileURLToPath(new URL('../', import.meta.url))
 const reservation = createServer()
@@ -38,6 +38,8 @@ try {
     collaborators: [], referenceImages: [],
     floors: [{ floorId, projectId, name: '1F', sortOrder: 0, referenceImages: [] }] }
   let uploadCount = 0
+  let referencesPutCount = 0
+  let uploadGate = null
   let putFail = false
   let putGate = null
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: authUser } }))
@@ -49,9 +51,11 @@ try {
     if (path === '/api/v1/office/projects/budgets') return respond({})
     if (path === '/api/v1/images/upload' && request.method() === 'POST') {
       uploadCount += 1
+      if (uploadGate) { const gate = uploadGate; uploadGate = null; await gate }
       return respond([`/uploads/images/e2e-${uploadCount}.png`])
     }
     if (path === `/api/v1/office/projects/${projectId}/floors/${floorId}/references` && request.method() === 'PUT') {
+      referencesPutCount += 1
       const body = request.postDataJSON()
       if (putGate) { const gate = putGate; putGate = null; await gate }
       if (putFail) return respond(null, 500, '保存失败')
@@ -85,22 +89,43 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await names().getByText('风格', { exact: true }).waitFor()
 
-  // 场景 2：连续两次保存，第一次响应被挂起晚到 → 只有最后一次保存生效（竞态回归）
+  // 场景 2：上传 B 期间不能删除 A；保存 B 期间也不能再次编辑，刷新后 A/B 都保留。
+  let releaseUpload
+  uploadGate = new Promise(resolve => { releaseUpload = resolve })
   let releaseHeldPut
   putGate = new Promise(resolve => { releaseHeldPut = resolve })
+  const putCountBeforeUpload = referencesPutCount
+  const uploadStarted = page.waitForRequest(request => request.url().includes('/images/upload'))
+  await uploadInput.setInputFiles({ name: '新增图B.png', mimeType: 'image/png', buffer: png })
+  await uploadStarted
+  const removeButton = editor.getByTestId('remove-reference-image').first()
+  assert.equal(await removeButton.isDisabled(), true, '上传期间不得删除已有图片')
+  assert.equal(await editor.getByTestId('upload-reference-image').isDisabled(), true, '上传期间不得再次上传')
+  // 原生 click 不触发 disabled 按钮，不能在上传结果回来前提交删除保存。
+  await removeButton.evaluate(button => button.click())
+  assert.equal(referencesPutCount, putCountBeforeUpload)
+  const uploadFinished = page.waitForResponse(response => response.url().includes('/images/upload'))
   const heldPut = page.waitForRequest(isReferencesPut)
-  await uploadInput.setInputFiles({ name: '乱序一.png', mimeType: 'image/png', buffer: png })
-  await heldPut
-  const secondPutDone = page.waitForResponse(response => isReferencesPut(response.request()))
-  await uploadInput.setInputFiles({ name: '乱序二.png', mimeType: 'image/png', buffer: png })
-  await secondPutDone
-  await names().getByText('乱序二', { exact: true }).waitFor()
-  const latePut = page.waitForResponse(response => isReferencesPut(response.request()))
+  releaseUpload()
+  await uploadFinished
+  const pendingBody = (await heldPut).postDataJSON()
+  assert.deepEqual(pendingBody.referenceImages.map(image => image.name), ['风格', '新增图B'])
+  await page.getByText('正在保存…', { exact: true }).waitFor()
+  assert.equal(await editor.getByTestId('upload-reference-image').count(), 0, '保存期间隐藏上传入口')
+  assert.equal(await editor.getByTestId('remove-reference-image').count(), 0, '保存期间隐藏删除入口')
+  const savedPut = page.waitForResponse(response => isReferencesPut(response.request()))
   releaseHeldPut()
-  await latePut
-  await page.waitForLoadState('networkidle')
-  assert.equal(await names().getByText('乱序一', { exact: true }).count(), 0, '迟到的旧响应不得覆盖后一次保存结果')
-  await names().getByText('乱序二', { exact: true }).waitFor()
+  await savedPut
+  await names().getByText('新增图B', { exact: true }).waitFor()
+  await uploadInput.setInputFiles({ name: '后续图C.png', mimeType: 'image/png', buffer: png })
+  await names().getByText('后续图C', { exact: true }).waitFor()
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.deepEqual(await names().locator('li > span').allTextContents(), ['风格', '新增图B', '后续图C'])
+  // 上传结束后删除恢复可用，删除保存也必须能刷新回读。
+  await editor.getByTestId('remove-reference-image').first().click()
+  await names().getByText('风格', { exact: true }).waitFor({ state: 'detached' })
+  await page.reload({ waitUntil: 'networkidle' })
+  assert.deepEqual(await names().locator('li > span').allTextContents(), ['新增图B', '后续图C'])
 
   // 场景 3：保存失败显示 role=alert，恢复后再次保存成功且提示消失
   putFail = true
@@ -147,7 +172,7 @@ try {
   assert.equal(await popover.locator('img').count(), 2, '弹层应列出当前楼层全部参考图')
 
   assert.deepEqual(errors, [], `不应有未捕获错误：${errors.join('; ')}`)
-  console.log('楼层参考图 UI 通过：上传保存恢复、乱序防覆盖、失败提示、只读禁用、工具栏弹层五场景。API 全部模拟。')
+  console.log('楼层参考图 UI 通过：上传/保存期间禁用编辑、连续新增及删除后刷新恢复、失败重试、只读权限、工具栏弹层。API 全部模拟。')
 } finally {
   await browser?.close()
   app.kill()

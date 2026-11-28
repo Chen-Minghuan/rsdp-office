@@ -29,7 +29,7 @@ async function pickFiles(event: Event) {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files || [])
   input.value = ''
-  if (!files.length || props.disabled) return
+  if (!files.length || props.disabled || uploading.value) return
   error.value = ''
   if (props.images.length + files.length > props.max) {
     error.value = `参考图片不能超过 ${props.max} 张`
@@ -48,7 +48,8 @@ async function pickFiles(event: Event) {
 }
 
 function removeImage(index: number) {
-  if (props.disabled) return
+  // 上传完成前保留原列表，避免删除保存与上传结果同时提交。
+  if (props.disabled || uploading.value) return
   const next = [...props.images]
   next.splice(index, 1)
   emit('update:images', next)
@@ -66,7 +67,7 @@ function removeImage(index: number) {
         <img :src="previewUrl(image.url)" :alt="image.name || '项目参考图片'" class="h-24 w-full object-cover">
         <figcaption class="truncate px-2 py-1 text-xs text-muted">{{ image.name || '参考图片' }}</figcaption>
         <button v-if="!disabled" type="button" :aria-label="`删除参考图片 ${index + 1}`" data-testid="remove-reference-image"
-          class="absolute right-1 top-1 rounded-lg bg-white/90 p-1 text-muted hover:text-red-600"
+          :disabled="uploading" class="absolute right-1 top-1 rounded-lg bg-white/90 p-1 text-muted hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
           @click="removeImage(index)"><AppIcon name="trash" size="4" /></button>
       </figure>
     </div>
@@ -82,7 +83,7 @@ function removeImage(index: number) {
       <li v-for="(image, index) in images" :key="image.url" class="flex min-w-0 items-center justify-between gap-2">
         <span class="truncate">{{ image.name || '参考图片' }}</span>
         <button v-if="!disabled" type="button" :aria-label="`删除参考图片 ${index + 1}`" data-testid="remove-reference-image"
-          class="shrink-0 p-1 text-muted hover:text-red-600"
+          :disabled="uploading" class="shrink-0 p-1 text-muted hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
           @click="removeImage(index)"><AppIcon name="trash" size="4" /></button>
       </li>
     </ul>

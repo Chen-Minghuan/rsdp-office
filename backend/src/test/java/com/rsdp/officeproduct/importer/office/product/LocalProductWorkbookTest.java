@@ -24,8 +24,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,12 +44,13 @@ class LocalProductWorkbookTest {
         byte[] file;
         try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("月影胡桃");
-            row(sheet, 0, "PICTURE", "ITEM NO.", "ITEM NAME", "COLOR", "SPEC", "REMARK", "MATERIAL");
-            row(sheet, 1, "", "TEA001", "茶台", "月影胡桃", "2000x800x750", "台面为碳晶板，标配乌金石茶盘。");
+            row(sheet, 0, "PICTURE", "ITEM NO.", "ITEM NAME", "COLOR", "SPEC", "REMARK", "MATERIAL", "销售价", "出厂价");
+            row(sheet, 1, "", "TEA001", "茶台", "月影胡桃", "2000x800x750", "台面为碳晶板，标配乌金石茶盘。", "", "￥5,742.00", "1895");
             row(sheet, 2, "", "TEA002", "配套台", "月影胡桃", "1200/1400x800x750", "隐藏的不锈钢旧值");
             row(sheet, 3, "", "TEA003", "木桌", "月影胡桃", "1800x800x750", "表面为岩板", "橡木");
             row(sheet, 4, "", "TEA004", "配套柜", "大理石纹+月影胡桃", "800x400x750", "仿大理石纹，不采用实木");
             sheet.addMergedRegion(new CellRangeAddress(1, 2, 5, 5));
+            sheet.addMergedRegion(new CellRangeAddress(1, 2, 7, 7));
             workbook.write(output);
             file = output.toByteArray();
         }
@@ -61,6 +64,11 @@ class LocalProductWorkbookTest {
         assertEquals("橡木", goods.get(2).product().variants().getFirst().material());
         assertEquals(LocalProductWorkbook.MaterialSource.COLUMN, goods.get(2).variantEvidence().getFirst().materialSource());
         assertEquals("", goods.get(3).product().variants().getFirst().material());
+        assertEquals("5742.00", goods.getFirst().product().variants().getFirst().referencePrice().toPlainString());
+        assertEquals(List.of("5742.00", "5742.00"), goods.get(1).product().variants().stream()
+            .map(variant -> variant.referencePrice().toPlainString()).toList());
+        assertEquals("H", evidence.referencePriceCell().column());
+        assertEquals(2, evidence.referencePriceCell().row());
     }
 
     @Test
@@ -75,12 +83,16 @@ class LocalProductWorkbookTest {
             var sheet = workbook.getSheetAt(0);
             assertEquals("厂内型号", sheet.getRow(0).getCell(2).getStringCellValue());
             row(sheet, 1, "会议桌", "OF", "DESK", "默认", "1200", "600");
+            int priceColumn = sheet.getRow(0).getLastCellNum() - 1;
+            assertEquals("参考价（元）", sheet.getRow(0).getCell(priceColumn).getStringCellValue());
+            sheet.getRow(1).createCell(priceColumn).setCellValue("1,300.50");
             workbook.write(output);
             file = output.toByteArray();
         }
         var bound = factoryWorkbook.preview(new MockMultipartFile("file", "factory.xlsx", null, file));
         assertEquals("B001", bound.products().getFirst().factoryCode());
         assertTrue(bound.errors().isEmpty());
+        assertEquals("1300.50", bound.products().getFirst().variants().getFirst().referencePrice().toPlainString());
 
         try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(workbookService().template()));
              var output = new ByteArrayOutputStream()) {
@@ -118,9 +130,10 @@ class LocalProductWorkbookTest {
         assertNull(preview.supplier());
 
         var mapping = new SupplierWorkbookMapping.Selection(1, 2,
-            Map.of(MODEL, 2, NAME, 0, WIDTH_MM, 3, DEPTH_MM, 4, CATEGORY, 5));
+            Map.of(MODEL, 2, NAME, 0, WIDTH_MM, 3, DEPTH_MM, 4, CATEGORY, 5, REFERENCE_PRICE, 1));
         var products = workbookService.preview(upload, mapping).supplier().products();
         assertEquals(2, products.size());
+        assertEquals("599.00", products.getFirst().product().variants().getFirst().referencePrice().toPlainString());
         var table = products.getFirst();
         assertEquals("MT-11", table.product().factoryModel());
         assertEquals("会议桌", table.sourceCategory());
@@ -285,6 +298,33 @@ class LocalProductWorkbookTest {
             sameWorkspace.setWorkspaceId("WS-TEST");
             sameWorkspace.setUserId("USR-OTHER");
             assertThrows(BusinessException.class, () -> cache.read(referenced.previewId(), image.id(), sameWorkspace));
+        } finally {
+            cache.shutdown();
+        }
+    }
+
+    @Test
+    void retainsFileMetadataForAnImageFreeWorkbook() throws Exception {
+        var cache = new WorkbookPreviewCache();
+        try {
+            var workbookService = new LocalProductWorkbook(productService(new RsdpMainProperties()), cache);
+            byte[] bytes;
+            try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(workbookService.template()));
+                 var output = new ByteArrayOutputStream()) {
+                row(workbook.getSheetAt(0), 1, "会议桌", "OF", "DESK-NO-IMAGE", "默认", "1200", "600");
+                workbook.write(output);
+                bytes = output.toByteArray();
+            }
+            var preview = workbookService.preview(new MockMultipartFile("file", "C:\\fakepath\\产品表.xlsx", null, bytes), null, true);
+            assertNotNull(preview.previewId());
+            assertTrue(preview.imageSizes().isEmpty());
+            var actor = new OfficeUser();
+            actor.setWorkspaceId("WS-TEST");
+            actor.setUserId("USR-TEST");
+            var request = new LocalProductModels.SaveRequest(UUID.randomUUID(), preview.products(), preview.previewId());
+            var materialized = cache.materialize(request, actor);
+            assertEquals(new WorkbookPreviewCache.WorkbookSource("产品表.xlsx", bytes.length), materialized.source());
+            assertEquals(1, materialized.products().size());
         } finally {
             cache.shutdown();
         }

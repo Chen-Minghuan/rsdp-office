@@ -12,6 +12,9 @@ import com.rsdp.officeproduct.importer.office.entity.OfficeQuotationLine;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeQuotationLineMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeQuotationMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignFloorMapper;
+import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.office.entity.OfficeDesignFloor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +22,10 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** 项目报价的权限、流程和确认事务入口。 */
@@ -35,18 +41,35 @@ public class ProjectQuotationService {
     private final ProjectQuotationPreviewBuilder previewBuilder;
     private final ProjectQuotationDraftBuilder draftBuilder;
     private final QuotationRecordAssembler recordAssembler;
+    private final OfficeProposalConfirmationService proposalConfirmations;
+    private final OfficeDesignFloorMapper floorMapper;
+    private final OfficeWorkspaceLockMapper floorLocks;
 
+    @Transactional
     public ProjectQuotationPreviewDto preview(String projectId, String mode, BigDecimal value) {
         OfficeDesignProject project = requireProjectAccess(projectId);
-        return previewBuilder.build(project, QuotationPricing.of(mode, value));
+        // 与画布/清单编辑使用相同的事务锁，试算明细与其确认 ID 来自同一状态。
+        lockProjectFloors(projectId);
+        var preview = previewBuilder.build(project, QuotationPricing.of(mode, value));
+        Map<String, String> sources = new LinkedHashMap<>();
+        for (var floor : preview.getFloors()) {
+            var status = proposalConfirmations.latest(floor.getFloorId());
+            if (status != null && status.current()) sources.put(floor.getFloorId(), status.confirmationId());
+        }
+        preview.setProposalConfirmationIds(sources);
+        return preview;
     }
 
     /** 确认报价后保留历史版本，并在同一事务内更新当前版本和审计。 */
     @Transactional
     public ProjectQuotationRecordDto confirm(String projectId, ConfirmProjectQuotationRequest request) {
-        ProjectQuotationDraftBuilder.Draft draft = draftBuilder.build(requireProjectAccess(projectId), request);
+        OfficeDesignProject project = requireProjectAccess(projectId);
+        lockProjectFloors(projectId);
+        ProjectQuotationDraftBuilder.Draft draft = draftBuilder.build(project, request);
+        Map<String, String> sources = requireConfirmedSchemes(draft, request);
         OfficeQuotation quotation = draft.quotation();
         quotation.setFeesJson(recordAssembler.writeFees(draft.fees()));
+        quotation.setProposalConfirmationsJson(recordAssembler.writeProposalSources(sources));
 
         // 锁定项目后再分配版本，首次确认也能串行写入。
         if (projectMapper.selectOne(new QueryWrapper<OfficeDesignProject>().select("project_id")
@@ -126,6 +149,37 @@ public class ProjectQuotationService {
         ProjectQuotationRecordDto record = latest(projectId);
         if (record == null) throw new BusinessException("项目暂无已确认报价");
         return record;
+    }
+
+    /** 报价行涉及的每个楼层都必须持有当前有效的方案确认快照；缺失或已失效即拒绝确认报价。预览/试算不调用此门禁。 */
+    private Map<String, String> requireConfirmedSchemes(ProjectQuotationDraftBuilder.Draft draft, ConfirmProjectQuotationRequest request) {
+        Map<String, String> floors = new LinkedHashMap<>();
+        for (OfficeQuotationLine row : draft.rows()) {
+            floors.putIfAbsent(row.getFloorId(), row.getFloorName());
+        }
+        List<String> unconfirmed = new ArrayList<>();
+        Map<String, String> sources = new LinkedHashMap<>();
+        for (Map.Entry<String, String> floor : floors.entrySet()) {
+            OfficeProposalConfirmationService.Status status = proposalConfirmations.latest(floor.getKey());
+            if (status == null || !status.current()) {
+                unconfirmed.add(floor.getValue());
+            } else if (request.getProposalConfirmationIds() == null
+                    || !status.confirmationId().equals(request.getProposalConfirmationIds().get(floor.getKey()))) {
+                throw new BusinessException("楼层「" + floor.getValue() + "」的方案已变化，请重新试算后确认报价");
+            } else {
+                sources.put(floor.getKey(), status.confirmationId());
+            }
+        }
+        if (!unconfirmed.isEmpty()) {
+            throw new BusinessException("楼层「" + String.join("、", unconfirmed)
+                + "」的方案尚未确认或已失效，请先在项目清单页确认当前方案后再确认报价");
+        }
+        return sources;
+    }
+
+    private void lockProjectFloors(String projectId) {
+        floorMapper.selectList(new QueryWrapper<OfficeDesignFloor>().eq("project_id", projectId)).stream()
+            .map(OfficeDesignFloor::getFloorId).distinct().sorted().forEach(floorLocks::lockWorkspace);
     }
 
     private OfficeQuotation findLatest(String projectId, boolean confirmedOnly) {
