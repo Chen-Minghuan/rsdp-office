@@ -37,6 +37,8 @@ try {
   let recognizeCalls = 0
   let recognizeRelease = null
   let recognizeRelease2 = null
+  let recognizeRelease3 = null
+  let recognizeRelease4 = null
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const reviewMock = createReviewConfirmMock()
   await context.route('**/api/v1/**', async route => {
@@ -46,10 +48,12 @@ try {
     if (path.endsWith('/layout-reference/recognize')) {
       assert.equal(route.request().method(), 'POST')
       recognizeCalls++
-      // 第 1/4 次识别挂起，模拟用户离开期间仍在进行/完成的识别任务；第 2 次失败，验证重试失败保留上一轮标记。
+      // 第 1/4/6/7 次识别挂起，模拟用户离开期间仍在进行/完成的识别任务；第 2 次失败，验证重试失败保留上一轮标记。
       if (recognizeCalls === 1) await new Promise(resolve => { recognizeRelease = resolve })
       if (recognizeCalls === 2) return route.fulfill({ json: { code: 500, message: 'mock 识别失败' } })
       if (recognizeCalls === 4) await new Promise(resolve => { recognizeRelease2 = resolve })
+      if (recognizeCalls === 6) await new Promise(resolve => { recognizeRelease3 = resolve })
+      if (recognizeCalls === 7) await new Promise(resolve => { recognizeRelease4 = resolve })
       return route.fulfill({ json: { code: 200, data: [
         { templateId: 'desk-straight', categoryId: 'workstation', group: 'office', x: 0.12, y: 0.22, width: 0.16, depth: 0.11, rotation: 0, confidence: 'high' },
         { templateId: 'chair-office', categoryId: 'workstation', group: 'office', x: 0.165, y: 0.35, width: 0.04, depth: 0.05, rotation: 0, confidence: 'low' },
@@ -176,20 +180,16 @@ try {
   const referenceLayer = page.getByTestId('reference-canvas-layer')
   await referenceLayer.waitFor()
 
-  // 画布已有家具时拦截识别，不发起请求。
-  await page.getByTestId('reference-recognize').click()
+  // 画布已有家具时面板打开即亮出一键清空入口；再点识别仍被拦截，不发起请求。
   await page.getByText('请清除当前画布上的家具', { exact: true }).waitFor()
+  await page.getByTestId('reference-clear-and-recognize').waitFor()
+  await page.getByTestId('reference-recognize').click()
   assert.equal(recognizeCalls, 0, '画布有家具时不发起识别请求')
 
-  // 清空画布后发起识别；切换标签页不中断任务，回来仍显示正在识别。
-  await page.getByRole('button', { name: '返回组合布局', exact: true }).click()
-  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
-  await page.getByTestId('auto-clear-layout').click()
+  // 一键清空画布家具并继续识别：面板内两步确认后清空并自动发起识别，不离开参考面板。
+  await page.getByTestId('reference-clear-and-recognize').click()
+  await page.getByTestId('reference-clear-confirm-ok').click()
   await page.waitForFunction(() => !(JSON.parse(localStorage.getItem('rsdp-office-v01:MOCK-USER:OFFICE-PROJECT-001')).objects || []).some(object => object.kind === 'furniture'))
-  await page.getByTestId('mixed-layout-reference').click()
-  await page.getByTestId('layout-reference-panel').waitFor()
-  await referenceLayer.waitFor()
-  await page.getByTestId('reference-recognize').click()
   await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…')
   assert.equal(await page.getByTestId('reference-recognize').isDisabled(), true, '识别进行中按钮禁用')
   await page.getByTestId('tab-product-selection').click()
@@ -385,8 +385,43 @@ try {
   assert.equal((await state()).objects.filter(object => object.kind === 'furniture').length, 1, '应用拦截后画布家具未被覆盖')
   assert.equal((await state()).objects.filter(object => object.layoutReference).length, 0, '兜底拦截后无参考家具写入')
 
+  // 场景 4a：面板内取消识别，直接回到组合布局，无需切换页面即可继续组合预览；迟到的旧结果按运行令牌丢弃。
+  await page.getByTestId('reference-recognize').click()
+  await page.getByTestId('reference-clear-and-recognize').click()
+  await page.getByTestId('reference-clear-confirm-ok').click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…')
+  await page.getByTestId('reference-cancel-recognize').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  await page.getByTestId('mixed-layout-reference').waitFor()
+  recognizeRelease3()
+
+  // 场景 4b：重新打开参考面板并识别，进行中尝试写入家具，画布中央弹门禁；「保持识别」拦截不写入，「取消识别并继续」放弃任务后放行。
+  await page.getByTestId('mixed-layout-reference').click()
+  await page.getByTestId('layout-reference-panel').waitFor()
+  await referenceLayer.waitFor()
+  await page.getByTestId('reference-recognize').click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="reference-recognize"]')?.textContent === '正在识别…')
+  await page.getByTestId('tab-product-selection').click()
+  await page.getByTestId('layout-reference-panel').waitFor({ state: 'detached' })
+  const firstCatalogModule = page.locator('[data-catalog-category] [data-module-id]').first()
+  await firstCatalogModule.evaluate(el => el.closest('details')?.setAttribute('open', ''))
+  await firstCatalogModule.click()
+  await page.getByTestId('recognition-gate-dialog').waitFor()
+  await page.getByTestId('recognition-gate-keep').click()
+  assert.equal(await page.getByTestId('recognition-gate-dialog').count(), 0, '保持识别后门禁关闭')
+  assert.equal(await page.evaluate(() => !!document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').furniturePlacement), false, '保持识别时不开始摆放')
+  await page.locator('[data-catalog-category] [data-module-id]').first().click()
+  await page.getByTestId('recognition-gate-dialog').waitFor()
+  await page.getByTestId('recognition-gate-cancel').click()
+  await page.waitForFunction(() => !!document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').furniturePlacement)
+  recognizeRelease4()
+  await page.waitForFunction(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('layoutReference')
+    return !Object.keys(store.tasks).length
+  })
+
   assert.deepEqual(errors, [], '页面无脚本错误')
-  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入；画布占用拦截识别、识别任务跨标签页保留与结果恢复、已展示未应用结果跨页面恢复、重试失败保留标记、排版变化阻止旧结果覆盖。')
+  console.log('预览拖动 E2E 通过：单模块和组合快照应用、参考家具吸附、旋转和删除快捷键、点放补录及来源写入；画布占用拦截识别与一键清空后继续识别、识别任务跨标签页保留与结果恢复、已展示未应用结果跨页面恢复、重试失败保留标记、排版变化阻止旧结果覆盖、识别进行中排版写入门禁、面板内取消识别后回到组合布局且旧结果丢弃。')
 } finally {
   if (browser) await browser.close()
   app.kill()

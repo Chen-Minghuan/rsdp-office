@@ -24,6 +24,7 @@ const preferences = reactive<LayoutPreferences>(defaultLayoutPreferences())
 // Off by default: entering a space shows only actually placed furniture. Selecting a module/preset or the checkbox enables the proposal preview.
 const showPreview = ref(false)
 const store = useOfficeStore()
+const guard = useRecognitionGuard()
 const collapsed = ref(false)
 const applicationMessage = ref('')
 type LayoutPanelStep = 'module' | 'settings' | 'style'
@@ -304,20 +305,22 @@ function undoModuleDeletion() {
   applicationMessage.value = '已恢复目录模块'
 }
 
-function addToCanvas() {
+async function addToCanvas() {
   if (store.furniturePlacement) { store.cancelFurniturePlacement(); return }
-  if (!zone.value || !store.beginFurniturePlacement(zone.value.id, selectedModule.value.id, unitW.value, unitD.value, { ...spacing })) {
+  if (!zone.value || !await guard.gateFurnitureEdit(zone.value.id)) return
+  if (!store.beginFurniturePlacement(zone.value.id, selectedModule.value.id, unitW.value, unitD.value, { ...spacing })) {
     applicationMessage.value = '请检查当前空间、模块尺寸和间距后再添加'
   }
 }
 
-function applyLayout() {
+async function applyLayout() {
   if (!zone.value || !proposal.value || proposal.value.problem || draftApplied.value) return
   const live = props.currentPreview
   if (!live || live.zoneId !== zone.value.id || !live.furniture.length) {
     applicationMessage.value = '请先显示并核对当前方案预览，再应用'
     return
   }
+  if (!await guard.gateFurnitureEdit(zone.value.id)) return
   // 当前预览就是用户确认的几何快照，包含画布上的手动位置调整。
   const applied = store.applyLayoutProposal(zone.value.id, { ...proposal.value, furniture: live.furniture, replaceIds: live.replaceIds }, request.value.preferences)
   if (!applied) { applicationMessage.value = '预览已过期或存在越界、重叠、约束冲突，请重新生成或调整'; return }

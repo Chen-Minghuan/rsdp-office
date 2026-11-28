@@ -31,6 +31,8 @@ interface LayoutReferenceState {
 
 /** 进行中的请求持有在模块级，组件卸载不会取消它。 */
 const inflight = new Map<string, Promise<void>>()
+/** 每次识别的身份令牌：取消后重新识别时，旧请求落地凭令牌丢弃，避免写进新记录（Pinia 状态是代理，不能比对象引用）。 */
+const runTokens = new Map<string, symbol>()
 const STALE_MS = 24 * 3600 * 1000
 
 function storageKeyFor(projectId: string) {
@@ -52,6 +54,9 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
   getters: {
     taskFor: state => (zoneId: string, analysisId: string, revision: number): LayoutReferenceTask | null =>
       state.tasks[layoutReferenceTaskKey(zoneId, analysisId, revision)] || null,
+    /** 该空间是否有进行中且未放弃的识别任务；识别结果面向空画布，运行期间同空间的家具写入需经确认放行。 */
+    runningTaskFor: state => (zoneId: string): LayoutReferenceTask | null =>
+      Object.values(state.tasks).find(task => task.zoneId === zoneId && task.status === 'running' && !task.dismissed) || null,
   },
   actions: {
     /** 从 sessionStorage 水合当前楼层的任务记录；stale running 视为中断（整页刷新已杀死请求）。 */
@@ -93,7 +98,8 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
     }): Promise<void> {
       const key = layoutReferenceTaskKey(params.zoneId, params.analysisId, params.revision)
       const existing = inflight.get(key)
-      if (existing) return existing
+      // 已放弃的旧请求仍在飞行时不复用：允许取消后立即重新识别，旧结果落地时按记录身份丢弃。
+      if (existing && this.tasks[key] && !this.tasks[key].dismissed) return existing
       this.ensureHydrated()
       const record: LayoutReferenceTask = {
         zoneId: params.zoneId,
@@ -111,12 +117,15 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
       }
       this.tasks[key] = record
       this.persistRecord(record, key)
+      const token = Symbol(key)
+      runTokens.set(key, token)
       const promise = (async () => {
         try {
           const detected = await useOfficeApi().recognizeLayoutReference(params.upload, params.analysisId, params.revision)
           const valid = detected.filter(params.isValid)
           const current = this.tasks[key]
-          if (!current || current.dismissed) { this.clear(key); return }
+          if (!current || runTokens.get(key) !== token) return
+          if (current.dismissed) { this.clear(key); return }
           current.status = 'done'
           current.marks = valid
           current.message = valid.length ? `识别到 ${valid.length} 个家具标记，请核对图例、方向和分组` : '裁图中未识别到可靠家具，可以在画布手动添加'
@@ -124,13 +133,14 @@ export const useLayoutReferenceStore = defineStore('layoutReference', {
           this.persistRecord(current, key)
         } catch (error) {
           const current = this.tasks[key]
-          if (!current || current.dismissed) { this.clear(key); return }
+          if (!current || runTokens.get(key) !== token) return
+          if (current.dismissed) { this.clear(key); return }
           current.status = 'error'
           current.message = error instanceof Error ? error.message : '识别失败，可手动添加'
           current.updatedAt = Date.now()
           this.persistRecord(current, key)
         } finally {
-          inflight.delete(key)
+          if (inflight.get(key) === promise) inflight.delete(key)
         }
       })()
       inflight.set(key, promise)

@@ -11,6 +11,7 @@ import { cloneReferenceEditing, layoutReferenceTaskKey } from '~/utils/layoutRef
 const props = defineProps<{ categoryIds: string[]; currentPreview?: LayoutPreview | null }>()
 const emit = defineEmits<{ preview: [value: LayoutPreview | null] }>()
 const store = useOfficeStore()
+const guard = useRecognitionGuard()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
 const preferences = reactive(defaultLayoutPreferences())
 const spacing = reactive<OfficeLayoutSpacing>({ ...OFFICE_LAYOUT_SPACING })
@@ -133,8 +134,9 @@ function applicationPreferences(room: ZoneObject, appliedSpacing: OfficeLayoutSp
     channels: JSON.parse(JSON.stringify(room.layoutPreferences?.channels || [])),
   }
 }
-function apply() {
+async function apply() {
   if (!zone.value || !activeProposal.value || activeProposal.value.problem || !previewReady.value) return
+  if (!await guard.gateFurnitureEdit(zone.value.id)) return
   const savedPreferences = applicationPreferences(zone.value, activeCandidate.value?.spacing || spacing)
   const snapshot = withPreviewPositions(activeProposal.value)
   if (!snapshot || !store.applyLayoutProposal(zone.value.id, snapshot, savedPreferences)) { applicationMessage.value = '预览已过期或存在越界、重叠、约束冲突，请重新生成或调整'; return }

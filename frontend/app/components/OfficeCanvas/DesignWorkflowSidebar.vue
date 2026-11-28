@@ -7,6 +7,7 @@ import { furnitureById } from '~/utils/manualFurniture'
 import { ZONE_TYPES } from '~/utils/sample'
 
 const store = useOfficeStore()
+const guard = useRecognitionGuard()
 const selectedId = defineModel<string | null>('selectedId')
 const referenceEditing = defineModel<LayoutReferenceEditing | null>('referenceEditing', { required: true })
 /** 画布上实时（可能已被用户拖动调整）的排版预览，应用时以它为准。 */
@@ -97,8 +98,8 @@ function confirmAndRecommend() {
   actionMessage.value = ''
   activePage.value = 'recommendations'
 }
-function clearAutomaticLayout() {
-  if (!zone.value) return
+async function clearAutomaticLayout() {
+  if (!zone.value || !await guard.gateFurnitureEdit(zone.value.id)) return
   store.clearFurniture(zone.value.id)
   store.unconfirmLayout(zone.value.id)
   selectedCategories.value = []

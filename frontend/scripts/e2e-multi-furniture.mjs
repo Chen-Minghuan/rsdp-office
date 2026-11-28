@@ -27,6 +27,7 @@ try {
   await context.route('**/api/auth/me', route => route.fulfill({ json: { code: 200, data: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'USER' } } }))
   const project = {
     projectId: 'OFFICE-PROJECT-001', name: '家具多选测试',
+    leader: { userId: 'MOCK-USER', username: 'test', displayName: '测试用户', role: 'LEADER', permissions: ['EDIT'] }, collaborators: [], referenceImages: [],
     floors: [{ projectId: 'OFFICE-PROJECT-001', floorId: 'OFFICE-PROJECT-001', name: '默认楼层', sortOrder: 1 }],
   }
   await context.route('**/api/v1/**', route => {
@@ -155,6 +156,47 @@ try {
   assert.equal((await items()).find(f => f.id === 'E').rotation, 270, '座椅侧净空不足已降级为提示，不再拦截旋转（2026-10-26 定稿）')
   await page.reload({ waitUntil: 'networkidle' })
   assert.equal((await items()).find(f => f.id === 'E').rotation, 270)
+  // Arbitrary-angle rotation: typing only previews; Enter, switching selection or clicking canvas applies; zero angle is rejected.
+  await item('C').click()
+  const rotateInput = page.getByLabel('家具旋转角度（度，顺时针为正）')
+  await rotateInput.fill('45')
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 0, '输入角度只触发预览，不落库')
+  await rotateInput.press('Enter')
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 45, 'Enter 应用输入角度')
+  assert.equal((await items()).find(f => f.id === 'C').layoutConfirmed, false)
+  assert.equal(await page.getByTestId('rotate-angle-form').count(), 0, 'Enter 应用后取消选中，操作条收起')
+  await item('C').click()
+  await rotateInput.fill('30')
+  await item('E').click()
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 75, '切换选中时自动应用待提交的旋转')
+  await item('C').click()
+  await rotateInput.fill('-75')
+  await page.getByTestId('office-design-canvas').click({ position: { x: 30, y: 30 } })
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 0, '点击画布自动应用，累计回到 0°')
+  await item('C').click()
+  await rotateInput.fill('0')
+  await rotateInput.press('Enter')
+  assert.equal((await items()).find(f => f.id === 'C').rotation, 0, '零角度不生效')
+  assert.equal(await page.getByTestId('rotate-commit-problem').innerText(), '请输入非零旋转角度', '零角度提示原因且保留选中')
+  // Out-of-bounds rotation is rejected: rotation unchanged, selection kept, reason shown inline.
+  await item('E').click()
+  await rotateInput.fill('45')
+  await rotateInput.press('Enter')
+  assert.equal((await items()).find(f => f.id === 'E').rotation, 270, '越界旋转被拒绝，角度保持不变')
+  assert.equal(await page.getByTestId('rotate-angle-form').count(), 1, '校验失败保留选中与操作条')
+  assert.equal(await rotateInput.inputValue(), '', '拒绝旋转后清除未应用的角度')
+  assert.equal(await page.getByTestId('rotate-commit-problem').innerText(), '此位置超出空间边界', '画布显示失败原因')
+  await rotateInput.press('Escape')
+  assert.equal(await page.getByTestId('rotate-commit-problem').count(), 0, 'Esc 清除错误提示')
+  await item('E').click()
+  await rotateInput.fill('45')
+  await canvas.click({ position: { x: 30, y: 30 } })
+  assert.equal((await items()).find(f => f.id === 'E').rotation, 270, '点击空白处提交越界旋转也不保存')
+  assert.equal(await page.getByTestId('rotate-angle-form').count(), 0, '点击空白处取消选中')
+  assert.equal(await page.getByTestId('rotate-commit-problem').innerText(), '此位置超出空间边界', '取消选中后仍可看到旋转失败原因')
+  await item('E').click()
+  assert.equal(await rotateInput.inputValue(), '', '重新选中时不显示失败的旋转角度')
+  await rotateInput.press('Escape')
   // Manual arranging snaps to walls and other modules within 50mm; the toolbar toggle disables it.
   const zoom = await page.evaluate(() => document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office').zoom)
   const beforeSnap = await items()
@@ -173,7 +215,7 @@ try {
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   assert.deepEqual(await items(), beforeSnap, '吸附移动每次各产生一次撤销记录')
   assert.deepEqual(errors, [])
-  console.log('家具多选 UI 通过：Shift/Ctrl 多选、框选、整组移动、旋转 90°/水平镜像（含拒绝与撤销）、碰撞/越界拒绝、一次撤销、刷新、批量删除与其他空间隔离；API 模拟。')
+  console.log('家具多选 UI 通过：Shift/Ctrl 多选、框选、整组移动、旋转 90°/水平镜像（含拒绝与撤销）、任意角度旋转（预览、Enter/切换选中/点画布自动应用、零角度拒绝）、碰撞/越界拒绝、一次撤销、刷新、批量删除与其他空间隔离；API 模拟。')
 } finally {
   try { await browser?.close() } finally {
     if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill('SIGTERM'); await exited }

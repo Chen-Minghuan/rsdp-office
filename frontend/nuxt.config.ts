@@ -1,5 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 
+const devApiProxyTarget = process.env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:8082'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -10,6 +12,12 @@ export default defineNuxtConfig({
   ],
   css: ['~/assets/css/main.css'],
   vite: {
+    server: {
+      proxy: {
+        '/api': { target: devApiProxyTarget, changeOrigin: true },
+        '/uploads': { target: devApiProxyTarget, changeOrigin: true },
+      },
+    },
     plugins: [tailwindcss()],
     optimizeDeps: {
       include: [
