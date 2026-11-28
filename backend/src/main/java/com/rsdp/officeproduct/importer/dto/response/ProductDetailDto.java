@@ -21,6 +21,7 @@ public class ProductDetailDto {
     private String sourceFactoryName;
 
     private String colorPrimaryName;
+    private List<String> materialTags = List.of();
     private String description;
     private BigDecimal retailPrice;
     private String primaryImageUrl;

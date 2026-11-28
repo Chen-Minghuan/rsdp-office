@@ -630,6 +630,7 @@ public class RsdpCatalogGateway {
             dto.setOwnerFactoryCode(textOrNull(rspu, "ownerFactoryCode"));
         }
         dto.setColorPrimaryName(textOrNull(rspu, "colorPrimaryName"));
+        dto.setMaterialTags(textValues(embeddedJson(rspu.path("materialTags"))).stream().distinct().toList());
         dto.setDescription(textOrNull(rspu, "description"));
         dto.setRetailPrice(decimalOrNull(rspu, "retailPrice"));
         dto.setStatus(textOrNull(rspu, "status"));

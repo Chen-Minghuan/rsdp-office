@@ -180,15 +180,19 @@ await context.route('**/api/v1/**', async route => {
   }
   if (/^\/api\/v1\/products\/P-\d+$/.test(url.pathname) && request.method() === 'GET') {
     const product = products.find(item => item.rspuId === url.pathname.split('/').pop())
+    const hasProductMaterial = product.material === 'WO'
     return respond({
       ...product, detailImageUrls: null, deletedAt: null,
+      materialTags: hasProductMaterial ? ['WO'] : [],
+      description: hasProductMaterial ? '架子：进口白蜡木实木' : product.description,
       variants: [{ variantId: product.rspuId + '-V1', displayName: product.productName, sizeCode: null, sizeText: null,
         dimensions: null, widthMm: product.width, productLevel: 'B', packageCount: null, packageVolumeCbm: null,
-        grossWeight: null, colorCode: null, colorText: null, materialCode: null, materialText: product.material,
+        grossWeight: null, colorCode: null, colorText: null, materialCode: null, materialText: hasProductMaterial ? null : product.material,
         status: product.status, createdAt: product.createdAt, updatedAt: product.updatedAt }],
       images: [],
     })
   }
+  if (url.pathname === '/api/v1/dicts/material') return respond([{ dictCode: 'WO', dictName: '实木' }])
   if (url.pathname === '/api/v1/products' && request.method() === 'GET') return respond(products.map(({ description, material, width, ...summary }) => summary))
   if (url.pathname === '/api/v1/office/favorites/product-ids') return respond([])
   if (url.pathname === '/api/v1/office/favorites/items') return respond([])
@@ -396,6 +400,9 @@ try {
   await openDialog()
   await page.locator('[aria-label="商品卡片列表"] a').first().click()
   await page.waitForURL(/\/products\/P-\d+/)
+  await page.getByRole('region', { name: '商品资料' }).getByText('实木', { exact: true }).waitFor()
+  await page.getByText('架子：进口白蜡木实木', { exact: true }).waitFor()
+  await page.getByRole('region', { name: '商品规格' }).getByText('见商品资料').waitFor()
   await page.goto(`${baseUrl}/products`, { waitUntil: 'networkidle' })
 
   // 手机 390×844 全屏弹层

@@ -579,6 +579,7 @@ export function useOfficeApi() {
   const workbookPreviewImageUrl = (id: string, key: string) => apiUrl(`${localProductsPath}/excel-preview/${encodeURIComponent(id)}/images/${encodeURIComponent(key)}`)
   const localProductTemplateUrl = () => apiUrl(`${localProductsPath}/excel-template`)
   const listLocalProductCategories = () => request<{ dictCode: string, dictName: string }[]>('GET', '/api/v1/dicts/category')
+  const listProductMaterials = () => request<{ dictCode: string, dictName: string }[]>('GET', '/api/v1/dicts/material')
 
   const suggestWorkbookFields = (headers: Record<number, string>) => request<WorkbookFieldColumns>(
     'POST', `${localProductsPath}/excel-field-suggestions`, { headers })
@@ -688,6 +689,7 @@ export function useOfficeApi() {
     workbookPreviewImageUrl,
     localProductTemplateUrl,
     listLocalProductCategories,
+    listProductMaterials,
     previewLocalProductWorkbook,
     suggestWorkbookFields,
     suggestWorkbookCategories,

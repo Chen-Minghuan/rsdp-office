@@ -109,6 +109,7 @@ export interface ProductDetail {
   externalCode: string | null
   productName: string | null
   colorPrimaryName: string | null
+  materialTags?: string[]
   description: string | null
   retailPrice: number | null
   primaryImageUrl: string | null

@@ -182,6 +182,25 @@ class RsdpCatalogGatewayTest {
     }
 
     @Test
+    void productDetailKeepsProductMaterialSeparateFromVariantMaterial() throws Exception {
+        RsdpClient client = mock(RsdpClient.class);
+        RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
+        when(client.get("/api/v1/products/RSPU-MATERIAL")).thenReturn(json.readTree("""
+            {"rspu":{"rspuId":"RSPU-MATERIAL","materialTags":["WO","WO",""],"description":"架子：进口白蜡木实木"},
+             "recognitions":[{"parsedOcr":{"materialDescription":"橡木框架"}}]}
+            """));
+        when(client.get("/api/v1/products/RSPU-MATERIAL/variants")).thenReturn(json.readTree("""
+            [{"variantId":"V1"},{"variantId":"V2","materialText":"编织麻绳"}]
+            """));
+
+        var detail = gateway.getProductDetail("RSPU-MATERIAL");
+        assertEquals(List.of("WO"), detail.getMaterialTags());
+        assertEquals("架子：进口白蜡木实木", detail.getDescription());
+        assertNull(detail.getVariants().get(0).getMaterialText());
+        assertEquals("编织麻绳", detail.getVariants().get(1).getMaterialText());
+    }
+
+    @Test
     void detailAndCurrentVariantFindExactIdAcrossVisibleCatalogPages() throws Exception {
         RsdpClient client = mock(RsdpClient.class);
         RsdpCatalogGateway gateway = new RsdpCatalogGateway(client, json);
