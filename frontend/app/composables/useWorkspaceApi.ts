@@ -70,6 +70,7 @@ export function useWorkspaceApi() {
     addFloor: async (projectId: string, floorName: string) => floorFromDto(await request<FloorDto>('POST', `/api/v1/office/projects/${projectId}/floors`, { name: floorName })),
     updateProject: async (projectId: string, projectName: string) => projectFromDto(await request<ProjectDto>('PATCH', `/api/v1/office/projects/${projectId}`, { name: projectName })),
     updateFloor: async (projectId: string, floorId: string, floorName: string) => floorFromDto(await request<FloorDto>('PATCH', `/api/v1/office/projects/${projectId}/floors/${floorId}`, { name: floorName })),
+    deleteFloor: (projectId: string, floorId: string) => request<null>('DELETE', `/api/v1/office/projects/${projectId}/floors/${floorId}`),
     updateFloorReferences: async (projectId: string, floorId: string, referenceImages: ProjectReferenceImage[]) =>
       floorFromDto(await request<FloorDto>('PUT', `/api/v1/office/projects/${projectId}/floors/${floorId}/references`, { referenceImages })),
     updateRequirements: async (projectId: string, customerRequirements: string) => projectFromDto(await request<ProjectDto>('PATCH', `/api/v1/office/projects/${projectId}/requirements`, { customerRequirements })),

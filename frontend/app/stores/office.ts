@@ -525,6 +525,12 @@ export const useOfficeStore = defineStore('office', {
       this.saveLocal()
     },
 
+    /** 删除楼层时清理该楼层（workspaceId 即楼层 ID）的本地画布草稿。 */
+    removeDraft(workspaceId: string) {
+      if (typeof window === 'undefined') return
+      localStorage.removeItem(storageKey(workspaceId))
+    },
+
     setBlank() {
       this.snapshotUndo()
       this.blank = true

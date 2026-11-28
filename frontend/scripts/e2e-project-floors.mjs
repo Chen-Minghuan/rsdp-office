@@ -95,6 +95,11 @@ try {
       floor.name = request.postDataJSON().name
       return respond(floor)
     }
+    if (path.startsWith('/api/v1/office/projects/OPRJ-TEST/floors/') && request.method() === 'DELETE') {
+      const floorId = path.split('/').at(-1)
+      projects[0].floors = projects[0].floors.filter(item => item.floorId !== floorId)
+      return respond(null)
+    }
     if (path === '/api/v1/office/projects/OPRJ-TEST/requirements/summary' && request.method() === 'POST') {
       const body = request.postDataJSON()
       summaryRequests.push(body)
@@ -633,6 +638,31 @@ try {
   await page.waitForURL(url => url.pathname === '/proposal' && url.search === '?floorId=OFLR-3')
   await budget.getByText(`${first.project} / 3F`, { exact: true }).waitFor()
   assert.equal(await budget.getByText('方案演示', { exact: true }).count(), 0)
+
+  // 删除楼层：确认弹窗提示不可恢复，删除激活楼层后切换到同项目剩余楼层，最后一层禁止删除。
+  await page.getByTitle('编辑项目名称和楼层名称', { exact: true }).click()
+  const deleteButtons = page.getByRole('button', { name: /^删除楼层 / })
+  assert.equal(await deleteButtons.count(), 3, '三个楼层均应显示删除按钮')
+  await page.getByRole('button', { name: '删除楼层 3F', exact: true }).click()
+  const confirmFloorDelete = page.getByRole('dialog', { name: '删除楼层', exact: true })
+  await confirmFloorDelete.getByText('确定删除楼层「3F」吗？', { exact: false }).waitFor()
+  await confirmFloorDelete.getByText('此操作不可恢复', { exact: false }).waitFor()
+  await confirmFloorDelete.getByRole('button', { name: '确认删除', exact: true }).click()
+  await page.waitForURL(url => url.searchParams.get('floorId') === 'OFLR-1')
+  assert.equal(await projectTree.getByRole('button', { name: /^3F/ }).count(), 0, '楼层树不应再显示已删除的 3F')
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('rsdp-office-workspace-v1:MOCK-USER')).floorId), 'OFLR-1', '选中记录应切换到剩余楼层')
+  assert.equal(await page.evaluate(() => localStorage.getItem('rsdp-office-v01:MOCK-USER:OFLR-3')), null, '已删除楼层的本地草稿应清理')
+  assert.equal(await deleteButtons.count(), 2)
+  await page.getByRole('button', { name: '删除楼层 2F', exact: true }).click()
+  const confirmSecondDelete = page.getByRole('dialog', { name: '删除楼层', exact: true })
+  await confirmSecondDelete.getByRole('button', { name: '确认删除', exact: true }).click()
+  await confirmSecondDelete.waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: '删除楼层 一层', exact: true }).waitFor()
+  const lastDeleteButton = page.getByRole('button', { name: '删除楼层 一层', exact: true })
+  assert.equal(await lastDeleteButton.isDisabled(), true, '最后一层应禁止删除')
+  assert.equal(await lastDeleteButton.getAttribute('title'), '项目至少需要保留一个楼层')
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('heading', { name: '编辑项目与楼层', exact: true }).waitFor({ state: 'hidden' })
 
   assert.ok(saves.every(save => save.path.includes(save.body.projectId)), '画布保存必须使用原楼层隔离键')
   assert.deepEqual(errors, [])
