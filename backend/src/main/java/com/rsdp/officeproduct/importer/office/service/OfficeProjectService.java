@@ -6,8 +6,27 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rsdp.officeproduct.importer.common.AccessDeniedException;
 import com.rsdp.officeproduct.importer.common.BusinessException;
+import com.rsdp.officeproduct.importer.entity.FloorPlanAnalysis;
+import com.rsdp.officeproduct.importer.entity.FloorPlanRoom;
+import com.rsdp.officeproduct.importer.entity.FloorPlanSceneRevision;
 import com.rsdp.officeproduct.importer.entity.OfficeUser;
+import com.rsdp.officeproduct.importer.entity.spatial.FloorPlanDesignScene;
+import com.rsdp.officeproduct.importer.entity.spatial.FloorPlanDocument;
+import com.rsdp.officeproduct.importer.entity.spatial.FloorPlanPage;
+import com.rsdp.officeproduct.importer.entity.spatial.FloorPlanSourceScene;
+import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
+import com.rsdp.officeproduct.importer.mapper.FloorPlanRoomMapper;
+import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
 import com.rsdp.officeproduct.importer.mapper.OfficeUserMapper;
+import com.rsdp.officeproduct.importer.mapper.SpaceTemplateMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanCalibrationMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanConfirmationMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanDesignRevisionMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanDesignSceneMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanDocumentMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanOperationReceiptMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanPageMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanSourceSceneMapper;
 import com.rsdp.officeproduct.importer.service.RsdpCatalogGateway;
 import com.rsdp.officeproduct.importer.office.dto.AssignableUserDto;
 import com.rsdp.officeproduct.importer.office.dto.CreateOfficeFloorRequest;
@@ -33,6 +52,7 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeCartMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.office.mapper.RenderPreviewMapper;
 import com.rsdp.officeproduct.importer.util.IdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,6 +98,19 @@ public class OfficeProjectService {
     private final OfficeProposalConfirmationMapper confirmationMapper;
     private final OfficeCanvasMapper canvasMapper;
     private final OfficeWorkspaceLockMapper workspaceLocks;
+    private final RenderPreviewMapper renderPreviewMapper;
+    private final SpaceTemplateMapper spaceTemplateMapper;
+    private final FloorPlanAnalysisMapper analysisMapper;
+    private final FloorPlanRoomMapper roomMapper;
+    private final FloorPlanSceneRevisionMapper sceneRevisionMapper;
+    private final FloorPlanDocumentMapper documentMapper;
+    private final FloorPlanPageMapper pageMapper;
+    private final FloorPlanSourceSceneMapper sourceSceneMapper;
+    private final FloorPlanDesignSceneMapper designSceneMapper;
+    private final FloorPlanDesignRevisionMapper designRevisionMapper;
+    private final FloorPlanCalibrationMapper calibrationMapper;
+    private final FloorPlanConfirmationMapper spatialConfirmationMapper;
+    private final FloorPlanOperationReceiptMapper operationReceiptMapper;
 
     public List<OfficeProjectDto> listProjects() {
         return listProjects(true);
@@ -322,6 +355,74 @@ public class OfficeProjectService {
             throw new BusinessException("楼层名称不能重复");
         }
         return toFloorDto(floor);
+    }
+
+    /**
+     * 删除楼层及其全部楼层数据。楼层 ID 同时是画布/图纸等业务表 project_id 的隔离键，
+     * 需在同一事务内按子表→父表顺序清理；历史报价单（office_quotation 快照）保留。
+     */
+    @Transactional
+    public void deleteFloor(String projectId, String floorId) {
+        accessService.requirePermission(projectId, OfficeProjectPermission.EDIT);
+        requireProject(projectId);
+        OfficeDesignFloor floor = StringUtils.hasText(floorId) ? floorMapper.selectById(floorId) : null;
+        if (floor == null || !projectId.equals(floor.getProjectId())) {
+            throw new BusinessException("楼层不存在");
+        }
+        Long floorCount = floorMapper.selectCount(new QueryWrapper<OfficeDesignFloor>().eq("project_id", projectId));
+        if (floorCount == null || floorCount <= 1) {
+            throw new BusinessException("项目至少需要保留一个楼层");
+        }
+        // 与画布/购物车等写入共用楼层锁，串行化并发保存。
+        workspaceLocks.lockWorkspace(floorId);
+
+        // 识别批次（floor_plan_analysis.project_id 存楼层 ID）。
+        List<String> analysisIds = analysisMapper.selectList(new QueryWrapper<FloorPlanAnalysis>()
+                .eq("project_id", floorId).select("analysis_id"))
+            .stream().map(FloorPlanAnalysis::getAnalysisId).toList();
+        // 遗留空间场景链路（SpatialSceneController 仍在用），design_scene 按 project_id 挂载。
+        List<String> sceneIds = designSceneMapper.selectList(new QueryWrapper<FloorPlanDesignScene>()
+                .eq("project_id", floorId).select("scene_id"))
+            .stream().map(FloorPlanDesignScene::getSceneId).toList();
+        if (!sceneIds.isEmpty()) {
+            operationReceiptMapper.deleteBySceneIds(sceneIds);
+            spatialConfirmationMapper.delete(new QueryWrapper<com.rsdp.officeproduct.importer.entity.spatial.FloorPlanConfirmation>()
+                .in("scene_id", sceneIds));
+            calibrationMapper.deleteBySceneIds(sceneIds);
+            designRevisionMapper.deleteBySceneIds(sceneIds);
+            designSceneMapper.delete(new QueryWrapper<FloorPlanDesignScene>().in("scene_id", sceneIds));
+        }
+        // 图纸文档链路：document → page → source_scene（source_scene.analysis_id 引用识别批次，须先于批次删除）。
+        List<String> assetIds = documentMapper.selectList(new QueryWrapper<FloorPlanDocument>()
+                .eq("project_id", floorId).select("asset_id"))
+            .stream().map(FloorPlanDocument::getAssetId).toList();
+        if (!assetIds.isEmpty()) {
+            List<String> pageIds = pageMapper.selectList(new QueryWrapper<FloorPlanPage>()
+                    .in("asset_id", assetIds).select("page_id"))
+                .stream().map(FloorPlanPage::getPageId).toList();
+            if (!pageIds.isEmpty()) {
+                sourceSceneMapper.delete(new QueryWrapper<FloorPlanSourceScene>().in("page_id", pageIds));
+                pageMapper.delete(new QueryWrapper<FloorPlanPage>().in("page_id", pageIds));
+            }
+            documentMapper.delete(new QueryWrapper<FloorPlanDocument>().in("asset_id", assetIds));
+        }
+        if (!analysisIds.isEmpty()) {
+            sceneRevisionMapper.delete(new QueryWrapper<FloorPlanSceneRevision>().in("analysis_id", analysisIds));
+            roomMapper.delete(new QueryWrapper<FloorPlanRoom>().in("analysis_id", analysisIds));
+            analysisMapper.delete(new QueryWrapper<FloorPlanAnalysis>().in("analysis_id", analysisIds));
+        }
+        // 效果图、空间模板、购物车、画布（project_id 存楼层 ID）。
+        renderPreviewMapper.deleteByProject(floorId);
+        spaceTemplateMapper.deleteByProject(floorId);
+        cartMapper.delete(new QueryWrapper<OfficeCart>().eq("project_id", floorId));
+        canvasMapper.delete(new QueryWrapper<OfficeCanvas>().eq("project_id", floorId));
+        // 房间方案与方案确认（FK 引用楼层行，须先于楼层删除；确认记录先按惯例置 retired）。
+        canvasMapper.deleteRoomSchemes(floorId);
+        canvasMapper.retireProposalConfirmations(floorId);
+        confirmationMapper.deleteByFloor(floorId);
+
+        floorMapper.deleteById(floorId);
+        auditService.record("FLOOR_DELETED", "PROJECT", projectId, "floorId=" + floorId + "; name=" + floor.getName());
     }
 
     @Transactional

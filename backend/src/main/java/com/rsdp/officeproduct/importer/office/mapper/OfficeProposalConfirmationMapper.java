@@ -33,4 +33,8 @@ public interface OfficeProposalConfirmationMapper {
         VALUES (#{confirmationId}, #{floorId}, #{canvasRevision}, #{fingerprint}, CAST(#{snapshotJson} AS jsonb), #{confirmedBy}, #{confirmedAt})
         """)
     void insert(Row confirmation);
+
+    /** 删除楼层时清理该楼层的方案确认记录（先 retired 软删，再随楼层硬删）。 */
+    @Delete("DELETE FROM office_proposal_confirmation WHERE floor_id=#{floorId}")
+    int deleteByFloor(@Param("floorId") String floorId);
 }

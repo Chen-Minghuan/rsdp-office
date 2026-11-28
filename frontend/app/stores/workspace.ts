@@ -204,6 +204,18 @@ export const useWorkspaceStore = defineStore('workspace', {
       const floor = this.projects.find(project => project.projectId === projectId)?.floors.find(item => item.floorId === floorId)
       if (floor) Object.assign(floor, updated)
     },
+    async deleteFloor(floorId: string) {
+      const project = this.projects.find(item => item.floors.some(floor => floor.floorId === floorId))
+      if (!project) throw new Error('楼层不存在')
+      await useWorkspaceApi().deleteFloor(project.projectId, floorId)
+      project.floors = project.floors.filter(floor => floor.floorId !== floorId)
+      // 浏览器侧残留的草稿与图纸缓存尽力清理，失败不阻塞删除。
+      void clearFloorClientData(floorId)
+      if (this.currentFloorId !== floorId) return
+      // 删除的是当前激活楼层：重置画布并切换到同项目剩余楼层（后端保证至少保留一个）。
+      useOfficeStore().$reset()
+      await this.activateFloor(project.floors[0]!.floorId)
+    },
     async updateProjectDetails(projectName: string, floors: Array<{ floorId: string; floorName: string }>) {
       if (!this.currentProject) throw new Error('请先选择项目')
       const projectId = this.currentProject.projectId

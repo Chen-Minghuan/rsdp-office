@@ -34,6 +34,40 @@ const permissionChoices: { key: ProjectPermission; label: string }[] = [
 ]
 const saving = ref(false)
 const error = ref('')
+const deleteDialog = ref<HTMLDialogElement | null>(null)
+const deletingFloor = ref<{ floorId: string, floorName: string } | null>(null)
+const deleting = ref(false)
+const deleteError = ref('')
+
+function askDeleteFloor(floor: { floorId: string, floorName: string }) {
+  if (saving.value || deleting.value || floors.value.length <= 1) return
+  deleteError.value = ''
+  deletingFloor.value = floor
+  nextTick(() => deleteDialog.value?.showModal())
+}
+
+function cancelDeleteFloor() {
+  if (deleting.value) return
+  deleteDialog.value?.close()
+  deletingFloor.value = null
+}
+
+async function confirmDeleteFloor() {
+  const floor = deletingFloor.value
+  if (!floor || deleting.value) return
+  deleting.value = true
+  deleteError.value = ''
+  try {
+    await workspace.deleteFloor(floor.floorId)
+    floors.value = floors.value.filter(item => item.floorId !== floor.floorId)
+    deleteDialog.value?.close()
+    deletingFloor.value = null
+  } catch (cause) {
+    deleteError.value = cause instanceof Error ? cause.message : '楼层删除失败'
+  } finally {
+    deleting.value = false
+  }
+}
 
 onMounted(async () => {
   if (!authEnabled) return
@@ -106,7 +140,7 @@ async function save() {
     <div class="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" @click.self="emit('close')">
       <form class="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl" @submit.prevent="save">
         <div class="mb-5 flex items-start justify-between">
-          <div><h2 class="text-lg font-bold">编辑项目与楼层</h2><p class="mt-1 text-xs text-muted">修改名称不会改变楼层 ID，已有图纸和设计数据保持关联。</p></div>
+          <div><h2 class="text-lg font-bold">编辑项目与楼层</h2><p class="mt-1 text-xs text-muted">修改名称不会改变楼层 ID，已有图纸和设计数据保持关联；删除楼层会同时删除该楼层的全部设计数据。</p></div>
           <button type="button" class="rounded-lg p-2 text-muted hover:bg-cream" aria-label="关闭项目编辑" @click="emit('close')"><AppIcon name="close" /></button>
         </div>
         <div class="grid max-h-[65vh] gap-5 overflow-y-auto pr-1">
@@ -115,10 +149,16 @@ async function save() {
           </label>
           <section class="grid gap-2">
             <h3 class="text-sm font-semibold">楼层名称</h3>
-            <label v-for="(floor, index) in floors" :key="floor.floorId" class="flex items-center gap-3 text-xs text-muted">
+            <div v-for="(floor, index) in floors" :key="floor.floorId" class="flex items-center gap-3 text-xs text-muted">
               <span class="w-12 shrink-0">楼层 {{ index + 1 }}</span>
               <input v-model="floor.floorName" :disabled="!canEdit" maxlength="200" class="min-w-0 flex-1 rounded-xl border border-line px-4 py-2.5 text-sm text-ink outline-none focus:border-bronze" :aria-label="`编辑楼层名称 ${index + 1}`">
-            </label>
+              <button type="button" class="shrink-0 rounded-lg p-1.5 text-muted transition hover:text-red-600 disabled:opacity-30"
+                :disabled="!canEdit || saving || floors.length <= 1"
+                :title="floors.length <= 1 ? '项目至少需要保留一个楼层' : '删除楼层'"
+                :aria-label="`删除楼层 ${floor.floorName}`" @click="askDeleteFloor(floor)">
+                <AppIcon name="trash" size="4" />
+              </button>
+            </div>
           </section>
           <ProjectMemberEditor v-model:leader="leader" v-model:collaborators="collaborators"
             :leader-optional="!authEnabled" :leader-disabled="authEnabled && !canGrant" :disabled="!canManageMembers" />
@@ -148,6 +188,24 @@ async function save() {
           <button v-if="canEdit || canManageMembers" type="submit" class="rounded-xl bg-bronze px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="saving">{{ saving ? '保存中…' : '保存修改' }}</button>
         </div>
       </form>
+      <dialog ref="deleteDialog" class="m-auto w-[min(400px,calc(100%_-_32px))] rounded-2xl border border-line bg-white p-0 text-ink shadow-panel backdrop:bg-black/40" aria-label="删除楼层" @cancel="event => { if (deleting) event.preventDefault() }" @close="deletingFloor = null">
+        <div class="p-6">
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <h2 class="text-lg font-bold">删除楼层</h2>
+            <button type="button" class="rounded-lg p-1.5 text-muted transition hover:bg-cream disabled:opacity-50" aria-label="关闭删除确认" :disabled="deleting" @click="cancelDeleteFloor"><AppIcon name="close" size="5" /></button>
+          </div>
+          <div class="mb-4 flex gap-3 rounded-xl border border-red-100 bg-red-50 p-3.5">
+            <AppIcon name="warning" size="5" class="mt-0.5 flex-none text-[#b3402f]" />
+            <p class="text-sm leading-6">确定删除楼层「<strong>{{ deletingFloor?.floorName }}</strong>」吗？该楼层的图纸、识别结果、画布设计、空间方案、排版、报价确认、效果图、空间模板和购物车条目将一并删除。</p>
+          </div>
+          <p class="mb-5 text-xs leading-5 text-muted">此操作不可恢复；项目的历史报价单保留，仍可在报价记录中查看。</p>
+          <div v-if="deleteError" class="mb-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">{{ deleteError }}</div>
+          <div class="flex justify-end gap-3 border-t border-line pt-4">
+            <button type="button" class="rounded-lg border border-line px-5 py-2.5 text-sm disabled:opacity-50" :disabled="deleting" @click="cancelDeleteFloor">取消</button>
+            <button type="button" class="rounded-lg bg-[#b3402f] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#9c3627] disabled:opacity-50" :disabled="deleting" @click="confirmDeleteFloor">{{ deleting ? '删除中…' : '确认删除' }}</button>
+          </div>
+        </div>
+      </dialog>
     </div>
   </Teleport>
 </template>

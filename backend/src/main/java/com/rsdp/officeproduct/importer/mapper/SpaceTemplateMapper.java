@@ -18,4 +18,8 @@ public interface SpaceTemplateMapper {
 
     @Select("SELECT template_id, project_id, name, content_hash, source_canvas_revision, source_analysis_id, source_analysis_revision, space_count, area_m2, evidence_kind, created_at FROM office_space_template WHERE project_id=#{projectId} ORDER BY created_at DESC, template_id DESC LIMIT 50")
     List<SpaceTemplate> list(@Param("projectId") String projectId);
+
+    /** 删除楼层时清理该楼层（project_id 存楼层 ID）的全部空间模板。 */
+    @Delete("DELETE FROM office_space_template WHERE project_id=#{projectId}")
+    int deleteByProject(@Param("projectId") String projectId);
 }

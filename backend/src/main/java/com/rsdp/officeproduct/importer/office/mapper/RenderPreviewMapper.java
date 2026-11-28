@@ -34,4 +34,8 @@ public interface RenderPreviewMapper {
 
     @Select("SELECT *, snapshot_json::text AS snapshot_json FROM office_render_preview WHERE project_id=#{projectId} AND zone_id=#{zoneId} ORDER BY created_at DESC, preview_id DESC LIMIT 30")
     List<RenderPreview> list(@Param("projectId") String projectId, @Param("zoneId") String zoneId);
+
+    /** 删除楼层时清理该楼层（project_id 存楼层 ID）的全部效果图记录。 */
+    @Delete("DELETE FROM office_render_preview WHERE project_id=#{projectId}")
+    int deleteByProject(@Param("projectId") String projectId);
 }

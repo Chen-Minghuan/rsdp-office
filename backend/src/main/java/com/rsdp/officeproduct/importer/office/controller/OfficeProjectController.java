@@ -14,6 +14,7 @@ import com.rsdp.officeproduct.importer.office.dto.UpdateProjectMembersRequest;
 import com.rsdp.officeproduct.importer.office.dto.UpdateProjectReferencesRequest;
 import com.rsdp.officeproduct.importer.office.service.OfficeProjectService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -71,6 +72,12 @@ public class OfficeProjectController {
     public Result<OfficeFloorDto> updateFloor(@PathVariable String projectId, @PathVariable String floorId,
                                                @RequestBody CreateOfficeFloorRequest request) {
         return Result.ok(projectService.updateFloor(projectId, floorId, request));
+    }
+
+    @DeleteMapping("/{projectId}/floors/{floorId}")
+    public Result<Void> deleteFloor(@PathVariable String projectId, @PathVariable String floorId) {
+        projectService.deleteFloor(projectId, floorId);
+        return Result.ok(null);
     }
 
     @PatchMapping("/{projectId}/requirements")

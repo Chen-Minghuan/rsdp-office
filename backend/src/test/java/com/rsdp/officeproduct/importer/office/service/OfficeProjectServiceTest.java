@@ -28,6 +28,19 @@ import com.rsdp.officeproduct.importer.office.mapper.OfficeDesignProjectMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProjectMemberMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeProposalConfirmationMapper;
 import com.rsdp.officeproduct.importer.office.mapper.OfficeWorkspaceLockMapper;
+import com.rsdp.officeproduct.importer.office.mapper.RenderPreviewMapper;
+import com.rsdp.officeproduct.importer.mapper.FloorPlanAnalysisMapper;
+import com.rsdp.officeproduct.importer.mapper.FloorPlanRoomMapper;
+import com.rsdp.officeproduct.importer.mapper.FloorPlanSceneRevisionMapper;
+import com.rsdp.officeproduct.importer.mapper.SpaceTemplateMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanCalibrationMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanConfirmationMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanDesignRevisionMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanDesignSceneMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanDocumentMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanOperationReceiptMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanPageMapper;
+import com.rsdp.officeproduct.importer.mapper.spatial.FloorPlanSourceSceneMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -68,6 +81,8 @@ class OfficeProjectServiceTest {
     private OfficeProposalConfirmationMapper confirmationMapper;
     private OfficeCanvasMapper canvasMapper;
     private OfficeWorkspaceLockMapper workspaceLocks;
+    private RenderPreviewMapper renderPreviewMapper;
+    private SpaceTemplateMapper spaceTemplateMapper;
     private OfficeProjectService service;
 
     @BeforeEach void setup() {
@@ -135,6 +150,9 @@ class OfficeProjectServiceTest {
         when(floorMapper.nextSortOrder(anyString())).thenAnswer(call -> floors.values().stream()
             .filter(floor -> floor.getProjectId().equals(call.getArgument(0)))
             .mapToInt(OfficeDesignFloor::getSortOrder).max().orElse(-1) + 1);
+        when(floorMapper.selectCount(any())).thenAnswer(call -> floors.values().stream()
+            .filter(floor -> scopeIds(call.getArgument(0)).contains(floor.getProjectId())).count());
+        when(floorMapper.deleteById(anyString())).thenAnswer(call -> { floors.remove(call.getArgument(0)); return 1; });
         when(memberMapper.insert(any(OfficeProjectMember.class))).thenAnswer(call -> { members.add(call.getArgument(0)); return 1; });
         when(memberMapper.selectList(any())).thenAnswer(call -> members.stream()
             .filter(member -> scopeIds(call.getArgument(0)).contains(member.getProjectId())).toList());
@@ -170,9 +188,24 @@ class OfficeProjectServiceTest {
                 }).toList());
         workspaceLocks = mock(OfficeWorkspaceLockMapper.class);
         when(workspaceLocks.lockWorkspace(anyString())).thenReturn(1);
+        renderPreviewMapper = mock(RenderPreviewMapper.class);
+        spaceTemplateMapper = mock(SpaceTemplateMapper.class);
+        var analysisMapper = mock(FloorPlanAnalysisMapper.class);
+        var roomMapper = mock(FloorPlanRoomMapper.class);
+        var sceneRevisionMapper = mock(FloorPlanSceneRevisionMapper.class);
+        var documentMapper = mock(FloorPlanDocumentMapper.class);
+        var pageMapper = mock(FloorPlanPageMapper.class);
+        var sourceSceneMapper = mock(FloorPlanSourceSceneMapper.class);
+        var designSceneMapper = mock(FloorPlanDesignSceneMapper.class);
+        var designRevisionMapper = mock(FloorPlanDesignRevisionMapper.class);
+        var calibrationMapper = mock(FloorPlanCalibrationMapper.class);
+        var spatialConfirmationMapper = mock(FloorPlanConfirmationMapper.class);
+        var operationReceiptMapper = mock(FloorPlanOperationReceiptMapper.class);
         service = new OfficeProjectService(projectMapper, floorMapper, memberMapper, userMapper, access,
             auditService, new ObjectMapper(), cartMapper, catalogGateway, sharedCatalogService, confirmationMapper,
-            canvasMapper, workspaceLocks);
+            canvasMapper, workspaceLocks, renderPreviewMapper, spaceTemplateMapper, analysisMapper, roomMapper,
+            sceneRevisionMapper, documentMapper, pageMapper, sourceSceneMapper, designSceneMapper,
+            designRevisionMapper, calibrationMapper, spatialConfirmationMapper, operationReceiptMapper);
     }
 
     private OfficeUser activeUser(String userId, String username) {
@@ -398,6 +431,56 @@ class OfficeProjectServiceTest {
             () -> service.addFloor(created.getProjectId(), floor)).getMessage());
         floor.setName("一 层");
         assertDoesNotThrow(() -> service.addFloor(created.getProjectId(), floor));
+    }
+
+    @Test void deleteFloorRemovesFloorAndCleansRelatedData() {
+        var created = service.createProject(request("删除楼层项目", List.of("一层", "二层")));
+        String floorId = created.getFloors().get(1).getFloorId();
+
+        service.deleteFloor(created.getProjectId(), floorId);
+
+        assertFalse(floors.containsKey(floorId));
+        assertTrue(auditLogs.stream().anyMatch(log -> "FLOOR_DELETED".equals(log.getAction())));
+        verify(workspaceLocks).lockWorkspace(floorId);
+        verify(renderPreviewMapper).deleteByProject(floorId);
+        verify(spaceTemplateMapper).deleteByProject(floorId);
+        verify(cartMapper).delete(any());
+        verify(canvasMapper).delete(any());
+        verify(canvasMapper).deleteRoomSchemes(floorId);
+        verify(canvasMapper).retireProposalConfirmations(floorId);
+        verify(confirmationMapper).deleteByFloor(floorId);
+        // 另一楼层不受影响
+        assertTrue(floors.containsKey(created.getFloors().get(0).getFloorId()));
+    }
+
+    @Test void deleteFloorRejectsLastRemainingFloor() {
+        var created = service.createProject(request("单楼层项目", List.of("一层")));
+        String floorId = created.getFloors().get(0).getFloorId();
+
+        assertEquals("项目至少需要保留一个楼层", assertThrows(BusinessException.class,
+            () -> service.deleteFloor(created.getProjectId(), floorId)).getMessage());
+        assertTrue(floors.containsKey(floorId));
+    }
+
+    @Test void deleteFloorRejectsUnknownOrCrossProjectFloor() {
+        var created = service.createProject(request("跨项目校验", List.of("一层", "二层")));
+        assertEquals("楼层不存在", assertThrows(BusinessException.class,
+            () -> service.deleteFloor(created.getProjectId(), "OFLR-MISSING")).getMessage());
+        var other = service.createProject(request("另一个项目", List.of("一层", "二层")));
+        String foreignFloorId = other.getFloors().get(0).getFloorId();
+        assertEquals("楼层不存在", assertThrows(BusinessException.class,
+            () -> service.deleteFloor(created.getProjectId(), foreignFloorId)).getMessage());
+        assertTrue(floors.containsKey(foreignFloorId));
+    }
+
+    @Test void deleteFloorRequiresEditPermission() {
+        var created = service.createProject(request("权限校验", List.of("一层", "二层")));
+        String floorId = created.getFloors().get(0).getFloorId();
+        doThrow(new com.rsdp.officeproduct.importer.common.AccessDeniedException("无权编辑"))
+            .when(access).requirePermission(created.getProjectId(), OfficeProjectPermission.EDIT);
+        assertThrows(com.rsdp.officeproduct.importer.common.AccessDeniedException.class,
+            () -> service.deleteFloor(created.getProjectId(), floorId));
+        assertTrue(floors.containsKey(floorId));
     }
 
     @Test void rejectsEmptyNamesEmptyPlansDuplicateFloorsAndUnknownParents() {
@@ -1081,19 +1164,7 @@ class OfficeProjectServiceTest {
     }
 
     private OfficeProjectService budgetService() {
-        try {
-            return OfficeProjectService.class.getConstructor(
-                OfficeDesignProjectMapper.class, OfficeDesignFloorMapper.class, OfficeProjectMemberMapper.class,
-                OfficeUserMapper.class, OfficeProjectAccessService.class, OfficeAuditService.class, ObjectMapper.class,
-                OfficeCartMapper.class, RsdpCatalogGateway.class, SharedCatalogService.class,
-                OfficeProposalConfirmationMapper.class, OfficeCanvasMapper.class, OfficeWorkspaceLockMapper.class
-            ).newInstance(projectMapper, floorMapper, memberMapper, userMapper, access, auditService, new ObjectMapper(),
-                cartMapper, catalogGateway, sharedCatalogService, confirmationMapper, canvasMapper, workspaceLocks);
-        } catch (NoSuchMethodException missingBudgetDependencies) {
-            throw new AssertionError("项目服务尚未提供购物车预算聚合依赖", missingBudgetDependencies);
-        } catch (ReflectiveOperationException failed) {
-            throw new AssertionError("无法构造带预算聚合能力的项目服务", failed);
-        }
+        return service;
     }
 
     private OfficeProjectDto project(List<OfficeProjectDto> projects, String projectId) {
