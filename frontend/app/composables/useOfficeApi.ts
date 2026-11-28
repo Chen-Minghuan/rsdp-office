@@ -110,6 +110,7 @@ interface ProductDto {
   widthMm?: number
   depthMm?: number
   heightMm?: number
+  colorPrimaryName?: string
 }
 
 function apiUrl(path: string) {
@@ -309,6 +310,7 @@ export function useOfficeApi() {
     return list.filter(p => p.widthCm != null && p.widthCm > 0 && p.depthCm != null && p.depthCm > 0
       && p.price > 0).map((p) => ({
       id: p.id, rspuId: p.rspuId, variantId: p.variantId, widthMm: p.widthMm, depthMm: p.depthMm, heightMm: p.heightMm,
+      colorPrimaryName: p.colorPrimaryName,
       name: p.name,
       desc: p.desc || '',
       variant: p.variant || '',
