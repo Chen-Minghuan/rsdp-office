@@ -752,19 +752,20 @@ export const useOfficeStore = defineStore('office', {
       return moveWarning ? `已移动；提示：${moveWarning}，确认排版时会被拦截` : null
     },
 
-    rotateFurnitureGroup(ids: string[], zoneId: string): string | null {
+    rotateFurnitureGroup(ids: string[], zoneId: string, angleDeg = 90): string | null {
       const zone = this.zones.find(item => item.id === zoneId)
       const selected = new Set(ids)
       const current = this.furnitureForZone(zoneId)
       const items = current.filter(item => selected.has(item.id))
       if (!zone || !items.length || items.length !== selected.size) return '所选家具无效'
+      if (!Number.isFinite(angleDeg) || !angleDeg) return '请输入非零旋转角度'
       // Rotation swaps the footprint of non-square modules; revalidate bounds and overlaps.（560mm 座椅净空降级为提示，不再拦截旋转）
-      const candidates = items.map(item => ({ ...item, rotation: ((item.rotation + 90) % 360 + 360) % 360 }))
+      const candidates = items.map(item => ({ ...item, rotation: ((item.rotation + angleDeg) % 360 + 360) % 360 }))
       const problem = officeFurnitureMoveProblem(zone, candidates, current)
       if (problem) return problem
       this.lastManualFurnitureEdit = { zoneId, at: Date.now() }
       this.objectUpdate(() => {
-        items.forEach(item => { item.rotation = ((item.rotation + 90) % 360 + 360) % 360 })
+        items.forEach(item => { item.rotation = ((item.rotation + angleDeg) % 360 + 360) % 360 })
         this.furnitureForZone(zoneId).forEach(item => { item.layoutConfirmed = false })
       })
       const rotateWarning = officeFurnitureMoveWarning(zone, items)

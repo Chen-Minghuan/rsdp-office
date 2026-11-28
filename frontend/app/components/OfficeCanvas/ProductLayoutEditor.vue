@@ -8,6 +8,7 @@ import { OFFICE_LAYOUT_SPACING } from '~/utils/officeAutoLayout'
 import { OFFICE_MODULE_DRAG_TYPE } from '~/utils/officeManualPlacement'
 
 const store = useOfficeStore()
+const guard = useRecognitionGuard()
 const selectedId = defineModel<string | null>('selectedId')
 const emit = defineEmits<{ confirmed: []; 'select-module': [module: OfficeModuleTemplate, size?: [number, number]] }>()
 const zone = computed(() => store.zones.find(item => item.id === store.designZoneId) || null)
@@ -87,15 +88,15 @@ function removeSelected() {
     message.value = '已删除所选家具，可撤销'
   }
 }
-function clearLayout() {
-  if (!zone.value) return
+async function clearLayout() {
+  if (!zone.value || !await guard.gateFurnitureEdit(zone.value.id)) return
   store.clearFurniture(zone.value.id)
   store.unconfirmLayout(zone.value.id)
   selectedId.value = null
   message.value = '已清空当前空间排版，可撤销'
 }
-function addModule(module: OfficeModuleTemplate) {
-  if (!zone.value) return
+async function addModule(module: OfficeModuleTemplate) {
+  if (!zone.value || !await guard.gateFurnitureEdit(zone.value.id)) return
   selectedCatalogId.value = module.id
   selectedId.value = null
   replacementMode.value = false

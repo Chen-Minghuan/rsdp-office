@@ -23,6 +23,8 @@ const addToExistingGroup = ref(false)
 const includeOtherCategories = ref(props.existing?.includeOtherCategories ?? !props.categoryIds.length)
 const status = ref('正在读取当前空间底图…')
 const gateProblem = ref('')
+const gateClearAndRecognize = ref(false)
+const confirmingClear = ref(false)
 const options = (id: string) => (REFERENCE_TEMPLATES[id] || []).filter(key => furnitureById.has(key))
 const selected = computed(() => editing.value?.selected == null ? null : editing.value.marks[editing.value.selected])
 const label = (id: string) => furnitureById.get(id)?.name || id
@@ -30,7 +32,7 @@ const categoryLabel = (id: string) => MIXED_LAYOUT_CATEGORIES[MIXED_CATEGORY_IDS
 const revision = props.plan.analysisRevision || 1
 const taskKey = computed(() => layoutReferenceTaskKey(props.zone.id, props.plan.analysisId, revision))
 const task = computed(() => taskStore.taskFor(props.zone.id, props.plan.analysisId, revision))
-const busy = computed(() => task.value?.status === 'running')
+const busy = computed(() => task.value?.status === 'running' && !task.value.dismissed)
 let disposed = false
 watch(category, id => { template.value = options(id)[0] || ''; addToExistingGroup.value = false }, { immediate: true })
 onUnmounted(() => {
@@ -101,6 +103,11 @@ onMounted(async () => {
       else if (!record.consumed) applyTaskResult(record)
       else status.value = record.message
     }
+    // 画布已有家具时直接亮出一键清空入口，省掉一次注定被拦截的「识别原图家具」点击。
+    if (!busy.value && officeStore.furnitureForZone(props.zone.id).length > 0) {
+      gateProblem.value = '请清除当前画布上的家具'
+      gateClearAndRecognize.value = true
+    }
   } catch (error) {
     if (!disposed) status.value = error instanceof Error ? '无法读取空间底图 · ' + error.message : '无法读取空间底图'
   }
@@ -135,8 +142,11 @@ function applyTaskResult(record: LayoutReferenceTask) {
 async function recognize() {
   if (!upload.value || busy.value || !editing.value) return
   gateProblem.value = ''
+  gateClearAndRecognize.value = false
+  confirmingClear.value = false
   if (officeStore.furnitureForZone(props.zone.id).length > 0) {
     gateProblem.value = '请清除当前画布上的家具'
+    gateClearAndRecognize.value = true
     return
   }
   status.value = '正在识别裁图中的家具…'
@@ -150,6 +160,27 @@ async function recognize() {
     layoutSignature: furnitureLayoutSignature(officeStore.furnitureForZone(props.zone.id)),
     isValid: mark => options(mark.categoryId).includes(mark.templateId),
   })
+}
+
+/** 识别结果面向空画布（recognize 的拦截）；面板内两步确认后清空家具并立即继续识别。 */
+function clearAndRecognize() {
+  if (busy.value || !editing.value) return
+  confirmingClear.value = true
+}
+
+function confirmClearAndRecognize() {
+  confirmingClear.value = false
+  officeStore.clearFurniture(props.zone.id)
+  gateProblem.value = ''
+  gateClearAndRecognize.value = false
+  void recognize()
+}
+
+/** 放弃进行中的识别并回到组合布局：迟到的结果由 store 按运行令牌丢弃；记录已放弃，不会自动重开面板。 */
+function cancelRecognition() {
+  if (!busy.value) return
+  taskStore.dismiss(taskKey.value)
+  emit('close')
 }
 
 function close() {
@@ -175,6 +206,7 @@ function applyCurrent() {
   // 兜底拦截：结果展示后画布才摆上家具时，阻止基于空画布识别的旧结果覆盖新排版。
   if (officeStore.furnitureForZone(props.zone.id).length > 0) {
     gateProblem.value = '请清除当前画布上的家具'
+    gateClearAndRecognize.value = false
     return
   }
   emit('apply', { crop: state.crop, analysisId: props.plan.analysisId, revision, marks: state.marks.map(mark => ({ ...mark })), includeOtherCategories: includeOtherCategories.value })
@@ -190,8 +222,22 @@ function applyCurrent() {
       </div>
       <p v-if="status" class="text-[11px] text-muted" role="status">{{ status }}</p>
       <template v-if="editing?.crop">
-        <button type="button" data-testid="reference-recognize" class="w-full border border-line px-2 py-2 text-xs font-medium disabled:opacity-50" :disabled="busy" @click="recognize">{{ busy ? '正在识别…' : '识别原图家具' }}</button>
+        <div class="flex gap-2">
+          <button type="button" data-testid="reference-recognize" class="min-w-0 flex-1 border border-line px-2 py-2 text-xs font-medium disabled:opacity-50" :disabled="busy" @click="recognize">{{ busy ? '正在识别…' : '识别原图家具' }}</button>
+          <button v-if="busy" type="button" data-testid="reference-cancel-recognize" class="flex-none border border-accent px-3 py-2 text-xs text-accent-ink hover:bg-accent-tint" @click="cancelRecognition">取消识别</button>
+        </div>
         <p v-if="gateProblem" class="text-[10px] text-[#a65e4c]" role="status">{{ gateProblem }}</p>
+        <div v-if="gateClearAndRecognize">
+          <button v-if="!confirmingClear" type="button" data-testid="reference-clear-and-recognize" class="w-full border border-accent bg-accent-tint px-2 py-1.5 text-[11px] font-medium text-accent-ink disabled:opacity-50" :disabled="busy" @click="clearAndRecognize">清空画布家具并继续识别</button>
+          <div v-else role="alertdialog" aria-label="确认清空画布家具" data-testid="reference-clear-confirm" class="border border-accent bg-white p-2 text-[11px]">
+            <p class="font-semibold text-[#403a33]">确认清空「{{ zone.name }}」画布上的全部家具？</p>
+            <p class="mt-0.5 text-[10px] text-muted">清空后立即继续识别原图家具，可通过工具栏撤销恢复。</p>
+            <div class="mt-2 flex gap-2">
+              <button type="button" data-testid="reference-clear-confirm-ok" class="flex-1 bg-accent px-2 py-1.5 font-semibold text-white disabled:opacity-50" :disabled="busy" @click="confirmClearAndRecognize">确认清空并继续</button>
+              <button type="button" class="flex-1 border border-line px-2 py-1.5 text-muted" @click="confirmingClear = false">取消</button>
+            </div>
+          </div>
+        </div>
         <p class="text-[10px] text-muted">在画布上点选家具，拖动调整位置。橙色图例待确认。</p>
         <div class="space-y-2 border-y border-line py-2 text-xs">
           <div class="grid grid-cols-2 gap-1">

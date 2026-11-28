@@ -30,6 +30,8 @@
 
 2026-11-27 [TENANT-005 合并与迁移回归补强](tasks/TENANT-005-project-member-permission-tests.md#2026-11-27-合并与迁移回归补强) 本地合入 PR #29，补测重跑迁移保留人工设置的仅查看及撤权状态，并核实 CHECK 约束。隔离 PostgreSQL 专项及反向验证通过，Java 全量 501 项（0 失败、13 跳过）、前端构建、权限/工作流/报价/冒烟模拟 UI 通过。楼层参考图模拟 UI 场景 2 仍等待第二次 PUT 超时。
 
+2026-11-27 [LAYOUT-045](tasks/LAYOUT-045-furniture-arbitrary-rotation.md) 单空间设计选中家具支持任意角度旋转：复用空间核对的「输入预览 + 应用落库」交互，store 的 rotateFurnitureGroup 新增 angleDeg 参数（默认 90，既有调用方不变），画布操作条新增角度输入与应用按钮，Esc/失焦/点画布丢弃预览。构建与多选/预览拖动/3D 白模模拟回归通过；smoke/workflows 与基线同样失败（既有环境问题）。未提交、未部署。
+
 2026-11-26 [TENANT-005 项目成员权限写入与校验测试](tasks/TENANT-005-project-member-permission-tests.md) 核实项目设置弹窗七种项目权限（查看/编辑/报价查看/毛利查看/方案导出/报价导出/成员管理）的写入链路与检查点：勾选经 `PUT .../members` 由 `OfficeProjectPermission.encode()` 编码为位掩码写入 `office_project_member.permission_flags` 并随项目 DTO 回读；七权限均有真实后端校验（毛利查看为软校验，置空成本/毛利字段返回，前端报价表有自然兜底，不构成泄露）。补齐测试缺口：后端新增 14 用例（权限位写入/缺省保留/非法组合拒绝/仅主号可授权或换负责人、encode 业务规则、方案导出端点 403 与 CSV、access 层权限位矩阵、PUT 路由枚举反序列化透传），含反向验证（破坏 encode 后相关用例如期失败，随后恢复）；新增 `OfficeProjectMemberPermissionsPostgresTest` 固化迁移回填与落库回读；前端新增 `e2e:project-permissions` 五场景（勾选级联与 PUT 请求体、取消查看级联清空、无改动不请求、只读协作者入口全关、报价查看/导出分离与毛利列隐藏、仅成员管理协作者 PUT 不含 permissions）。实际执行（2026-11-26 本机）：后端全量与前端构建、五场景 mock e2e、`e2e:workflows`、`MOCK_API=1 e2e:smoke`、`e2e:quotes` 通过；Postgres 专项因未配置 `RSDP_TEST_POSTGRES_URL` 跳过，不计为数据库验收；`e2e:floor-references` 场景 2 两次超时失败，为本分支既有问题（本任务未改前端生产代码），未深入排查；未做真实后端联调。
 
 2026-11-26 [CAT-012 商品筛选 PR 合并修复](tasks/CAT-012-smart-search-filter.md#2026-11-26-pr-27-合并修复) 已合入 PR #27，修复编译、非在售漏查、选项请求竞态和快捷筛选分页，并补强制刷新回源。Java 全量 483 项（0 失败、12 跳过）、前端构建、筛选/工作流/收藏/模拟冒烟回归通过；真实部署验收未执行，未发布远程。
@@ -797,3 +799,15 @@ RENDER-011（2026-11-24，实验中）：实现 v9 三图生图输入，F编号�
 ## 2026-11-25 CAT-012 二次合并
 
 - 合并上游本地商品收藏功能，冲突解决；favorites E2E 时序断言加固；全量测试与四套 E2E 通过。
+
+## 2026-11-27 LAYOUT-049 参考原图一键清空并识别
+
+- 识别原图家具被「请清除当前画布上的家具」拦截时，面板内新增「清空画布家具并继续识别」按钮，显式确认后清空并自动发起识别，不再返回组合布局手动清空；前端构建与预览拖动 E2E 通过。详见[任务记录](tasks/LAYOUT-049-clear-and-recognize.md)。
+
+## 2026-11-28 LAYOUT-045 家具任意角度旋转改为自动应用
+
+- 单空间设计选中家具的角度输入去掉「应用」按钮：Enter 应用并取消选中（操作条收起，直接看到成品状态），焦点离开输入框（点击画布/其他家具/任意操作）自动落库，仅 Esc 放弃；统一 blur 即提交以消除与选中集 watch 的事件竞态。另修复 e2e mock 项目缺 `permissions: ['EDIT']` 被新版工作区权限门禁拒载的既有问题。构建与多选/预览拖动/3D 白模 E2E 通过。详见[任务记录](tasks/LAYOUT-045-furniture-arbitrary-rotation.md)。
+
+## 2026-11-28 LAYOUT-050 识别进行中的排版写入门禁
+
+- 识别原图家具进行中，同空间的添加家具/应用排版/清空排版先弹画布中央门禁：「取消识别并继续」放弃任务后放行，「保持识别」中止操作；不再静默浪费识别结果。前端构建、预览拖动与工作流 E2E 通过。详见[任务记录](tasks/LAYOUT-050-recognition-write-gate.md)。
