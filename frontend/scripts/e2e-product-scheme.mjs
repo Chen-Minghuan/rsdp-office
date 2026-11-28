@@ -20,6 +20,7 @@ const zone = {
   id: 'ROOM', kind: 'zone', x: 0, y: 0, w: 6000, h: 4000, name: '副总办公室', zoneType: 'EXECUTIVE_OFFICE',
   reviewUnit: 'mm', reviewConfirmation: { status: 'CONFIRMED' }, evidenceKind: 'MANUAL',
   polygon: [[0, 0], [6000, 0], [6000, 4000], [0, 4000]],
+  spaceTemplateId: 'LSTPL-EXISTING', templateSpaceId: 'ROOM',
 }
 const furniture = {
   id: 'DESK', zoneId: zone.id, kind: 'furniture', x: 900, y: 700, w: 1500, h: 800, rotation: 0,
@@ -29,7 +30,7 @@ const product = { id: 'SKU', variantId: 'SKU', rspuId: 'RSPU', name: '胡桃木�
 const catalog = [{ rspuId: 'RSPU', productName: product.name, retailPrice: 1250, status: 'active', categoryPath: ['办公家具', '办公桌'] }]
 const selected = { ...furniture, productId: product.id, productSelection: { cartLineId: 'LINE', product } }
 const cartLine = { lineId: 'LINE', zoneId: zone.id, zoneName: zone.name, projectId: floorId, productId: product.id, qty: 1 }
-let canvas = { projectId: floorId, revision: 5, mode: 'design', designZoneId: zone.id, objects: [zone, selected], files: [], blank: false }
+let canvas = { projectId: floorId, revision: 5, mode: 'design', designZoneId: zone.id, objects: [zone, { ...selected, layoutConfirmed: false }], files: [], blank: false }
 let cart = [cartLine]
 let slot = 'A', otherSlot = null, bundle = null, confirmation = null, submitted = null
 let confirmedSlot = null
@@ -60,6 +61,11 @@ try {
     if (path === '/api/v1/products/browse') return ok({ rows: catalog.map(shared => ({ local: null, shared })),
       total: catalog.length, catalogTotal: catalog.length, activeTotal: catalog.length, localTotal: 0 })
     if (path.endsWith('/products/RSPU')) return ok({ variants: [{ variantId: 'SKU', displayName: product.variant, status: 'active' }] })
+    if (path === '/api/v1/office/favorites/folders') return ok([{ folderId: 'DEFAULT', name: '默认收藏夹', itemCount: 1, defaultFolder: true, selected: true }])
+    if (path === '/api/v1/office/favorites/product-ids') return ok(['RSPU'])
+    if (path === '/api/v1/office/favorites/items') return ok(catalog)
+    if (path === `/api/v1/office/projects/${projectId}/favorites/product-ids`) return ok([])
+    if (path === `/api/v1/office/projects/${projectId}/favorites/items`) return ok([])
     if (path.endsWith('/product-bundles')) {
       if (bundleApiMissing) return route.fulfill({ status: 404, json: { message: 'No static resource api/v1/office/product-bundles' } })
       return ok(bundle ? [bundle] : [])
@@ -147,24 +153,6 @@ try {
   const page = await context.newPage()
   const pageErrors = []
   page.on('pageerror', error => pageErrors.push(error.message))
-  await page.goto(baseUrl + '/products')
-  const bundlePanel = page.getByRole('region', { name: '自选商品组合' })
-  const bundleError = bundlePanel.getByRole('alert')
-  await bundleError.getByText('当前服务暂未提供商品组合，更新服务后可重试。', { exact: false }).waitFor()
-  assert.doesNotMatch(await bundleError.innerText(), /\/api\/|https?:|404/)
-  assert.equal(await bundlePanel.getByRole('button', { name: '＋ 新建组合' }).isDisabled(), true)
-  assert.equal(await bundlePanel.evaluate(panel => panel.scrollWidth > panel.clientWidth), false)
-  const newButton = await bundlePanel.getByRole('button', { name: '＋ 新建组合' }).boundingBox()
-  const bounds = await bundlePanel.boundingBox()
-  assert.ok(newButton.x + newButton.width <= bounds.x + bounds.width)
-  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/catalog-legacy-server.png' })
-  bundleApiMissing = false
-  await bundleError.getByRole('button', { name: '重试' }).click()
-  await page.getByRole('button', { name: '加入组合 胡桃木办公桌' }).click()
-  await page.getByLabel('组合名称').fill('主管办公室组合')
-  await page.getByRole('button', { name: '加入规格' }).click()
-  await page.getByRole('button', { name: '保存组合' }).click()
-  await page.getByText('组合已保存', { exact: true }).waitFor()
   const backgroundOf = locator => locator.evaluate(element => getComputedStyle(element).backgroundColor)
   await page.goto(baseUrl + '/canvas?floorId=' + floorId)
   const spaceActive = page.locator('.review-toolbar button.active').first()
@@ -174,10 +162,138 @@ try {
   const schemeUrl = baseUrl + '/canvas?mode=design&view=products&zoneId=ROOM&floorId=' + floorId
   await page.goto(schemeUrl)
   await page.getByTestId('product-scheme').waitFor()
+  const templateIdAfterReentry = await page.evaluate(() => {
+    const app = document.querySelector('#__nuxt').__vue_app__
+    const store = app.config.globalProperties.$pinia._s.get('office')
+    store.spaceTemplate = null
+    store.enterDesign('ROOM')
+    return store.zones[0]?.spaceTemplateId
+  })
+  assert.equal(templateIdAfterReentry, 'LSTPL-EXISTING', '空间内容未变、仅内存模板缺失时，进入排版不得轮换 spaceTemplateId，避免方案确认指纹无故失效')
+  await page.waitForFunction(() => {
+    const store = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$pinia._s.get('office')
+    return store.syncState === 'saved'
+  })
+  assert.equal(await page.getByTestId('tab-style-recommendation').count(), 0, '产品方案不再显示顶级款式推荐页签')
+  assert.equal((await page.getByTestId('tab-product-selection').innerText()).trim(), '手动布局', '产品选型页签改名为手动布局')
+  assert.equal(await page.getByRole('button', { name: '自动选品', exact: true }).count(), 0, '自动选品按钮由排版步骤取代')
+  const stepLayout = page.getByTestId('scheme-step-layout')
+  const stepSelect = page.getByTestId('scheme-step-select')
+  await stepLayout.waitFor()
+  assert.equal(await stepSelect.getAttribute('aria-disabled'), 'true', '未确认排版时选品锁定')
+  await stepSelect.click({ force: true })
+  await page.getByText('请先完成第 1 步排版', { exact: false }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '项目选品库', exact: true }).count(), 0, '排版步骤不显示选品来源')
+  assert.equal(await page.getByTestId('design-workflow-sidebar').getByRole('region', { name: '自选商品组合' }).count(), 0, '排版步骤不显示组合面板')
+  await page.getByRole('button', { name: '确认当前排版', exact: true }).click()
+  await page.getByRole('button', { name: '项目选品库', exact: true }).waitFor()
+  assert.equal(await stepSelect.getAttribute('aria-disabled'), 'false', '确认排版后选品解锁')
   const schemeAccent = await backgroundOf(page.getByRole('button', { name: '选择', exact: true }))
   assert.equal(schemeAccent, spaceAccent, '两个设计页的选中工具应使用同一颜色')
   const currentNav = page.getByRole('link', { name: '产品方案', exact: true })
-  assert.equal(await backgroundOf(page.getByRole('button', { name: '自动选品', exact: true })), await backgroundOf(currentNav))
+  await page.getByRole('button', { name: '项目选品库', exact: true }).click()
+  assert.equal(await backgroundOf(page.getByRole('button', { name: '项目选品库', exact: true })), await backgroundOf(currentNav))
+  await page.getByTestId('tab-product-selection').click()
+  assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true', '来源内容显示时必须选中产品选型')
+  const schemeBundles = page.getByTestId('design-workflow-sidebar').getByRole('region', { name: '自选商品组合' })
+  await schemeBundles.waitFor()
+  const bundleError = schemeBundles.getByRole('alert')
+  await bundleError.getByText('当前服务暂未提供商品组合，更新服务后可重试。', { exact: false }).waitFor()
+  assert.doesNotMatch(await bundleError.innerText(), /\/api\/|https?:|404/)
+  assert.equal(await schemeBundles.getByRole('button', { name: '＋ 新建组合' }).isDisabled(), true)
+  assert.equal(await schemeBundles.evaluate(panel => panel.scrollWidth > panel.clientWidth), false)
+  const newButton = await schemeBundles.getByRole('button', { name: '＋ 新建组合' }).boundingBox()
+  const bounds = await schemeBundles.boundingBox()
+  assert.ok(newButton.x + newButton.width <= bounds.x + bounds.width)
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-legacy-server.png' })
+  bundleApiMissing = false
+  await bundleError.getByRole('button', { name: '重试' }).click()
+  await schemeBundles.getByText('将常用商品保存为组合', { exact: false }).waitFor()
+  // 商品库页的组合面板已由上游 ProductComboPanel 接管；这里通过页面内请求预置组合（走 mock 路由），再切来源重载面板
+  const seeded = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/office/product-bundles/BUNDLE-1', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '主管办公室组合', revision: 0, items: [{ rspuId: 'RSPU', variantId: 'SKU', quantity: 1 }] }),
+    })
+    return response.status
+  })
+  assert.equal(seeded, 200, '预置组合应成功')
+  await page.getByRole('button', { name: '收藏', exact: true }).click()
+  await page.getByTestId('scheme-favorites-panel').waitFor()
+  await page.getByRole('button', { name: '项目选品库', exact: true }).click()
+  await schemeBundles.waitFor()
+  const bundlePanel = schemeBundles
+  await bundlePanel.getByTestId('bundle-card').getByRole('button', { name: '展开组合', exact: true }).click()
+  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'visible' })
+  const activeBundleCard = bundlePanel.locator('[data-testid="bundle-card"].is-active')
+  assert.equal(await activeBundleCard.count(), 1, '展开组合只显示一张卡片')
+  await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).waitFor()
+  await activeBundleCard.getByRole('button', { name: '删除', exact: true }).waitFor()
+  const nameBox = await activeBundleCard.locator('.bundle-select').boundingBox()
+  const renameBox = await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).boundingBox()
+  const toggleBox = await activeBundleCard.getByRole('button', { name: '收起组合', exact: true }).boundingBox()
+  assert.ok(Math.abs(renameBox.y - nameBox.y) < 10, '重命名/删除应与组合名称同一行')
+  assert.ok(renameBox.x >= nameBox.x + nameBox.width && renameBox.x + renameBox.width <= toggleBox.x, '重命名/删除应位于名称与展开箭头之间')
+  assert.equal(await page.getByLabel('组合名称').count(), 0, '非重命名状态不重复显示组合名称输入框')
+  await activeBundleCard.getByRole('button', { name: '重命名组合', exact: true }).click()
+  assert.equal(await page.getByLabel('组合名称').evaluate(element => document.activeElement === element), true, '重命名按钮聚焦组合名称')
+  await page.getByLabel('组合名称').fill('主管办公室组合')
+  await page.getByText('组合已保存', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '保存组合', exact: true }).count(), 0, '自动保存后移除保存按钮')
+  assert.equal(await page.getByRole('button', { name: '删除组合', exact: true }).count(), 0, '底部删除按钮移除')
+  assert.equal(await page.getByRole('button', { name: '关闭编辑', exact: true }).count(), 0, '关闭编辑按钮移除')
+  assert.equal(await page.getByRole('button', { name: '加入规格', exact: true }).count(), 0, '不再显示加入规格')
+  assert.equal(await page.getByRole('button', { name: '取消选规格', exact: true }).count(), 0, '不再显示取消选规格')
+  await activeBundleCard.getByRole('button', { name: '收起组合', exact: true }).click()
+  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'hidden' })
+  await bundlePanel.getByTestId('bundle-card').getByRole('button', { name: '展开组合', exact: true }).click()
+  await bundlePanel.locator('form.bundle-editor').waitFor({ state: 'visible' })
+  await bundlePanel.getByTestId('bundle-add-slot').waitFor()
+  await bundlePanel.getByTestId('bundle-add-slot').click()
+  await bundlePanel.getByText('请先在商品库选择商品加入组合', { exact: false }).waitFor()
+  await bundlePanel.getByTestId('bundle-add-slot').click()
+  await bundlePanel.locator('.bundle-product-options').waitFor({ state: 'hidden' })
+  await bundlePanel.getByRole('button', { name: '＋ 创建新的组合', exact: true }).waitFor()
+  await bundlePanel.locator('.bundle-item-image').waitFor()
+  assert.equal(await bundlePanel.locator('.bundle-item-image').count(), 1, '组合卡片展示商品图片')
+  await bundlePanel.getByRole('button', { name: '收起商品', exact: true }).click()
+  await bundlePanel.locator('.bundle-items').waitFor({ state: 'hidden' })
+  assert.equal(await bundlePanel.locator('.bundle-item-image').isVisible(), true, '收起商品明细时图片区域保持显示')
+  await bundlePanel.getByRole('button', { name: '展开商品', exact: true }).click()
+  await bundlePanel.locator('.bundle-items').waitFor({ state: 'visible' })
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/bundle-card.png' })
+  const schemeSourceAccent = await backgroundOf(currentNav)
+  await page.waitForFunction(expected => getComputedStyle(document.querySelector('[data-testid="tab-product-selection"]')).backgroundColor === expected, schemeSourceAccent)
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-bundles.png' })
+  assert.equal(await page.getByText('产品选型 · 手动排版', { exact: false }).count(), 0, '项目选品库不再显示家具手动排版')
+  assert.equal(await page.getByRole('button', { name: '收藏', exact: true }).count(), 1, '产品选型提供统一收藏入口')
+  await page.getByRole('button', { name: '收藏', exact: true }).click()
+  await page.getByTestId('tab-product-selection').click()
+  assert.equal(await page.getByTestId('tab-product-selection').getAttribute('aria-selected'), 'true', '来源内容显示时必须选中产品选型')
+  const schemeFavorites = page.getByTestId('scheme-favorites-panel')
+  await schemeFavorites.waitFor()
+  const projectFavoriteTab = schemeFavorites.getByRole('tab', { name: '项目收藏夹', exact: true })
+  const personalFavoriteTab = schemeFavorites.getByRole('tab', { name: '个人收藏夹', exact: true })
+  assert.equal(await projectFavoriteTab.getAttribute('aria-selected'), 'true', '收藏默认打开项目收藏夹')
+  await schemeFavorites.getByText('该项目还没有收藏的商品', { exact: false }).waitFor()
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-project-favorites.png' })
+  await personalFavoriteTab.click()
+  await schemeFavorites.getByText('胡桃木办公桌', { exact: true }).waitFor()
+  if (process.env.SCHEME_SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCHEME_SCREENSHOT_DIR + '/scheme-personal-favorites.png' })
+  assert.equal(await projectFavoriteTab.getAttribute('aria-selected'), 'false')
+  assert.equal(await personalFavoriteTab.getAttribute('aria-selected'), 'true')
+  await projectFavoriteTab.click()
+  await schemeFavorites.getByText('该项目还没有收藏的商品', { exact: false }).waitFor()
+  await page.getByRole('button', { name: '款式推荐', exact: true }).click()
+  assert.equal(await schemeBundles.count(), 0, '款式推荐隐藏组合面板')
+  assert.equal(await schemeFavorites.count(), 0, '款式推荐隐藏收藏面板')
+  await stepLayout.click()
+  await page.getByText('产品选型 · 手动排版', { exact: false }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '项目选品库', exact: true }).count(), 0, '排版步骤隐藏选品来源')
+  assert.equal(await schemeBundles.count(), 0, '返回排版后隐藏组合面板')
+  assert.equal(await schemeFavorites.count(), 0, '返回排版后隐藏收藏面板')
+  await stepSelect.click()
+  await page.getByRole('button', { name: '项目选品库', exact: true }).click()
   const plan = name => page.getByRole('button', { name: `Plan ${name}`, exact: true })
   await page.locator('button[aria-pressed=true]').filter({ hasText: 'Plan A' }).waitFor()
   // Plan B 按需创建：初始只有 Plan A 和「+」按钮

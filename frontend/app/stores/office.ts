@@ -1059,7 +1059,21 @@ export const useOfficeStore = defineStore('office', {
     },
     enterDesign(zoneId: string) {
       if (this.layoutEntryBlocker || !this.zones.some(zone => zone.id === zoneId)) return false
-      if (!this.spaceTemplateCurrent) this.spaceTemplate = this.captureSpaceTemplate()
+      if (!this.spaceTemplateCurrent) {
+        // 空间仍统一绑定某模板、而内存模板缺失或指向其他模板时，内容并未因此变化：
+        // 重建内存模板但沿用原 ID，避免无意义的 UUID 轮换改变方案确认指纹。
+        const sharedId = this.zones.length && this.zones.every(zone => zone.spaceTemplateId && zone.spaceTemplateId === this.zones[0]!.spaceTemplateId)
+          ? this.zones[0]!.spaceTemplateId! : null
+        const previousId = this.spaceTemplate?.templateId
+        const captured = this.captureSpaceTemplate()
+        if (captured) {
+          if (sharedId && previousId !== sharedId) {
+            captured.templateId = sharedId
+            captured.scene.sceneId = sharedId
+          }
+          this.spaceTemplate = captured
+        }
+      }
       this.zones.forEach(zone => { zone.spaceTemplateId = this.spaceTemplate!.templateId; zone.templateSpaceId = zone.id })
       this.canvasMode = 'design'
       this.designZoneId = zoneId
